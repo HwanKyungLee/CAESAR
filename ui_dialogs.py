@@ -689,7 +689,7 @@ class WavelengthCalibrationDialog(QDialog):
         w_min = int(round(np.min(self.wavelengths)))
         w_max = int(round(np.max(self.wavelengths)))
         range_str = f"{w_min}-{w_max}nm"
-        suggested_name = f"Calib_{date_str}_Hg_{range_str}.txt"
+        suggested_name = f"Calib_{date_str}_Hg_{range_str}_Poly2.txt"
 
         # 3. Specify Save Path
         filters = "Text Files (*.txt);;Data Files (*.dat);;CSV Files (*.csv)"
@@ -1421,13 +1421,16 @@ class ReferenceGeneratorDialog(QDialog):
             self.raw_data = intensity_raw
             
             base_name = os.path.basename(filename)
-            self.gas_name = base_name.split('_').split(' ')
+            
+            self.gas_name = base_name.split('_')[ 0 ]
+            
             self.lbl_raw_info.setText(f"Loaded: {base_name} (Gas: {self.gas_name})")
             
-            self.ax.clear()
-            self.ax.plot(self.raw_wave, self.raw_data, 'k-', alpha=0.5, label='Raw Data')
-            self.ax.legend()
+            self.ax[ 0 ].clear()
+            self.ax[ 0 ].plot(self.raw_wave, self.raw_data, 'k-', alpha=0.5, label='Raw Data')
+            self.ax[ 0 ].legend()
             self.canvas.draw()
+            
         except Exception as e: 
             QMessageBox.critical(self, "Error", f"Failed to load Raw file:\n{e}")
 
@@ -2250,8 +2253,16 @@ class R_GeneratorDialog(QDialog):
             
             r_curve = 1 - cavity_len * ((ratio * alpha2 - alpha1) / (1 - ratio))
 
+            gas1 = self.combo1.currentText().split(' ')[ 0 ]
+            gas2 = self.combo2.currentText().split(' ')[ 0 ]
+            import datetime
+            date_str = datetime.datetime.now().strftime("%Y%m%d")
+            
+            default_fname = f"RCurve_{gas1}_vs_{gas2}_d{cavity_len}cm_{date_str}.csv"
+
             # Save the result
-            save_path, _ = QFileDialog.getSaveFileName(self, "Save R-Curve", "Universal_R_Curve.csv", "CSV (*.csv)")
+            save_path, _ = QFileDialog.getSaveFileName(self, "Save R-Curve", default_fname, "CSV (*.csv)")
+            
             if save_path:
                 pd.DataFrame({'Wavelength': self.wl, 'Reflectivity': r_curve}).to_csv(save_path, index=False)
                 QMessageBox.information(self, "Success", "Reflectivity curve saved successfully!")
@@ -2385,8 +2396,14 @@ class PostProcessDialog(QDialog):
             # Extract extension intuitively, e.g., ".csv" from "CSV (*.csv) - Standard Text"
             ext = "." + selected_format.split(" (*.")[1].split(")")[0]
             
-            save_path, _ = QFileDialog.getSaveFileName(self, "Save Results", f"Final_Result{ext}", selected_format)
+            import datetime
+            date_str = datetime.datetime.now().strftime("%Y%m%d")
+            d_val = self.input_cavity_len.text()
             
+            default_fname = f"{date_str}_PPB_Result_d{d_val}cm_R_Applied{ext}"
+            
+            save_path, _ = QFileDialog.getSaveFileName(self, "Save Results", default_fname, selected_format)
+
             if save_path:
                 if ext == ".csv": 
                     df.to_csv(save_path, index=False)

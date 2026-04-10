@@ -224,46 +224,57 @@ class CAESARAnalyzer(QMainWindow):
         
         # --- Detailed Parameters Section (Poly, Shift Center, Precision Control) ---
         grp_calib = QGroupBox("Parameters")
+        lay_calib_main = QVBoxLayout() # 세로 정렬로 변경하여 위아래로 나눔
+        
+        # 프리셋(Preset) 콤보박스 라인
+        lay_preset = QHBoxLayout()
+        lay_preset.addWidget(QLabel("🎯 Fit Preset:"))
+        self.combo_preset = QComboBox()
+        self.combo_preset.addItems(["Custom (Manual)", "🔬 Precision (Clear Air)", "🛰️ Monitoring (Standard)", "🔥 Defense (Noisy/Harsh)"])
+        self.combo_preset.currentIndexChanged.connect(self.apply_preset) # 연동 함수 연결
+        lay_preset.addWidget(self.combo_preset)
+        lay_calib_main.addLayout(lay_preset)
+
         lay_calib = QHBoxLayout()
         
-        lay_calib.addWidget(QLabel("Step Limit (px):"))
+        lay_calib.addWidget(QLabel("Step Limit:"))
         self.spin_step_limit = QDoubleSpinBox()
         self.spin_step_limit.setRange(0.01, 10.0)
         self.spin_step_limit.setSingleStep(0.1)
         self.spin_step_limit.setDecimals(2)
         self.spin_step_limit.setValue(0.5) 
-        self.spin_step_limit.setToolTip("Maximum pixels that can be moved per frame (inertia limit)")
+        self.spin_step_limit.setToolTip("Maximum pixels that can be moved per frame")
         lay_calib.addWidget(self.spin_step_limit)
 
-        lay_calib.addWidget(QLabel("Poly Degree:"))
+        lay_calib.addWidget(QLabel("Poly Deg:"))
         self.spin_poly_deg = QSpinBox()
         self.spin_poly_deg.setRange(0, 10)
         self.spin_poly_deg.setValue(3)
         lay_calib.addWidget(self.spin_poly_deg)
         
-        #티호노프 람다(λ) 다이얼 추가
         lay_calib.addWidget(QLabel("Tikhonov λ:"))
         self.spin_lambda = QDoubleSpinBox()
         self.spin_lambda.setRange(0.0, 10.0)
-        self.spin_lambda.setSingleStep(0.01)
-        self.spin_lambda.setDecimals(4)
-        self.spin_lambda.setValue(0.0000) # 기본값 0 (꺼짐)
-        self.spin_lambda.setToolTip("Ridge Penalty: 0 = Off, 0.01~0.1 = Strong stabilization")
+        self.spin_lambda.setSingleStep(0.0001) 
+        self.spin_lambda.setDecimals(6)        
+        self.spin_lambda.setValue(0.0000) 
+        self.spin_lambda.setToolTip("Ridge Penalty: 0 = Off, 1e-4 = Monitoring")
         lay_calib.addWidget(self.spin_lambda)
 
         self.chk_robust = QCheckBox("🛡️ Robust (IRLS)")
         self.chk_robust.setToolTip("Auto-ignore spike noise and cosmic rays")
-        self.chk_robust.setChecked(False) # 기본값 꺼짐
+        self.chk_robust.setChecked(False) 
         lay_calib.addWidget(self.chk_robust)
 
-        self.ref_props = {} # Internal dictionary to store property settings
+        self.ref_props = {} 
         
-        btn_props = QPushButton("⚙️ Edit Reference Properties")
+        btn_props = QPushButton("⚙️ Properties")
         btn_props.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
         btn_props.clicked.connect(self.open_ref_properties)
         lay_calib.addWidget(btn_props)
         
-        grp_calib.setLayout(lay_calib)
+        lay_calib_main.addLayout(lay_calib)
+        grp_calib.setLayout(lay_calib_main)
         left_layout.addWidget(grp_calib)
 
         # --- 3. Analysis Control Section ---
@@ -346,6 +357,21 @@ class CAESARAnalyzer(QMainWindow):
         self.monitor.roi_selected.connect(self.apply_roi_from_graph)
         
         splitter.addWidget(right_widget)
+
+    def apply_preset(self):
+        """Changes Lambda and Robust settings based on the selected preset."""
+        preset = self.combo_preset.currentText()
+        
+        if "Precision" in preset:
+            self.spin_lambda.setValue(0.0000) # 노이즈가 없는 깨끗한 데이터용 (가장 예민함)
+            self.chk_robust.setChecked(False)
+        elif "Monitoring" in preset:
+            self.spin_lambda.setValue(0.0001) # 일반적인 대기 관측용 (추천)
+            self.chk_robust.setChecked(True)
+        elif "Defense" in preset:
+            self.spin_lambda.setValue(0.0100) # 기상이 안 좋거나 노이즈가 극심할 때
+            self.chk_robust.setChecked(True)
+        # Custom일 때는 아무것도 바꾸지 않음 (사용자가 수동 조절)
 
     def setup_post_tab(self):
         """Configure the layout and buttons for the Post-Analysis tab."""
@@ -1169,10 +1195,13 @@ class CAESARAnalyzer(QMainWindow):
             sh_str = f"Sh[{real_sh}]"
             sq_str = f"Sq[{real_sq}]"
 
-        # 🌟 4. Ultimate Filename Combiner
-        default_fname = f"{now_str}_Result_{gas_list_str}_{wl_str}_Poly{poly_deg}_Step[{step_val}]_{sh_str}_{sq_str}.dat"
+        lam_val = self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0
+        robust_str = "Robust" if hasattr(self, 'chk_robust') and self.chk_robust.isChecked() else "Std"
+
+        default_fname = f"{now_str}_Result_{gas_list_str}_{wl_str}_Poly{poly_deg}_L{lam_val:g}_{robust_str}_Step[{step_val}]_{sh_str}_{sq_str}.dat"
         
         path, _ = QFileDialog.getSaveFileName(self, "Save Data", default_fname, "Data Files (*.dat);;CSV Files (*.csv)")
+
         if path:
             try:
                 import pandas as pd
@@ -1181,12 +1210,33 @@ class CAESARAnalyzer(QMainWindow):
                 if 'Params' in df.columns:
                     df = df.drop(columns=['Params'])
                     
-                if path.endswith('.csv'):
-                    df.to_csv(path, index=False)
-                else:
-                    df.to_csv(path, sep='\t', index=False)
+                import datetime
+                current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                robust_status = "ON" if hasattr(self, 'chk_robust') and self.chk_robust.isChecked() else "OFF"
+                
+                header_lines = [
+                    "# ==========================================================",
+                    "# CAESAR Pro Analysis Report",
+                    f"# Generated: {current_time}",
+                    f"# Fit Range: Pixel {f_min_px}-{f_max_px} ({wl_str})",
+                    f"# Polynomial Degree: {poly_deg}",
+                    f"# Tikhonov Lambda: {lam_val:g}",
+                    f"# Robust Fitting (IRLS): {robust_status}",
+                    f"# Step Limit: {step_val} px",
+                    f"# Reference Constraints: {sh_str}, {sq_str}",
+                    "# ==========================================================\n"
+                ]
+
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write("\n".join(header_lines))
+                    
+                    if path.endswith('.csv'):
+                        df.to_csv(f, index=False, lineterminator='\n')
+                    else:
+                        df.to_csv(f, sep='\t', index=False, lineterminator='\n')
                     
                 QMessageBox.information(self, "Success", f"🎉 Analysis results saved successfully!\nFile: {os.path.basename(path)}")
+                
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"An error occurred while saving:\n{e}")
 
@@ -1310,8 +1360,21 @@ class CAESARAnalyzer(QMainWindow):
     # 🌟 [V11.0] Scenario Auto-Save & Load System
     # =========================================================
     def save_scenario(self):
-        """Serializes current UI state, parameters, and reference paths into a JSON scenario file."""
-        # 1. Gather reference information (name, path, multiplier)
+        """설정값, 경로, 그리고 새로운 파라미터(람다, 로버스트)를 포함하여 파일명 자동 생성"""
+        # 1. 가스 리스트 및 기본 정보 추출
+        gas_list_str = "_".join(self.engine.gas_list) if hasattr(self, 'engine') and self.engine.gas_list else "NoRefs"
+        f_min = self.txt_min.text()
+        f_max = self.txt_max.text()
+        poly = self.spin_poly_deg.value()
+        
+        # 파일명에 넣을 새로운 파라미터 정보 정리
+        lam_val = self.spin_lambda.value()
+        robust_str = "Robust" if self.chk_robust.isChecked() else "Std"
+        
+        # 예: FitSet_NO2_H2O_1453-1646px_Poly4_L0.0001_Robust.json
+        default_fname = f"FitSet_{gas_list_str}_{f_min}-{f_max}px_Poly{poly}_L{lam_val:g}_{robust_str}.json"
+
+        # 2. 기존 데이터 수집 로직
         refs_data = []
         if hasattr(self, 'ref_widgets'):
             for rw in self.ref_widgets:
@@ -1322,31 +1385,25 @@ class CAESARAnalyzer(QMainWindow):
                         "mult": rw['mult'].value()
                     })
 
-        # 2. Collect all critical configuration settings
         scenario_data = {
             "wl_path": getattr(self, 'loaded_wl_path', ""), 
             "refs": refs_data,                              
-            "f_min": self.txt_min.text(),
-            "f_max": self.txt_max.text(),
-            "poly_deg": self.spin_poly_deg.value(),
-            "step_limit": getattr(self, 'spin_step_limit', None).value() if hasattr(self, 'spin_step_limit') else 0.5, # Start Shift 대신 Step Limit 저장!
-            "ref_props": getattr(self, 'ref_props', {}) 
+            "f_min": f_min,
+            "f_max": f_max,
+            "poly_deg": poly,
+            "step_limit": getattr(self, 'spin_step_limit', None).value() if hasattr(self, 'spin_step_limit') else 0.5,
+            "ref_props": getattr(self, 'ref_props', {}),
+            "tikhonov_lambda": lam_val,
+            "use_robust": self.chk_robust.isChecked()
         }
-        
-        # 3. Generate smart filename
-        gas_str = "_".join(self.engine.gas_list) if hasattr(self, 'engine') and self.engine.gas_list else "NoRefs"
-        f_min = self.txt_min.text()
-        f_max = self.txt_max.text()
-        poly = self.spin_poly_deg.value()
-        
-        default_fname = f"FitSet_{gas_str}_{f_min}-{f_max}px_Poly{poly}.json"
-        
+
+        # 3. 파일 저장 다이얼로그 실행
         path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", default_fname, "JSON Files (*.json)")
         if path:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(scenario_data, f, indent=4)
-                QMessageBox.information(self, "Success", f"Scenario saved successfully!\nFile: {os.path.basename(path)}")
+                QMessageBox.information(self, "Success", f"Scenario saved!\nFile: {os.path.basename(path)}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Save Failed:\n{e}")
 
@@ -1367,6 +1424,16 @@ class CAESARAnalyzer(QMainWindow):
                 self.spin_step_limit.setValue(scenario.get("step_limit", 0.5))
             self.ref_props = scenario.get("ref_props", {})
             
+            #람다 및 로버스트 복구
+            if hasattr(self, 'spin_lambda'):
+                self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
+            if hasattr(self, 'chk_robust'):
+                self.chk_robust.setChecked(scenario.get("use_robust", False))
+            
+            # 프리셋을 'Custom'으로 변경하여 불러온 값 유지
+            if hasattr(self, 'combo_preset'):
+                self.combo_preset.setCurrentIndex(0)
+
             # 🌟 2. Auto-load wavelength file
             wl_path = scenario.get("wl_path", "")
             if wl_path and os.path.exists(wl_path):

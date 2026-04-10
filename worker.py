@@ -157,124 +157,114 @@ class AnalysisWorker(QThread):
         return active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub
 
     def _execute_varpro_fit(self, pixel_idx, optical_depth, W_initial, active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub, poly_order, fixed_e_f, absolute_center, fit_sign, override_lam=None, override_robust=None):
-        """[Helper] 핵심 수학 엔진: 비선형(Shift/Sq) + 선형(가스농도) 분리 피팅 (Tikhonov + IRLS 융합형)"""
-        x_min, x_max = pixel_idx[ 0 ], pixel_idx[-1]
+        """[CAESAR Pro 최종 완성형] 비음수 제약(NNLS) + 티호노프 + 로버스트 엔진"""
+        import numpy as np
+        from scipy.optimize import least_squares, lsq_linear
+        
+        # 🌟 수정 1: pixel_idx의 0번 인덱스 명시
+        x_min, x_max = pixel_idx[ 0 ], pixel_idx[ -1 ]
         x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
         T = chebyshev.chebvander(x_mapped, poly_order) if poly_order >= 0 else np.zeros((len(pixel_idx), 0))
 
         lam = override_lam if override_lam is not None else getattr(self, 'tikhonov_lambda', 0.0)
         use_robust = override_robust if override_robust is not None else getattr(self, 'use_robust_fitting', False)
         
-        # 가중치 행렬 초기화
         W_current = W_initial.copy()
-
-        # IRLS 루프 (로버스트 피팅 사용 시 3회 반복, 미사용 시 1회)
         max_iters = 3 if use_robust else 1
-        
+        num_gases = len(self.engine.gas_list)
+
         for iteration in range(max_iters):
             def objective_varpro(theta):
-                val_dict = {}
-                idx = 0
-                for v_name in active_vars:
-                    val_dict[v_name] = theta[idx]; idx += 1
+                val_dict = {v: theta[ i ] for i, v in enumerate(active_vars)}
                 val_dict.update(fixed_vars)
-                for v_name, target in linked_vars.items():
-                    val_dict[v_name] = val_dict.get(target, 0.0)
+                for v, t in linked_vars.items(): val_dict[ v ] = val_dict.get(t, 0.0)
                 
-                e_p = theta[-1]           
+                e_p = theta[ -1 ]           
                 cols = []
                 for name in self.engine.gas_list:
-                    sh_i, sq_i = val_dict[f"{name}_sh"], val_dict[f"{name}_sq"]
+                    sh_i, sq_i = val_dict[ f"{name}_sh" ], val_dict[ f"{name}_sq" ]
                     pixel_shifted = (pixel_idx - absolute_center) * sq_i + absolute_center + sh_i
-                    raw_ref = fit_sign * self.engine.interpolators[name](pixel_shifted) / self.engine.scaling_factors[name]
+                    raw_ref = fit_sign * self.engine.interpolators[ name ](pixel_shifted) / self.engine.scaling_factors[ name ]
                     cols.append(raw_ref)
                 
-                for j in range(poly_order + 1): cols.append(T[:, j])
+                for j in range(poly_order + 1): cols.append(T[ :, j ])
                 cols.append(np.sin(fixed_e_f * pixel_idx + e_p))
                 
                 A_weighted = W_current @ np.column_stack(cols)
                 y_weighted = W_current @ optical_depth
                 
-                # 티호노프 정규화 적용 (Non-linear Step)
+                # 🌟 수정 2: shape의 1번 인덱스(열 개수) 명시
+                num_cols = A_weighted.shape[ 1 ]
+                
                 if lam > 0:
-                    Gamma = np.eye(A_weighted.shape[ 1 ]) * lam
-                    A_aug = np.vstack((A_weighted, Gamma))
-                    y_aug = np.concatenate((y_weighted, np.zeros(A_weighted.shape[ 1 ])))
+                    A_aug = np.vstack((A_weighted, np.eye(num_cols) * lam))
+                    y_aug = np.concatenate((y_weighted, np.zeros(num_cols)))
                 else:
                     A_aug, y_aug = A_weighted, y_weighted
 
-                c_temp, _, _, _ = scipy_lstsq(A_aug, y_aug, lapack_driver='gelsy')
-                return y_aug - A_aug @ c_temp
+                # 가스 농도는 0 이상으로 강제 (비음수 제약)
+                lb_inner = [ 0.0 ] * num_gases + [ -np.inf ] * (num_cols - num_gases)
+                ub_inner = [ np.inf ] * num_cols
+                
+                res_temp = lsq_linear(A_aug, y_aug, bounds=(lb_inner, ub_inner))
+                return y_aug - A_aug @ res_temp.x
 
-            # 1. 비선형 파라미터 최적화 (Shift, Squeeze)
+            # 1. 비선형 최적화 (Shift, Squeeze)
             res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub), max_nfev=1500)
             theta_opt = res_nonlin.x
             
-            # 2. 선형 파라미터 최적화 (Concentrations)
-            val_dict_opt = {}
-            idx = 0
-            for v_name in active_vars:
-                val_dict_opt[v_name] = theta_opt[idx]; idx += 1
+            # 2. 선형 최적화 (최종 결과 도출)
+            val_dict_opt = {v: theta_opt[ i ] for i, v in enumerate(active_vars)}
             val_dict_opt.update(fixed_vars)
-            for v_name, target in linked_vars.items():
-                val_dict_opt[v_name] = val_dict_opt.get(target, 0.0)
-                
-            opt_shifts = [val_dict_opt[f"{g}_sh"] for g in self.engine.gas_list]
-            opt_squeezes = [val_dict_opt[f"{g}_sq"] for g in self.engine.gas_list]
-            best_ep = theta_opt[-1]
+            for v, t in linked_vars.items(): val_dict_opt[ v ] = val_dict_opt.get(t, 0.0)
+            
+            opt_shifts = [ val_dict_opt[ f"{g}_sh" ] for g in self.engine.gas_list ]
+            opt_squeezes = [ val_dict_opt[ f"{g}_sq" ] for g in self.engine.gas_list ]
+            best_ep = theta_opt[ -1 ]
             
             cols = []
-            for gas_idx, name in enumerate(self.engine.gas_list):
-                pixel_shifted = (pixel_idx - absolute_center) * opt_squeezes[gas_idx] + absolute_center + opt_shifts[gas_idx]
-                raw_ref = fit_sign * self.engine.interpolators[name](pixel_shifted) / self.engine.scaling_factors[name]
-                cols.append(raw_ref)
-            
-            for j in range(poly_order + 1): cols.append(T[:, j])
+            for i, name in enumerate(self.engine.gas_list):
+                pixel_shifted = (pixel_idx - absolute_center) * opt_squeezes[ i ] + absolute_center + opt_shifts[ i ]
+                cols.append(fit_sign * self.engine.interpolators[ name ](pixel_shifted) / self.engine.scaling_factors[ name ])
+            for j in range(poly_order + 1): cols.append(T[ :, j ])
             cols.append(np.sin(fixed_e_f * pixel_idx + best_ep))
+            
             A_final = np.column_stack(cols)
+            A_f_w = W_current @ A_final
+            y_w = W_current @ optical_depth
             
-            A_final_weighted = W_current @ A_final
-            y_weighted = W_current @ optical_depth
-            
-            if lam > 0:
-                Gamma = np.eye(A_final_weighted.shape[ 1 ]) * lam
-                A_aug = np.vstack((A_final_weighted, Gamma))
-                y_aug = np.concatenate((y_weighted, np.zeros(A_final_weighted.shape[ 1 ])))
-            else:
-                A_aug, y_aug = A_final_weighted, y_weighted
+            # 🌟 수정 3: shape의 1번 인덱스(열 개수) 명시
+            num_cols_final = A_f_w.shape[ 1 ]
 
-            res_lin_final = lsq_linear(A_aug, y_aug)
+            if lam > 0:
+                A_aug = np.vstack((A_f_w, np.eye(num_cols_final) * lam))
+                y_aug = np.concatenate((y_w, np.zeros(num_cols_final)))
+            else:
+                A_aug, y_aug = A_f_w, y_w
+
+            lb_final = [ 0.0 ] * num_gases + [ -np.inf ] * (num_cols_final - num_gases)
+            res_lin_final = lsq_linear(A_aug, y_aug, bounds=(lb_final, [ np.inf ] * num_cols_final))
             c_opt = res_lin_final.x
 
-            # [IRLS 핵심]: 오차가 큰 픽셀의 가중치를 깎아 다음 루프로 전달
+            # IRLS 가중치 업데이트
             if use_robust and iteration < max_iters - 1:
                 residuals = np.abs(optical_depth - A_final @ c_opt)
-                # MAD(Median Absolute Deviation) 기반 가중치 계산
                 mad = np.median(residuals) if np.median(residuals) > 0 else np.mean(residuals)
-                # 튜닝 계수 4.685 (Bisquare Weighting 표준값)
                 k = 4.685 * (mad + 1e-9)
-                new_w_diag = np.where(residuals < k, (1 - (residuals/k)**2)**2, 0.0)
-                W_current = np.diag(new_w_diag * np.diag(W_initial))
+                W_current = np.diag(np.where(residuals < k, (1 - (residuals/k)**2)**2, 0.0) * np.diag(W_initial))
             else:
-                break # 루프 종료
+                break
 
-        # 에러 계산 (Covariance)
-        resid_final_weighted = y_weighted - A_final_weighted @ c_opt
-        mse = np.mean(resid_final_weighted**2)
+        # 최종 반환 처리
+        resid_w = y_w - A_f_w @ c_opt
+        mse = np.mean(resid_w**2)
         try:
-            cov_lin = np.linalg.pinv(A_aug.T @ A_aug) * mse
-            perr_lin = np.sqrt(np.diag(cov_lin))
-        except Exception:
+            perr_lin = np.sqrt(np.diag(np.linalg.pinv(A_aug.T @ A_aug) * mse))
+        except:
             perr_lin = np.zeros_like(c_opt)
             
-        num_gases = len(self.engine.gas_list)
-        gas_coeffs_scaled = c_opt[ 0 : num_gases ]
-        poly_coeffs_scaled = c_opt[ num_gases : -1 ]
-        etalon_amp_scaled = c_opt[ -1 ]
-        gas_errs = perr_lin[ 0 : num_gases ]
-
-        return opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs
-
+        return opt_shifts, opt_squeezes, c_opt[ 0 : num_gases ], c_opt[ num_gases : -1 ], c_opt[ -1 ], best_ep, perr_lin[ 0 : num_gases ]
+    
     # ==========================================
     # 🌟 Main Orchestrator
     # ==========================================
