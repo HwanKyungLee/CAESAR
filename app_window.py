@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
                              QCheckBox, QGridLayout, QInputDialog, QRadioButton, QButtonGroup,
-                             QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
+                             QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout, QMenu)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
 
@@ -96,20 +96,6 @@ class CAESARAnalyzer(QMainWindow):
         
         left_layout.addWidget(grp_scenario)
         
-        # --- 0. Independent Tool Buttons ---
-        layout_tools = QHBoxLayout()
-        
-        btn_calib_tool = QPushButton("🔍 Wavelength Calibration Tool")
-        btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
-        
-        btn_ref_gen = QPushButton("✂️ Reference Generator")
-        btn_ref_gen.clicked.connect(self.open_reference_generator)
-        btn_ref_gen.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
-        
-        layout_tools.addWidget(btn_calib_tool)
-        layout_tools.addWidget(btn_ref_gen)
-        left_layout.addLayout(layout_tools)
-
         # --- 1. Reference Management Section ---
         grp_ref = QGroupBox("1. Reference")
         grp_ref.setMinimumHeight(250)
@@ -230,7 +216,16 @@ class CAESARAnalyzer(QMainWindow):
         lay_preset = QHBoxLayout()
         lay_preset.addWidget(QLabel("🎯 Fit Preset:"))
         self.combo_preset = QComboBox()
-        self.combo_preset.addItems(["Custom (Manual)", "🔬 Precision (Clear Air)", "🛰️ Monitoring (Standard)", "🔥 Defense (Noisy/Harsh)"])
+        self.combo_preset.addItems([
+            "Custom (Manual)", 
+            "🔬 Lab Precision (Zero Noise)", 
+            "🛰️ Ambient Standard (Monitoring)", 
+            "🏎️ Fast Plume (High Tracking)", 
+            "📉 Stable Trend (Long-term)", 
+            "⛈️ Harsh Weather (Noisy)", 
+            "🚐 Mobile Sync (Vibration)", 
+            "🛡️ Extreme Recovery (Glitched)"
+        ])
         self.combo_preset.currentIndexChanged.connect(self.apply_preset) # 연동 함수 연결
         lay_preset.addWidget(self.combo_preset)
         lay_calib_main.addLayout(lay_preset)
@@ -274,6 +269,28 @@ class CAESARAnalyzer(QMainWindow):
         lay_calib.addWidget(btn_props)
         
         lay_calib_main.addLayout(lay_calib)
+
+        lay_kalman = QHBoxLayout()
+        lay_kalman.addWidget(QLabel("Kalman Q(추종력):"))
+        self.spin_kalman_q = QDoubleSpinBox()
+        self.spin_kalman_q.setRange(0.0001, 1.0)
+        self.spin_kalman_q.setSingleStep(0.0005)
+        self.spin_kalman_q.setDecimals(4)
+        self.spin_kalman_q.setValue(0.0005)
+        self.spin_kalman_q.setToolTip("값이 클수록 변화를 빠르게 따라갑니다. (차량 배기가스 등 급격한 변화 관측 시 증가)")
+        lay_kalman.addWidget(self.spin_kalman_q)
+
+        lay_kalman.addWidget(QLabel("R(안정도):"))
+        self.spin_kalman_r = QDoubleSpinBox()
+        self.spin_kalman_r.setRange(0.001, 1.0)
+        self.spin_kalman_r.setSingleStep(0.01)
+        self.spin_kalman_r.setDecimals(3)
+        self.spin_kalman_r.setValue(0.050)
+        self.spin_kalman_r.setToolTip("값이 클수록 잔잔한 노이즈를 강하게 억제합니다. (안정적인 배경 농도 관측 시 증가)")
+        lay_kalman.addWidget(self.spin_kalman_r)
+
+        lay_calib_main.addLayout(lay_kalman)
+
         grp_calib.setLayout(lay_calib_main)
         left_layout.addWidget(grp_calib)
 
@@ -327,6 +344,10 @@ class CAESARAnalyzer(QMainWindow):
         self.table.cellDoubleClicked.connect(self.on_table_double_click)
         self.table.cellClicked.connect(self.on_table_single_click)
         
+        # 파일 리스트 우클릭 시 "I0로 설정하기" 메뉴를 띄우기 위한 설정
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_table_context_menu)
+
         left_layout.addWidget(self.status)
         left_layout.addWidget(self.pbar)
         left_layout.addWidget(self.table)
@@ -341,14 +362,14 @@ class CAESARAnalyzer(QMainWindow):
         # 1. Main Tab Widget
         self.main_tabs = QTabWidget()
         
-        # 2. [Tab 1] Existing Graph Monitor (High-Speed Analysis Monitor)
+        # 2. [Tab 1] New Cavity Setup Tab (Pre-Analysis)
+        self.setup_tab = QWidget()
+        self.setup_cavity_tab()
+        self.main_tabs.addTab(self.setup_tab, "🛠️ Cavity Setup")
+        
+        # 3. [Tab 2] Analysis Monitor (High-Speed Fit Viewer)
         self.monitor = MonitorWidget(self.engine)
         self.main_tabs.addTab(self.monitor, "📈 Analysis Monitor")
-        
-        # 3. [Tab 2] Post-Processing Screen
-        self.post_tab = QWidget()
-        self.setup_post_tab() # Fills the contents of the post-processing tab
-        self.main_tabs.addTab(self.post_tab, "📊 Post-Analysis")
         
         right_layout.addWidget(self.main_tabs)
         
@@ -362,121 +383,276 @@ class CAESARAnalyzer(QMainWindow):
         """Changes Lambda and Robust settings based on the selected preset."""
         preset = self.combo_preset.currentText()
         
-        if "Precision" in preset:
-            self.spin_lambda.setValue(0.0000) # 노이즈가 없는 깨끗한 데이터용 (가장 예민함)
+        if "Lab Precision" in preset:
+            # For high-SNR lab data where transparency is key.
+            self.spin_lambda.setValue(0.0000)
             self.chk_robust.setChecked(False)
-        elif "Monitoring" in preset:
-            self.spin_lambda.setValue(0.0001) # 일반적인 대기 관측용 (추천)
-            self.chk_robust.setChecked(True)
-        elif "Defense" in preset:
-            self.spin_lambda.setValue(0.0100) # 기상이 안 좋거나 노이즈가 극심할 때
-            self.chk_robust.setChecked(True)
-        # Custom일 때는 아무것도 바꾸지 않음 (사용자가 수동 조절)
+            self.spin_kalman_q.setValue(0.0100) # Fast tracking
+            self.spin_kalman_r.setValue(0.005)  # Minimal smoothing
 
-    def setup_post_tab(self):
-        """Configure the layout and buttons for the Post-Analysis tab."""
-        layout = QVBoxLayout(self.post_tab)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        elif "Ambient Standard" in preset:
+            # General background monitoring in stable conditions.
+            self.spin_lambda.setValue(0.0001)
+            self.chk_robust.setChecked(True)
+            self.spin_kalman_q.setValue(0.0005) 
+            self.spin_kalman_r.setValue(0.050)
+
+        elif "Fast Plume" in preset:
+            # Designed to capture rapid concentration spikes (e.g., exhaust plumes).
+            self.spin_lambda.setValue(0.0001)
+            self.chk_robust.setChecked(True)
+            self.spin_kalman_q.setValue(0.0500) # Ultra-fast tracking
+            self.spin_kalman_r.setValue(0.010)  # Low smoothing to avoid peak clipping
+
+        elif "Stable Trend" in preset:
+            # For long-term drift analysis with maximum noise suppression.
+            self.spin_lambda.setValue(0.0010)
+            self.chk_robust.setChecked(True)
+            self.spin_kalman_q.setValue(0.0001) # Slow tracking
+            self.spin_kalman_r.setValue(0.200)  # Strong smoothing
+
+        elif "Harsh Weather" in preset:
+            # For fog, rain, or low-light conditions where signal is compromised.
+            self.spin_lambda.setValue(0.0050)
+            self.chk_robust.setChecked(True)
+            self.spin_kalman_q.setValue(0.0002)
+            self.spin_kalman_r.setValue(0.300)
+
+        elif "Mobile Sync" in preset:
+            # For vehicle-mounted measurements where vibrations cause spectral jumps.
+            self.spin_lambda.setValue(0.0100) # High regularization for stability
+            self.chk_robust.setChecked(True)
+            self.spin_kalman_q.setValue(0.0010)
+            self.spin_kalman_r.setValue(0.100)
+
+        elif "Extreme Recovery" in preset:
+            # Use as a last resort for heavily corrupted or glitched data.
+            self.spin_lambda.setValue(0.0500) # Maximum regularization
+            self.chk_robust.setChecked(True)
+            self.spin_kalman_q.setValue(0.0001)
+            self.spin_kalman_r.setValue(0.800) # Maximum noise rejection
+
+    def setup_cavity_tab(self):
+        """Configure the layout for the Pre-Analysis Cavity Setup tab."""
+        # Main horizontal layout: Controls on Left, Diagnostics on Right
+        main_layout = QHBoxLayout(self.setup_tab)
         
-        # 1. Mirror Reflectivity Section
-        group_r = QGroupBox("STEP 1: Mirror Reflectivity (R) Generation")
-        r_layout = QVBoxLayout()
-        btn_gen_r = QPushButton("🎡 Generate R-Curve") 
-        btn_gen_r.setFixedSize(300, 50)
-        btn_gen_r.clicked.connect(self.open_r_generator)
-        r_layout.addWidget(btn_gen_r, alignment=Qt.AlignmentFlag.AlignCenter)
-        group_r.setLayout(r_layout)
-        layout.addWidget(group_r)
+        # --- Left Panel: Controls ---
+        control_layout = QVBoxLayout()
+        
+        # Group 1: Calibration Tools
+        grp_calib = QGroupBox("1. Calibration & Generators")
+        lay_calib = QVBoxLayout()
+        
+        btn_calib_tool = QPushButton("🔍 Wavelength Calibration Tool")
+        btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
+        
+        btn_ref_gen = QPushButton("✂️ R-Curve / Reference Generator")
+        btn_ref_gen.clicked.connect(self.open_reference_generator)
+        btn_ref_gen.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
+        
+        lay_calib.addWidget(btn_calib_tool)
+        lay_calib.addWidget(btn_ref_gen)
+        grp_calib.setLayout(lay_calib)
+        control_layout.addWidget(grp_calib)
+        
+        # Group 2: Cavity Parameters (BBCEAS Physics)
+        grp_physics = QGroupBox("2. Cavity Parameters")
+        lay_physics = QFormLayout()
+        
+        # Variables to store paths
+        self.i0_filepath = ""
+        self.r_filepath = ""
+        
+        # I0 Setup
+        self.lbl_i0_path = QLabel("Not selected")
+        self.lbl_i0_path.setStyleSheet("color: red;")
+        btn_browse_i0 = QPushButton("Browse I0")
+        btn_browse_i0.clicked.connect(self.browse_i0_file)
+        
+        lay_i0 = QHBoxLayout()
+        lay_i0.addWidget(self.lbl_i0_path)
+        lay_i0.addWidget(btn_browse_i0)
+        lay_physics.addRow("I0 (Zero-Air):", lay_i0)
+        
+        # R Curve Setup
+        self.lbl_r_path = QLabel("Not selected")
+        self.lbl_r_path.setStyleSheet("color: red;")
+        btn_browse_r = QPushButton("Browse R")
+        btn_browse_r.clicked.connect(self.browse_r_file)
+        
+        lay_r = QHBoxLayout()
+        lay_r.addWidget(self.lbl_r_path)
+        lay_r.addWidget(btn_browse_r)
+        lay_physics.addRow("R (Reflectivity):", lay_r)
+        
+        # Cavity Length
+        self.spin_d_len = QDoubleSpinBox()
+        self.spin_d_len.setRange(1.0, 1000.0)
+        self.spin_d_len.setValue(100.0) # Default 100cm
+        lay_physics.addRow("Cavity Length d (cm):", self.spin_d_len)
+        
+        grp_physics.setLayout(lay_physics)
+        control_layout.addWidget(grp_physics)
+        
+        # Group 3: Environment Settings (For real-time PPB)
+        grp_env = QGroupBox("3. Environment Variables (PPB)")
+        lay_env = QFormLayout()
+        
+        self.spin_temp = QDoubleSpinBox()
+        self.spin_temp.setRange(-50.0, 100.0)
+        self.spin_temp.setValue(25.0)
+        lay_env.addRow("Temperature (°C):", self.spin_temp)
+        
+        self.spin_pres = QDoubleSpinBox()
+        self.spin_pres.setRange(500.0, 1500.0)
+        self.spin_pres.setValue(1013.25)
+        lay_env.addRow("Pressure (mbar):", self.spin_pres)
+        
+        grp_env.setLayout(lay_env)
+        control_layout.addWidget(grp_env)
+        
+        control_layout.addStretch(1)
+        main_layout.addLayout(control_layout, stretch=1)
+        
+        # --- Right Panel: Diagnostic Viewer ---
+        viewer_layout = QVBoxLayout()
+        grp_viewer = QGroupBox("Cavity Diagnostic Viewer")
+        lay_v = QVBoxLayout()
+        
+        # 🌟 Dual-Axis pyqtgraph Setup
+        self.plot_diagnostic = pg.PlotWidget(title="Cavity Diagnostics: I0 & Reflectivity (R)")
+        self.plot_diagnostic.showGrid(x=True, y=True, alpha=0.3)
+        self.plot_diagnostic.setLabel('left', 'Intensity (I0)', color='k')
+        self.plot_diagnostic.setLabel('bottom', 'Pixel / Wavelength')
+        
+        # Main plot item (Left Y-axis)
+        self.p1 = self.plot_diagnostic.plotItem
+        
+        # Secondary plot item (Right Y-axis) for Reflectivity (R)
+        self.p2 = pg.ViewBox()
+        self.p1.showAxis('right')
+        self.p1.scene().addItem(self.p2)
+        self.p1.getAxis('right').linkToView(self.p2)
+        self.p2.setXLink(self.p1)
+        self.p1.getAxis('right').setLabel('Reflectivity (R)', color='b')
+        
+        # Sync ViewBoxes when resizing
+        def updateViews():
+            self.p2.setGeometry(self.p1.vb.sceneBoundingRect())
+            self.p2.linkedViewChanged(self.p1.vb, self.p2.XAxis)
+            
+        updateViews()
+        self.p1.vb.sigResized.connect(updateViews)
+        
+        lay_v.addWidget(self.plot_diagnostic)
+        
+        grp_viewer.setLayout(lay_v)
+        viewer_layout.addWidget(grp_viewer)
+        
+        main_layout.addLayout(viewer_layout, stretch=2)
 
-        # 2. Concentration (ppb) Conversion Section
-        group_ppb = QGroupBox("STEP 2: Concentration (ppb) Conversion")
-        ppb_layout = QVBoxLayout()
-        btn_open_ppb = QPushButton("🚀 Open ppb Converter")
-        btn_open_ppb.setFixedSize(300, 50)
-        btn_open_ppb.clicked.connect(self.open_post_process)
-        ppb_layout.addWidget(btn_open_ppb, alignment=Qt.AlignmentFlag.AlignCenter)
-        group_ppb.setLayout(ppb_layout)
-        layout.addWidget(group_ppb)
+    def browse_i0_file(self):
+        """Browse and set the I0 (Zero-air) measurement file."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select I0 File", "", "Data Files (*.dat *.txt *.csv)")
+        if filepath:
+            self.set_i0_path(filepath)
 
-    def open_post_process(self):
-        """Search deep within the engine and monitor to locate the wavelength array before opening."""
-        if not hasattr(self, 'results') or not self.results:
-            QMessageBox.warning(self, "No Data", "No analysis results found. Please run the analysis (RUN) first.")
-            return
-
-        wl_data = None
-
-        # 🔍 Search Priority 1: Main class attributes
-        wl_data = getattr(self, 'wavelengths', getattr(self, 'wave_data', None))
-
-        # 🔍 Search Priority 2: Dive into the engine's raw references
-        if wl_data is None and hasattr(self.engine, 'raw_references') and self.engine.raw_references:
+    def browse_r_file(self):
+        """Browse and set the Reflectivity (R-Curve) file."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select R-Curve File", "", "Data Files (*.dat *.txt *.csv)")
+        if filepath:
+            self.r_filepath = filepath
+            self.lbl_r_path.setText(os.path.basename(filepath))
+            self.lbl_r_path.setStyleSheet("color: blue; font-weight: bold;")
+            
+            # 🌟 Load R data and plot
             try:
-                first_gas = self.engine.gas_list[0]
-                ref_obj = self.engine.raw_references[first_gas]
-                
-                if isinstance(ref_obj, dict):
-                    wl_data = ref_obj.get('wl')
-                else:
-                    wl_data = getattr(ref_obj, 'index', None)
+                # 일반적인 R 커브 파일(2열 데이터) 로드 로직
+                import pandas as pd
+                df = pd.read_csv(filepath, sep=None, engine='python', header=None, comment='#')
+                # 1열이 파장/픽셀, 2열이 R값이라고 가정
+                r_y = pd.to_numeric(df.iloc[:, -1], errors='coerce').dropna().values
+                self.r_data = r_y
+                self.update_diagnostic_plot()
             except Exception as e:
-                print(f"DEBUG: Error searching raw_references - {e}")
+                print(f"Error loading R file: {e}")
+                QMessageBox.warning(self, "Load Error", "Failed to parse Reflectivity (R) file.")
 
-        # 🔍 Search Priority 3: Extract from Monitor Widget
-        if wl_data is None and hasattr(self, 'monitor'):
-            wl_data = getattr(self.monitor, 'wavelengths', getattr(self.monitor, 'wave_data', None))
-
-        # 🚨 Final check before execution
-        if wl_data is None:
-            QMessageBox.critical(self, "Missing Data", 
-                                 "Wavelength data could not be found.\n"
-                                 "Make sure you have fully loaded the data or completed an analysis run.")
+    def show_table_context_menu(self, pos):
+        """Shows context menu on the measurement table."""
+        row = self.table.rowAt(pos)
+        if row < 0:
             return
             
-        # Convert to numpy array safely
-        wl_final = np.array(wl_data)
+        menu = QMenu()
+        action_i0 = menu.addAction("🎯 Set as I0 (Zero-Air)")
+        action = menu.exec(self.table.viewport().mapToGlobal(pos))
         
-        dialog = PostProcessDialog(self, self.results, wl_final)
-        dialog.exec()
+        if action == action_i0:
+            self.set_i0_from_table(row)
+
+    def set_i0_from_table(self, row):
+        """Extracts the filepath from the table row and sets it as I0."""
+        fname = self.table.item(row, 0).text()
+        filepath = next((f for f in self.file_list if os.path.basename(f) == fname), None)
+        
+        if filepath:
+            self.set_i0_path(filepath)
+            self.main_tabs.setCurrentIndex(0)
+            
+    def set_i0_path(self, filepath):
+        """Updates the I0 state, loads data, and updates UI."""
+        self.i0_filepath = filepath
+        self.lbl_i0_path.setText(os.path.basename(filepath))
+        self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
+        self.status.setText(f"🎯 I0 set to: {os.path.basename(filepath)}")
+        
+        # 🌟 Load I0 data and plot
+        try:
+            from data_io import DataIO
+            # 엔진과 동일한 방식으로 I0 파일 로드 (가장 안정적)
+            _, intensity_raw = DataIO.load_measurement(filepath, pixel_min=0)
+            self.i0_data = intensity_raw
+            self.update_diagnostic_plot()
+        except Exception as e:
+            print(f"Error loading I0 file: {e}")
+            QMessageBox.warning(self, "Load Error", "Failed to read I0 measurement file.")
+
+    def update_diagnostic_plot(self):
+        """Draws I0 and R on the diagnostic viewer."""
+        self.p1.clear()
+        self.p2.clear()
+        
+        # 파장(nm) 축이 로드되어 있으면 적용, 아니면 픽셀 축 적용
+        x_axis = None
+        if hasattr(self, 'wavelengths') and self.wavelengths is not None:
+            x_axis = np.array(self.wavelengths).flatten()
+            self.plot_diagnostic.setLabel('bottom', 'Wavelength (nm)')
+        else:
+            self.plot_diagnostic.setLabel('bottom', 'Pixel Index')
+            
+        # 1. 검은색 선으로 I0 그리기 (Left Y-axis)
+        if hasattr(self, 'i0_data') and self.i0_data is not None:
+            x = x_axis if (x_axis is not None and len(x_axis) == len(self.i0_data)) else np.arange(len(self.i0_data))
+            self.p1.plot(x, self.i0_data, pen=pg.mkPen('k', width=1.5), name="I0 (Zero-Air)")
+            
+        # 2. 파란색 점선으로 R 그리기 (Right Y-axis)
+        if hasattr(self, 'r_data') and self.r_data is not None:
+            x = x_axis if (x_axis is not None and len(x_axis) == len(self.r_data)) else np.arange(len(self.r_data))
+            
+            curve_r = pg.PlotCurveItem(x, self.r_data, pen=pg.mkPen('b', width=2, style=Qt.PenStyle.DashLine))
+            self.p2.addItem(curve_r)
+            
+            # R값은 보통 0.99~0.999 수준이므로 범위를 보기 좋게 자동 조절
+            self.p2.autoRange()
 
     def open_r_generator(self):
-        """Locates wavelength data and opens the Reflectivity (R-Curve) Generator."""
-        if not hasattr(self, 'results') or not self.results:
-            QMessageBox.warning(self, "No Data", "No analysis results found. Please run the analysis (RUN) first.")
-            return
-
-        wl_data = None
-
-        # 🔍 Search 1: Engine's raw references
-        if hasattr(self.engine, 'raw_references') and self.engine.raw_references:
-            try:
-                first_gas = self.engine.gas_list[0]
-                ref_obj = self.engine.raw_references[first_gas]
-                
-                if isinstance(ref_obj, dict):
-                    wl_data = ref_obj.get('wl')
-                elif isinstance(ref_obj, pd.DataFrame):
-                    wl_data = ref_obj.index.values
-            except Exception as e:
-                print(f"DEBUG: Error searching raw_references - {e}")
-
-        # 🔍 Search 2: Engine's scaling factors properties
-        if wl_data is None and hasattr(self.engine, 'scaling_factors'):
-            if isinstance(self.engine.scaling_factors, dict):
-                wl_data = self.engine.scaling_factors.get('wl', self.engine.scaling_factors.get('x'))
-
-        # 🔍 Search 3: Retrieve directly from the active Monitor widget
-        if wl_data is None and hasattr(self, 'monitor'):
-            wl_data = getattr(self.monitor, 'wavelengths', 
-                      getattr(self.monitor, 'wave_data', 
-                      getattr(self.monitor, 'wl', None)))
-
+        """Opens the Reflectivity (R-Curve) Generator using the loaded wavelength axis."""
+        wl_data = getattr(self, 'wavelengths', getattr(self.monitor, 'wavelengths', None))
         if wl_data is None:
-            print("--- [FINAL DEBUG: Engine Attributes] ---")
-            print(f"Engine Gas List: {getattr(self.engine, 'gas_list', 'None')}")
-            QMessageBox.critical(self, "Search Failed", "Wavelength data not found. Please check the engine configuration.")
+            QMessageBox.warning(self, "No Wavelength Data", "Please load the X-Axis (nm) wavelength file first.")
             return
-
         dialog = R_GeneratorDialog(self, np.array(wl_data))
         dialog.exec()
 
@@ -608,6 +784,7 @@ class CAESARAnalyzer(QMainWindow):
                     break
                     
             if wl_data is not None:
+                self.wavelengths = wl_data
                 self.monitor.set_wavelengths(wl_data)
                 self.lbl_fwhm_display.setText(f"💡 WL Loaded: {os.path.basename(filepath)}")
                 
@@ -793,6 +970,10 @@ class CAESARAnalyzer(QMainWindow):
                 else:
                     print(f"⚠️ Lock Failed ({widget['n'].text()}): {msg}")
                     
+        # 파장 축을 엔진에 등록 (pixel_to_wavelength 사용을 위해)
+        if current_wave is not None:
+            self.engine.set_wavelength_axis(current_wave)
+
         # Apply zero convolution initially (refreshes internal interpolators)
         self.engine.apply_ils_convolution(0.0)
         
@@ -801,7 +982,7 @@ class CAESARAnalyzer(QMainWindow):
 
             # Dynamically update the Result Table headers
             if hasattr(self, 'table'):
-                cols = ["File", "RMS", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
+                cols = ["File", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
                 self.table.setColumnCount(len(cols))
                 self.table.setHorizontalHeaderLabels(cols)
                 
@@ -814,53 +995,6 @@ class CAESARAnalyzer(QMainWindow):
         else:
             QMessageBox.warning(self, "Error", "No valid references found to lock, or an error occurred.")
 
-    # ---------------------------------------------------------
-    # Legacy Support for Wavelength/Lamp Loading
-    # ---------------------------------------------------------
-    def load_x_axis(self):
-        """Loads a pre-calibrated text file as the X-axis."""
-        filepath, _ = QFileDialog.getOpenFileName(self, "Load Calibration", "", "Text Files (*.txt)")
-        if not filepath: 
-            return
-        
-        self.wavelengths = np.loadtxt(filepath)
-        
-        # Read the first line to check for FWHM metadata
-        with open(filepath, 'r') as f:
-            first_line = f.readline()
-            if "FWHM" in first_line:
-                fwhm_info = first_line.strip().replace('#', '').strip()
-                self.lbl_fwhm_display.setText(f"💡 {fwhm_info}")
-                self.lbl_fwhm_display.setStyleSheet("color: #2E7D32; font-weight: bold;")
-            else:
-                self.lbl_fwhm_display.setText("⚠️ No FWHM Metadata")
-                self.lbl_fwhm_display.setStyleSheet("color: #C62828; font-weight: bold;")
-
-    def calculate_fwhm_from_old_lamp(self):
-        """Calculates FWHM using an older format Hg Lamp CSV file."""
-        if not hasattr(self, 'wavelengths') or self.wavelengths is None:
-            QMessageBox.warning(self, "Warning", "Please load the X-axis (Wavelength Calibration) file first!")
-            return
-            
-        filepath, _ = QFileDialog.getOpenFileName(self, "Load Old Hg Lamp", "", "CSV Files (*.csv)")
-        if not filepath: 
-            return
-        
-        try:
-            df = pd.read_csv(filepath)
-            lamp_y = df.groupby('Column')['Intensity'].mean().values if 'Column' in df.columns else df.iloc[:, -1].values
-            
-            # Default pixel approximation for legacy Hg lamps
-            peak_pixel_guess = 727 
-            
-            fwhm_px, fwhm_nm = self.calculate_fwhm(peak_pixel_guess, lamp_y, self.wavelengths)
-            
-            if fwhm_nm is not None:
-                self.lbl_fwhm_display.setText(f"💡 Calculated FWHM: {fwhm_nm:.3f} nm")
-                self.lbl_fwhm_display.setStyleSheet("color: #1565C0; font-weight: bold;")
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Calculation Failed", f"Error calculating FWHM:\n{e}")
 
     # ---------------------------------------------------------
     # Measurement Data Loading & UI State Logic
@@ -954,38 +1088,6 @@ class CAESARAnalyzer(QMainWindow):
         self.txt_min.setText(str(min_idx))
         self.txt_max.setText(str(max_idx))
         
-    def open_scanner(self):
-        """Opens the CalibrationScanner to auto-find the best initial shift."""
-        if not self.file_list: 
-            return
-        if not self.engine.is_engine_ready(): 
-            QMessageBox.warning(self, "Warning", "Please load references first.")
-            return
-        try: 
-            pixel_min, pixel_max = int(self.txt_min.text()), int(self.txt_max.text())
-        except Exception: 
-            return
-            
-        mid_file = self.file_list[len(self.file_list) // 2]
-        try:
-            from data_io import DataIO
-            _, y_data = DataIO.load_measurement(mid_file, pixel_min=0)
-        except Exception: 
-            QMessageBox.critical(self, "Read Error", "Cannot parse the selected data file.")
-            return
-            
-        current_poly_order = self.spin_poly_deg.value()
-        # scanner = CalibrationScanner(...) 코드는 ui_dialogs.py 쪽에서 담당하므로 생략 없이 기존 호출부 유지
-        self.scanner = CalibrationScanner(self.engine, y_data, pixel_min, pixel_max, current_poly_order)
-        self.scanner.apply_result.connect(self.apply_scan_result)
-        self.scanner.exec()
-        
-    def apply_scan_result(self, optimal_shift):
-        """Updates the main UI shift value based on the scanner's result."""
-        self.calib_shift = optimal_shift
-        self.spin_manual_shift.setValue(optimal_shift)
-        QMessageBox.information(self, "Success", f"Optimal Shift set to {optimal_shift:.2f}")
-        
     def apply_roi_from_graph(self, min_val, max_val):
         """Updates the fitting range directly from the fast monitor ROI selection."""
         self.txt_min.setText(str(min_val))
@@ -1017,7 +1119,7 @@ class CAESARAnalyzer(QMainWindow):
         self.table.setRowCount(len(self.file_list)) 
         
         # Lock in column headers dynamically based on loaded gases
-        cols = ["File", "RMS", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
+        cols = ["File", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
         self.table.setColumnCount(len(cols))
         self.table.setHorizontalHeaderLabels(cols)
         
@@ -1050,18 +1152,50 @@ class CAESARAnalyzer(QMainWindow):
             interval = -1
             delay_ms = 0
             
-        # Initialize and fire the Worker Thread
+        # [ BBCEAS Data Preparation ]
+        sliced_i0 = None
+        sliced_r = None
+        cavity_d = self.spin_d_len.value()
+        
+        # Check if I0 and R are loaded, then slice them to match the fitting range
+        if hasattr(self, 'i0_data') and self.i0_data is not None:
+            if len(self.i0_data) > pixel_max:
+                sliced_i0 = self.i0_data[ pixel_min : pixel_max ]
+            else:
+                QMessageBox.warning(self, "Warning", "I0 data length is shorter than Fit Max Pixel.")
+                return
+                
+        if hasattr(self, 'r_data') and self.r_data is not None:
+            # Handle R data assuming it matches the full pixel length (from R-Curve Generator)
+            if len(self.r_data) > pixel_max:
+                sliced_r = self.r_data[ pixel_min : pixel_max ]
+            else:
+                QMessageBox.warning(self, "Warning", "Reflectivity (R) data length mismatch.")
+                return
+
+        if sliced_i0 is None or sliced_r is None:
+            ans = QMessageBox.question(self, "Missing BBCEAS Params", 
+                                       "I0 or R is missing. Fallback to standard DOAS (Log)?", 
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if ans == QMessageBox.StandardButton.No:
+                self.b_run.setEnabled(True)
+                return
+
+        # Initialize and fire the Worker Thread with BBCEAS params
         self.worker = AnalysisWorker(
             self.engine, self.file_list, pixel_min, pixel_max, 
             p0, (bounds_low, bounds_high), interval, delay_ms,
-            ref_properties=getattr(self, 'ref_props', {})
+            ref_properties=getattr(self, 'ref_props', {}),
+            i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d
         )
         
         self.worker.step_limit = step_limit_val
-
         self.worker.tikhonov_lambda = self.spin_lambda.value()
-
         self.worker.use_robust_fitting = self.chk_robust.isChecked()
+        self.worker.kalman_q = self.spin_kalman_q.value()
+        self.worker.kalman_r = self.spin_kalman_r.value()
+        self.worker.temperature = self.spin_temp.value()
+        self.worker.pressure = self.spin_pres.value()
 
         # ===============================================================
         # Connect Thread Signals to UI functions
@@ -1077,15 +1211,15 @@ class CAESARAnalyzer(QMainWindow):
         self.status.setText("🏃 Analysis in progress...")
         self.worker.start()
         
-    def stop_analysis(self): 
+    def stop_analysis(self):
         """Safely stops the worker thread and re-enables UI controls."""
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.stop()
             self.status.setText("🛑 Halting analysis... please wait.")
             self.status.setStyleSheet("color: red; font-weight: bold;")
-            self.b_stop.setEnabled(False) 
-            self.worker.wait() 
-            self.analysis_finished()
+            self.b_stop.setEnabled(False)
+            self.worker.wait()
+            self.analysis_finished(stopped=True)
             
     def update_table(self, result_dict, row_index):
         """Triggered by the worker thread to update the table row-by-row."""
@@ -1093,25 +1227,30 @@ class CAESARAnalyzer(QMainWindow):
         self.results.append(result_dict)
         
         self.table.setItem(row_index, 0, QTableWidgetItem(str(result_dict['File'])))
-        self.table.setItem(row_index, 1, QTableWidgetItem(f"{result_dict['RMS']:.2e}"))
-        
+        self.table.setItem(row_index, 1, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
+        self.table.setItem(row_index, 2, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
+        self.table.setItem(row_index, 3, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
+
         # Set status cell with conditional background color formatting
-        item_status = QTableWidgetItem(str(result_dict['Status']))
+        item_status = QTableWidgetItem(str(result_dict.get('Status', '')))
         try:
-            if result_dict['Status'] != "OK": 
-                item_status.setBackground(QColor(255, 100, 100)) # Light Red for errors
+            status = result_dict.get('Status', '')
+            if status not in ("OK", "Recovered"):
+                item_status.setBackground(QColor(255, 100, 100))
+            elif status == "Recovered":
+                item_status.setBackground(QColor(255, 220, 100))
         except Exception:
             pass
-            
-        self.table.setItem(row_index, 2, item_status)
-        
-        # Populate gas concentrations dynamically
-        for i, gas_name in enumerate(self.engine.gas_list): 
-            self.table.setItem(row_index, 3 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
-            
+
+        self.table.setItem(row_index, 4, item_status)
+
+        # Populate gas concentrations dynamically (col 5 onwards)
+        for i, gas_name in enumerate(self.engine.gas_list):
+            self.table.setItem(row_index, 5 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
+
         gas_offset = len(self.engine.gas_list)
-        self.table.setItem(row_index, 3 + gas_offset, QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
-        self.table.setItem(row_index, 4 + gas_offset, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
+        self.table.setItem(row_index, 5 + gas_offset, QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
+        self.table.setItem(row_index, 6 + gas_offset, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
 
         # Force UI scroll to follow the latest row
         item = self.table.item(row_index, 0)
@@ -1121,13 +1260,17 @@ class CAESARAnalyzer(QMainWindow):
         # Explicitly enforce progress bar value increment
         self.pbar.setValue(row_index + 1)
         
-    def analysis_finished(self): 
+    def analysis_finished(self, stopped=False):
         """Re-enables UI and displays completion message when the worker finishes."""
         self.b_run.setEnabled(True)
         self.b_stop.setEnabled(False)
-        self.status.setText("✅ Analysis Completed!")
-        self.status.setStyleSheet("color: green; font-weight: bold;")
-        QMessageBox.information(self, "Done", "All files analyzed successfully.")
+        if stopped:
+            self.status.setText("🛑 Analysis stopped by user.")
+            self.status.setStyleSheet("color: red; font-weight: bold;")
+        else:
+            self.status.setText("✅ Analysis Completed!")
+            self.status.setStyleSheet("color: green; font-weight: bold;")
+            QMessageBox.information(self, "Done", "All files analyzed successfully.")
 
     def save(self):
         """Saves the current analysis results with an intelligently generated filename (in nm)."""
@@ -1394,7 +1537,9 @@ class CAESARAnalyzer(QMainWindow):
             "step_limit": getattr(self, 'spin_step_limit', None).value() if hasattr(self, 'spin_step_limit') else 0.5,
             "ref_props": getattr(self, 'ref_props', {}),
             "tikhonov_lambda": lam_val,
-            "use_robust": self.chk_robust.isChecked()
+            "use_robust": self.chk_robust.isChecked(),
+            "kalman_q": self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005,
+            "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050
         }
 
         # 3. 파일 저장 다이얼로그 실행
@@ -1429,6 +1574,10 @@ class CAESARAnalyzer(QMainWindow):
                 self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
             if hasattr(self, 'chk_robust'):
                 self.chk_robust.setChecked(scenario.get("use_robust", False))
+            if hasattr(self, 'spin_kalman_q'):
+                self.spin_kalman_q.setValue(scenario.get("kalman_q", 0.0005))
+            if hasattr(self, 'spin_kalman_r'):
+                self.spin_kalman_r.setValue(scenario.get("kalman_r", 0.050))
             
             # 프리셋을 'Custom'으로 변경하여 불러온 값 유지
             if hasattr(self, 'combo_preset'):

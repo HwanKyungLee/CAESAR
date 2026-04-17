@@ -12,16 +12,28 @@ class UniversalEngine:
     - Basis Matrix 생성기를 고급형(배열 파라미터 지원)으로 업그레이드.
     """
     def __init__(self):
-        self.raw_references = {}      
-        self.interpolators = {}       
-        self.gas_list = []            
-        self.scaling_factors = {}     
+        self.raw_references = {}
+        self.interpolators = {}
+        self.gas_list = []
+        self.scaling_factors = {}
+        self._wave_axis = None     
 
     def clear_engine(self):
         self.raw_references = {}
         self.interpolators = {}
         self.gas_list = []
         self.scaling_factors = {}
+        self._wave_axis = None
+
+    def set_wavelength_axis(self, wave_nm):
+        self._wave_axis = np.array(wave_nm)
+
+    def pixel_to_wavelength(self, pixel_idx):
+        if self._wave_axis is not None:
+            f = interp1d(np.arange(len(self._wave_axis)), self._wave_axis,
+                         kind='linear', bounds_error=False, fill_value='extrapolate')
+            return f(np.asarray(pixel_idx, dtype=float))
+        return np.asarray(pixel_idx, dtype=float)
 
     def is_engine_ready(self) -> bool:
         return len(self.gas_list) > 0
@@ -132,7 +144,7 @@ class UniversalEngine:
         custom_effect = 0
         if custom_basis is not None and custom_coeffs is not None:
             # custom_basis는 (픽셀 수, 기저 개수) 형태의 2D 배열이라고 가정합니다.
-            for i in range(custom_basis.shape):
+            for i in range(custom_basis.shape[1]):
                 custom_effect += custom_coeffs[i] * custom_basis[:, i]
         
         full_model = baseline + total_absorption + etalon_wave + custom_effect
@@ -149,9 +161,6 @@ class UniversalEngine:
         
         return coefficient * self.interpolators[gas_name](pixel_shifted) / self.scaling_factors[gas_name]
         
-    def get_absolute_concentration(self, name, fit_coefficient):
-        return fit_coefficient / self.scaling_factors[name]
-    
     # Basis Matrix에 Custom Basis 행렬 병합 기능 추가
     def get_basis_matrix(self, pixel_idx, shifts, squeezes, poly_order=-1, etalon_freq=None, etalon_phase=0.0, custom_basis=None):
         center_idx = pixel_idx[ len(pixel_idx)//2 ]
@@ -182,7 +191,7 @@ class UniversalEngine:
             # custom_basis가 1D 배열이면 2D 열 벡터로 변환
             if custom_basis.ndim == 1:
                 custom_basis = custom_basis.reshape(-1, 1)
-            for i in range(custom_basis.shape):
+            for i in range(custom_basis.shape[1]):
                 column_vectors.append(custom_basis[:, i])
                 
         return np.column_stack(column_vectors)

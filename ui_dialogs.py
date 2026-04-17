@@ -1524,25 +1524,6 @@ class ReferenceGeneratorDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load FWHM profile:\n{e}")
 
-    def load_lamp_for_slit(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Open Hg Lamp", "", "Data Files (*.csv *.txt *.dat)")
-        if not filename: return
-        try:
-            if filename.endswith('.csv'): 
-                df = pd.read_csv(filename)
-            else: 
-                df = pd.read_csv(filename, sep=None, engine='python', header=None, comment='#')
-                
-            if 'Intensity' in df.columns and 'Column' in df.columns:
-                self.lamp_intensity = df.groupby('Column')['Intensity'].mean().values
-            else: 
-                self.lamp_intensity = df.iloc[:, -1].values
-                
-            self.radio_measured.setChecked(True)
-            QMessageBox.information(self, "Success", "Lamp data loaded successfully.")
-        except Exception as e: 
-            QMessageBox.critical(self, "Error", f"Failed to load Lamp data:\n{e}")
-
     def auto_load_lamp_data(self, intensity_array):
         """Automatically imports lamp data if available from the main application."""
         if intensity_array is not None:
@@ -1995,7 +1976,11 @@ class MonitorWidget(QWidget):
         self.curve_items["poly_fit"].setData(x_plot, intensity_poly)
         self.curve_items["residual"].setData(x_plot, residual)
 
-    def update_trend(self, idx, shift, squeeze, rms):
+    def update_trend(self, data: dict):
+        idx = data.get('idx', 0)
+        shift = data.get('shift', 0.0)
+        squeeze = data.get('squeeze', 1.0)
+        rms = data.get('rms', 0.0)
         self.x_data.append(idx)
         self.y_sh.append(shift)
         self.y_sq.append(squeeze)
@@ -2271,12 +2256,9 @@ class R_GeneratorDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate R(λ):\n{e}")
 
+# PostProcessDialog removed — functionality covered by save() in app_window.py
 class PostProcessDialog(QDialog):
-    """
-    Dialog for precise concentration conversion (ppb) and multi-format exporting.
-    Applies physical parameters (Temperature, Pressure, Cavity Length) and 
-    mirror reflectivity (R) to correct the analyzed data.
-    """
+    """Deprecated — kept as stub to avoid import errors if referenced externally."""
     def __init__(self, parent, analysis_results, wavelengths):
         super().__init__(parent)
         self.setWindowTitle("📊 BBCEAS Precision Concentration & Multi-Format Export")

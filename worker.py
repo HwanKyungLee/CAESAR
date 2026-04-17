@@ -18,6 +18,34 @@ from numpy.polynomial import chebyshev
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
+class StateFlag:
+    AMBIENT = 0      # 대기 측정 (피팅 수행)
+    ZERO_AIR = 1     # I0 캘리브레이션
+    HELIUM = 2       # 헬륨 캘리브레이션
+
+# [ Rayleigh Physics Logic for worker.py ]
+
+class RayleighPhysics:
+    """
+    Calculates Rayleigh scattering cross-sections based on Bodhaine (1999).
+    """
+    @staticmethod
+    def get_alpha_rayleigh(wave_nm, temp_c, press_mbar, gas_type='air'):
+        # Number density (molecules/cm^3)
+        n_density = 2.68678e19 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
+        lambda_um = wave_nm / 1000.0
+        
+        if gas_type == 'air':
+            n_minus_1 = 1e-8 * (5792105.0 / (238.0185 - (1.0/lambda_um)**2) + 16791.7 / (57.362 - (1.0/lambda_um)**2))
+            king_factor = 1.061
+        else: # Helium
+            n_minus_1 = 1e-8 * (1.46746e4 / (2.80287e2 - (1.0/lambda_um)**2))
+            king_factor = 1.0
+        
+        wave_cm = wave_nm * 1e-7
+        sigma = (8.0 * np.pi**3 * (n_minus_1 * 2.0)**2 * king_factor) / (3.0 * (n_density**2) * (wave_cm**4))
+        return sigma * n_density
+
 class KalmanTracker:
     def __init__(self, num_variables, q_noise=1e-4, r_noise=1e-2):
         self.num_vars = num_variables
@@ -43,24 +71,52 @@ class KalmanTracker:
 
 class AnalysisWorker(QThread):
     progress = pyqtSignal(int)
-    result_ready = pyqtSignal(dict, int) 
-    plot_update = pyqtSignal(object, object, object, object, object, str) 
-    trend_update = pyqtSignal(int, float, float, float)
+    result_ready = pyqtSignal(dict, int)
+    plot_update = pyqtSignal(np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict, str)
+    trend_update = pyqtSignal(dict)
     finished = pyqtSignal()
-    
-    def __init__(self, engine, file_list, pixel_min, pixel_max, initial_params, fit_bounds, update_interval=1, delay_ms=0, ref_properties=None):
+
+    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=1, flag_he=2): # 🌟 파라미터 2개 추가
         super().__init__()
         self.engine = engine
         self.file_list = file_list
-        self.pixel_min = int(pixel_min)
-        self.pixel_max = int(pixel_max)
-        self.params = initial_params
-        self.bounds = fit_bounds
+        self.pixel_min = pixel_min
+        self.pixel_max = pixel_max
+        self.p0 = p0
+        self.bounds = bounds
         self.update_interval = update_interval
         self.delay_ms = delay_ms
-        self.is_running = True
-        self.needs_pre_calibration = True
         self.ref_properties = ref_properties if ref_properties is not None else {}
+        self._is_running = True
+        
+        # [ BBCEAS Physics Parameters ]
+        self.i0_array = i0_array
+        self.r_array = r_array
+        self.cavity_len = cavity_len
+
+        # [ Environment Variables ]
+        self.temperature = temperature
+        self.pressure = pressure
+
+        self.i_za_last = None        
+        self.i_he_last = None        
+        self.one_minus_r_over_d = None 
+        
+        self.flag_za = flag_za
+        self.flag_he = flag_he
+
+        # 명시적 초기화 (run()에서 직접 접근)
+        self.params = list(p0) if p0 is not None else [0.0, 1.0]
+        self.is_running = True
+        self.tikhonov_lambda = 0.0
+        self.use_robust_fitting = False
+        self.needs_pre_calibration = False
+        self.etalon_freq = None
+        self.step_limit = 0.5
+        self.kalman_q = 0.0005
+        self.kalman_r = 0.050
+        self.etalon_freq_min = 0.02
+        self.etalon_freq_max = 0.40
 
     def auto_pre_calibrate(self, pixel_idx, optical_depth, poly_order):
         best_rms = np.inf
@@ -99,7 +155,7 @@ class AnalysisWorker(QThread):
         fft_vals = np.fft.rfft(rough_residual)
         fft_freqs = np.fft.rfftfreq(len(rough_residual), d=1.0) 
         
-        valid_mask = (fft_freqs > 0.02) & (fft_freqs < 0.40)
+        valid_mask = (fft_freqs > self.etalon_freq_min) & (fft_freqs < self.etalon_freq_max)
         if np.any(valid_mask):
             peak_f = fft_freqs[valid_mask][np.argmax(np.abs(fft_vals[valid_mask]))]
             return 2.0 * np.pi * peak_f
@@ -275,32 +331,92 @@ class AnalysisWorker(QThread):
             
         total_files = len(self.file_list)
         last_valid_shift = float(np.atleast_1d(current_params[ 0 ])[ 0 ])
-        kalman_filter = KalmanTracker(num_variables=len(self.engine.gas_list), q_noise=0.0005, r_noise=0.05)
+        
+        current_kalman_q = getattr(self, 'kalman_q', 0.0005)
+        current_kalman_r = getattr(self, 'kalman_r', 0.050)
+        kalman_filter = KalmanTracker(num_variables=len(self.engine.gas_list), q_noise=current_kalman_q, r_noise=current_kalman_r)
         
         for i, file_path in enumerate(self.file_list):
             if not self.is_running: break
 
-            # 🌟 [버그 수정 1]: 매 파일마다 항상 이전 파일에서 성공했던 Shift 값을 중심점으로 잡습니다.
             initial_shift_center = last_valid_shift
             result = {'File': os.path.basename(file_path), 'Params': {}}
             
             try:
-                # 1. 파일 읽기 및 전처리
-                pixel_idx, intensity_raw = DataIO.load_measurement(file_path, self.pixel_min, self.pixel_max)
+                # 1. Load Spectrum and Housekeeping (including Flag)
+                pixel_idx, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(file_path, self.pixel_min, self.pixel_max)
                 
-                avg_raw = np.mean(intensity_raw)
-                is_linear_mode = (abs(avg_raw) < 1.0) 
-                scale_factor = 10 ** (-np.floor(np.log10(abs(avg_raw)))) if (abs(avg_raw) < 1e-4 and avg_raw != 0) else 1.0
-                intensity_processed = intensity_raw * scale_factor
+                # Update current environment for PPB calculation
+                self.temperature = env_t
+                self.pressure = env_p
+
+                # 🌟 [추가]: Rayleigh 계산을 위해 픽셀을 파장(nm)으로 변환
+                wave_nm = self.engine.pixel_to_wavelength(pixel_idx)
+
+                # 🌟 [ Auto-Pilot State Switching & R-Calibration ]
+                # 🌟 [ Auto-Pilot State Switching & R-Calibration ]
+                if state_flag == self.flag_za:  #  UI에서 정한 Zero-Air 번호와 같으면
+                    self.i_za_last = intensity_raw.copy()
+                    self.i0_array = intensity_raw.copy()
+                    result['Status'] = f"Zero-Air (Flag {self.flag_za} - I0 Updated)"
+                    
+                    if getattr(self, 'i_he_last', None) is not None:
+                        self.update_mirror_reflectivity(wave_nm, env_t, env_p)
+                        result['Status'] += " & R-Calibrated"
+                    
+                    self.result_ready.emit(result, i)
+                    self.progress.emit(i+1)
+                    continue 
+                    
+                elif state_flag == self.flag_he: #  UI에서 정한 Helium 번호와 같으면
+                    self.i_he_last = intensity_raw.copy()
+                    result['Status'] = f"Helium (Flag {self.flag_he} - Updated)"
+                    
+                    if getattr(self, 'i_za_last', None) is not None:
+                        self.update_mirror_reflectivity(wave_nm, env_t, env_p)
+                        result['Status'] += " & R-Calibrated"
+                        
+                    self.result_ready.emit(result, i)
+                    self.progress.emit(i+1)
+                    continue
                 
-                if is_linear_mode:
-                    optical_depth = intensity_processed
-                    fit_sign = 1.0 
-                else:
-                    intensity_safe = intensity_processed.copy()
-                    intensity_safe[intensity_safe <= 0] = 1e-9
-                    optical_depth = np.log(intensity_safe)
-                    fit_sign = -1.0 
+                # 🌟 [ AMBIENT 정상 측정 모드 ]
+                else: #  그 외의 모든 번호(예: 0)는 정상 피팅 파일로 취급!
+                    
+                    if getattr(self, 'one_minus_r_over_d', None) is None:
+                        if self.r_array is not None:
+                            self.one_minus_r_over_d = (1.0 - self.r_array) / self.cavity_len
+                        else:
+                            result['Status'] = "Skip: No R-curve"
+                            self.result_ready.emit(result, i)
+                            self.progress.emit(i+1)
+                            continue
+
+                    # 2. Pre-processing
+                    avg_raw = np.mean(intensity_raw)
+                    is_linear_mode = (abs(avg_raw) < 1.0) 
+                    scale_factor = 10 ** (-np.floor(np.log10(abs(avg_raw)))) if (abs(avg_raw) < 1e-4 and avg_raw != 0) else 1.0
+                    intensity_processed = intensity_raw * scale_factor
+                    
+                    if is_linear_mode:
+                        optical_depth = intensity_processed
+                        fit_sign = 1.0 
+                    else:
+                        # [ BBCEAS Native Physics Engine ]
+                        I_meas = intensity_processed.copy()
+                        I_meas[ I_meas <= 0 ] = 1e-9
+                        
+                        if self.i0_array is not None:
+                            I_0 = self.i0_array
+                            
+                            # 🌟 박사님의 공식으로 도출된 진짜 반사율 손실값을 사용!
+                            # alpha = ((1 - R) / d) * ((I_0 - I_meas) / I_meas)
+                            optical_depth = self.one_minus_r_over_d * ((I_0 - I_meas) / I_meas)
+                            fit_sign = 1.0 
+                        else:
+                            # Fallback for traditional DOAS
+                            optical_depth = np.log(I_meas) 
+                            fit_sign = -1.0
 
                 poly_start_idx = 2 + len(self.engine.gas_list)
                 poly_order = len(current_params) - poly_start_idx - 1
@@ -337,7 +453,7 @@ class AnalysisWorker(QThread):
                     theta0.append(0.0); theta_lb.append(-np.pi); theta_ub.append(np.pi)
                     
                     try:
-                        weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(intensity_safe))
+                        weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(I_meas))
                         weights = weights / np.mean(weights)
                         W = np.diag(weights)
 
@@ -382,12 +498,40 @@ class AnalysisWorker(QThread):
 
                         smooth_concentrations = kalman_filter.process(raw_concentrations)
                         
+                        # 🌟 [ Real-time PPB Conversion ]
+                        # 공기 분자 밀도 계산 (N_L = 2.68678e19 molecules/cm^3 at 273.15K, 1013.25 mbar)
+                        n_air = 2.68678e19 * (self.pressure / 1013.25) * (273.15 / (self.temperature + 273.15))
+                        
+                        # n_air 불확도 전파 (T: ±1°C, P: ±1 mbar 가정, Washenfelder 2008)
+                        dn_air_dT = -n_air / (self.temperature + 273.15)
+                        dn_air_dP = n_air / self.pressure
+                        rel_err_n = np.sqrt((dn_air_dT * 1.0)**2 + (dn_air_dP * 1.0)**2) / n_air
+
                         for gi, nm in enumerate(self.engine.gas_list):
-                            result[f"{nm}_Raw"], result[nm], result[f"{nm}_Error"] = raw_concentrations[gi], smooth_concentrations[gi], real_errors[gi]
+                            ppb_raw = (raw_concentrations[gi] / n_air) * 1e9
+                            ppb_smooth = (smooth_concentrations[gi] / n_air) * 1e9
+                            ppb_err = (real_errors[gi] / n_air) * 1e9
+                            ppb_total_err = abs(ppb_raw) * np.sqrt((ppb_err / max(abs(ppb_raw), 1e-30))**2 + rel_err_n**2)
+
+                            result[f"{nm}_Raw"], result[nm], result[f"{nm}_Error"] = ppb_raw, ppb_smooth, ppb_err
+                            result[f"{nm}_TotalError"] = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
                             result[f"{nm}_Shift"], result[f"{nm}_Squeeze"] = opt_shifts[gi], opt_squeezes[gi]
+
+                        # 스펙트럼 품질 지표 (DOASIS 논문 기반)
+                        n_pts = len(pixel_idx)
+                        n_gases = len(self.engine.gas_list)
+                        n_params = len(theta0) + n_gases + (poly_order + 1) + 1
+                        dof = max(n_pts - n_params, 1)
+                        resid_std = np.std(residual) if np.std(residual) > 0 else 1.0
+                        chi2 = float(np.sum((residual / resid_std)**2) / dof)
+                        snr = float(np.mean(np.abs(optical_depth)) / (resid_std + 1e-12))
+                        result['Chi2'] = chi2
+                        result['DOF'] = dof
+                        result['SNR'] = snr
 
                         # 피팅 상태 판정
                         threshold = (np.mean(abs(optical_depth)) * 0.3) if is_linear_mode else 0.05
+
                         if rms < threshold:
                             status = "OK"
                             if attempt == 1: status = "Recovered" 
@@ -419,7 +563,7 @@ class AnalysisWorker(QThread):
                     diff_fit = fit_sign * abs_val_orig
                     self.plot_update.emit(pixel_idx, diff_data, diff_fit, np.zeros_like(pixel_idx), final_params_dict, os.path.basename(file_path))
                     sh_val, sq_val = opt_shifts[ 0 ] if len(opt_shifts) > 0 else 0, opt_squeezes[ 0 ] if len(opt_squeezes) > 0 else 1
-                    self.trend_update.emit(i, sh_val, sq_val, rms)
+                    self.trend_update.emit({'idx': i, 'shift': sh_val, 'squeeze': sq_val, 'rms': rms})
                     
             except Exception as e: 
                 result['Status'] = f"Skip: {str(e)}"
@@ -433,5 +577,19 @@ class AnalysisWorker(QThread):
             
         self.finished.emit()
 
+    def update_mirror_reflectivity(self, wave_nm, t, p):
+        """
+        Calculates (1-R)/d based on the ratio of Zero-Air and Helium intensities.
+        (Formula proposed by Dr's feedback and Washenfelder 2008)
+        """
+        # Get theoretical Alpha Rayleigh (cm^-1) using current T, P
+        alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t, p, 'air')
+        alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t, p, 'helium')
+        
+        # Apply the Ratio Formula
+        ratio = self.i_za_last / self.i_he_last
+        self.one_minus_r_over_d = ( (ratio * alpha_ray_za) - alpha_ray_he ) / ( 1.0 - ratio )
+
     def stop(self):
+        self._is_running = False
         self.is_running = False

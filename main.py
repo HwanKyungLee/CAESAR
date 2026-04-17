@@ -21,6 +21,7 @@ from matplotlib.figure import Figure
 from matplotlib.widgets import SpanSelector
 from matplotlib.ticker import ScalarFormatter
 
+
 from scipy.optimize import curve_fit, least_squares, lsq_linear
 from scipy.interpolate import interp1d
 from scipy.signal import convolve
