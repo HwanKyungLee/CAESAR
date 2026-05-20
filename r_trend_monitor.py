@@ -24,7 +24,7 @@ HAS_MPL = True
 try:
     from reflectance_calc import ReflectanceCalculator
     from auto_r_calculator import (
-        iter_cal_scans, FLAG_ZA, FLAG_HE,
+        read_all_scans, FLAG_ZA, FLAG_HE,
         CAVITY_LEN, RL_FACTOR, PIXEL_MIN, PIXEL_MAX,
     )
 except ImportError as e:
@@ -93,7 +93,10 @@ def _parse_timestamp(filepath: str) -> datetime:
         return datetime.now()
 
 def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
-    """ZA/He 사이클 단위로 R을 계산해 결과 목록을 반환한다."""
+    """파일마다 R을 계산해 결과 목록을 반환한다.
+    He가 있는 파일: He 갱신 후 해당 파일 ZA + 새 He로 계산.
+    He가 없는 파일: 직전 He + 해당 파일 ZA로 계산.
+    """
     if file_list is not None:
         files = sorted(str(f) for f in file_list if os.path.isfile(str(f)))
     else:
@@ -108,63 +111,44 @@ def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
     print(f"  {len(files)}개 파일 연속 처리 시작...\n")
 
     results = []
-    last_za_group = None   # 가장 최근 완성된 ZA 연속 그룹
-    last_he_group = None   # 가장 최근 완성된 He 연속 그룹
-    current_type  = None
-    current_group = []
-    current_fp    = None
-    cycle_count   = 0
-
-    def flush_group():
-        nonlocal last_za_group, last_he_group, cycle_count
-        if not current_group:
-            return
-        if current_type == "za":
-            last_za_group = list(current_group)
-            if last_he_group is not None:
-                cycle_count += 1
-                _run_cycle(last_za_group, last_he_group, current_fp, cycle_count)
-        elif current_type == "he":
-            last_he_group = list(current_group)
-
-    def _run_cycle(za_group, he_group, fp, idx):
-        fname = os.path.basename(fp)
-        try:
-            rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
-            for sp, t, p in za_group: rc.add_za_spectrum(sp, t, p)
-            for sp, t, p in he_group: rc.add_he_spectrum(sp, t, p)
-            wave_out, r_curve, omr_d = rc.calculate(wave_nm)
-            res = {
-                "timestamp": _parse_timestamp(fp),
-                "filename": fname,
-                "cycle": idx,
-                "r_mean": float(np.mean(r_curve)),
-                "r_std":  float(np.std(r_curve)),
-                "r_min":  float(np.min(r_curve)),
-                "r_max":  float(np.max(r_curve)),
-                "leff_mean": float(np.mean(1.0 / (omr_d + 1e-30) * 1e-5)),
-                "valid_frac": rc.valid_fraction,
-                "n_za": len(za_group),
-                "n_he": len(he_group),
-            }
-            results.append(res)
-            print(f"  [{fname}] 사이클{idx:04d} ✅ R_mean={res['r_mean']:.6f}")
-        except Exception as e:
-            print(f"  [{fname}] 사이클{idx:04d} ❌ {e}")
+    last_he = []   # 가장 최근 He 스캔 (파일 간 유지)
 
     for fp in files:
-        for scan_type, sp, t, p in iter_cal_scans(fp):
-            if scan_type != current_type:
-                flush_group()
-                current_type  = scan_type
-                current_group = [(sp, t, p)]
-                current_fp    = fp
-            else:
-                current_group.append((sp, t, p))
+        fname = os.path.basename(fp)
+        za, he = read_all_scans(fp)
 
-    flush_group()
+        if he:
+            last_he = he   # 새 He 캘리브레이션 갱신
 
-    print(f"\n  총 사이클: {cycle_count}  성공: {len(results)}  실패: {cycle_count - len(results)}")
+        if not za or not last_he:
+            print(f"  [{fname}] ⏳ 스킵 (ZA:{len(za)} He누적:{len(last_he)})")
+            continue
+
+        try:
+            rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
+            for sp, t, p in za:      rc.add_za_spectrum(sp, t, p)
+            for sp, t, p in last_he: rc.add_he_spectrum(sp, t, p)
+            wave_out, r_curve, omr_d = rc.calculate(wave_nm)
+
+            res = {
+                "timestamp":  _parse_timestamp(fp),
+                "filename":   fname,
+                "r_mean":     float(np.mean(r_curve)),
+                "r_std":      float(np.std(r_curve)),
+                "r_min":      float(np.min(r_curve)),
+                "r_max":      float(np.max(r_curve)),
+                "leff_mean":  float(np.mean(1.0 / (omr_d + 1e-30) * 1e-5)),
+                "valid_frac": rc.valid_fraction,
+                "n_za":       len(za),
+                "n_he":       len(last_he),
+            }
+            results.append(res)
+            he_tag = "  [He갱신]" if he else ""
+            print(f"  [{fname}] ✅ R_mean={res['r_mean']:.6f}  valid={res['valid_frac']*100:.1f}%{he_tag}")
+        except Exception as e:
+            print(f"  [{fname}] ❌ {e}")
+
+    print(f"\n  총 파일: {len(files)}  성공: {len(results)}  실패/스킵: {len(files)-len(results)}")
     return results
 
 def _stem_digits(filename: str) -> str:
@@ -182,11 +166,11 @@ def save_dat(results: list[dict], out_path: str) -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# CAESAR Pro — Mirror Reflectivity Trend\n")
         fh.write(f"# cavity={CAVITY_LEN} cm  RL={RL_FACTOR}  ZA_flag={FLAG_ZA}  He_flag={FLAG_HE}\n")
-        fh.write("timestamp\tfilename\tcycle\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
+        fh.write("timestamp\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
         for r in results:
             fh.write(
                 f"{r['timestamp'].strftime('%Y-%m-%d %H:%M')}\t"
-                f"{r['filename']}\t{r.get('cycle', '')}\t"
+                f"{r['filename']}\t"
                 f"{r['r_mean']:.8f}\t{r['r_std']:.8f}\t"
                 f"{r['r_min']:.8f}\t{r['r_max']:.8f}\t{r['leff_mean']:.4f}\t"
                 f"{r['valid_frac']*100:.1f}\t{r['n_za']}\t{r['n_he']}\n"

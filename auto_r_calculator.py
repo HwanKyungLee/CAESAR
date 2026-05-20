@@ -20,14 +20,14 @@ RL_FACTOR  = 0.933
 PIXEL_MIN = 0
 PIXEL_MAX = None
 
-# 파장 보정 경로 매핑
 WAVE_CAL_COLD = r"C:\CAESAR_pro_package\reference\wavelength_cal\CAESAR cold\Calib_20260507_Hg_399-494nm_Poly2.txt"
 WAVE_CAL_HOT  = r"C:\CAESAR_pro_package\reference\wavelength_cal\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
 
-OUTPUT_DIR = r"."
-FLAG_ZA = 500
-FLAG_HE = 510
+OUTPUT_DIR   = r"."
+FLAG_ZA      = 500   # ZA 안정 측정 (Injecting)
+FLAG_HE      = 510   # He 안정 측정 (Injecting)
 FILE_PATTERN = "*.dat"
+# ════════════════════════════════════════════════════════════════
 
 
 def _extract_spectrum_and_hk(tokens):
@@ -49,106 +49,83 @@ def _extract_spectrum_and_hk(tokens):
     return intensity_full[PIXEL_MIN:PIXEL_MAX], t_c, p_mbar
 
 
-def iter_cal_scans(filepath):
-    """파일에서 ZA/He 스캔을 시간 순서대로 yield: (scan_type, sp, t, p)"""
+def read_all_scans(filepath):
+    """파일에서 flag=FLAG_ZA / flag=FLAG_HE 스캔을 읽어 (za, he) 리스트로 반환.
+    각 항목: (spectrum_array, temp_c, press_mbar)
+    """
+    za, he = [], []
     with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             tokens = line.strip().split("\t")
             if len(tokens) < 6:
                 continue
             try:
-                flag = tokens[4].strip()
-                if flag == str(FLAG_ZA):
+                flag = int(tokens[4].strip())
+                if flag == FLAG_ZA:
                     sp, t, p = _extract_spectrum_and_hk(tokens)
                     if len(sp) > 0:
-                        yield ("za", sp, t, p)
-                elif flag == str(FLAG_HE):
+                        za.append((sp, t, p))
+                elif flag == FLAG_HE:
                     sp, t, p = _extract_spectrum_and_hk(tokens)
                     if len(sp) > 0:
-                        yield ("he", sp, t, p)
+                        he.append((sp, t, p))
             except:
                 continue
+    return za, he
 
 
-def save_r_dat(out_path, wave, r, omr_d, src_label):
+def save_r_dat(out_path, wave, r, omr_d, src_label, n_za, n_he):
     leff = 1.0 / (omr_d + 1e-30) * 1e-5
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# Source: {src_label}\n")
-        fh.write(f"# cavity={CAVITY_LEN}cm  RL={RL_FACTOR}\n")
+        fh.write(f"# cavity={CAVITY_LEN}cm  RL={RL_FACTOR}  ZA={n_za}스캔  He={n_he}스캔\n")
         fh.write("wavelength_nm\tR\tomr_d_cm-1\tLeff_km\n")
         for i in range(len(r)):
             fh.write(f"{wave[i]:.4f}\t{r[i]:.8f}\t{omr_d[i]:.6e}\t{leff[i]:.4f}\n")
 
 
-def _try_calculate(za_group, he_group, wave_nm, output_dir, label):
-    """ZA/He 그룹 한 쌍으로 R 계산 후 저장. 성공 여부 반환."""
-    try:
-        rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
-        for sp, t, p in za_group:
-            rc.add_za_spectrum(sp, t, p)
-        for sp, t, p in he_group:
-            rc.add_he_spectrum(sp, t, p)
-        wave_out, r_curve, omr_d = rc.calculate(wave_nm)
-        out_path = os.path.join(output_dir, f"{label}_R.dat")
-        save_r_dat(out_path, wave_out, r_curve, omr_d, label)
-        return True
-    except Exception as e:
-        print(f"  [계산 실패] {label}: {e}")
-        return False
-
-
 def process_channel(channel_name, directory, wave_cal_path, output_dir):
-    print(f"\n[시작] {channel_name} 연속 처리 (Cal: {os.path.basename(wave_cal_path)})")
+    print(f"\n[시작] {channel_name} 처리")
 
     wave_nm = np.loadtxt(wave_cal_path) if wave_cal_path and os.path.exists(wave_cal_path) else None
     files = sorted(glob.glob(os.path.join(directory, FILE_PATTERN)))
 
-    # 파일 경계를 넘어 유지되는 ZA/He 그룹 버퍼
-    last_za_group = None   # 가장 최근 완성된 ZA 연속 그룹
-    last_he_group = None   # 가장 최근 완성된 He 연속 그룹
-
-    current_type = None    # 현재 축적 중인 타입 ('za' | 'he')
-    current_group = []     # 현재 축적 중인 스캔 목록
-    current_file = None    # 현재 그룹이 시작된 파일명 (출력 라벨용)
-
-    cycle_count = 0
-    saved = 0
-
-    def flush_group():
-        """current_group 을 last_za/he_group 으로 확정하고, ZA가 완성되면 R 계산."""
-        nonlocal last_za_group, last_he_group, cycle_count, saved
-        if not current_group:
-            return
-        if current_type == "za":
-            last_za_group = list(current_group)
-            # ZA 그룹 완성 → He 가 있으면 R 계산
-            if last_he_group is not None:
-                cycle_count += 1
-                file_date = "-".join(os.path.basename(current_file).split("-")[:3])
-                target_dir = os.path.join(output_dir, file_date)
-                os.makedirs(target_dir, exist_ok=True)
-                stem = os.path.splitext(os.path.basename(current_file))[0]
-                label = f"{stem}_c{cycle_count:04d}"
-                if _try_calculate(last_za_group, last_he_group, wave_nm,
-                                   target_dir, label):
-                    saved += 1
-        elif current_type == "he":
-            last_he_group = list(current_group)
+    last_he = []   # 가장 최근 파일의 He 스캔 (다음 파일들에서 재사용)
+    saved = fail = skip = 0
 
     for fp in files:
-        for scan_type, sp, t, p in iter_cal_scans(fp):
-            if scan_type != current_type:
-                flush_group()
-                current_type = scan_type
-                current_group = [(sp, t, p)]
-                current_file = fp
-            else:
-                current_group.append((sp, t, p))
+        fname = os.path.basename(fp)
+        za, he = read_all_scans(fp)
 
-    # 마지막 그룹 처리
-    flush_group()
+        if he:
+            last_he = he   # 새 He 캘리브레이션 갱신
 
-    print(f"[완료] {channel_name}  사이클 수: {cycle_count}  저장: {saved}  실패: {cycle_count - saved}")
+        if not za or not last_he:
+            skip += 1
+            continue
+
+        try:
+            rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
+            for sp, t, p in za:      rc.add_za_spectrum(sp, t, p)
+            for sp, t, p in last_he: rc.add_he_spectrum(sp, t, p)
+
+            wave_out, r_curve, omr_d = rc.calculate(wave_nm)
+
+            file_date = "-".join(fname.split("-")[:3])
+            target_dir = os.path.join(output_dir, file_date)
+            os.makedirs(target_dir, exist_ok=True)
+            stem = os.path.splitext(fname)[0]
+            save_r_dat(os.path.join(target_dir, f"{stem}_R.dat"),
+                       wave_out, r_curve, omr_d, fname, len(za), len(last_he))
+
+            print(f"  ✅ {fname}  R={np.mean(r_curve):.6f}  valid={rc.valid_fraction*100:.1f}%"
+                  f"  ZA={len(za)}  He={len(last_he)}{'  [He갱신]' if he else ''}")
+            saved += 1
+        except Exception as e:
+            print(f"  ❌ {fname}  {e}")
+            fail += 1
+
+    print(f"[완료] {channel_name}  성공:{saved}  실패:{fail}  스킵:{skip}")
 
 
 def main():
