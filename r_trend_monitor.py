@@ -24,9 +24,8 @@ HAS_MPL = True
 try:
     from reflectance_calc import ReflectanceCalculator
     from auto_r_calculator import (
-        read_all_scans, FLAG_ZA, FLAG_HE,
+        iter_cal_scans, FLAG_ZA, FLAG_HE,
         CAVITY_LEN, RL_FACTOR, PIXEL_MIN, PIXEL_MAX,
-        CalibrationBuffer
     )
 except ImportError as e:
     print(f"[오류] 필수 모듈을 찾을 수 없습니다: {e}")
@@ -94,68 +93,78 @@ def _parse_timestamp(filepath: str) -> datetime:
         return datetime.now()
 
 def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
-    """진행 상황과 에러 메시지를 상세히 출력하는 연속 계산 루프"""
+    """ZA/He 사이클 단위로 R을 계산해 결과 목록을 반환한다."""
     if file_list is not None:
         files = sorted(str(f) for f in file_list if os.path.isfile(str(f)))
     else:
         files = sorted(glob.glob(os.path.join(directory, FILE_PATTERN)))
         if not files:
             files = sorted(glob.glob(os.path.join(directory, "**", FILE_PATTERN), recursive=True))
-            
+
     if not files:
         print(f"  .dat 파일 없음: {directory}")
         return []
 
-    buffer = CalibrationBuffer()
-    results = []
-
     print(f"  {len(files)}개 파일 연속 처리 시작...\n")
-    
-    for fp in files:
-        fname = os.path.basename(fp)
-        
-        # 파일이 실제로 존재하는지 확인 (file_range 사용 시 없는 파일 지정 방지)
-        if not os.path.isfile(fp):
-            print(f"  [{fname}] ⚠️ 파일이 존재하지 않아 스킵합니다.")
-            continue
-            
-        za_spectra, he_spectra = read_all_scans(fp)
-        
-        # 1. 캘리브레이션 데이터 업데이트
-        if za_spectra or he_spectra:
-            buffer.update(za_spectra, he_spectra)
-            print(f"  [{fname}] 🔄 캘리브레이션 갱신 (ZA: {len(za_spectra)}행, He: {len(he_spectra)}행) | 준비상태: {buffer.is_ready}")
-        
-        # 2. 버퍼 준비 여부에 따른 처리
-        if not buffer.is_ready:
-            print(f"  [{fname}] ⏳ 대기 중 (아직 ZA와 He가 모두 확보되지 않음)")
-            continue
 
+    results = []
+    last_za_group = None   # 가장 최근 완성된 ZA 연속 그룹
+    last_he_group = None   # 가장 최근 완성된 He 연속 그룹
+    current_type  = None
+    current_group = []
+    current_fp    = None
+    cycle_count   = 0
+
+    def flush_group():
+        nonlocal last_za_group, last_he_group, cycle_count
+        if not current_group:
+            return
+        if current_type == "za":
+            last_za_group = list(current_group)
+            if last_he_group is not None:
+                cycle_count += 1
+                _run_cycle(last_za_group, last_he_group, current_fp, cycle_count)
+        elif current_type == "he":
+            last_he_group = list(current_group)
+
+    def _run_cycle(za_group, he_group, fp, idx):
+        fname = os.path.basename(fp)
         try:
             rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
-            for s, t, p in buffer.za_spectra: rc.add_za_spectrum(s, t, p)
-            for s, t, p in buffer.he_spectra: rc.add_he_spectrum(s, t, p)
-            
+            for sp, t, p in za_group: rc.add_za_spectrum(sp, t, p)
+            for sp, t, p in he_group: rc.add_he_spectrum(sp, t, p)
             wave_out, r_curve, omr_d = rc.calculate(wave_nm)
-            
             res = {
                 "timestamp": _parse_timestamp(fp),
                 "filename": fname,
+                "cycle": idx,
                 "r_mean": float(np.mean(r_curve)),
-                "r_std": float(np.std(r_curve)),
-                "r_min": float(np.min(r_curve)),
-                "r_max": float(np.max(r_curve)),
+                "r_std":  float(np.std(r_curve)),
+                "r_min":  float(np.min(r_curve)),
+                "r_max":  float(np.max(r_curve)),
                 "leff_mean": float(np.mean(1.0 / (omr_d + 1e-30) * 1e-5)),
                 "valid_frac": rc.valid_fraction,
-                "n_za": len(buffer.za_spectra),
-                "n_he": len(buffer.he_spectra)
+                "n_za": len(za_group),
+                "n_he": len(he_group),
             }
             results.append(res)
-            print(f"  [{fname}] ✅ 계산 성공 (R_mean: {res['r_mean']:.6f})")
-            
+            print(f"  [{fname}] 사이클{idx:04d} ✅ R_mean={res['r_mean']:.6f}")
         except Exception as e:
-            print(f"  [{fname}] ❌ 계산 실패: {e}")
+            print(f"  [{fname}] 사이클{idx:04d} ❌ {e}")
 
+    for fp in files:
+        for scan_type, sp, t, p in iter_cal_scans(fp):
+            if scan_type != current_type:
+                flush_group()
+                current_type  = scan_type
+                current_group = [(sp, t, p)]
+                current_fp    = fp
+            else:
+                current_group.append((sp, t, p))
+
+    flush_group()
+
+    print(f"\n  총 사이클: {cycle_count}  성공: {len(results)}  실패: {cycle_count - len(results)}")
     return results
 
 def _stem_digits(filename: str) -> str:
@@ -173,11 +182,12 @@ def save_dat(results: list[dict], out_path: str) -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# CAESAR Pro — Mirror Reflectivity Trend\n")
         fh.write(f"# cavity={CAVITY_LEN} cm  RL={RL_FACTOR}  ZA_flag={FLAG_ZA}  He_flag={FLAG_HE}\n")
-        fh.write("timestamp\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
+        fh.write("timestamp\tfilename\tcycle\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
         for r in results:
             fh.write(
                 f"{r['timestamp'].strftime('%Y-%m-%d %H:%M')}\t"
-                f"{r['filename']}\t{r['r_mean']:.8f}\t{r['r_std']:.8f}\t"
+                f"{r['filename']}\t{r.get('cycle', '')}\t"
+                f"{r['r_mean']:.8f}\t{r['r_std']:.8f}\t"
                 f"{r['r_min']:.8f}\t{r['r_max']:.8f}\t{r['leff_mean']:.4f}\t"
                 f"{r['valid_frac']*100:.1f}\t{r['n_za']}\t{r['n_he']}\n"
             )
@@ -310,7 +320,7 @@ def main():
             print(f"║  {ch}: 데이터 없음")
             continue
         r_vals = np.array([r["r_mean"] for r in res])
-        print(f"║  {ch}: 파일 {len(res)}개  R_mean={np.mean(r_vals):.6f}  경고={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}건")
+        print(f"║  {ch}: 사이클 {len(res)}개  R_mean={np.mean(r_vals):.6f}  경고={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}건")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
 if __name__ == "__main__":
