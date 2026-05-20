@@ -27,9 +27,9 @@ class RayleighPhysics:
         
         if gas_type == "zero_air":
             # Thalman 2014 공식 (Zero-Air: N2 80% + O2 20% 혼합비 고려)
-            n_minus_1 = (0.80 * (1e-8 * (2726.7 + 15.286 / lambda_um**2 + 0.131 / lambda_um**4))) + \
-                        (0.20 * (1e-8 * (2366.1 + 10.97 / lambda_um**2 + 0.08 / lambda_um**4)))
-            king_factor = 1.034 
+            n_minus_1 = (0.80 * (1e-7 * (2726.7 + 15.286 / lambda_um**2 + 0.131 / lambda_um**4))) + \
+                        (0.20 * (1e-7 * (2366.1 + 10.97 / lambda_um**2 + 0.08 / lambda_um**4)))
+            king_factor = 1.034
             
         elif gas_type == "helium":
             n_minus_1 = 1e-8 * (2283.0 + 1.8102e5 / (153.42 - (1.0/lambda_um)**2))
