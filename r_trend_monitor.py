@@ -78,19 +78,22 @@ PLOT_DPI   = 150
 _TS_PATTERN = re.compile(r"(\d{4})[_\-](\d{2})[_\-](\d{2})[_\-](\d+)", re.IGNORECASE)
 
 def _parse_timestamp(filepath: str) -> datetime:
+    # 파일 수정시간을 우선 사용 (실제 기록 완료 시각)
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(filepath))
+    except OSError:
+        pass
+    # fallback: 파일명에서 날짜만 추출
     name = os.path.basename(filepath)
     m = _TS_PATTERN.search(name)
     if m:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        seq  = int(m.group(4))
+        seq = int(m.group(4))
         try:
-            return datetime(year, month, day) + timedelta(hours=seq)
+            return datetime(year, month, day, seq % 24, 0, 0)
         except ValueError:
             pass
-    try:
-        return datetime.fromtimestamp(os.path.getmtime(filepath))
-    except OSError:
-        return datetime.now()
+    return datetime.now()
 
 def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 반환한다.
