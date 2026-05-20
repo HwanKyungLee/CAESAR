@@ -67,12 +67,11 @@ def read_all_scans(filepath):
             if len(tokens) < 6: continue
             
             try:
-                # 플래그는 보통 tokens[2]에 있으나, 앞 5개 토큰 내에서 탐색
-                header = set(t.strip() for t in tokens[:5])
-                if str(FLAG_ZA) in header:
+                flag = tokens[4].strip()
+                if flag == str(FLAG_ZA):
                     sp, t, p = _extract_spectrum_and_hk(tokens)
                     if len(sp) > 0: za.append((sp, t, p))
-                elif str(FLAG_HE) in header:
+                elif flag == str(FLAG_HE):
                     sp, t, p = _extract_spectrum_and_hk(tokens)
                     if len(sp) > 0: he.append((sp, t, p))
             except:

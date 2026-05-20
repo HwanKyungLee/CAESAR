@@ -74,12 +74,12 @@ def _load_spectrum_from_file(
 
     if len(raw) >= 6175:
         intensity_full = raw[2053:4101]
-        flag = int(raw[2])
+        flag = int(raw[4])
         raw_p, raw_t = raw[6156], raw[6157]
         if not (np.isnan(raw_p) or raw_p in (0, 65535)): p_mbar = raw_p * (0.01 * 6894.73326 / 100.0)
         if not (np.isnan(raw_t) or raw_t in (0, 65535)): t_c = raw_t / 100.0
     elif len(raw) > 10:
-        possible_flag = raw[2] if len(raw) > 5 else None
+        possible_flag = raw[4] if len(raw) > 5 else None
         col5_mean = float(np.mean(raw[5 : min(55, len(raw))])) if len(raw) > 5 else 0.0
         if possible_flag is not None and 0 <= possible_flag <= 999 and possible_flag == int(possible_flag) and col5_mean > 100.0:
             flag = int(possible_flag)
