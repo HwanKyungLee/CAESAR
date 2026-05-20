@@ -84,7 +84,7 @@ def _parse_timestamp(filepath: str) -> datetime:
         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
         seq  = int(m.group(4))
         try:
-            return datetime(year, month, day) + timedelta(minutes=seq * 10)
+            return datetime(year, month, day) + timedelta(hours=seq)
         except ValueError:
             pass
     try:
@@ -137,7 +137,7 @@ def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
                 "r_std":      float(np.std(r_curve)),
                 "r_min":      float(np.min(r_curve)),
                 "r_max":      float(np.max(r_curve)),
-                "leff_mean":  float(np.mean(1.0 / (omr_d + 1e-30) * 1e-5)),
+                "leff_mean":  float(np.nanmean(np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan))),
                 "valid_frac": rc.valid_fraction,
                 "n_za":       len(za),
                 "n_he":       len(last_he),
@@ -209,7 +209,9 @@ def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
     ax_r.set_ylim(y_lo - 0.0005, y_hi + 0.0005)
 
     if ax_l is not None:
-        ax_l.plot(times, leff, "s-", color=color, markersize=4, linewidth=1.0, alpha=0.8)
+        leff_plot = np.array(leff, dtype=float)
+        leff_plot[~np.isfinite(leff_plot)] = np.nan
+        ax_l.plot(times, leff_plot, "s-", color=color, markersize=4, linewidth=1.0, alpha=0.8)
         ax_l.set_ylabel("Leff mean (km)")
         ax_l.grid(True, alpha=0.3)
 

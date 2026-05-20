@@ -75,7 +75,7 @@ def read_all_scans(filepath):
 
 
 def save_r_dat(out_path, wave, r, omr_d, src_label, n_za, n_he):
-    leff = 1.0 / (omr_d + 1e-30) * 1e-5
+    leff = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# Source: {src_label}\n")
         fh.write(f"# cavity={CAVITY_LEN}cm  RL={RL_FACTOR}  ZA={n_za}스캔  He={n_he}스캔\n")
