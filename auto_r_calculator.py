@@ -25,8 +25,8 @@ WAVE_CAL_COLD = r"C:\CAESAR_pro_package\reference\wavelength_cal\CAESAR cold\Cal
 WAVE_CAL_HOT  = r"C:\CAESAR_pro_package\reference\wavelength_cal\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
 
 OUTPUT_DIR = r"."    
-FLAG_ZA = 500
-FLAG_HE = 510
+FLAG_ZA = 502
+FLAG_HE = 512
 FILE_PATTERN = "*.dat"
 
 class CalibrationBuffer:
