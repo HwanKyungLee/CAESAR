@@ -47,10 +47,8 @@ def _extract_spectrum_and_hk(tokens):
     if n >= 6175:
         raw = np.array([float(t) if t.strip() else np.nan for t in tokens])
         intensity_full = raw[2053:4101]
-        
-        # [수정] 정상적으로 배열 인덱스 지정
-        raw_p = raw
-        raw_t = raw
+        raw_p = raw[6156]
+        raw_t = raw[6157]
         if np.isfinite(raw_p) and raw_p not in (0.0, 65535.0):
             p_mbar = raw_p * (0.01 * 6894.73326 / 100.0)
         if np.isfinite(raw_t) and raw_t not in (0.0, 65535.0):
@@ -68,14 +66,12 @@ def read_all_scans(filepath):
             tokens = line.strip().split("\t")
             if len(tokens) < 6: continue
             
-            # [긴급 수정] 특정 위치(tokens)만 보지 말고, 전체 토큰을 뒤져서 502/512를 찾습니다.
             try:
-                # 라인에 502 또는 512가 포함되어 있는지 확인
-                line_str = " ".join(tokens)
-                if "502" in tokens or "502.0" in tokens:
+                flag = tokens[2].strip()
+                if flag == str(FLAG_ZA):
                     sp, t, p = _extract_spectrum_and_hk(tokens)
                     if len(sp) > 0: za.append((sp, t, p))
-                elif "512" in tokens or "512.0" in tokens:
+                elif flag == str(FLAG_HE):
                     sp, t, p = _extract_spectrum_and_hk(tokens)
                     if len(sp) > 0: he.append((sp, t, p))
             except: 
