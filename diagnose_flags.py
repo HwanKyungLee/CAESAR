@@ -56,48 +56,35 @@ def diagnose(directory):
                 print("  (이하 생략)")
                 break
 
-    # 전체 파일에서 토큰[0~10] 값 분포 집계
-    print(f"\n=== 전체 {len(files)}개 파일 토큰[2] 값 분포 ===")
-    counter = Counter()
-    flag_files = Counter()
+    # 전체 파일에서 tokens[4] 기준 플래그 분포
+    print(f"\n=== 전체 {len(files)}개 파일 tokens[4] 플래그 분포 ===")
+    flag4_counter = Counter()
     for fp in files:
         with open(fp, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 tokens = line.strip().split("\t")
-                if len(tokens) < 3:
+                if len(tokens) < 5:
                     continue
-                val = tokens[2].strip()
-                counter[val] += 1
-                if val in TARGET_FLAGS:
-                    flag_files[val] += 1
+                flag4_counter[tokens[4].strip()] += 1
 
-    print("  tokens[2] 값 → 라인 수 (상위 15개):")
-    for val, cnt in counter.most_common(15):
-        mark = " ← 플래그!" if val in TARGET_FLAGS else ""
-        print(f"    '{val}': {cnt}행{mark}")
+    for val, cnt in flag4_counter.most_common(20):
+        mark = " ← ZA(제로에어)" if val == "502" else (" ← He(헬륨)" if val == "512" else "")
+        print(f"    tokens[4]='{val}': {cnt}행{mark}")
 
-    # 다른 위치도 확인 (앞 10개 토큰 전체 스캔)
-    print(f"\n=== 전체 파일에서 502/512가 등장하는 토큰 인덱스 분포 ===")
-    idx_counter = Counter()
-    checked = 0
-    for fp in files[:min(10, len(files))]:
+    # 파일별 ZA/He 포함 여부
+    print(f"\n=== 파일별 502(ZA) / 512(He) 포함 현황 ===")
+    for fp in files:
+        za_cnt = he_cnt = 0
         with open(fp, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 tokens = line.strip().split("\t")
-                for i, t in enumerate(tokens[:30]):
-                    if t.strip() in TARGET_FLAGS:
-                        idx_counter[i] += 1
-        checked += 1
-
-    if idx_counter:
-        print(f"  (파일 {checked}개 기준)")
-        for idx, cnt in sorted(idx_counter.items()):
-            print(f"    tokens[{idx}]: {cnt}번 등장")
-    else:
-        print(f"  앞 30개 토큰 내에 502/512 없음 (파일 {checked}개 확인)")
-        print("\n  >> 502/512가 파일 어느 위치에도 없을 수 있습니다.")
-        print("  >> 실제 ZA/He를 구분하는 기준 값이 다를 수 있습니다.")
-        print("  >> tokens[2]의 실제 값 목록을 위 분포에서 확인하세요.")
+                if len(tokens) < 5:
+                    continue
+                f = tokens[4].strip()
+                if f == "502": za_cnt += 1
+                elif f == "512": he_cnt += 1
+        if za_cnt or he_cnt:
+            print(f"  {os.path.basename(fp):30s}  ZA(502)={za_cnt}행  He(512)={he_cnt}행")
 
 if __name__ == "__main__":
     directory = sys.argv[1] if len(sys.argv) > 1 else "."
