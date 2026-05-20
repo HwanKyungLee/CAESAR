@@ -159,11 +159,11 @@ def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
     return results
 
 def _stem_digits(filename: str) -> str:
-    return re.sub(r"[^0-9]", "", os.path.splitext(os.path.basename(filename)))
+    return re.sub(r"[^0-9]", "", os.path.splitext(os.path.basename(filename))[0])
 
 def make_range_name(results: list[dict]) -> str:
     if not results: return "nodata"
-    first = _stem_digits(results["filename"])
+    first = _stem_digits(results[0]["filename"])
     last  = _stem_digits(results[-1]["filename"])
     if first == last: return first
     return f"{first}_{last}"
@@ -228,8 +228,8 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
     n_panels = 2 if SHOW_LEFF else 1
     fig, axes = plt.subplots(n_panels, 1, figsize=(12, 4 * n_panels), sharex=True, squeeze=False)
     fig.suptitle(f"CAESAR Pro — {channel_name} Channel Mirror Reflectivity Trend\n(cavity={CAVITY_LEN} cm  RL={RL_FACTOR}  ZA flag={FLAG_ZA}  He flag={FLAG_HE})", fontsize=11)
-    ax_r = axes
-    ax_l = axes if SHOW_LEFF else None
+    ax_r = axes[0, 0]
+    ax_l = axes[1, 0] if SHOW_LEFF else None
     _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color)
     if ax_l: ax_l.set_xlabel("Date / Time")
     else: ax_r.set_xlabel("Date / Time")
@@ -244,8 +244,8 @@ def plot_combined(results_cold, results_hot, out_path):
     n_rows = 4 if SHOW_LEFF else 2
     fig, axes = plt.subplots(n_rows, 1, figsize=(14, 3.5 * n_rows), sharex=False, squeeze=False)
     fig.suptitle("CAESAR Pro — Cold / Hot Channel Mirror Reflectivity Trend", fontsize=12)
-    _plot_channel(axes, axes if SHOW_LEFF else None, results_cold, "Cold", R_EXPECTED_COLD, "steelblue")
-    _plot_channel(axes, axes if SHOW_LEFF else None, results_hot, "Hot", R_EXPECTED_HOT, "darkorange")
+    _plot_channel(axes[0, 0], axes[1, 0] if SHOW_LEFF else None, results_cold, "Cold", R_EXPECTED_COLD, "steelblue")
+    _plot_channel(axes[2, 0], axes[3, 0] if SHOW_LEFF else None, results_hot, "Hot", R_EXPECTED_HOT, "darkorange")
     for i in range(n_rows): axes[i, 0].set_xlabel("Date / Time")
     plt.tight_layout()
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
