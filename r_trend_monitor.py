@@ -68,8 +68,8 @@ HOT_FILES  = None
 #COLD_FILES = file_range(COLD_DIR, "2026-05-19", 1, 2)
 #HOT_FILES  = file_range(HOT_DIR, "2026-05-19", 1, 2)
 
-FLAGS_ZA = [500], [502]
-FLAGS_HE = [510] ,[512]
+FLAGS_ZA = [500, 502]
+FLAGS_HE = [510, 512]
 
 SHOW_LEFF  = True
 SHOW_PLOT  = False
