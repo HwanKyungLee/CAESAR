@@ -118,8 +118,11 @@ def process_channel(channel_name, directory, wave_cal_path, output_dir):
             save_r_dat(os.path.join(target_dir, f"{stem}_R.dat"),
                        wave_out, r_curve, omr_d, fname, len(za), len(last_he))
 
+            tag = ""
+            if he:              tag += "  [He갱신]"
+            if not rc.quality_ok: tag += "  ⚠️ 이상값"
             print(f"  ✅ {fname}  R={np.mean(r_curve):.6f}  valid={rc.valid_fraction*100:.1f}%"
-                  f"  ZA={len(za)}  He={len(last_he)}{'  [He갱신]' if he else ''}")
+                  f"  ZA={len(za)}  He={len(last_he)}{tag}")
             saved += 1
         except Exception as e:
             print(f"  ❌ {fname}  {e}")

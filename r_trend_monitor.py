@@ -143,8 +143,8 @@ def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
                 "n_he":       len(last_he),
             }
             results.append(res)
-            he_tag = "  [He갱신]" if he else ""
-            print(f"  [{fname}] ✅ R_mean={res['r_mean']:.6f}  valid={res['valid_frac']*100:.1f}%{he_tag}")
+            tag = ("  [He갱신]" if he else "") + ("  ⚠️ 이상값" if not rc.quality_ok else "")
+            print(f"  [{fname}] ✅ R_mean={res['r_mean']:.6f}  valid={res['valid_frac']*100:.1f}%{tag}")
         except Exception as e:
             print(f"  [{fname}] ❌ {e}")
 

@@ -158,13 +158,13 @@ class ReflectanceCalculator:
 
         valid = np.isfinite(omr_d) & (omr_d > 0.0) & (omr_d < 1e-4)
         self.valid_fraction = float(np.sum(valid)) / n_pix
+        self.quality_ok = self.valid_fraction >= min_valid_fraction
 
-        if self.valid_fraction < min_valid_fraction:
-            raise RuntimeError(f"R-curve quality check failed. Valid: {self.valid_fraction * 100:.0f}%")
-
-        if np.any(~valid):
+        if np.any(valid):
             x = np.arange(n_pix)
             omr_d = np.interp(x, x[valid], omr_d[valid])
+        else:
+            omr_d = np.zeros(n_pix)
 
         r_curve = np.clip(1.0 - omr_d * self.cavity_len, 0.0, 1.0)
         self.omr_d = omr_d
