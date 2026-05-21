@@ -77,10 +77,12 @@ PLOT_DPI   = 150
 
 _TS_PATTERN = re.compile(r"(\d{4})[_\-](\d{2})[_\-](\d{2})[_\-](\d+)", re.IGNORECASE)
 
+_KST = timedelta(hours=9)  # Korea Standard Time = UTC+9
+
 def _parse_timestamp(filepath: str) -> datetime:
-    # 파일 수정시간을 우선 사용 (실제 기록 완료 시각)
+    # 파일 수정시간(UTC POSIX) → KST 변환
     try:
-        return datetime.fromtimestamp(os.path.getmtime(filepath))
+        return datetime.utcfromtimestamp(os.path.getmtime(filepath)) + _KST
     except OSError:
         pass
     # fallback: 파일명에서 날짜만 추출
@@ -93,7 +95,7 @@ def _parse_timestamp(filepath: str) -> datetime:
             return datetime(year, month, day, seq % 24, 0, 0)
         except ValueError:
             pass
-    return datetime.now()
+    return datetime.utcnow() + _KST
 
 def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 반환한다.

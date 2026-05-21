@@ -12,36 +12,50 @@ import numpy as np
 class RayleighPhysics:
     """
     Rayleigh scattering extinction α(λ) [cm⁻¹].
-    Ref: Thalman et al. (2014) Applied Optics.
+    Clausius-Mossotti form, ported from MATLAB CAESAR processing code.
+    σ = Fk × (24π³v⁴/N²) × ((n²-1)/(n²+2))²,  α = σ × N
+    where v = 1/λ_cm (wavenumber), N = number density [cm⁻³].
     """
     @staticmethod
     def get_alpha_rayleigh(
         wave_nm: np.ndarray,
         temp_c: float,
         press_mbar: float,
-        gas_type: str = "zero_air", 
+        gas_type: str = "zero_air",
     ) -> np.ndarray:
         wave_nm = np.asarray(wave_nm, dtype=float)
-        n_density = 2.68678e19 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
-        lambda_um = wave_nm / 1000.0
-        
+        N = 2.68678e19 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
+        v = 1e7 / wave_nm  # wavenumber [cm⁻¹]
+
         if gas_type == "zero_air":
-            # Thalman 2014 공식 (Zero-Air: N2 80% + O2 20% 혼합비 고려)
-            n_minus_1 = (0.80 * (1e-7 * (2726.7 + 15.286 / lambda_um**2 + 0.131 / lambda_um**4))) + \
-                        (0.20 * (1e-7 * (2366.1 + 10.97 / lambda_um**2 + 0.08 / lambda_um**4)))
-            king_factor = 1.034
-            
+            # N2 — Sellmeier dispersion
+            A_n2, B_n2, C_n2 = 5677.465, 318.81874e12, 14.4e9
+            n_n2 = 1.0 + (A_n2 + B_n2 / (C_n2 - v**2)) * 1e-8
+            Fk_n2 = 1.034 + 3.17e-12 * v
+            s_n2 = Fk_n2 * (24 * np.pi**3 * v**4 / N**2) * ((n_n2**2 - 1) / (n_n2**2 + 2))**2
+
+            # O2 — Sellmeier dispersion
+            A_o2, B_o2, C_o2 = 20564.8, 2.480899e13, 4.09e9
+            n_o2 = 1.0 + (A_o2 + B_o2 / (C_o2 - v**2)) * 1e-8
+            Fk_o2 = 1.09 + 1.385e-11 * v**2 + 1.448e-20 * v**4
+            s_o2 = Fk_o2 * (24 * np.pi**3 * v**4 / N**2) * ((n_o2**2 - 1) / (n_o2**2 + 2))**2
+
+            sigma = 0.79 * s_n2 + 0.21 * s_o2
+
         elif gas_type == "helium":
-            n_minus_1 = 1e-8 * (2283.0 + 1.8102e5 / (153.42 - (1.0/lambda_um)**2))
-            king_factor = 1.0
-            
-        else: # air
-            n_minus_1 = 1e-8 * (5792105.0 / (238.0185 - (1.0/lambda_um)**2) + 167917.0 / (57.362 - (1.0/lambda_um)**2))
-            king_factor = 1.061
-        
-        wave_cm = wave_nm * 1e-7
-        sigma = (8.0 * np.pi**3 * (n_minus_1 * 2.0)**2 * king_factor) / (3.0 * n_density**2 * wave_cm**4)
-        return sigma * n_density
+            # He — Sellmeier dispersion, Fk = 1
+            A_he, B_he, C_he = 2283.0, 1.8102e13, 1.5342e10
+            n_he = 1.0 + (A_he + B_he / (C_he - v**2)) * 1e-8
+            sigma = (24 * np.pi**3 * v**4 / N**2) * ((n_he**2 - 1) / (n_he**2 + 2))**2
+
+        else:  # standard air
+            lambda_um = wave_nm / 1000.0
+            n_minus_1 = 1e-8 * (5792105.0 / (238.0185 - (1.0/lambda_um)**2)
+                                 + 167917.0 / (57.362 - (1.0/lambda_um)**2))
+            wave_cm = wave_nm * 1e-7
+            sigma = (8.0 * np.pi**3 * (n_minus_1 * 2.0)**2 * 1.061) / (3.0 * N**2 * wave_cm**4)
+
+        return sigma * N
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal file loader
