@@ -9,7 +9,7 @@ import os
 import re
 import sys
 import glob
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import numpy as np
 
 # 모듈 경로 문제 해결을 위한 강제 패스 추가
@@ -75,27 +75,44 @@ SHOW_PLOT  = False
 PLOT_DPI   = 150
 # ════════════════════════════════════════════════════════════════
 
-_TS_PATTERN = re.compile(r"(\d{4})[_\-](\d{2})[_\-](\d{2})[_\-](\d+)", re.IGNORECASE)
-
-_KST = timedelta(hours=9)  # Korea Standard Time = UTC+9
+_DATE_RE  = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+_UTC      = timezone.utc
+_KST_TZ   = timezone(timedelta(hours=9))
 
 def _parse_timestamp(filepath: str) -> datetime:
-    # 파일 수정시간(UTC POSIX) → KST 변환
+    """
+    Araon Mega-Matrix 파일에서 첫 번째 스캔 시각을 읽어 KST로 반환.
+      col 1  = 자정 기준 UTC 경과 초  (예: 44207 = 12:16:47 UTC)
+      파일명 = UTC 날짜  (예: "2026-05-18-023.dat")
+    """
     try:
-        return datetime.utcfromtimestamp(os.path.getmtime(filepath)) + _KST
+        with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                tokens = line.split("\t")
+                if len(tokens) >= 6175:
+                    secs = float(tokens[1])
+                    if 0.0 <= secs < 86400.0:
+                        fname = os.path.basename(filepath)
+                        m = _DATE_RE.search(fname)
+                        if m:
+                            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                            base_utc = datetime(y, mo, d, tzinfo=_UTC)
+                            return (base_utc + timedelta(seconds=secs)).astimezone(_KST_TZ)
+                break   # 첫 번째 유효 행만 읽음
+    except Exception:
+        pass
+
+    # fallback 1: 파일 mtime → KST
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(filepath), tz=_KST_TZ)
     except OSError:
         pass
-    # fallback: 파일명에서 날짜만 추출
-    name = os.path.basename(filepath)
-    m = _TS_PATTERN.search(name)
-    if m:
-        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        seq = int(m.group(4))
-        try:
-            return datetime(year, month, day, seq % 24, 0, 0)
-        except ValueError:
-            pass
-    return datetime.utcnow() + _KST
+
+    # fallback 2: 현재 시각
+    return datetime.now(tz=_KST_TZ)
 
 def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 반환한다.

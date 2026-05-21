@@ -295,31 +295,32 @@ class DataIO:
 
         Column layout (verified against 2026-05-18 .dat sample, 6179 cols):
           col 0  → absolute scan counter (constant within one file — NOT a date)
-          col 1  → seconds since local midnight  (e.g. 44207 = 12:16:47)
+          col 1  → seconds since UTC midnight  (e.g. 44207 = 12:16:47 UTC)
 
-        The calendar date is extracted from the filename by the pattern
-        "YYYY-MM-DD" (e.g. "2026-05-18-023.dat").  The two together give
-        a full local datetime which is then tagged as KST (UTC+9).
+        The calendar date (UTC) is extracted from the filename by the pattern
+        "YYYY-MM-DD" (e.g. "2026-05-18-023.dat").  col 1 gives the UTC time
+        within that day; the result is then converted to KST (UTC+9).
 
-        Falls back to the file's modification time → KST when the pattern
+        Falls back to the file's modification time → KST when the date pattern
         is absent or col 1 is out of the [0, 86400) range.
 
         Returns: datetime with KST timezone, or None on total failure.
         """
+        UTC = timezone.utc
         KST = timezone(timedelta(hours=9))
         _DATE_RE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
 
         try:
             raw = DataIO._read_row_raw(filepath, row_index)
             if len(raw) >= 6175:
-                secs = float(raw[1])   # seconds since midnight (col 1)
+                secs = float(raw[1])   # seconds since UTC midnight (col 1)
                 if 0.0 <= secs < 86400.0:
                     fname = os.path.basename(filepath)
                     m = _DATE_RE.search(fname)
                     if m:
                         year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                        base = datetime(year, month, day, tzinfo=KST)
-                        return base + timedelta(seconds=secs)
+                        base_utc = datetime(year, month, day, tzinfo=UTC)
+                        return (base_utc + timedelta(seconds=secs)).astimezone(KST)
         except Exception:
             pass
 
