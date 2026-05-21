@@ -18,33 +18,18 @@ from scipy.io import savemat
 
 
 # ================================================================
-# [TODO] LabVIEW .dat 파일 읽기 함수 — 포맷 확인 후 구현 필요
+# LabVIEW .dat 파일 읽기 함수
+# 포맷: 탭 구분 텍스트, 11열, 헤더 없음, CRLF 줄바꿈
+#   col 0 : timestamp 상위 16비트
+#   col 1 : timestamp 하위 16비트
+#   col 2 : jNO2 upward   × 1000
+#   col 3 : jNO2 downward × 1000
+#   col 4 : jO3 upward    × 1000  (2026 N/A)
+#   col 5 : jO3 downward  × 1000  (2026 N/A)
+#   col 6~10 : 기타 채널
 # ================================================================
 def Func_Read_2026_Yeosu_Inlet(filename: str) -> np.ndarray:
-    """
-    LabVIEW .dat 파일을 읽어 N×M numpy 배열로 반환.
-
-    반환 배열 열 구성 (MATLAB 코드 기준, 0-indexed):
-      col 0 : timestamp 상위 16비트 (uint16)
-      col 1 : timestamp 하위 16비트 (uint16)
-      col 2 : jNO2 upward   × 1000  (저장 시 곱한 것, 읽을 때 /1000 복원)
-      col 3 : jNO2 downward × 1000
-      col 4 : jO3 upward    × 1000  (2026 N/A)
-      col 5 : jO3 downward  × 1000  (2026 N/A)
-      ...
-
-    TODO: 실제 .dat 파일 포맷에 맞게 구현 필요.
-          바이너리인지 텍스트인지, 열 수, dtype 등 확인 후 작성.
-    예시 (텍스트 탭구분 포맷인 경우):
-        return np.loadtxt(filename)
-    예시 (LabVIEW 바이너리 int16, big-endian인 경우):
-        raw = np.fromfile(filename, dtype='>i2')
-        return raw.reshape(-1, N_COLS)
-    """
-    raise NotImplementedError(
-        f"Func_Read_2026_Yeosu_Inlet 미구현: {filename}\n"
-        ".dat 파일 포맷(바이너리/텍스트, 열 수, dtype)을 알려주시면 구현합니다."
-    )
+    return np.loadtxt(filename, delimiter='\t')
 
 
 def main():
