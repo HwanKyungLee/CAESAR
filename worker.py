@@ -576,6 +576,10 @@ class AnalysisWorker(QThread):
             initial_shift_center = last_valid_shift
             # Always display as "filename [NNNN]" so results are unambiguous
             result = {'File': f"{os.path.basename(file_path)} [{row_idx:04d}]", 'Params': {}}
+            # Try to read the measurement timestamp from column 0 of the Araon row.
+            # Falls back to file mtime → KST if column 0 is not a recognisable timestamp.
+            _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
+            result['Time'] = _ts.strftime('%Y-%m-%d %H:%M:%S') if _ts else f"row {row_idx:04d}"
 
             try:
                 # 1. Load Spectrum and Housekeeping (including Flag)

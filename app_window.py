@@ -1006,9 +1006,21 @@ class CAESARAnalyzer(QMainWindow):
             
             curve_r = pg.PlotCurveItem(x, self.r_data, pen=pg.mkPen('b', width=2, style=Qt.PenStyle.DashLine))
             self.p2.addItem(curve_r)
-            
-            # R values are typically 0.99~0.999, so auto-range for a clean view
-            self.p2.autoRange()
+
+            # Zoom in around the actual R values so ±0.01% changes are visible
+            r_arr    = np.asarray(self.r_data, dtype=float)
+            r_finite = r_arr[np.isfinite(r_arr)]
+            if len(r_finite) > 0:
+                r_mean = float(np.mean(r_finite))
+                r_std  = float(np.std(r_finite))
+                margin = max(r_std * 5.0, 5e-4)   # ≥ ±0.05 % window
+                self.p2.setYRange(
+                    max(0.0,    r_mean - margin),
+                    min(1.0001, r_mean + margin),
+                    padding=0,
+                )
+            else:
+                self.p2.autoRange()
 
 
     def _on_r_curve_update(self, wave_nm, r_curve):
@@ -1370,7 +1382,7 @@ class CAESARAnalyzer(QMainWindow):
 
             # Dynamically update the Result Table headers
             if hasattr(self, 'table'):
-                cols = ["File", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
+                cols = ["File", "Time", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
                 self.table.setColumnCount(len(cols))
                 self.table.setHorizontalHeaderLabels(cols)
                 
@@ -1548,7 +1560,7 @@ class CAESARAnalyzer(QMainWindow):
         self.table.setRowCount(0)
         
         # Lock in column headers dynamically based on loaded gases
-        cols = ["File", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
+        cols = ["File", "Time", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
         self.table.setColumnCount(len(cols))
         self.table.setHorizontalHeaderLabels(cols)
         
@@ -1727,12 +1739,16 @@ class CAESARAnalyzer(QMainWindow):
         if row_index >= self.table.rowCount():
             self.table.setRowCount(row_index + 1)
         
+        # col 0: filename + scan index
         self.table.setItem(row_index, 0, QTableWidgetItem(str(result_dict['File'])))
-        self.table.setItem(row_index, 1, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
-        self.table.setItem(row_index, 2, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
-        self.table.setItem(row_index, 3, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
+        # col 1: measurement timestamp (from Araon col 0, or file mtime as fallback)
+        self.table.setItem(row_index, 1, QTableWidgetItem(str(result_dict.get('Time', ''))))
+        # col 2-4: fit quality metrics
+        self.table.setItem(row_index, 2, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
+        self.table.setItem(row_index, 3, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
+        self.table.setItem(row_index, 4, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
 
-        # Set status cell with conditional background color formatting
+        # col 5: status with conditional background colour
         item_status = QTableWidgetItem(str(result_dict.get('Status', '')))
         try:
             status = result_dict.get('Status', '')
@@ -1743,15 +1759,15 @@ class CAESARAnalyzer(QMainWindow):
         except Exception:
             pass
 
-        self.table.setItem(row_index, 4, item_status)
+        self.table.setItem(row_index, 5, item_status)
 
-        # Populate gas concentrations dynamically (col 5 onwards)
+        # col 6+: gas concentrations, then Shift, Squeeze
         for i, gas_name in enumerate(self.engine.gas_list):
-            self.table.setItem(row_index, 5 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
+            self.table.setItem(row_index, 6 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
 
         gas_offset = len(self.engine.gas_list)
-        self.table.setItem(row_index, 5 + gas_offset, QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
-        self.table.setItem(row_index, 6 + gas_offset, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
+        self.table.setItem(row_index, 6 + gas_offset, QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
+        self.table.setItem(row_index, 7 + gas_offset, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
 
         # Force UI scroll to follow the latest row
         item = self.table.item(row_index, 0)

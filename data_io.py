@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+from datetime import datetime, timedelta, timezone
 
 
 def ui_scale() -> float:
@@ -282,6 +283,48 @@ class DataIO:
             raise RuntimeError(
                 f"HK Data Load Failed ({os.path.basename(filepath)}): {str(e)}"
             )
+
+    @staticmethod
+    def parse_row_timestamp(filepath, row_index=0):
+        """
+        Reads a measurement timestamp from column 0 of an Araon Mega-Matrix row.
+
+        Araon LabVIEW typically stores absolute time in column 0 as one of:
+          - LabVIEW epoch: seconds since Jan 1, 1904 UTC  (~3.83 × 10⁹ in 2026)
+          - Unix epoch:    seconds since Jan 1, 1970 UTC  (~1.75 × 10⁹ in 2026)
+
+        Falls back to the file's modification time (converted to KST) when
+        column 0 does not contain a recognisable timestamp value.
+
+        Returns:
+          datetime with KST timezone, or None on total failure.
+
+        NOTE: column indices for pressure (6162) and temperature (6174) used by
+        DataIO differ from those in reflectance_calc.py / auto_r_calculator.py
+        (6156 / 6157).  Verify against actual .dat files and update the constants
+        here and in those files if needed.
+        """
+        KST = timezone(timedelta(hours=9))
+        LV_EPOCH_OFFSET = 2082844800  # seconds: LabVIEW epoch → Unix epoch
+
+        try:
+            raw = DataIO._read_row_raw(filepath, row_index)
+            if len(raw) >= 6175:
+                ts_raw = float(raw[0])
+                # LabVIEW timestamp in 2020–2035 is roughly 3.65e9 – 4.15e9
+                if 3.5e9 < ts_raw < 4.5e9:
+                    return datetime.fromtimestamp(ts_raw - LV_EPOCH_OFFSET, tz=KST)
+                # Unix timestamp in 2020–2035 is roughly 1.58e9 – 2.05e9
+                elif 1.5e9 < ts_raw < 2.1e9:
+                    return datetime.fromtimestamp(ts_raw, tz=KST)
+        except Exception:
+            pass
+
+        # Fallback: file modification time → KST
+        try:
+            return datetime.fromtimestamp(os.path.getmtime(filepath), tz=KST)
+        except Exception:
+            return None
 
     @staticmethod
     def extract_gas_name(filepath):
