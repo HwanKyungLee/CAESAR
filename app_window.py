@@ -410,11 +410,21 @@ class CAESARAnalyzer(QMainWindow):
             "DOAS 피팅만 수행 → *_fit.tsv 결과 저장"
         )
 
+        btn_r_trend = QPushButton("📈 R Trend Monitor (거울 반사율 시계열)")
+        btn_r_trend.clicked.connect(self.open_r_trend_monitor)
+        btn_r_trend.setStyleSheet("background-color: #ede7f6; font-weight: bold;")
+        btn_r_trend.setToolTip(
+            "raw .dat 파일 디렉토리를 스캔해서 파일마다 R 값을 계산하고\n"
+            "반사율 시계열 그래프(PNG)와 결과(.dat)를 저장합니다.\n"
+            "Cold / Hot 채널 분리 처리, Sellmeier 기반 Rayleigh 모델 사용."
+        )
+
         lay_calib.addWidget(btn_calib_tool)
         lay_calib.addWidget(btn_ref_gen)
         lay_calib.addWidget(btn_r_gen)
         lay_calib.addWidget(btn_alpha_export)
         lay_calib.addWidget(btn_alpha_fit)
+        lay_calib.addWidget(btn_r_trend)
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
         
@@ -1045,6 +1055,12 @@ class CAESARAnalyzer(QMainWindow):
             self.update_leff()
             self.status.setText(f"✅ R-Curve loaded ({len(self.r_data)} pixels)")
             print(f"✅ R-Curve auto-loaded: {len(self.r_data)} pixels, mean R = {self.r_data.mean():.6f}")
+
+    def open_r_trend_monitor(self):
+        """R Trend Monitor: raw .dat 파일 디렉토리를 스캔해 파일별 R 시계열을 계산·저장·플롯."""
+        from ui_dialogs import RTrendMonitorDialog
+        dialog = RTrendMonitorDialog(self)
+        dialog.exec()
 
     def open_wavelength_calibration(self):
         """Opens the interactive Wavelength Calibration tool."""

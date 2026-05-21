@@ -450,33 +450,48 @@ class WavelengthCalibrationDialog(QDialog):
             window = 15
             start = max(0, int(peak_pixel) - window)
             end = min(len(intensities), int(peak_pixel) + window + 1)
-            
-            x_data = np.arange(start, end)
-            y_data = intensities[start:end]
-            
-            # 2. Set initial estimates
-            offset_guess = np.min(y_data)
-            a_guess = np.max(y_data) - offset_guess
-            mu_guess = peak_pixel
-            sigma_guess = 2.0
-            
-            # 3. Curve Fitting
+
+            x_data = np.arange(start, end, dtype=float)
+            y_data = np.asarray(intensities[start:end], dtype=float)
+
+            # 2. Initial estimates — 데이터에서 자동 추정
+            offset_guess = float(np.percentile(y_data, 10))   # 하위 10% → 베이스라인
+            a_guess      = float(np.max(y_data)) - offset_guess
+            mu_guess     = float(x_data[np.argmax(y_data)])   # 실제 최대값 위치
+
+            # sigma 초기값: 반치폭 픽셀 수에서 추정
+            y_above_half = np.where((y_data - offset_guess) >= a_guess / 2.0)[0]
+            sigma_guess  = (len(y_above_half) / 2.3548) if len(y_above_half) >= 2 else 2.0
+            sigma_guess  = max(0.5, min(sigma_guess, window * 0.8))
+
+            # 3. Curve Fitting — bounds로 발산 방지
             p0_guess = [a_guess, mu_guess, sigma_guess, offset_guess]
-            popt, _ = curve_fit(self._gaussian_model, x_data, y_data, p0=p0_guess)
+            bounds_lo = [0.0,   float(start),  0.3,      -np.inf]
+            bounds_hi = [np.inf, float(end),   float(window), np.inf]
+
+            popt, _ = curve_fit(
+                self._gaussian_model, x_data, y_data,
+                p0=p0_guess,
+                bounds=(bounds_lo, bounds_hi),
+                maxfev=8000,
+            )
             a, mu, sigma, offset = popt
-            
+
             # 4. Convert Gaussian sigma → FWHM
             # For a Gaussian: FWHM = 2 · √(2 · ln 2) · σ ≈ 2.3548 · σ
             fwhm_pixels = 2.3548 * abs(sigma)
-            
-            # 5. Convert to nm if wavelength calibration data is available
+
+            # 5. Convert to nm — 피팅된 peak center(mu) 근방 로컬 분산율 사용
             fwhm_nm = None
-            if current_wavelengths is not None and len(current_wavelengths) > end:
-                dispersion = (current_wavelengths[end-1] - current_wavelengths[start]) / (end - 1 - start)
-                fwhm_nm = fwhm_pixels * dispersion
-                
+            if current_wavelengths is not None:
+                wl = np.asarray(current_wavelengths)
+                mu_i = int(np.clip(round(mu), 1, len(wl) - 2))
+                dispersion = (wl[mu_i + 1] - wl[mu_i - 1]) / 2.0  # nm/px (로컬)
+                if dispersion > 0:
+                    fwhm_nm = fwhm_pixels * dispersion
+
             return fwhm_pixels, fwhm_nm
-            
+
         except Exception as e:
             print(f"FWHM calculation failed (noisy data or non-peak): {e}")
             return None, None
@@ -2605,5 +2620,150 @@ class PostProcessDialog(QDialog):
                 QMessageBox.information(self, "Success", f"Data successfully converted and exported in {ext} format.")
                 self.accept()
                 
-        except Exception as e: 
+        except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to process and save data:\n{e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  R Trend Monitor Dialog
+#  raw .dat 디렉토리 스캔 → 파일마다 R 계산 → 시계열 PNG + DAT 저장
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _RTrendWorker(QThread):
+    """백그라운드에서 r_trend_monitor.main()을 실행."""
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(str)   # 결과 폴더 경로
+
+    def __init__(self, cfg: dict):
+        super().__init__()
+        self.cfg = cfg
+
+    def run(self):
+        import io as _io
+        try:
+            import r_trend_monitor as rtm
+            cfg = self.cfg
+
+            # 사용자 설정 오버라이드
+            rtm.COLD_DIR      = cfg.get("cold_dir", "")
+            rtm.HOT_DIR       = cfg.get("hot_dir",  "")
+            rtm.WAVE_CAL_COLD = cfg.get("wl_cold",  "")
+            rtm.WAVE_CAL_HOT  = cfg.get("wl_hot",   "")
+            rtm.OUTPUT_DIR    = cfg.get("out_dir",  ".")
+            rtm.COLD_FILES    = None
+            rtm.HOT_FILES     = None
+            rtm.SHOW_PLOT     = False
+
+            # stdout 캡처 → log 시그널
+            import sys as _sys
+            old_stdout = _sys.stdout
+            _sys.stdout = buf = _io.StringIO()
+            try:
+                rtm.main()
+            finally:
+                _sys.stdout = old_stdout
+
+            for line in buf.getvalue().splitlines():
+                self.log.emit(line)
+
+            self.finished.emit(rtm.OUTPUT_DIR)
+
+        except Exception as e:
+            import traceback
+            self.log.emit(f"[오류] {e}\n{traceback.format_exc()}")
+            self.finished.emit("")
+
+
+class RTrendMonitorDialog(QDialog):
+    """R Trend Monitor 설정 + 실행 + 로그 표시 다이얼로그."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열")
+        self.resize(720, 560)
+        self._worker = None
+        self._init_ui()
+
+    def _pick_dir(self, line_edit):
+        d = QFileDialog.getExistingDirectory(self, "폴더 선택")
+        if d:
+            line_edit.setText(d)
+
+    def _pick_file(self, line_edit):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "파일 선택", "", "텍스트 파일 (*.txt *.dat *.csv);;모든 파일 (*)")
+        if f:
+            line_edit.setText(f)
+
+    def _init_ui(self):
+        from PyQt6.QtWidgets import QTextEdit
+        main = QVBoxLayout(self)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        def row_dir(label, attr):
+            le = QLineEdit()
+            btn = QPushButton("…"); btn.setFixedWidth(32)
+            btn.clicked.connect(lambda: self._pick_dir(le))
+            h = QHBoxLayout(); h.addWidget(le); h.addWidget(btn)
+            w = QWidget(); w.setLayout(h)
+            form.addRow(label, w)
+            setattr(self, attr, le)
+
+        def row_file(label, attr):
+            le = QLineEdit()
+            btn = QPushButton("…"); btn.setFixedWidth(32)
+            btn.clicked.connect(lambda: self._pick_file(le))
+            h = QHBoxLayout(); h.addWidget(le); h.addWidget(btn)
+            w = QWidget(); w.setLayout(h)
+            form.addRow(label, w)
+            setattr(self, attr, le)
+
+        row_dir("Cold 데이터 폴더:",      "_le_cold_dir")
+        row_dir("Hot 데이터 폴더:",       "_le_hot_dir")
+        row_file("Cold 파장 보정 파일:",  "_le_wl_cold")
+        row_file("Hot 파장 보정 파일:",   "_le_wl_hot")
+        row_dir("결과 저장 폴더:",        "_le_out_dir")
+        self._le_out_dir.setText(".")
+        main.addLayout(form)
+
+        btn_run = QPushButton("▶  계산 시작")
+        btn_run.setStyleSheet(
+            "background-color: #4CAF50; color: white; font-weight: bold; height: 36px;")
+        btn_run.clicked.connect(self._run)
+        main.addWidget(btn_run)
+        self._btn_run = btn_run
+
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setFontFamily("Consolas")
+        self._log.setFontPointSize(9)
+        main.addWidget(self._log)
+
+    def _run(self):
+        cfg = {
+            "cold_dir": self._le_cold_dir.text().strip(),
+            "hot_dir":  self._le_hot_dir.text().strip(),
+            "wl_cold":  self._le_wl_cold.text().strip(),
+            "wl_hot":   self._le_wl_hot.text().strip(),
+            "out_dir":  self._le_out_dir.text().strip() or ".",
+        }
+        if not cfg["cold_dir"] and not cfg["hot_dir"]:
+            QMessageBox.warning(self, "입력 오류", "Cold 또는 Hot 데이터 폴더를 지정해주세요.")
+            return
+
+        self._log.clear()
+        self._btn_run.setEnabled(False)
+        self._worker = _RTrendWorker(cfg)
+        self._worker.log.connect(self._log.append)
+        self._worker.finished.connect(self._on_done)
+        self._worker.start()
+
+    def _on_done(self, out_dir: str):
+        self._btn_run.setEnabled(True)
+        if out_dir:
+            self._log.append(f"\n✅ 완료 → 결과 폴더: {out_dir}")
+            QMessageBox.information(self, "완료", f"R Trend Monitor 완료!\n결과 폴더:\n{out_dir}")
+        else:
+            self._log.append("\n❌ 오류 발생 — 위 로그를 확인하세요.")
