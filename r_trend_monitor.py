@@ -26,6 +26,7 @@ try:
     from auto_r_calculator import (
         read_all_scans, FLAG_ZA, FLAG_HE,
         CAVITY_LEN, RL_FACTOR, PIXEL_MIN, PIXEL_MAX,
+        COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT, COL_TEMP_HOT,
     )
 except ImportError as e:
     print(f"[오류] 필수 모듈을 찾을 수 없습니다: {e}")
@@ -114,10 +115,12 @@ def _parse_timestamp(filepath: str) -> datetime:
     # fallback 2: 현재 시각
     return datetime.now(tz=_KST_TZ)
 
-def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
+def scan_directory(directory: str, wave_nm, file_list=None,
+                   col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 반환한다.
     He가 있는 파일: He 갱신 후 해당 파일 ZA + 새 He로 계산.
     He가 없는 파일: 직전 He + 해당 파일 ZA로 계산.
+    col_press/col_temp: 채널별 HK 컬럼 인덱스 (Cold/Hot 다름).
     """
     if file_list is not None:
         files = sorted(str(f) for f in file_list if os.path.isfile(str(f)))
@@ -137,7 +140,7 @@ def scan_directory(directory: str, wave_nm, file_list=None) -> list[dict]:
 
     for fp in files:
         fname = os.path.basename(fp)
-        za, he = read_all_scans(fp)
+        za, he = read_all_scans(fp, col_press, col_temp)
 
         if he:
             last_he = he   # 새 He 캘리브레이션 갱신
@@ -303,11 +306,15 @@ def main():
     # ── Cold 채널 ─────────────────────────────────────────────────
     bar = "=" * 64
     print(f"\n{bar}\n  Cold 채널 처리\n{bar}")
-    results_cold = scan_directory(COLD_DIR, wave_nm_cold, COLD_FILES) if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
+    results_cold = scan_directory(COLD_DIR, wave_nm_cold, COLD_FILES,
+                                  col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD) \
+                   if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
     # ── Hot 채널 ──────────────────────────────────────────────────
     print(f"\n{bar}\n  Hot 채널 처리\n{bar}")
-    results_hot = scan_directory(HOT_DIR, wave_nm_hot, HOT_FILES) if (HOT_FILES is not None or os.path.isdir(HOT_DIR)) else []
+    results_hot = scan_directory(HOT_DIR, wave_nm_hot, HOT_FILES,
+                                 col_press=COL_PRESS_HOT, col_temp=COL_TEMP_HOT) \
+                  if (HOT_FILES is not None or os.path.isdir(HOT_DIR)) else []
 
     # ── 출력 폴더 이름 결정 및 저장 ──────────────────────────────────
     range_cold = make_range_name(results_cold)

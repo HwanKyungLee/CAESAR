@@ -244,22 +244,34 @@ class DataIO:
                 # Extract housekeeping scalars from their fixed byte offsets
                 state_flag = int(raw_probe[4])   # Measurement state flag
 
-                # Araon Mega-Matrix housekeeping columns (verified 2026-05-18 sample):
+                # Araon Mega-Matrix HK columns (verified 2026-05-18/19 samples):
                 #   col  4    → state flag
-                #   col  1    → seconds since midnight (for timestamp)
-                #   col 6160  → pressure  raw count: × (0.01 PSI/count × 68.947 mbar/PSI) → mbar
-                #   col 6174  → temperature raw count: ÷ 100 → °C (cavity housing sensor)
-                raw_p_count = raw_probe[6160]
-                raw_t_count = raw_probe[6174]
+                #   col  1    → seconds since UTC midnight
+                #   Cold: pressure=6160 (~1010 mbar), cavity-T=6173 (~24°C, unheated)
+                #   Hot:  pressure=6162 (~971 mbar),  cavity-T=6155 (~75°C, heated)
+                #
+                # Auto-detect: try Cold columns first, fall back to Hot columns.
+                # Pressure — try 6160 (Cold), then 6162 (Hot)
+                raw_p_count = np.nan
+                for _pcol in (6160, 6162):
+                    _v = raw_probe[_pcol] if _pcol < len(raw_probe) else np.nan
+                    if np.isfinite(_v) and _v not in (0, 65535):
+                        raw_p_count = _v
+                        break
 
-                env_p = raw_p_count * (0.01 * 6894.73326 / 100.0)
-                env_t = raw_t_count / 100.0
+                # Temperature — hot cavity (col 6155 ~75°C) takes priority;
+                # fall back to cold ambient (col 6173 ~24°C)
+                raw_t_count = np.nan
+                for _tcol in (6155, 6173):
+                    _v = raw_probe[_tcol] if _tcol < len(raw_probe) else np.nan
+                    if np.isfinite(_v) and _v not in (0, 65535):
+                        raw_t_count = _v
+                        break
 
-                # Sensor saturation / disconnection returns 65535 or 0 in raw counts
-                if np.isnan(raw_p_count) or raw_p_count in (65535, 0):
-                    env_p = 1013.25
-                if np.isnan(raw_t_count) or raw_t_count in (65535, 0):
-                    env_t = 25.0
+                if np.isfinite(raw_p_count):
+                    env_p = float(raw_p_count) * (0.01 * 6894.73326 / 100.0)
+                if np.isfinite(raw_t_count):
+                    env_t = float(raw_t_count) / 100.0
             else:
                 # ── Regular 1D file (one value per line, e.g. alpha trace) ──
                 # Re-read the whole file to get all rows, not just the target row.
