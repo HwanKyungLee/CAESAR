@@ -1,4 +1,5 @@
 import os
+import re
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -243,15 +244,18 @@ class DataIO:
                 # Extract housekeeping scalars from their fixed byte offsets
                 state_flag = int(raw_probe[4])   # Measurement state flag
 
-                # Raw units from LabVIEW:
-                #   pressure  → 0.01 PSI counts  →  × (0.01 × 6894.73326 Pa/PSI) / 100 = mbar
-                #   temperature → 0.01 °C counts →  ÷ 100 = °C
-                env_p = raw_probe[6162] * (0.01 * 6894.73326 / 100.0)
-                env_t = raw_probe[6174] / 100.0
+                # Araon Mega-Matrix housekeeping columns (verified 2026-05-18 sample):
+                #   col  4    → state flag
+                #   col  1    → seconds since midnight (for timestamp)
+                #   col 6160  → pressure  raw count: × (0.01 PSI/count × 68.947 mbar/PSI) → mbar
+                #   col 6174  → temperature raw count: ÷ 100 → °C (cavity housing sensor)
+                raw_p_count = raw_probe[6160]
+                raw_t_count = raw_probe[6174]
+
+                env_p = raw_p_count * (0.01 * 6894.73326 / 100.0)
+                env_t = raw_t_count / 100.0
 
                 # Sensor saturation / disconnection returns 65535 or 0 in raw counts
-                raw_p_count = raw_probe[6162]
-                raw_t_count = raw_probe[6174]
                 if np.isnan(raw_p_count) or raw_p_count in (65535, 0):
                     env_p = 1013.25
                 if np.isnan(raw_t_count) or raw_t_count in (65535, 0):
@@ -287,36 +291,35 @@ class DataIO:
     @staticmethod
     def parse_row_timestamp(filepath, row_index=0):
         """
-        Reads a measurement timestamp from column 0 of an Araon Mega-Matrix row.
+        Reconstructs a measurement datetime from an Araon Mega-Matrix row.
 
-        Araon LabVIEW typically stores absolute time in column 0 as one of:
-          - LabVIEW epoch: seconds since Jan 1, 1904 UTC  (~3.83 × 10⁹ in 2026)
-          - Unix epoch:    seconds since Jan 1, 1970 UTC  (~1.75 × 10⁹ in 2026)
+        Column layout (verified against 2026-05-18 .dat sample, 6179 cols):
+          col 0  → absolute scan counter (constant within one file — NOT a date)
+          col 1  → seconds since local midnight  (e.g. 44207 = 12:16:47)
 
-        Falls back to the file's modification time (converted to KST) when
-        column 0 does not contain a recognisable timestamp value.
+        The calendar date is extracted from the filename by the pattern
+        "YYYY-MM-DD" (e.g. "2026-05-18-023.dat").  The two together give
+        a full local datetime which is then tagged as KST (UTC+9).
 
-        Returns:
-          datetime with KST timezone, or None on total failure.
+        Falls back to the file's modification time → KST when the pattern
+        is absent or col 1 is out of the [0, 86400) range.
 
-        NOTE: column indices for pressure (6162) and temperature (6174) used by
-        DataIO differ from those in reflectance_calc.py / auto_r_calculator.py
-        (6156 / 6157).  Verify against actual .dat files and update the constants
-        here and in those files if needed.
+        Returns: datetime with KST timezone, or None on total failure.
         """
         KST = timezone(timedelta(hours=9))
-        LV_EPOCH_OFFSET = 2082844800  # seconds: LabVIEW epoch → Unix epoch
+        _DATE_RE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
 
         try:
             raw = DataIO._read_row_raw(filepath, row_index)
             if len(raw) >= 6175:
-                ts_raw = float(raw[0])
-                # LabVIEW timestamp in 2020–2035 is roughly 3.65e9 – 4.15e9
-                if 3.5e9 < ts_raw < 4.5e9:
-                    return datetime.fromtimestamp(ts_raw - LV_EPOCH_OFFSET, tz=KST)
-                # Unix timestamp in 2020–2035 is roughly 1.58e9 – 2.05e9
-                elif 1.5e9 < ts_raw < 2.1e9:
-                    return datetime.fromtimestamp(ts_raw, tz=KST)
+                secs = float(raw[1])   # seconds since midnight (col 1)
+                if 0.0 <= secs < 86400.0:
+                    fname = os.path.basename(filepath)
+                    m = _DATE_RE.search(fname)
+                    if m:
+                        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                        base = datetime(year, month, day, tzinfo=KST)
+                        return base + timedelta(seconds=secs)
         except Exception:
             pass
 

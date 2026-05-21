@@ -36,8 +36,11 @@ def _extract_spectrum_and_hk(tokens):
     if n >= 6175:
         raw = np.array([float(t) if t.strip() else np.nan for t in tokens])
         intensity_full = raw[2053:4101]
-        raw_p = raw[6156]
-        raw_t = raw[6157]
+        # Verified column indices from 2026-05-18 .dat sample (6179 cols total):
+        #   col 6160 → pressure raw count  (×0.6895 mbar/count → ~1010 mbar at sea level)
+        #   col 6174 → temperature raw count (÷100 → ~30 °C inside cavity housing)
+        raw_p = raw[6160]
+        raw_t = raw[6174]
         if np.isfinite(raw_p) and raw_p not in (0.0, 65535.0):
             p_mbar = raw_p * (0.01 * 6894.73326 / 100.0)
         if np.isfinite(raw_t) and raw_t not in (0.0, 65535.0):

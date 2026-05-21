@@ -89,7 +89,10 @@ def _load_spectrum_from_file(
     if len(raw) >= 6175:
         intensity_full = raw[2053:4101]
         flag = int(raw[4])
-        raw_p, raw_t = raw[6156], raw[6157]
+        # Verified column indices from 2026-05-18 .dat sample (6179 cols total):
+        #   col 6160 → pressure raw count  (×0.6895 mbar/count → ~1010 mbar at sea level)
+        #   col 6174 → temperature raw count (÷100 → ~30 °C inside cavity housing)
+        raw_p, raw_t = raw[6160], raw[6174]
         if not (np.isnan(raw_p) or raw_p in (0, 65535)): p_mbar = raw_p * (0.01 * 6894.73326 / 100.0)
         if not (np.isnan(raw_t) or raw_t in (0, 65535)): t_c = raw_t / 100.0
     elif len(raw) > 10:

@@ -209,9 +209,15 @@ def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
     ax_r.legend(fontsize=8, loc="lower left")
     ax_r.grid(True, alpha=0.3)
 
-    y_lo = min(float(np.min(r_mean - r_std)), r_expected - R_WARN_DELTA - 0.0005)
-    y_hi = max(float(np.max(r_mean + r_std)), r_expected + 0.0005)
-    ax_r.set_ylim(y_lo - 0.0005, y_hi + 0.0005)
+    # Zoom Y-axis so ±0.01 % changes near R≈99.99 % are clearly visible.
+    # Window = ±5σ of the data, but never narrower than ±0.05 % (5e-4).
+    r_mean_val = float(np.mean(r_mean))
+    r_std_val  = float(np.std(r_mean))
+    margin     = max(r_std_val * 5.0, 5e-4)
+    # Also guarantee the expected-R and warn-limit lines stay inside the frame.
+    y_lo = min(r_mean_val - margin, r_expected - R_WARN_DELTA - 1e-4)
+    y_hi = max(r_mean_val + margin, r_expected + 1e-4)
+    ax_r.set_ylim(y_lo, y_hi)
 
     if ax_l is not None:
         leff_plot = np.array(leff, dtype=float)
