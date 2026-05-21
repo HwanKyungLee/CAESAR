@@ -7,11 +7,11 @@ import json
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
+from data_io import ui_scale as _ui_scale
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.rcParams['font.family'] = 'Malgun Gothic'
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 # [PyQt6] Backend
@@ -44,8 +44,14 @@ from PyQt6.QtGui import QColor, QFont, QPixmap
 
 class NavigationHelper:
     """
-    Helper class providing mouse wheel zoom, drag panning, 
-    and double-click reset functionality for Matplotlib graphs.
+    Attaches interactive navigation (zoom, pan, reset) to a Matplotlib Axes object.
+
+    Controls
+    --------
+    Mouse wheel      → zoom in/out centered on the cursor position
+    Left-click drag  → pan the graph (in 'pan_left' mode)
+    Right-click drag → pan the graph (in 'pan_right' mode, used in RangeSelectorDialog)
+    Double left-click→ reset zoom to show all data (autoscale)
     """
     def __init__(self, ax, base_scale=1.2, mode='pan_left'):
         self.ax = ax
@@ -79,14 +85,16 @@ class NavigationHelper:
         if xdata is None or ydata is None: 
             return
             
-        # Determine scale factor based on scroll direction (up = zoom out, down = zoom in)
+        # Scroll up → zoom out (scale_factor > 1 expands the axis range)
+        # Scroll down → zoom in (scale_factor < 1 shrinks the axis range)
         scale_factor = 1 / self.base_scale if event.button == 'up' else self.base_scale
             
         # Calculate new width and height
         new_width = (cur_xlim[1] - cur_xlim[0]) * scale_factor
         new_height = (cur_ylim[1] - cur_ylim[0]) * scale_factor
         
-        # Calculate ratio based on cursor position to keep the view fixed under the cursor
+        # Calculate how far the cursor is from each edge (as a fraction of the range).
+        # This anchors the zoom so the point under the cursor stays fixed on screen.
         relx = (cur_xlim[1] - xdata) / (cur_xlim[1] - cur_xlim[0])
         rely = (cur_ylim[1] - ydata) / (cur_ylim[1] - cur_ylim[0])
         
@@ -145,7 +153,8 @@ class WavelengthCalibrationDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🛠️ Wavelength Calibration Tool (Interactive)")
-        self.resize(1100, 700)
+        _s = _ui_scale()
+        self.resize(int(1100 * _s), int(700 * _s))
         
         # --- Internal Data Variables ---
         self.spectrum = None
@@ -368,11 +377,24 @@ class WavelengthCalibrationDialog(QDialog):
 
     def get_subpixel_peak(self, peak_pixel, intensities):
         """
-        Calculates the exact sub-pixel peak position using Center of Mass (Centroid) 
-        and Gaussian fitting. Ensures a float sub-pixel value is always returned.
+        Refines a coarse integer peak position to sub-pixel accuracy.
+
+        Two-stage approach:
+          Stage 1 — Centroid (Center of Mass):
+            x_c = Σ(x · I) / Σ(I)   using a ±5-pixel window around the peak.
+            Fast and always works, but slightly biased for asymmetric peaks.
+
+          Stage 2 — Gaussian fitting (curve_fit):
+            Fits a Gaussian + offset model  a·exp(-(x-μ)²/2σ²) + c  to the same
+            window, using the centroid as the initial guess for μ.
+            More accurate for symmetric emission lines (Hg lamp, etc.).
+
+        If Gaussian fitting fails or diverges by more than the window size,
+        the centroid value is returned as a safe fallback.
+        Returns a float (sub-pixel) in all cases — never a rounded integer.
         """
         try:
-            # 1. 수은 램프 등 뾰족한 피크에 맞게 탐색 범위를 ±5 픽셀로 좁힘
+            # 1. Narrow search to ±5 pixels to match sharp peaks (e.g., mercury lamp)
             window = 5  
             start = max(0, int(peak_pixel) - window)
             end = min(len(intensities), int(peak_pixel) + window + 1)
@@ -380,35 +402,35 @@ class WavelengthCalibrationDialog(QDialog):
             x_data = np.arange(start, end)
             y_data = intensities[start:end]
             
-            # 2. 베이스라인(배경 노이즈) 제거
+            # 2. Remove baseline (background noise)
             y_bg_removed = y_data - np.min(y_data)
             mass_sum = np.sum(y_bg_removed)
             
-            # 3. 1차 계산: 무게중심(Centroid) 공식을 이용한 소수점 중심 찾기
+            # 3. Step 1: Find sub-pixel center using Center-of-Mass (Centroid)
             if mass_sum == 0:
                 return float(peak_pixel)
             centroid_x = np.sum(x_data * y_bg_removed) / mass_sum
             
-            # 4. 2차 계산: 가우시안 피팅을 위한 초기값 (무게중심 결과를 이용)
+            # 4. Step 2: Initial estimates for Gaussian fitting (using centroid result)
             offset_guess = np.min(y_data)
             a_guess = np.max(y_data) - offset_guess
-            mu_guess = centroid_x  # 정수 대신 앞서 구한 무게중심을 초기값으로!
-            sigma_guess = 1.0      # 뾰족한 피크를 위해 넓이(sigma) 추정치 감소
+            mu_guess = centroid_x  # Use centroid (not integer peak) as initial guess
+            sigma_guess = 1.0      # Narrow sigma estimate for sharp peaks
             
             p0_guess = [a_guess, mu_guess, sigma_guess, offset_guess]
             
-            # 5. 최적화 진행 (curve_fit)
+            # 5. Run optimization (curve_fit)
             popt, _ = curve_fit(self._gaussian_model, x_data, y_data, p0=p0_guess, maxfev=2000)
             sub_pixel_mu = popt
             
-            # 6. 피팅이 너무 이상한 곳으로 튀었다면, 안전하게 무게중심 값 반환
+            # 6. If fitting diverged too far, safely fall back to centroid
             if abs(sub_pixel_mu - peak_pixel) > window:
                 return centroid_x
                 
             return sub_pixel_mu
             
         except Exception as e:
-            # 가우시안 피팅 실패 시, 기존처럼 정수로 포기하지 않고 무게중심(Centroid) 값을 최종 반환!
+            # On Gaussian fit failure, return centroid instead of rounding to integer
             print(f"Gaussian fit failed for pixel {peak_pixel}, using Centroid fallback.")
             try:
                 # Fallback to pure Center of Mass
@@ -443,7 +465,8 @@ class WavelengthCalibrationDialog(QDialog):
             popt, _ = curve_fit(self._gaussian_model, x_data, y_data, p0=p0_guess)
             a, mu, sigma, offset = popt
             
-            # 4. Calculate FWHM (2.355 * sigma)
+            # 4. Convert Gaussian sigma → FWHM
+            # For a Gaussian: FWHM = 2 · √(2 · ln 2) · σ ≈ 2.3548 · σ
             fwhm_pixels = 2.3548 * abs(sigma)
             
             # 5. Convert to nm if wavelength calibration data is available
@@ -465,7 +488,7 @@ class WavelengthCalibrationDialog(QDialog):
             return
             
         try:
-            # 1. 파일 확장자에 따른 데이터 로딩
+            # 1. Load data based on file extension
             if filename.lower().endswith('.csv'):
                 try:
                     df = pd.read_csv(filename, on_bad_lines='skip')
@@ -477,15 +500,14 @@ class WavelengthCalibrationDialog(QDialog):
                 except TypeError:
                     df = pd.read_csv(filename, comment='#', sep=r'\s+', engine='python', error_bad_lines=False)
 
-            # 2. 🌟 LightField 및 범용 헤더 매핑 사전 (Alias Dictionary)
-            # 약자, 풀네임 등을 모두 표준화된 키워드로 연결합니다.
+            # 2. LightField and generic header alias dictionary
             header_aliases = {
-                # Y축 (Intensity)
+                # Y-axis (Intensity)
                 'i': 'intensity', 'intensity': 'intensity', 'counts': 'intensity',
-                # X축 (Wavelength or Pixel/Column)
+                # X-axis (Wavelength or Pixel/Column)
                 'w': 'wavelength', 'wavelength': 'wavelength',
                 'x': 'column', 'column': 'column', 'pixel': 'column',
-                # 메타데이터 및 그룹화용
+                # Metadata and grouping
                 'f': 'frame', 'frame': 'frame',
                 'y': 'row', 'row': 'row',
                 'r': 'roi', 'roi': 'roi',
@@ -496,18 +518,18 @@ class WavelengthCalibrationDialog(QDialog):
                 'mtp': 'mtp', 'modulationtrackingphase': 'mtp'
             }
 
-            # 3. 데이터프레임 헤더 전처리 (대소문자 무시, 공백 및 언더바 제거)
+            # 3. Normalize DataFrame column headers (lowercase, strip spaces/underscores)
             original_cols = df.columns.tolist()
             clean_cols = []
             for col in original_cols:
-                # "Exposure Start Time Stamp" -> "exposurestarttimestamp" 형태로 변환
+                # e.g., "Exposure Start Time Stamp" -> "exposurestarttimestamp"
                 raw_str = str(col).strip().lower().replace(" ", "").replace("_", "")
-                # 사전에 매핑된 표준 이름이 있으면 가져오고, 없으면 전처리된 이름 그대로 사용
+                # Use alias if mapped, otherwise keep the normalized name
                 clean_cols.append(header_aliases.get(raw_str, raw_str))
             
             df.columns = clean_cols
 
-            # 4. 표준화된 헤더 이름을 기반으로 X축, Y축 데이터 추출
+            # 4. Extract X and Y data using normalized header names
             x_col = None
             if 'wavelength' in clean_cols:
                 x_col = 'wavelength'
@@ -516,18 +538,18 @@ class WavelengthCalibrationDialog(QDialog):
 
             y_col = 'intensity' if 'intensity' in clean_cols else None
 
-            # 5. 데이터 결정 및 할당
+            # 5. Assign final data
             if x_col and y_col:
-                # Frame이나 Row가 여러 개 저장된 데이터일 경우 X축 기준으로 평균을 냅니다.
+                # Average intensity per X value when multiple frames/rows are stored
                 avg_spec = df.groupby(x_col)[y_col].mean()
                 self.spectrum = avg_spec.values
                 self.pixels = avg_spec.index.values
             elif y_col:
-                # X축 정보가 없고 Intensity만 있는 경우
+                # Intensity only (no X-axis info)
                 self.spectrum = df[y_col].values
                 self.pixels = np.arange(len(self.spectrum))
             else:
-                # 💡 안전망: 매핑 사전에 없는 완전히 낯선 형식일 경우 가장 마지막 열 강제 사용
+                # Fallback: unknown format — force-use the last column
                 print(f"Warning: Expected headers not found. Found columns: {original_cols}. Using the last column.")
                 self.spectrum = df.iloc[:, -1].values
                 if x_col:
@@ -535,11 +557,11 @@ class WavelengthCalibrationDialog(QDialog):
                 else:
                     self.pixels = np.arange(len(self.spectrum))
 
-            # 6. 그래프 업데이트
+            # 6. Update graph
             self.ax.clear()
             self.ax.plot(self.pixels, self.spectrum, 'k-', alpha=0.7, label='Lamp Spectrum')
             
-            # Wavelength 값이 있으면 X축 라벨을 변경해줍니다.
+            # Update X-axis label if wavelength data is available
             if x_col == 'wavelength':
                 self.ax.set_xlabel('Wavelength (nm)')
             else:
@@ -608,11 +630,16 @@ class WavelengthCalibrationDialog(QDialog):
         # 3. Polynomial Fitting (Degree 2)
         self.poly_coeffs = np.polyfit(pixel_list, wavelength_list, 2)
 
-        # 4. Calculate R² (Coefficient of Determination) Accuracy
+        # 4. Calculate R² (Coefficient of Determination)
+        # R² = 1 means the polynomial passes exactly through every data point.
+        # R² > 0.9999 is typically required for a reliable wavelength calibration.
+        # Formula: R² = 1 - SS_res / SS_tot
+        #   SS_res = sum of squared residuals between the fit and measured wavelengths
+        #   SS_tot = total variance of the measured wavelengths
         fitted_waves = np.polyval(self.poly_coeffs, pixel_list)
-        y_mean = np.mean(wavelength_list)
-        ss_tot = np.sum((wavelength_list - y_mean)**2)
-        ss_res = np.sum((wavelength_list - fitted_waves)**2)
+        y_mean    = np.mean(wavelength_list)
+        ss_tot    = np.sum((wavelength_list - y_mean)**2)
+        ss_res    = np.sum((wavelength_list - fitted_waves)**2)
         r_squared = 1 - (ss_res / ss_tot)
         
         # 5. Generate wavelengths for the full pixel range
@@ -622,17 +649,17 @@ class WavelengthCalibrationDialog(QDialog):
         if not hasattr(self, 'fwhm_records'):
             self.fwhm_records = {}
             
-        self.fwhm_records.clear()  # 이전에 남아있던 찌꺼기 데이터 초기화
+        self.fwhm_records.clear()  # Clear any leftover records from previous runs
         
         if hasattr(self, 'spectrum') and self.spectrum is not None:
-            # pixel_list는 사용자가 테이블에 등록해둔 픽셀들입니다.
+            # pixel_list contains the peaks registered in the table by the user
             for px in pixel_list:  
                 fwhm_px, fwhm_nm = self.calculate_fwhm(px, self.spectrum, self.wavelengths)
                 if fwhm_px is not None:
-                    # 딕셔너리에 자동으로 쏙쏙 저장합니다.
+                    # Store result in the dictionary
                     self.fwhm_records[round(px, 3)] = {"fwhm_nm": fwhm_nm, "fwhm_px": fwhm_px}
 
-        # 상태 메시지에 평균 FWHM도 바로 보여주기 위한 계산
+        # Calculate average FWHM for the status message
         valid_fwhms = [data['fwhm_nm'] for data in self.fwhm_records.values() if data.get('fwhm_nm') is not None]
         avg_fwhm_str = ""
         if valid_fwhms:
@@ -648,7 +675,7 @@ class WavelengthCalibrationDialog(QDialog):
             self.help_label.setText(msg)
             self.help_label.setStyleSheet("color: #1565C0; font-weight: bold; font-size: 13px;")
 
-        # 8. 피팅 결과 팝업창 띄우기
+        # 8. Show fitting result popup
         self.show_fit_result_popup(pixel_list, wavelength_list, poly_func, r_squared)
 
     def show_fit_result_popup(self, px, wave, func, r2):
@@ -701,12 +728,12 @@ class WavelengthCalibrationDialog(QDialog):
             # Generate Metadata Header including FWHM
             avg_fwhm_str = "No FWHM recorded"
             
-            # fwhm_records 바구니가 존재하고 비어있지 않다면
+            # Proceed only if fwhm_records exist and are non-empty
             if hasattr(self, 'fwhm_records') and self.fwhm_records:
-                # 에러 없이 nm 단위로 잘 계산된 FWHM 값들만 리스트로 뽑아냅니다
+                # Collect only FWHM values successfully calculated in nm
                 valid_fwhms = [data['fwhm_nm'] for data in self.fwhm_records.values() if data.get('fwhm_nm') is not None]
                 
-                # 유효한 값이 1개라도 있으면 평균을 계산합니다
+                # Compute average if at least one valid value exists
                 if valid_fwhms:
                     avg_fwhm = sum(valid_fwhms) / len(valid_fwhms)
                     avg_fwhm_str = f"Average FWHM: {avg_fwhm:.3f} nm (calculated from {len(valid_fwhms)} peaks)"
@@ -736,10 +763,10 @@ class WavelengthCalibrationDialog(QDialog):
     def save_fwhm_data(self):
         """Export accumulated FWHM and Sigma records to a text file."""
         if not hasattr(self, 'fwhm_records') or not self.fwhm_records:
-            QMessageBox.warning(self, "No Data", "저장할 FWHM 데이터가 없습니다.\n먼저 그래프의 피크를 우클릭하여 FWHM을 계산해 주세요.")
+            QMessageBox.warning(self, "No Data", "No FWHM data to save.\nRight-click a peak on the graph to calculate FWHM first.")
             return
 
-        # 자동 파일명 생성
+        # Auto-generate filename
         date_str = datetime.datetime.now().strftime("%Y%m%d")
         suggested_name = f"FWHM_Analysis_{date_str}.txt"
 
@@ -750,31 +777,31 @@ class WavelengthCalibrationDialog(QDialog):
         if save_path:
             try:
                 with open(save_path, 'w', encoding='utf-8') as f:
-                    # 헤더 (설명창) 작성
+                    # Write file header
                     f.write("# BBCEAS FWHM & Sigma Analysis Records\n")
                     f.write(f"# Generated: {date_str}\n")
                     f.write("# Formula: abs(Sigma) = FWHM / 2.3548\n")
                     f.write("-" * 60 + "\n")
                     
-                    # 엑셀/오리진(Origin)에서 붙여넣기 좋게 Tab으로 열 구분
+                    # Tab-separated for easy import into Excel / Origin
                     if save_path.endswith('.csv'):
                         f.write("Pixel,FWHM(nm),FWHM(px),abs_Sigma(nm),abs_Sigma(px)\n")
                     else:
                         f.write("Pixel\tFWHM(nm)\tFWHM(px)\tabs_Sigma(nm)\tabs_Sigma(px)\n")
                     
-                    # 픽셀 번호가 작은 순서대로(왼쪽에서 오른쪽) 정렬하여 기록
+                    # Sort by pixel number (ascending)
                     for px in sorted(self.fwhm_records.keys()):
                         data = self.fwhm_records[px]
                         
-                        # FWHM 값 가져오기
+                        # Retrieve FWHM values
                         f_nm = data['fwhm_nm']
                         f_px = data['fwhm_px']
                         
-                        # Sigma 값 역산하기 (FWHM = 2.3548 * sigma)
+                        # Back-calculate Sigma (FWHM = 2.3548 * sigma)
                         s_nm = f_nm / 2.3548 if f_nm is not None else None
                         s_px = f_px / 2.3548 if f_px is not None else None
 
-                        # 빈 값이면 N/A 처리, 있으면 소수점 4자리까지 출력
+                        # Format: N/A if missing, 4 decimal places otherwise
                         str_f_nm = f"{f_nm:.4f}" if f_nm is not None else "N/A"
                         str_f_px = f"{f_px:.4f}" if f_px is not None else "N/A"
                         str_s_nm = f"{s_nm:.4f}" if s_nm is not None else "N/A"
@@ -785,10 +812,10 @@ class WavelengthCalibrationDialog(QDialog):
                         else:
                             f.write(f"{px}\t{str_f_nm}\t{str_f_px}\t{str_s_nm}\t{str_s_px}\n")
 
-                QMessageBox.information(self, "Success", f"FWHM 데이터가 성공적으로 저장되었습니다!\n파일명: {os.path.basename(save_path)}")
+                QMessageBox.information(self, "Success", f"FWHM data saved successfully!\nFile: {os.path.basename(save_path)}")
             
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"파일 저장 중 오류가 발생했습니다:\n{e}")
+                QMessageBox.critical(self, "Error", f"An error occurred while saving:\n{e}")
 
 class CalibrationScanner(QDialog):
     """
@@ -800,7 +827,8 @@ class CalibrationScanner(QDialog):
     def __init__(self, engine, y_data, pixel_min, pixel_max, poly_order):
         super().__init__()
         self.setWindowTitle(f"🔍 Shift Scanner (Poly Order: {poly_order})")
-        self.resize(800, 600)
+        _s = _ui_scale()
+        self.resize(int(800 * _s), int(600 * _s))
         
         # --- Initialize Analysis Data ---
         self.engine = engine
@@ -861,7 +889,15 @@ class CalibrationScanner(QDialog):
         self.nav = NavigationHelper(self.ax, mode='pan_left')
         
     def run_scan(self):
-        """Explore the defined range to find the shift with the minimum RMS error."""
+        """
+        Brute-force grid search over the shift range to find the minimum RMS error.
+
+        For each candidate shift value the engine builds a basis matrix A, solves
+        A·c = y via least squares, and records the RMS of the residual.
+        The result is a U-shaped error curve; the minimum of that curve is the
+        optimal shift.  This is useful for finding a good starting point before
+        the non-linear VarPro optimizer runs in the main analysis.
+        """
         scan_range = self.spin_range.value()
         step = self.spin_step.value()
         shifts = np.arange(-scan_range, scan_range + step / 100, step)
@@ -895,7 +931,7 @@ class CalibrationScanner(QDialog):
             except Exception:
                 rms_list.append(np.nan)
                 
-        # --- Visualization: Draw the U-shaped Error Curve ---
+        # ── Visualization: draw the U-shaped RMS-vs-Shift error curve ────────────
         self.ax.clear()
         self.ax.plot(shifts, rms_list, 'b.-', label='RMS Error Curve')
         self.ax.set_xlabel("Shift (Pixels or nm)")
@@ -935,7 +971,8 @@ class RangeSelectorDialog(QDialog):
     def __init__(self, data_path, pixel_min, pixel_max, engine):
         super().__init__()
         self.setWindowTitle("🔍 Fit Range Selector")
-        self.resize(900, 600)
+        _s = _ui_scale()
+        self.resize(int(900 * _s), int(600 * _s))
         
         # --- Initialize Analysis Data & State ---
         self.engine = engine
@@ -1047,13 +1084,24 @@ class RangeSelectorDialog(QDialog):
 
 class MaskDialog(QDialog):
     """
-    Smart masking dialog to set unnecessary noise regions of reference spectra to zero,
-    thereby improving the accuracy of the fitting process.
+    Dialog for zeroing out unwanted spectral regions in a reference spectrum.
+
+    Why masking?
+    The fitting engine uses the full reference array.  If a reference has
+    strong features outside the measurement window (detector edge noise, saturated
+    lines, or features that overlap with another gas), those can corrupt the fit.
+    Masking forces those pixels to zero so they contribute nothing.
+
+    Two modes
+    ---------
+    Manual Range  → keep only pixels in [min, max]; zero everything outside.
+    Auto-Cut      → zero any pixel whose absolute value is below X% of the peak.
     """
     def __init__(self, gas_list):
         super().__init__()
         self.setWindowTitle("✂️ Smart Masking Tool")
-        self.resize(400, 250)
+        _s = _ui_scale()
+        self.resize(int(400 * _s), int(250 * _s))
         
         # List of gas names currently loaded in the main engine
         self.gas_list = gas_list 
@@ -1149,12 +1197,19 @@ class RefPropertiesDialog(QDialog):
     def __init__(self, parent, gas_list, current_props):
         super().__init__(parent)
         self.setWindowTitle("⚙️ Edit Reference Properties")
-        self.resize(800, 350)
+        _s = _ui_scale()
+        self.resize(int(1020 * _s), int(350 * _s))
         layout = QVBoxLayout(self)
-        
-        self.table = QTableWidget(len(gas_list), 5)
-        self.table.setHorizontalHeaderLabels(["Gas Name", "Shift Mode", "Shift Params", "Squeeze Mode", "Squeeze Params"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        self.table = QTableWidget(len(gas_list), 7)
+        self.table.setHorizontalHeaderLabels(["Gas Name", "Shift Mode", "Shift Params", "Squeeze Mode", "Squeeze Params", "T_ref (°C)", "dσ/dT (%/°C)"])
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Last two columns are numeric spinboxes — cap their width
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(5, 90)
+        self.table.setColumnWidth(6, 110)
         
         # Synchronized variable name with UniversalEngine
         self.gas_list = gas_list
@@ -1225,11 +1280,28 @@ class RefPropertiesDialog(QDialog):
             
             self.table.setCellWidget(i, 3, cmb_sq)
             self.table.setCellWidget(i, 4, stack_sq)
-            
+
+            # --- Temperature-dependent cross-section ---
+            t_ref_spin = QDoubleSpinBox()
+            t_ref_spin.setRange(-100.0, 100.0)
+            t_ref_spin.setDecimals(1)
+            t_ref_spin.setValue(float(props.get("t_ref", 25.0)))
+            t_ref_spin.setToolTip("Temperature at which this reference was measured (°C)")
+            self.table.setCellWidget(i, 5, t_ref_spin)
+
+            t_coeff_spin = QDoubleSpinBox()
+            t_coeff_spin.setRange(-10.0, 10.0)
+            t_coeff_spin.setDecimals(3)
+            t_coeff_spin.setSingleStep(0.01)
+            t_coeff_spin.setValue(float(props.get("t_coeff", 0.0)))
+            t_coeff_spin.setToolTip("Temperature coefficient: σ(T) = σ(T_ref)×(1 + coeff×ΔT/100)\n0.0 = no correction")
+            self.table.setCellWidget(i, 6, t_coeff_spin)
+
             # Save widget references for data extraction
             self.param_widgets[gas] = {
                 "sh_cmb": cmb_sh, "sh_lim": sh_lim, "sh_fix": sh_fix, "sh_lnk": sh_lnk,
-                "sq_cmb": cmb_sq, "sq_lim": sq_lim, "sq_fix": sq_fix, "sq_lnk": sq_lnk
+                "sq_cmb": cmb_sq, "sq_lim": sq_lim, "sq_fix": sq_fix, "sq_lnk": sq_lnk,
+                "t_ref_spin": t_ref_spin, "t_coeff_spin": t_coeff_spin
             }
         
         layout.addWidget(self.table)
@@ -1262,22 +1334,39 @@ class RefPropertiesDialog(QDialog):
             
             props[gas] = {
                 "sh_mode": sh_mode, "sh_val": sh_val,
-                "sq_mode": sq_mode, "sq_val": sq_val
+                "sq_mode": sq_mode, "sq_val": sq_val,
+                "t_ref": w["t_ref_spin"].value(),
+                "t_coeff": w["t_coeff_spin"].value()
             }
         return props
        
 class ReferenceGeneratorDialog(QDialog):
     """
-    Ultimate Reference Generator Dialog.
-    Incorporates advanced deconvolution logic to accurately simulate
-    Instrument Line Shape (ILS) based on literature FWHM values.
+    Generates instrument-ready reference cross-sections by applying
+    a wavelength-dependent Gaussian convolution (ILS degradation).
+
+    Why is this needed?
+    Literature cross-sections (e.g., from HITRAN or Vandaele) are measured
+    at very high spectral resolution (σ < 0.01 nm).  Our instrument has a much
+    coarser resolution (σ ≈ 0.2–0.5 nm).  If we feed the sharp reference directly
+    into the fit, the mismatch causes large residuals and incorrect concentrations.
+
+    This dialog convolves each wavelength point of the reference with a Gaussian
+    whose sigma is taken from the measured FWHM profile — making the reference
+    look exactly like what the spectrometer would record.
+
+    Variance addition formula:
+        σ_inst² = σ_lit² + σ_extra²   →   σ_extra = √(σ_inst² − σ_lit²)
+    Only the 'extra' broadening is applied because the literature data already
+    has σ_lit baked in.
     """
     reference_saved = pyqtSignal(str, str)
 
     def __init__(self, parent=None, current_wavelengths=None):
         super().__init__(parent)
         self.setWindowTitle("✂️ Ultimate Reference Generator (with Advanced Deconvolution)")
-        self.resize(1150, 800)
+        self._s = _ui_scale()
+        self.resize(int(1150 * self._s), int(800 * self._s))
         
         self.raw_wave = None
         self.raw_data = None
@@ -1370,7 +1459,6 @@ class ReferenceGeneratorDialog(QDialog):
         grp_wave.setLayout(lay_wave)
         right_layout.addWidget(grp_wave)
         
-        # --- 3. Instrument Line Shape (ILS) ---
         # --- 3. Instrument Line Shape (ILS) Profile ---
         grp_conv = QGroupBox("3. Instrument Line Shape (ILS) Profile")
         lay_conv = QVBoxLayout()
@@ -1385,7 +1473,7 @@ class ReferenceGeneratorDialog(QDialog):
         grp_conv.setLayout(lay_conv)
         right_layout.addWidget(grp_conv)
         
-        # 내부 데이터 저장을 위한 변수 초기화 (init 함수 쪽에 넣으셔도 됩니다)
+        # Internal data storage variables
         self.ils_pixels = None
         self.ils_sigmas = None
         
@@ -1393,13 +1481,13 @@ class ReferenceGeneratorDialog(QDialog):
         self.btn_generate = QPushButton("🪄 Generate Ultimate Reference")
         self.btn_generate.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; font-size: 14px;")
         self.btn_generate.clicked.connect(self.apply_convolution)
-        self.btn_generate.setMinimumHeight(50)
+        self.btn_generate.setMinimumHeight(int(50 * self._s))
         right_layout.addWidget(self.btn_generate)
         
         self.btn_save = QPushButton("💾 Save & Auto-Register to Main")
         self.btn_save.clicked.connect(self.save_reference)
         self.btn_save.setEnabled(False)
-        self.btn_save.setMinimumHeight(40)
+        self.btn_save.setMinimumHeight(int(40 * self._s))
         right_layout.addWidget(self.btn_save)
         
         right_layout.addStretch(1)
@@ -1491,7 +1579,7 @@ class ReferenceGeneratorDialog(QDialog):
         if not filename: return
         
         try:
-            # 1. 🌟 스마트 헤더 탐색: 파일 텍스트를 먼저 스캔해서 'Pixel'로 시작하는 줄의 위치를 찾습니다.
+            # 1. Smart header search: scan file text to find the line starting with "Pixel"
             header_row_idx = 0
             with open(filename, 'r', encoding='utf-8') as f:
                 for i, line in enumerate(f):
@@ -1499,19 +1587,19 @@ class ReferenceGeneratorDialog(QDialog):
                         header_row_idx = i
                         break
             
-            # 2. 찾은 헤더 위치(skiprows)를 기준으로 불필요한 줄(--- 등)을 건너뛰고 데이터를 불러옵니다.
+            # 2. Load data, skipping rows above the detected header
             df = pd.read_csv(filename, sep=r'\s+', skiprows=header_row_idx)
             
-            # 3. 컬럼 이름 전처리 (대소문자 무시, 공백 및 언더바 제거)
+            # 3. Normalize column names (lowercase, strip underscores)
             clean_cols = [str(col).strip().lower().replace("_", "") for col in df.columns]
             df.columns = clean_cols
             
-            # 4. 데이터 추출
+            # 4. Extract data
             if 'pixel' in clean_cols and 'abssigma(nm)' in clean_cols:
                 self.ils_pixels = df['pixel'].values
                 self.ils_sigmas = df['abssigma(nm)'].values
             elif len(df.columns) >= 4:
-                # 혹시 헤더 이름이 살짝 달라도, 1열(픽셀)과 4열(Sigma nm)을 강제 추출하는 안전망
+                # Fallback: force-extract column 1 (pixel) and column 4 (Sigma nm)
                 self.ils_pixels = df.iloc[:, 0].values
                 self.ils_sigmas = df.iloc[:, 3].values
             else:
@@ -1550,32 +1638,35 @@ class ReferenceGeneratorDialog(QDialog):
             
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            # 1. 고해상도 그리드 생성 (정확한 수치 적분을 위함)
+            # 1. Create high-resolution grid for accurate numerical integration
             hr_step = 0.002  
             hr_wave = np.arange(self.target_wavelengths.min() - 5.0, self.target_wavelengths.max() + 5.0, hr_step)
             
-            # 원본 데이터를 고해상도 그리드에 매핑
+            # Map raw data onto the high-resolution grid
             f_raw = interp1d(self.raw_wave, self.raw_data, kind='linear', bounds_error=False, fill_value=0.0)
             hr_data = f_raw(hr_wave)
             
             lit_fwhm = self.spin_lit_fwhm.value()
             lit_sigma = lit_fwhm / 2.35482
             
-            # 2. 결과물을 담을 빈 배열 준비 
+            # 2. Allocate output array
             degraded_data = np.zeros(len(self.target_wavelengths))
             
-            # 3. FWHM 프로파일(몇 개의 점)을 전체 픽셀 영역에 부드럽게 보간
+            # 3. Interpolate FWHM profile over the full pixel range
             f_sigma = interp1d(self.ils_pixels.astype(float), self.ils_sigmas.astype(float), 
                                kind='linear', fill_value="extrapolate")
             pixel_indices = np.arange(len(self.target_wavelengths))
             target_sigmas = f_sigma(pixel_indices)
             
-            # 4. Wavelength-Dependent Convolution (다중 가우시안 커널)
+            # 4. Wavelength-Dependent Convolution (per-pixel Gaussian kernel)
             for i, target_w in enumerate(self.target_wavelengths):
                 inst_sigma = target_sigmas[i]
                 
+                # Variance addition: σ_applied² = σ_inst² − σ_lit²
+                # If the literature resolution is already coarser than our instrument,
+                # we set added_var to a tiny positive number (no de-sharpening possible).
                 if inst_sigma <= lit_sigma:
-                    added_var = 1e-10 
+                    added_var = 1e-10   # Effectively no extra broadening
                 else:
                     added_var = (inst_sigma**2) - (lit_sigma**2)
                 
@@ -1588,12 +1679,12 @@ class ReferenceGeneratorDialog(QDialog):
             self.gen_info = "Dynamic-ILS-Applied"
             
             # =========================================================
-            # 🌟 5. 결과 시각화 (에러 원천 차단 로직 적용)
+            # 5. Visualize results
             # =========================================================
-            ax_top = self.fig.axes[0]     # 무조건 위쪽 그래프
-            ax_bottom = self.fig.axes[1]  # 무조건 아래쪽 그래프
+            ax_top = self.fig.axes[0]     # Top graph
+            ax_bottom = self.fig.axes[1]  # Bottom graph
             
-            # 위쪽 그래프 지우고 그리기
+            # Redraw top graph
             ax_top.clear()
             ax_top.plot(self.target_wavelengths, self.final_ready_data, 'r-', label="Ready Ref (Dynamic ILS)")
             ax_top.set_xlabel("Wavelength (nm)")
@@ -1601,7 +1692,7 @@ class ReferenceGeneratorDialog(QDialog):
             ax_top.legend()
             
             
-            # 아래쪽 그래프 지우고 그리기
+            # Redraw bottom graph
             ax_bottom.clear()
             ax_bottom.plot(self.target_wavelengths, target_sigmas, 'g-', lw=2)
             ax_bottom.set_title("Wavelength-Dependent Sigma Profile")
@@ -1656,7 +1747,7 @@ class MonitorWidget(QWidget):
         self.latest_fit_data = None
         self.latest_raw_data = None
         
-        # 🌟 그래프 객체 저장용 딕셔너리 (깜빡임 방지의 핵심)
+        # Graph object cache (key to anti-flicker rendering)
         self.plot_items = {} 
         self.curve_items = {}
         
@@ -1670,7 +1761,7 @@ class MonitorWidget(QWidget):
         self.init_tab_viewer_pg()
         self.init_tab_hq_mpl()
 
-    # 🌟 공통 툴바 생성 도구
+    # Shared toolbar factory
     def _create_reset_toolbar(self, target_glw=None, target_pw=None):
         toolbar = QHBoxLayout()
         btn = QPushButton("🔄 Reset View (Auto Range)")
@@ -1684,13 +1775,13 @@ class MonitorWidget(QWidget):
         return toolbar
 
     def _reset_glw_views(self, glw):
-        """GraphicsLayoutWidget 안의 모든 그래프를 원래 비율로 복구"""
+        """Reset all graphs in the GraphicsLayoutWidget to their original auto-range."""
         for item in glw.ci.items:
             if isinstance(item, pg.PlotItem):
                 item.enableAutoRange(axis='xy', enable=True)
 
     # =========================================================
-    # [Tab 1] Components (깜빡임 방지 & 잔차 복구)
+    # [Tab 1] Components (anti-flicker & residual display)
     # =========================================================
     def init_tab_components_pg(self):
         self.tab_comp = QWidget()
@@ -1731,7 +1822,7 @@ class MonitorWidget(QWidget):
         self.tabs.addTab(self.tab_spec, "📊 Fit View (Fast)")
 
     # =========================================================
-    # [Tab 3] Trend (전체 데이터 & 자유 줌/스크롤 지원)
+    # [Tab 3] Trend (full dataset with free zoom/scroll)
     # =========================================================
     def init_tab_trend_pg(self):
         self.tab_trend = QWidget()
@@ -1791,7 +1882,7 @@ class MonitorWidget(QWidget):
         l_view.addLayout(h_ctrl)
         
         self.pw_view = pg.PlotWidget()
-        l_view.addLayout(self._create_reset_toolbar(target_pw=self.pw_view)) # 뷰어용 리셋 버튼
+        l_view.addLayout(self._create_reset_toolbar(target_pw=self.pw_view))
         self.pw_view.addLegend()
         self.pw_view.showGrid(x=True, y=True)
         self.curve_view = self.pw_view.plot(pen=pg.mkPen('b', width=1.5), name='Current')
@@ -1935,10 +2026,23 @@ class MonitorWidget(QWidget):
         self.curve_resid.setData(x_plot, intensity_raw - intensity_fit)
 
     def update_components(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params):
+        """
+        Refreshes the per-gas component view using an anti-flicker technique.
+
+        Anti-flicker pattern
+        --------------------
+        pyqtgraph PlotItem.plot() is slow — calling it every frame causes visible
+        flickering.  Instead, we create all PlotDataItem objects ONCE (stored in
+        self.curve_items) and then only call setData() on subsequent frames.
+        setData() pushes new pixel arrays directly to the GPU without re-allocating
+        the plot item, making updates fast enough for real-time display.
+
+        The layout is rebuilt from scratch only when the number of gases changes.
+        """
         gas_list = self.engine.gas_list
         if not gas_list: return
-        
-        # 🌟 1. 최초 1회만 Plot 틀 생성 (Residual 포함)
+
+        # 1. Create plot frames only once (including Residual)
         current_gas_count = len(gas_list)
         if "layout_ready" not in self.plot_items or self.plot_items["gas_count"] != current_gas_count:
             self.glw_comp.clear()
@@ -1963,7 +2067,7 @@ class MonitorWidget(QWidget):
             self.plot_items["layout_ready"] = True
             self.plot_items["gas_count"] = current_gas_count
 
-        # 🌟 2. 데이터 알맹이만 부드럽게 업데이트
+        # 2. Update data smoothly without recreating frames
         x_plot, _ = self.get_x_axis(pixel_idx)
         residual = intensity_raw - intensity_fit 
 
@@ -1977,6 +2081,14 @@ class MonitorWidget(QWidget):
         self.curve_items["residual"].setData(x_plot, residual)
 
     def update_trend(self, data: dict):
+        """
+        Appends one new data point to each trend graph (Shift, Squeeze, RMS).
+
+        Trend graphs keep the entire history in memory so the user can freely
+        zoom and scroll without data being thrown away.  Auto-range is only
+        applied along the X-axis (file index) to follow new data, while Y-axis
+        zoom is left under user control.
+        """
         idx = data.get('idx', 0)
         shift = data.get('shift', 0.0)
         squeeze = data.get('squeeze', 1.0)
@@ -1986,7 +2098,7 @@ class MonitorWidget(QWidget):
         self.y_sq.append(squeeze)
         self.y_rms.append(rms)
         
-        # 전체 데이터 유지 (자유로운 줌/팬 가능)
+        # Keep full dataset for free zoom/pan
         self.curve_sh.setData(self.x_data, self.y_sh)
         self.curve_sq.setData(self.x_data, self.y_sq)
         
@@ -1994,15 +2106,15 @@ class MonitorWidget(QWidget):
         rms_data[rms_data <= 0] = 1e-9
         self.curve_rms.setData(self.x_data, rms_data)
         
-        # Shift 그래프가 자동 모드라면 업데이트
+        # Update Shift graph if in auto-range mode
         if self.p_sh.getViewBox().autoRangeEnabled(): 
             self.p_sh.enableAutoRange(axis='x', enable=True)
             
-        # Squeeze 그래프가 자동 모드라면 업데이트
+        # Update Squeeze graph if in auto-range mode
         if self.p_sq.getViewBox().autoRangeEnabled(): 
             self.p_sq.enableAutoRange(axis='x', enable=True)
             
-        # RMS 그래프가 자동 모드라면 업데이트
+        # Update RMS graph if in auto-range mode
         if self.p_rms.getViewBox().autoRangeEnabled(): 
             self.p_rms.enableAutoRange(axis='x', enable=True)
 
@@ -2016,6 +2128,14 @@ class MonitorWidget(QWidget):
     # [HQ Export] 
     # =========================================================
     def render_hq_plot(self):
+        """
+        Renders a publication-quality Matplotlib figure from the latest fit data.
+
+        Uses Matplotlib instead of pyqtgraph because Matplotlib produces
+        vector-quality output (PDF, SVG, high-DPI PNG) suitable for papers.
+        The interactive pyqtgraph tabs are optimized for speed; this tab is
+        optimized for appearance — render only when you need to export.
+        """
         if self.latest_fit_data is None:
             QMessageBox.warning(self, "No Data", "Please run the analysis or double-click to load data first!")
             return
@@ -2052,14 +2172,28 @@ class MonitorWidget(QWidget):
 # =============================================================================
 class R_GeneratorDialog(QDialog):
     """
-    BBCEAS Universal R-Curve Generator
-    Calculates the wavelength-dependent mirror reflectivity (R(λ)) 
-    using the difference in Rayleigh scattering cross-sections of two known gases.
+    BBCEAS Universal R-Curve Generator.
+
+    Calculates the wavelength-dependent mirror reflectivity R(λ) using the
+    difference in Rayleigh scattering cross-sections of two well-characterised gases.
+
+    Physical principle (Washenfelder et al. 2008)
+    ---------------------------------------------
+    When light bounces between two high-reflectivity mirrors separated by distance d,
+    the effective path length is L_eff = d / (1 − R).  By measuring two gases whose
+    scattering is well-known (e.g., Zero-Air and Helium), we can solve for R(λ):
+
+        ratio = I_gas2 / I_gas1
+        R(λ)  = 1 − d · (ratio·α₂ − α₁) / (1 − ratio)
+
+    The resulting R-curve is saved as a CSV file and loaded into the main engine
+    before analysis to enable accurate ppb-level concentration retrieval.
     """
     def __init__(self, parent, wavelengths):
         super().__init__(parent)
         self.setWindowTitle("🎡 BBCEAS Universal R-Curve Generator")
-        self.resize(550, 650)
+        _s = _ui_scale()
+        self.resize(int(550 * _s), int(650 * _s))
         self.wl = wavelengths
         self.data1 = None
         self.data2 = None
@@ -2083,44 +2217,85 @@ class R_GeneratorDialog(QDialog):
         phys_group.setLayout(phys_form)
         self.main_layout.addWidget(phys_group)
 
+        # Preset table: (C, k, reference)
+        PRESETS = {
+            "Zero-Air (ZA/Air)":    (1.100065e-15, -4.1656, "Bucholtz (1995) J. Atmos. Sci. 52, 1705"),
+            "Nitrogen (N2)":        (1.2577e-15,   -4.1814, "Naus & Ubachs (2000) J. Mol. Spectrosc. 203, 106"),
+            "Helium (He)":          (1.336e-17,    -4.1287, "Ityaksov et al. (2008) Chem. Phys. Lett. 462, 31"),
+            "Argon (Ar)":           (4.50e-17,     -4.0564, "Ityaksov et al. (2008) Chem. Phys. Lett. 462, 31"),
+            "Carbon Dioxide (CO2)": (6.50e-16,     -4.26,   "Sneep & Ubachs (2005) J. Quant. Spectrosc. 92, 293 (approx.)"),
+            "Neon (Ne)":            (2.68e-18,     -4.12,   "Sneep & Ubachs (2005) J. Quant. Spectrosc. 92, 293 (approx.)"),
+            "Krypton (Kr)":         (2.01e-16,     -4.02,   "Sneep & Ubachs (2005) J. Quant. Spectrosc. 92, 293 (approx.)"),
+            "Custom Input":         (None,          None,    ""),
+        }
+
         # 2. Gas Slot Generator (Returns the constructed GroupBox and its widgets)
         def create_gas_slot(slot_num):
             box = QGroupBox(f"Gas Slot {slot_num} Settings")
             vbox = QVBoxLayout()
-            
+
             combo = QComboBox()
-            combo.addItems(["Zero-Air (ZA/Air)", "Nitrogen (N2)", "Helium (He)", "Custom Input"])
-            
-            # Custom input fields
-            custom_widget = QWidget()
-            custom_hbox = QHBoxLayout(custom_widget)
-            txt_c = QLineEdit(); txt_c.setPlaceholderText("C (e.g., 1.1e-15)")
-            txt_k = QLineEdit(); txt_k.setPlaceholderText("k (e.g., -4.1)")
-            
-            custom_hbox.addWidget(QLabel("C:"))
-            custom_hbox.addWidget(txt_c)
-            custom_hbox.addWidget(QLabel("k:"))
-            custom_hbox.addWidget(txt_k)
-            custom_widget.setVisible(False)
-            
-            # Toggle custom input visibility based on combobox selection
-            combo.currentIndexChanged.connect(
-                lambda idx: custom_widget.setVisible(combo.currentText() == "Custom Input")
+            combo.addItems(list(PRESETS.keys()))
+
+            # C / k fields — always visible; pre-filled for presets, blank for Custom
+            ck_widget = QWidget()
+            ck_hbox = QHBoxLayout(ck_widget)
+            ck_hbox.setContentsMargins(0, 0, 0, 0)
+            txt_c = QLineEdit()
+            txt_c.setPlaceholderText("C  (e.g. 1.1e-15)")
+            txt_k = QLineEdit()
+            txt_k.setPlaceholderText("k  (e.g. -4.17)")
+            ck_hbox.addWidget(QLabel("C:"))
+            ck_hbox.addWidget(txt_c)
+            ck_hbox.addWidget(QLabel("k:"))
+            ck_hbox.addWidget(txt_k)
+
+            # Always-visible formula explanation
+            lbl_ck_info = QLabel(
+                "<b>σ(λ) = C · λᵏ</b> &nbsp;[cm²]<br>"
+                "C : scattering coefficient — gas-specific constant; larger molecules / higher polarity → larger C<br>"
+                "k : wavelength exponent — typically −4 ~ −4.3; pure Rayleigh gives exactly −4"
             )
-            
+            lbl_ck_info.setStyleSheet("color: #333; font-size: 10px; background: #f5f5f5; padding: 4px; border-radius: 3px;")
+            lbl_ck_info.setWordWrap(True)
+
+            # Reference label shown below C/k fields
+            lbl_ref = QLabel("")
+            lbl_ref.setStyleSheet("color: #555; font-size: 10px; font-style: italic;")
+            lbl_ref.setWordWrap(True)
+
+            def on_combo_changed():
+                name = combo.currentText()
+                c_val, k_val, ref = PRESETS[name]
+                if c_val is not None:
+                    txt_c.setText(f"{c_val:.6e}")
+                    txt_k.setText(str(k_val))
+                    txt_c.setStyleSheet("")
+                    txt_k.setStyleSheet("")
+                    lbl_ref.setText(f"Ref: {ref}")
+                else:
+                    txt_c.clear()
+                    txt_k.clear()
+                    lbl_ref.setText("Enter C and k manually.")
+
+            combo.currentIndexChanged.connect(lambda _: on_combo_changed())
+            on_combo_changed()  # Populate fields for the default selection
+
             btn_file = QPushButton(f"📂 Load Gas {slot_num} Spectrum")
             btn_file.clicked.connect(lambda: self.load_data(slot_num))
-            
+
             lbl_file = QLabel(f"Gas {slot_num}: No file selected")
             lbl_file.setStyleSheet("color: gray; font-size: 11px;")
-            
+
             vbox.addWidget(QLabel("<b>Select Gas Type:</b>"))
             vbox.addWidget(combo)
-            vbox.addWidget(custom_widget)
+            vbox.addWidget(ck_widget)
+            vbox.addWidget(lbl_ck_info)
+            vbox.addWidget(lbl_ref)
             vbox.addWidget(btn_file)
             vbox.addWidget(lbl_file)
             box.setLayout(vbox)
-            
+
             return box, combo, txt_c, txt_k, lbl_file
 
         # Instantiate Gas 1 and Gas 2 widgets
@@ -2188,32 +2363,41 @@ class R_GeneratorDialog(QDialog):
             QMessageBox.critical(self, "Load Error", f"Error loading file:\n{e}")
 
     def get_rayleigh(self, combo, txt_c, txt_k):
-        r"""Returns the Rayleigh scattering cross-section $\sigma(\lambda)$ based on the empirical formula $C \cdot \lambda^k$."""
-        mode = combo.currentText()
-        if mode == "Helium (He)": 
-            return 1.336e-17 * (self.wl ** -4.1287)
-        elif mode == "Nitrogen (N2)": 
-            return 1.2577e-15 * (self.wl ** -4.1814)
-        elif mode == "Zero-Air (ZA/Air)": 
-            return 1.100065e-15 * (self.wl ** -4.1656)
-        else:
-            try:
-                c_val = float(txt_c.text())
-                k_val = float(txt_k.text())
-                return c_val * (self.wl ** k_val)
-            except ValueError:
-                raise ValueError("Invalid Custom C or k values. Please enter valid numbers.")
+        r"""
+        Returns the Rayleigh scattering cross-section σ(λ) [cm²] using
+        σ = C · λ^k  (λ in nm), where C and k are read directly from the UI
+        fields so the user can override preset values at any time.
+        """
+        try:
+            c_val = float(txt_c.text())
+            k_val = float(txt_k.text())
+        except ValueError:
+            gas = combo.currentText()
+            raise ValueError(
+                f"C or k value for '{gas}' is not a valid number.\n"
+                "Please check the input fields."
+            )
+        return c_val * (self.wl ** k_val)
 
     def calculate_r(self):
         """Calculates the mirror reflectivity R(λ) and prompts the user to save it as a CSV."""
         if self.data1 is None or self.data2 is None:
             QMessageBox.warning(self, "Missing Data", "Please load spectra for both Gas 1 and Gas 2.")
             return
-        
+
+        if self.wl is None:
+            QMessageBox.warning(
+                self, "No Wavelength Calibration",
+                "Wavelength calibration has not been loaded.\n\n"
+                "Please load or run the Wavelength Calibration Tool first,\n"
+                "then re-open the R-Curve Generator."
+            )
+            return
+
         try:
             # Helper to align data lengths if resolutions mismatch
             def match_length(data, target_len):
-                if len(data) == target_len: 
+                if len(data) == target_len:
                     return data
                 return np.interp(np.linspace(0, 1, target_len), np.linspace(0, 1, len(data)), data)
 
@@ -2238,31 +2422,53 @@ class R_GeneratorDialog(QDialog):
             
             r_curve = 1 - cavity_len * ((ratio * alpha2 - alpha1) / (1 - ratio))
 
-            gas1 = self.combo1.currentText().split(' ')[ 0 ]
-            gas2 = self.combo2.currentText().split(' ')[ 0 ]
+            # Validate R range: R must be in (0, 1) for a physically real mirror.
+            # Values outside this range indicate noise, division-by-zero near ratio=1,
+            # or a mis-matched gas pair. Clip and warn so downstream analysis is safe.
+            n_bad = int(np.sum((r_curve < 0) | (r_curve > 1)))
+            if n_bad > 0:
+                r_curve = np.clip(r_curve, 0.0, 1.0)
+                QMessageBox.warning(
+                    self, "Out-of-Range Pixels",
+                    f"{n_bad} pixel(s) had R < 0 or R > 1 and were clipped to [0, 1].\n\n"
+                    "This typically occurs at spectral edges where I₂/I₁ ≈ 1 "
+                    "(ratio denominator near zero) or where signal-to-noise is poor.\n"
+                    "Check that the correct gases are assigned to each slot "
+                    "and that the spectra cover the same wavelength range."
+                )
+
+            gas1 = self.combo1.currentText().split(' ')[0]
+            gas2 = self.combo2.currentText().split(' ')[0]
             import datetime
             date_str = datetime.datetime.now().strftime("%Y%m%d")
-            
+
             default_fname = f"RCurve_{gas1}_vs_{gas2}_d{cavity_len}cm_{date_str}.csv"
 
             # Save the result
             save_path, _ = QFileDialog.getSaveFileName(self, "Save R-Curve", default_fname, "CSV (*.csv)")
-            
+
             if save_path:
                 pd.DataFrame({'Wavelength': self.wl, 'Reflectivity': r_curve}).to_csv(save_path, index=False)
+                self.r_curve_result = r_curve  # Expose result so caller can load it directly
                 QMessageBox.information(self, "Success", "Reflectivity curve saved successfully!")
                 self.accept()
                 
         except Exception as e:
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate R(λ):\n{e}")
 
-# PostProcessDialog removed — functionality covered by save() in app_window.py
+# PostProcessDialog: functionality superseded by save() in app_window.py.
+# Retained here as a stub so that any external scripts importing this class
+# do not break with an ImportError.
 class PostProcessDialog(QDialog):
-    """Deprecated — kept as stub to avoid import errors if referenced externally."""
+    """
+    Deprecated post-processing dialog (superseded by app_window.save()).
+    Kept as a stub for backward compatibility only — do not use in new code.
+    """
     def __init__(self, parent, analysis_results, wavelengths):
         super().__init__(parent)
         self.setWindowTitle("📊 BBCEAS Precision Concentration & Multi-Format Export")
-        self.resize(500, 600)
+        _s = _ui_scale()
+        self.resize(int(500 * _s), int(600 * _s))
         
         self.results = analysis_results # Current analysis results (list of dicts or DataFrame)
         self.wavelengths = wavelengths

@@ -2,113 +2,289 @@ import os
 import numpy as np
 import pandas as pd
 
+
+def ui_scale() -> float:
+    """Return a UI scale factor relative to 1080p reference height.
+    Clamps between 0.75 and 1.25 to avoid extreme layouts."""
+    try:
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return 1.0
+        h = screen.availableGeometry().height()
+        return max(0.75, min(1.25, h / 1080.0))
+    except Exception:
+        return 1.0
+
+
 class DataIO:
     """
-    CAESAR Pro Data Input/Output Manager
-    모든 파일 로딩과 데이터 정제를 전담하여 엔진과 UI를 가볍게 만듭니다.
-    Araon 2025 Mega-Matrix 포맷 및 일반 1D DOAS 포맷을 모두 지원합니다.
+    CAESAR Pro Data Input/Output Manager.
+
+    Centralizes all file-reading logic so the engine and UI stay clean.
+    Supports two measurement formats:
+      - Araon 2025 Mega-Matrix (.dat): one scan per row, 6175+ columns
+      - Standard 1D DOAS / BBCEAS text files: one intensity value per line
+
+    All methods are @staticmethod — call them as DataIO.load_reference(path),
+    no instance required.
     """
 
     @staticmethod
     def enforce_1d_array(data):
-        if data is None: return np.array([0.0])
-        if isinstance(data, tuple): data = data[ 0 ]
+        """
+        Defensive helper: normalizes any wavelength input into a flat 1D float array.
+
+        Why this exists: several callers pass wavelength data in different shapes
+        (None, a tuple from a loader, a 2-D matrix, etc.).  This function handles
+        every case so the rest of the engine never has to check.
+
+        Returns np.array([0.0]) when data is None (signals 'no wavelength axis').
+        """
+        if data is None:
+            return np.array([0.0])
+        if isinstance(data, tuple):
+            data = data[0]   # Some loaders return (wavelength, intensity) as a tuple
         return np.atleast_1d(data).flatten().astype(float)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Araon Mega-Matrix helpers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_row_raw(filepath, row_index):
+        """
+        Reads one specific row from a tab-delimited file and returns it as a
+        float numpy array.  Rows with different column counts (e.g. Araon's
+        6177-col init row vs 6181-col data rows) are handled correctly because
+        we read line-by-line rather than using pandas, which enforces a fixed
+        column count across the whole file.
+        """
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+            for i, line in enumerate(fh):
+                if not line.strip():
+                    continue
+                if i == row_index:
+                    vals = line.strip().split('\t')
+                    raw = np.empty(len(vals), dtype=float)
+                    for j, v in enumerate(vals):
+                        try:
+                            raw[j] = float(v)
+                        except (ValueError, TypeError):
+                            raw[j] = np.nan
+                    return raw
+        raise ValueError(f"Row {row_index} not found in {os.path.basename(filepath)}")
+
+    @staticmethod
+    def is_araon_mega_matrix(filepath):
+        """
+        Returns True when the first non-empty row has ≥6175 tab-separated
+        columns — the signature of the Araon LabVIEW Mega-Matrix format.
+        """
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if line.strip():
+                        return len(line.strip().split('\t')) >= 6175
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def count_scan_rows(filepath):
+        """Counts the number of non-empty rows (= scans) in a Mega-Matrix file."""
+        count = 0
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if line.strip():
+                        count += 1
+        except Exception:
+            pass
+        return count
+
+    @staticmethod
+    def expand_to_scan_list(filepath):
+        """
+        Expands a file path into a list of (filepath, row_index) tuples.
+
+        For Araon Mega-Matrix files (one scan per row), every row becomes a
+        separate scan entry.  For plain 1D files the result is always a
+        single-element list: [(filepath, 0)].
+        """
+        if DataIO.is_araon_mega_matrix(filepath):
+            n = DataIO.count_scan_rows(filepath)
+            return [(filepath, i) for i in range(n)]
+        return [(filepath, 0)]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Reference and measurement loaders
+    # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def load_reference(filepath):
+        """
+        Loads a cross-section reference file (e.g., NO2 absorption spectrum from HITRAN).
+
+        Expected file format:
+          - Two columns:  wavelength (nm) | cross-section (cm²/molecule)
+          - OR one column: cross-section only (no wavelength axis)
+          - Lines starting with '#' are treated as comments and skipped.
+
+        Returns:
+          (wave_nm, intensity_raw)  — wave_nm is None when the file has only one column.
+        """
         try:
+            # Try whitespace-delimited first (most common HITRAN / DOASIS format),
+            # then fall back to comma-delimited if that fails
             try:
                 df = pd.read_csv(filepath, sep=r'\s+', header=None, comment='#')
             except Exception:
                 df = pd.read_csv(filepath, sep=',', header=None, comment='#')
 
             if len(df.columns) >= 2:
-                wave_nm = pd.to_numeric(df.iloc[:, 0 ], errors='coerce').values
-                intensity_raw = pd.to_numeric(df.iloc[:, 1 ], errors='coerce').values
+                # Two-column file: col 0 = wavelength (nm), col 1 = cross-section
+                wave_nm = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
+                intensity_raw = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
             else:
+                # Single-column file: intensity only, caller must supply its own axis
                 wave_nm = None
-                intensity_raw = pd.to_numeric(df.iloc[:, -1 ], errors='coerce').values
+                intensity_raw = pd.to_numeric(df.iloc[:, -1], errors='coerce').values
 
             return wave_nm, intensity_raw
+
         except Exception as e:
             raise RuntimeError(f"Reference load failed: {str(e)}")
 
     @staticmethod
     def load_measurement(filepath, pixel_min=0, pixel_max=None):
-        """기존의 단순 스펙트럼 읽기용 호환성 함수"""
+        """
+        Loads a simple 1D spectrum file (one raw intensity value per line).
+
+        The pixel range [pixel_min, pixel_max) lets the caller slice out only
+        the wavelength window relevant to the fit, reducing memory and noise.
+
+        Returns:
+          (pixel_idx, intensity_raw)
+            - pixel_idx: integer array [pixel_min, pixel_min+1, ..., pixel_max-1]
+            - intensity_raw: float array of intensities within that range
+
+        Raises RuntimeError if the file cannot be parsed or the data is garbage.
+        """
         try:
+            # Read all values as strings first, then convert — handles mixed formats
+            # that would choke a direct float parser (e.g., trailing units or headers)
             df = pd.read_csv(filepath, sep=r'\s+', header=None, dtype=str)
-            intensity_full = pd.to_numeric(df.iloc[:, 0 ], errors='coerce').values
-            
+            intensity_full = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
+
+            # Strip NaN / Inf values that would corrupt fitting later
             valid_mask = ~np.isnan(intensity_full) & np.isfinite(intensity_full)
-            intensity_clean = intensity_full[ valid_mask ]
-            
+            intensity_clean = intensity_full[valid_mask]
+
             p_min = int(pixel_min)
             if len(intensity_clean) < p_min + 10:
-                raise ValueError("데이터의 길이가 픽셀 최소 범위보다 짧습니다.")
+                raise ValueError("Data length is shorter than the specified pixel minimum.")
 
+            # If no upper bound given, read to the end of the file
             if pixel_max is None or int(pixel_max) > len(intensity_clean):
                 p_max = len(intensity_clean)
             else:
                 p_max = int(pixel_max)
 
-            intensity_raw = intensity_clean[ p_min : p_max ]
+            intensity_raw = intensity_clean[p_min:p_max]
             pixel_idx = np.arange(p_min, p_max)
 
+            # Sanity check: all-zero or near-zero files are usually empty or corrupt
             if np.max(np.abs(intensity_raw)) < 1e-10:
-                raise ValueError("Garbage data detected (값이 너무 작음)")
+                raise ValueError("Garbage data detected (values too small)")
 
             return pixel_idx, intensity_raw
 
         except Exception as e:
-            raise RuntimeError(f"측정 파일 읽기 실패 ({os.path.basename(filepath)}): {str(e)}")
+            raise RuntimeError(
+                f"Failed to read measurement file ({os.path.basename(filepath)}): {str(e)}"
+            )
 
     @staticmethod
-    def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None):
+    def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None, row_index=0):
         """
-        Extracts Spectrum, Flag, Temp, and Press from Araon Raw .dat files.
-        Mapping based on LabVIEW Mega-Matrix format.
+        Extracts spectrum + housekeeping scalars from the Araon Raw .dat format.
+
+        The Araon LabVIEW system saves each scan as a single horizontal row with
+        6175+ columns (the 'Mega-Matrix' format):
+
+          Column range  2053–4100  →  CH1 NO2 spectrum  (2048 pixels)
+          Column        4          →  state flag  (1=Ambient, 500~503=ZA, 510~513=He)
+          Column        6162       →  cell pressure  (mbar)
+          Column        6174       →  cell temperature (°C)
+
+        row_index selects which row (scan) to read from a multi-scan file.
+        Falls back to treating the whole file as a plain 1D spectrum when the
+        file has fewer than 6175 columns per row.
+
+        Returns:
+          (pixel_idx, intensity_raw, state_flag, env_t, env_p)
         """
         try:
-            # Read all columns for the first row (Horizontal format)
-            df = pd.read_csv(filepath, sep=r'\s+', header=None, dtype=str, nrows=1)
-            
-            # Flatten to 1D array to handle horizontal format correctly
-            raw_data = pd.to_numeric(df.values.flatten(), errors='coerce')
-            
-            # Default fallback values
-            state_flag = 0  
+            # Read the target row directly — avoids pandas column-count enforcement
+            # which breaks on Araon files that mix 6177-col and 6181-col rows.
+            raw_probe = DataIO._read_row_raw(filepath, row_index)
+
+            # Safe defaults in case housekeeping columns are missing
+            state_flag = 0
             env_t = 25.0
             env_p = 1013.25
-            
-            # Check if it is the Araon Mega-Matrix format (6175+ columns)
-            if len(raw_data) >= 6175:
-                # Ch1 NO2 Spectrum (Index 2053 to 4100 -> Length 2048)
-                intensity_full = raw_data[ 2053 : 4101 ]
-                
-                # Housekeeping Data (Index based on MATLAB 1-based mapping)
-                state_flag = int(raw_data[ 4 ])  # 5th value
-                env_p = raw_data[ 6162 ]         # presscell1 (4115+2048-1)
-                env_t = raw_data[ 6174 ]         # tempcell1 (4127+2048-1)
+
+            if len(raw_probe) >= 6175:
+                # ── Araon Mega-Matrix format ─────────────────────────────────
+                intensity_full = raw_probe[2053:4101]  # 2048-pixel CH1 spectrum
+
+                # Extract housekeeping scalars from their fixed byte offsets
+                state_flag = int(raw_probe[4])   # Measurement state flag
+
+                # Raw units from LabVIEW:
+                #   pressure  → 0.01 PSI counts  →  × (0.01 × 6894.73326 Pa/PSI) / 100 = mbar
+                #   temperature → 0.01 °C counts →  ÷ 100 = °C
+                env_p = raw_probe[6162] * (0.01 * 6894.73326 / 100.0)
+                env_t = raw_probe[6174] / 100.0
+
+                # Sensor saturation / disconnection returns 65535 or 0 in raw counts
+                raw_p_count = raw_probe[6162]
+                raw_t_count = raw_probe[6174]
+                if np.isnan(raw_p_count) or raw_p_count in (65535, 0):
+                    env_p = 1013.25
+                if np.isnan(raw_t_count) or raw_t_count in (65535, 0):
+                    env_t = 25.0
             else:
+                # ── Regular 1D file (one value per line, e.g. alpha trace) ──
+                # Re-read the whole file to get all rows, not just the target row.
+                df_full = pd.read_csv(filepath, sep=r'\s+', header=None, dtype=str)
+                raw_data = pd.to_numeric(df_full.values.flatten(), errors='coerce')
                 intensity_full = raw_data
 
+            # Remove NaN / Inf before slicing to the requested pixel range
             valid_mask = ~np.isnan(intensity_full) & np.isfinite(intensity_full)
-            intensity_clean = intensity_full[ valid_mask ]
-            
-            p_min = int(pixel_min)
-            p_max = len(intensity_clean) if (pixel_max is None or int(pixel_max) > len(intensity_clean)) else int(pixel_max)
+            intensity_clean = intensity_full[valid_mask]
 
-            intensity_raw = intensity_clean[ p_min : p_max ]
+            p_min = int(pixel_min)
+            p_max = (
+                len(intensity_clean)
+                if (pixel_max is None or int(pixel_max) > len(intensity_clean))
+                else int(pixel_max)
+            )
+
+            intensity_raw = intensity_clean[p_min:p_max]
             pixel_idx = np.arange(p_min, p_max)
 
             return pixel_idx, intensity_raw, state_flag, env_t, env_p
 
         except Exception as e:
-            raise RuntimeError(f"HK Data Load Failed ({os.path.basename(filepath)}): {str(e)}")
+            raise RuntimeError(
+                f"HK Data Load Failed ({os.path.basename(filepath)}): {str(e)}"
+            )
 
     @staticmethod
     def extract_gas_name(filepath):
+        """Returns the gas species name by stripping the path and extension from a filename."""
         base = os.path.basename(filepath)
-        return os.path.splitext(base)[ 0 ]
+        return os.path.splitext(base)[0]

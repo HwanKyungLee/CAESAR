@@ -1,48 +1,27 @@
-import sys
 import os
 import math
 import datetime
-import time
 import json
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.rcParams['font.family'] = 'Malgun Gothic'
-matplotlib.rcParams['axes.unicode_minus'] = False
-
-# [PyQt6] Backend
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
-from matplotlib.figure import Figure
-from matplotlib.widgets import SpanSelector
-from matplotlib.ticker import ScalarFormatter
-
-from scipy.optimize import curve_fit, least_squares, lsq_linear
-from scipy.interpolate import interp1d
-from scipy.signal import convolve
-from scipy.signal import find_peaks
-from scipy.stats import norm
-from scipy.signal.windows import tukey
-from scipy.ndimage import gaussian_filter1d
-from numpy.polynomial import chebyshev
 
 
 # [PyQt6] Modules
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
-                             QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, 
-                             QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
-                             QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
-                             QCheckBox, QGridLayout, QInputDialog, QRadioButton, QButtonGroup,
-                             QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout, QMenu)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPixmap
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QPushButton, QLabel, QFileDialog,
+                             QTableWidget, QTableWidgetItem, QMessageBox,
+                             QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog,
+                             QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox,
+                             QCheckBox, QFormLayout, QMenu)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 
 from engine import UniversalEngine
-from worker import AnalysisWorker
+from worker import AnalysisWorker, AlphaExportWorker, AlphaFitWorker
+from data_io import DataIO
 from ui_dialogs import *
 
 class CAESARAnalyzer(QMainWindow):
@@ -59,15 +38,16 @@ class CAESARAnalyzer(QMainWindow):
         self.results = []
         self.ref_widgets = []
         
-        # Calibration State Variables
-        self.calib_shift = 0.0
         self.calib_squeeze = 1.0
         
         self.init_ui()
         
     def init_ui(self):
+        from data_io import ui_scale
+        s = ui_scale()
+        self._s = s
         self.setWindowTitle('CAESAR Pro v1.0')
-        self.resize(1400, 850)
+        self.resize(int(1400 * s), int(850 * s))
         
         # Create horizontal splitter (Left: Control Panel / Right: Monitor Tabs)
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -98,29 +78,18 @@ class CAESARAnalyzer(QMainWindow):
         
         # --- 1. Reference Management Section ---
         grp_ref = QGroupBox("1. Reference")
-        grp_ref.setMinimumHeight(250)
+        grp_ref.setMinimumHeight(int(250 * self._s))
         lay_ref = QVBoxLayout()
-        
+
         # Reference List Scroll Area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setMinimumHeight(100) 
+        self.scroll.setMinimumHeight(int(100 * self._s))
         self.ref_in = QWidget()
         self.ref_lay = QVBoxLayout()
         self.ref_in.setLayout(self.ref_lay)
         self.scroll.setWidget(self.ref_in)
         lay_ref.addWidget(self.scroll)
-        
-        # Batch Multiplier Scale
-        layout_mult = QHBoxLayout()
-        layout_mult.addWidget(QLabel("Ref Multiplier (1eX): 10^"))
-        self.spin_mult_pow = QSpinBox()
-        self.spin_mult_pow.setRange(-100, 100)
-        self.spin_mult_pow.setValue(0)
-        layout_mult.addWidget(self.spin_mult_pow)
-        layout_mult.addWidget(QLabel("(e.g., 40 -> x1e40)"))
-        layout_mult.addStretch(1)
-        lay_ref.addLayout(layout_mult)
         
         # Load and Mask Buttons
         layout_load = QHBoxLayout()
@@ -143,13 +112,24 @@ class CAESARAnalyzer(QMainWindow):
         btn_lock.setStyleSheet("background-color: #e1f5fe; color: #0277bd; font-weight: bold; padding: 5px;")
         lay_ref.addWidget(btn_lock)
         
-        # ILS Convolution Blur
+        # ILS Convolution Blur (Voigt = Gaussian ⊗ Lorentzian)
         layout_conv = QHBoxLayout()
-        layout_conv.addWidget(QLabel("FWHM:"))
+        layout_conv.addWidget(QLabel("Gaussian:"))
         self.spin_fwhm = QDoubleSpinBox()
         self.spin_fwhm.setRange(0, 50)
+        self.spin_fwhm.setDecimals(2)
+        self.spin_fwhm.setSuffix(" px")
+        self.spin_fwhm.setToolTip("Gaussian FWHM — slit-width broadening (σ = FWHM/2.355)")
         layout_conv.addWidget(self.spin_fwhm)
-        btn_conv = QPushButton("Blur")
+        layout_conv.addWidget(QLabel("Lorentzian:"))
+        self.spin_fwhm_lorentzian = QDoubleSpinBox()
+        self.spin_fwhm_lorentzian.setRange(0, 20)
+        self.spin_fwhm_lorentzian.setValue(0.0)
+        self.spin_fwhm_lorentzian.setDecimals(2)
+        self.spin_fwhm_lorentzian.setSuffix(" px")
+        self.spin_fwhm_lorentzian.setToolTip("Lorentzian FWHM — optical aberrations, grating scatter\n0.0 = pure Gaussian ILS")
+        layout_conv.addWidget(self.spin_fwhm_lorentzian)
+        btn_conv = QPushButton("Apply ILS")
         btn_conv.clicked.connect(self.apply_convolution)
         layout_conv.addWidget(btn_conv)
         lay_ref.addLayout(layout_conv)
@@ -174,11 +154,11 @@ class CAESARAnalyzer(QMainWindow):
         
         layout_px.addWidget(QLabel("Pixel Min:"))
         self.txt_min = QLineEdit("0")
-        self.txt_min.setFixedWidth(50)
+        self.txt_min.setFixedWidth(int(50 * self._s))
         layout_px.addWidget(self.txt_min)
         layout_px.addWidget(QLabel("Max:"))
         self.txt_max = QLineEdit("950")
-        self.txt_max.setFixedWidth(50)
+        self.txt_max.setFixedWidth(int(50 * self._s))
         layout_px.addWidget(self.txt_max)
         
         btn_sel = QPushButton("Vis. Select")
@@ -210,26 +190,8 @@ class CAESARAnalyzer(QMainWindow):
         
         # --- Detailed Parameters Section (Poly, Shift Center, Precision Control) ---
         grp_calib = QGroupBox("Parameters")
-        lay_calib_main = QVBoxLayout() # 세로 정렬로 변경하여 위아래로 나눔
+        lay_calib_main = QVBoxLayout() # Changed to vertical layout to split top/bottom
         
-        # 프리셋(Preset) 콤보박스 라인
-        lay_preset = QHBoxLayout()
-        lay_preset.addWidget(QLabel("🎯 Fit Preset:"))
-        self.combo_preset = QComboBox()
-        self.combo_preset.addItems([
-            "Custom (Manual)", 
-            "🔬 Lab Precision (Zero Noise)", 
-            "🛰️ Ambient Standard (Monitoring)", 
-            "🏎️ Fast Plume (High Tracking)", 
-            "📉 Stable Trend (Long-term)", 
-            "⛈️ Harsh Weather (Noisy)", 
-            "🚐 Mobile Sync (Vibration)", 
-            "🛡️ Extreme Recovery (Glitched)"
-        ])
-        self.combo_preset.currentIndexChanged.connect(self.apply_preset) # 연동 함수 연결
-        lay_preset.addWidget(self.combo_preset)
-        lay_calib_main.addLayout(lay_preset)
-
         lay_calib = QHBoxLayout()
         
         lay_calib.addWidget(QLabel("Step Limit:"))
@@ -270,25 +232,47 @@ class CAESARAnalyzer(QMainWindow):
         
         lay_calib_main.addLayout(lay_calib)
 
+        lay_thresh = QHBoxLayout()
+        lay_thresh.addWidget(QLabel("OK RMS Threshold (%):"))
+        self.spin_rms_thresh = QDoubleSpinBox()
+        self.spin_rms_thresh.setRange(1.0, 50.0)
+        self.spin_rms_thresh.setSingleStep(1.0)
+        self.spin_rms_thresh.setDecimals(1)
+        self.spin_rms_thresh.setValue(10.0)
+        self.spin_rms_thresh.setToolTip(
+            "A fit is accepted as OK when RMS residual < (signal mean × threshold).\n"
+            "10% = standard DOAS quality criterion.\n"
+            "Lower = stricter. Raise only if data is extremely noisy."
+        )
+        lay_thresh.addWidget(self.spin_rms_thresh)
+        lay_thresh.addWidget(QLabel("  (10% = standard DOAS criterion)"))
+        lay_calib_main.addLayout(lay_thresh)
+
         lay_kalman = QHBoxLayout()
-        lay_kalman.addWidget(QLabel("Kalman Q(추종력):"))
+        lay_kalman.addWidget(QLabel("🔄 Kalman  Q:"))
         self.spin_kalman_q = QDoubleSpinBox()
         self.spin_kalman_q.setRange(0.0001, 1.0)
         self.spin_kalman_q.setSingleStep(0.0005)
         self.spin_kalman_q.setDecimals(4)
         self.spin_kalman_q.setValue(0.0005)
-        self.spin_kalman_q.setToolTip("값이 클수록 변화를 빠르게 따라갑니다. (차량 배기가스 등 급격한 변화 관측 시 증가)")
+        self.spin_kalman_q.setToolTip(
+            "Kalman Q — process noise / tracking speed\n"
+            "Higher = tracks rapid changes faster (e.g. vehicle plumes)\n"
+            "Lower = smoother output for stable ambient monitoring"
+        )
         lay_kalman.addWidget(self.spin_kalman_q)
-
-        lay_kalman.addWidget(QLabel("R(안정도):"))
+        lay_kalman.addWidget(QLabel("R:"))
         self.spin_kalman_r = QDoubleSpinBox()
         self.spin_kalman_r.setRange(0.001, 1.0)
         self.spin_kalman_r.setSingleStep(0.01)
         self.spin_kalman_r.setDecimals(3)
         self.spin_kalman_r.setValue(0.050)
-        self.spin_kalman_r.setToolTip("값이 클수록 잔잔한 노이즈를 강하게 억제합니다. (안정적인 배경 농도 관측 시 증가)")
+        self.spin_kalman_r.setToolTip(
+            "Kalman R — measurement noise / smoothing strength\n"
+            "Higher = stronger smoothing (stable background)\n"
+            "Lower = faster response, less smoothing"
+        )
         lay_kalman.addWidget(self.spin_kalman_r)
-
         lay_calib_main.addLayout(lay_kalman)
 
         grp_calib.setLayout(lay_calib_main)
@@ -344,7 +328,7 @@ class CAESARAnalyzer(QMainWindow):
         self.table.cellDoubleClicked.connect(self.on_table_double_click)
         self.table.cellClicked.connect(self.on_table_single_click)
         
-        # 파일 리스트 우클릭 시 "I0로 설정하기" 메뉴를 띄우기 위한 설정
+        # Enable right-click context menu on the file list for the "Set as I0" action
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_table_context_menu)
 
@@ -376,61 +360,16 @@ class CAESARAnalyzer(QMainWindow):
         # Keep Existing Signal Connections
         self.monitor.cb_view.currentIndexChanged.connect(self.refresh_viewer)
         self.monitor.roi_selected.connect(self.apply_roi_from_graph)
-        
+
         splitter.addWidget(right_widget)
 
-    def apply_preset(self):
-        """Changes Lambda and Robust settings based on the selected preset."""
-        preset = self.combo_preset.currentText()
-        
-        if "Lab Precision" in preset:
-            # For high-SNR lab data where transparency is key.
-            self.spin_lambda.setValue(0.0000)
-            self.chk_robust.setChecked(False)
-            self.spin_kalman_q.setValue(0.0100) # Fast tracking
-            self.spin_kalman_r.setValue(0.005)  # Minimal smoothing
+        self._setup_shortcuts()
 
-        elif "Ambient Standard" in preset:
-            # General background monitoring in stable conditions.
-            self.spin_lambda.setValue(0.0001)
-            self.chk_robust.setChecked(True)
-            self.spin_kalman_q.setValue(0.0005) 
-            self.spin_kalman_r.setValue(0.050)
-
-        elif "Fast Plume" in preset:
-            # Designed to capture rapid concentration spikes (e.g., exhaust plumes).
-            self.spin_lambda.setValue(0.0001)
-            self.chk_robust.setChecked(True)
-            self.spin_kalman_q.setValue(0.0500) # Ultra-fast tracking
-            self.spin_kalman_r.setValue(0.010)  # Low smoothing to avoid peak clipping
-
-        elif "Stable Trend" in preset:
-            # For long-term drift analysis with maximum noise suppression.
-            self.spin_lambda.setValue(0.0010)
-            self.chk_robust.setChecked(True)
-            self.spin_kalman_q.setValue(0.0001) # Slow tracking
-            self.spin_kalman_r.setValue(0.200)  # Strong smoothing
-
-        elif "Harsh Weather" in preset:
-            # For fog, rain, or low-light conditions where signal is compromised.
-            self.spin_lambda.setValue(0.0050)
-            self.chk_robust.setChecked(True)
-            self.spin_kalman_q.setValue(0.0002)
-            self.spin_kalman_r.setValue(0.300)
-
-        elif "Mobile Sync" in preset:
-            # For vehicle-mounted measurements where vibrations cause spectral jumps.
-            self.spin_lambda.setValue(0.0100) # High regularization for stability
-            self.chk_robust.setChecked(True)
-            self.spin_kalman_q.setValue(0.0010)
-            self.spin_kalman_r.setValue(0.100)
-
-        elif "Extreme Recovery" in preset:
-            # Use as a last resort for heavily corrupted or glitched data.
-            self.spin_lambda.setValue(0.0500) # Maximum regularization
-            self.chk_robust.setChecked(True)
-            self.spin_kalman_q.setValue(0.0001)
-            self.spin_kalman_r.setValue(0.800) # Maximum noise rejection
+    def _setup_shortcuts(self):
+        """Register keyboard shortcuts for common operations."""
+        QShortcut(QKeySequence("F5"),      self).activated.connect(self.start_analysis)
+        QShortcut(QKeySequence("Escape"),  self).activated.connect(self.stop_analysis)
+        QShortcut(QKeySequence("Ctrl+S"),  self).activated.connect(self.save)
 
     def setup_cavity_tab(self):
         """Configure the layout for the Pre-Analysis Cavity Setup tab."""
@@ -447,53 +386,226 @@ class CAESARAnalyzer(QMainWindow):
         btn_calib_tool = QPushButton("🔍 Wavelength Calibration Tool")
         btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
         
-        btn_ref_gen = QPushButton("✂️ R-Curve / Reference Generator")
+        btn_ref_gen = QPushButton("✂️ Reference Generator")
         btn_ref_gen.clicked.connect(self.open_reference_generator)
         btn_ref_gen.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
-        
+
+        btn_r_gen = QPushButton("📊 R-Curve Generator (Rayleigh Method)")
+        btn_r_gen.clicked.connect(self.open_r_generator)
+        btn_r_gen.setStyleSheet("background-color: #e8f5e9; font-weight: bold;")
+
+        btn_alpha_export = QPushButton("📁 Alpha 내보내기 (피팅 없이 α 파일 생성)")
+        btn_alpha_export.clicked.connect(self.export_alpha_files)
+        btn_alpha_export.setStyleSheet("background-color: #e3f2fd; font-weight: bold;")
+        btn_alpha_export.setToolTip(
+            "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm-1) 계산 → .dat 파일 저장\n"
+            "DOAS 피팅 없이 alpha만 추출해서 박사님 alpha_trace와 직접 비교 가능"
+        )
+
+        btn_alpha_fit = QPushButton("📊 Alpha 피팅 (저장된 α 파일로 DOAS 피팅)")
+        btn_alpha_fit.clicked.connect(self.run_alpha_fit)
+        btn_alpha_fit.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
+        btn_alpha_fit.setToolTip(
+            "Alpha 내보내기로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
+            "DOAS 피팅만 수행 → *_fit.tsv 결과 저장"
+        )
+
         lay_calib.addWidget(btn_calib_tool)
         lay_calib.addWidget(btn_ref_gen)
+        lay_calib.addWidget(btn_r_gen)
+        lay_calib.addWidget(btn_alpha_export)
+        lay_calib.addWidget(btn_alpha_fit)
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
         
         # Group 2: Cavity Parameters (BBCEAS Physics)
         grp_physics = QGroupBox("2. Cavity Parameters")
         lay_physics = QFormLayout()
-        
-        # Variables to store paths
-        self.i0_filepath = ""
-        self.r_filepath = ""
-        
+
         # I0 Setup
         self.lbl_i0_path = QLabel("Not selected")
         self.lbl_i0_path.setStyleSheet("color: red;")
         btn_browse_i0 = QPushButton("Browse I0")
         btn_browse_i0.clicked.connect(self.browse_i0_file)
-        
+        btn_auto_i0 = QPushButton("🔍 Auto from ZA scans")
+        btn_auto_i0.clicked.connect(self.auto_extract_i0)
+
         lay_i0 = QHBoxLayout()
         lay_i0.addWidget(self.lbl_i0_path)
         lay_i0.addWidget(btn_browse_i0)
+        lay_i0.addWidget(btn_auto_i0)
         lay_physics.addRow("I0 (Zero-Air):", lay_i0)
-        
+
+        # Temporal I0 interpolation toggle
+        self.chk_temporal_i0 = QCheckBox("Temporal I0 interpolation (correct lamp drift)")
+        self.chk_temporal_i0.setToolTip(
+            "Pre-scans the dataset for periodic ZA calibration files and linearly\n"
+            "interpolates I0 between them so each ambient file uses the closest\n"
+            "calibration rather than a single fixed reference."
+        )
+        lay_physics.addRow("", self.chk_temporal_i0)
+
         # R Curve Setup
         self.lbl_r_path = QLabel("Not selected")
         self.lbl_r_path.setStyleSheet("color: red;")
         btn_browse_r = QPushButton("Browse R")
         btn_browse_r.clicked.connect(self.browse_r_file)
-        
+
         lay_r = QHBoxLayout()
         lay_r.addWidget(self.lbl_r_path)
         lay_r.addWidget(btn_browse_r)
         lay_physics.addRow("R (Reflectivity):", lay_r)
-        
+
         # Cavity Length
         self.spin_d_len = QDoubleSpinBox()
         self.spin_d_len.setRange(1.0, 1000.0)
-        self.spin_d_len.setValue(100.0) # Default 100cm
+        self.spin_d_len.setValue(51.8)
+        self.spin_d_len.setDecimals(1)
+        self.spin_d_len.setToolTip("CAESAR Araon 2025: CH1=51.8 cm, CH2=51.7 cm, CH3=51.1 cm")
+        self.spin_d_len.valueChanged.connect(self.update_leff)
         lay_physics.addRow("Cavity Length d (cm):", self.spin_d_len)
-        
+
+        # Effective path length display (L_eff = d / (1 - R_mean))
+        self.lbl_leff = QLabel("L_eff: — (load R-curve first)")
+        self.lbl_leff.setStyleSheet("color: #0277BD; font-weight: bold;")
+        lay_physics.addRow("Effective Path Length:", self.lbl_leff)
+
+        # Measurement State Flags — supports multiple values (comma-separated)
+        # CAESAR Araon 2025: ZA=500~503 / He=510~513 / Ambient=1
+        # 500=ZA injecting(실측), 501=setflow, 502=wait before, 503=wait after
+        # 510=He injecting(실측), 511=setflow, 512=wait before, 513=wait after
+        lay_flags = QHBoxLayout()
+        self.txt_flag_za = QLineEdit("500, 501, 502, 503")
+        self.txt_flag_za.setFixedWidth(int(130 * self._s))
+        self.txt_flag_za.setToolTip(
+            "Zero-Air 플래그 번호 (쉼표로 여러 값 가능)\n"
+            "CAESAR Araon 2025: 500=injecting(실측), 501=setflow, 502=wait before, 503=wait after\n"
+            "I₀는 500만 사용, 나머지는 ambient 제외용"
+        )
+        lay_flags.addWidget(QLabel("ZA:"))
+        lay_flags.addWidget(self.txt_flag_za)
+        lay_flags.addSpacing(8)
+        self.txt_flag_he = QLineEdit("510, 511, 512, 513")
+        self.txt_flag_he.setFixedWidth(int(130 * self._s))
+        self.txt_flag_he.setToolTip(
+            "Helium 플래그 번호 (쉼표로 여러 값 가능)\n"
+            "CAESAR Araon 2025: 510=injecting(실측), 511=setflow, 512=wait before, 513=wait after\n"
+            "R-cal은 510만 사용, 나머지는 ambient 제외용"
+        )
+        lay_flags.addWidget(QLabel("He:"))
+        lay_flags.addWidget(self.txt_flag_he)
+        lay_flags.addWidget(QLabel("Amb:"))
+        self.txt_flag_amb = QLineEdit("1")
+        self.txt_flag_amb.setFixedWidth(int(50 * self._s))
+        self.txt_flag_amb.setToolTip(
+            "Ambient(대기) 측정 플래그 번호\n"
+            "MATLAB Alpha 스크립트 기준: flag==1"
+        )
+        lay_flags.addWidget(self.txt_flag_amb)
+        lay_flags.addStretch()
+        lay_physics.addRow("측정 상태 플래그:", lay_flags)
+
+        # Alpha Intermediate Save
+        lay_alpha_save = QHBoxLayout()
+        self.chk_save_alpha = QCheckBox("α 스펙트럼 저장")
+        self.chk_save_alpha.setToolTip(
+            "BBCEAS 광학 깊이 계산 후 각 스캔의 α 스펙트럼을 중간 파일로 저장합니다.\n"
+            "파일명: {원본파일명}_alpha.dat  단위: cm⁻¹"
+        )
+        self.lbl_alpha_dir = QLabel("(디렉토리 미설정)")
+        self.lbl_alpha_dir.setStyleSheet("color: gray;")
+        btn_alpha_dir = QPushButton("폴더 선택")
+        btn_alpha_dir.clicked.connect(self.browse_alpha_save_dir)
+        lay_alpha_save.addWidget(self.chk_save_alpha)
+        lay_alpha_save.addWidget(self.lbl_alpha_dir, 1)
+        lay_alpha_save.addWidget(btn_alpha_dir)
+        lay_physics.addRow("Alpha 중간 저장:", lay_alpha_save)
+
+        # Purge Gas Length Ratio (RL)
+        lay_rl = QHBoxLayout()
+        self.spin_rl_factor = QDoubleSpinBox()
+        self.spin_rl_factor.setRange(0.01, 1.0)
+        self.spin_rl_factor.setSingleStep(0.001)
+        self.spin_rl_factor.setDecimals(4)
+        self.spin_rl_factor.setValue(1.0)
+        self.spin_rl_factor.setFixedWidth(int(80 * self._s))
+        self.spin_rl_factor.setToolTip(
+            "퍼지 가스 유효 캐비티 보정 계수 RL = d_eff / d\n"
+            "거울 오염 방지용 퍼지 가스가 흐르는 구간은 샘플이 없으므로\n"
+            "유효 측정 경로가 물리적 길이보다 짧아집니다.\n"
+            "MATLAB 기준 (CAESAR Araon 2025 ASIA-AQ 실측):\n"
+            "  CH1 (NO2/CHOCHO): 0.9330\n"
+            "  CH2 (HONO/HCHO): 0.9950\n"
+            "  CH3 (NO2/CHOCHO): 0.9968\n"
+            "1.0 = 보정 없음 (기본값; 측정값 있으면 반드시 입력)"
+        )
+        lay_rl.addWidget(self.spin_rl_factor)
+        lay_rl.addWidget(QLabel("  ← CH1: 0.9330 / CH2: 0.9950 / CH3: 0.9968"))
+        lay_rl.addStretch()
+        lay_physics.addRow("RL (Purge 보정):", lay_rl)
+
         grp_physics.setLayout(lay_physics)
         control_layout.addWidget(grp_physics)
+
+        # Group 2b: Detector Corrections
+        grp_det = QGroupBox("2b. Detector Corrections")
+        lay_det = QFormLayout()
+
+        # Dark Current Setup
+        self.lbl_dark_path = QLabel("Not loaded")
+        self.lbl_dark_path.setStyleSheet("color: gray;")
+        btn_browse_dark = QPushButton("Browse Dark")
+        btn_browse_dark.clicked.connect(self.browse_dark_file)
+        self.spin_dark_scale = QDoubleSpinBox()
+        self.spin_dark_scale.setRange(0.0, 1000.0)
+        self.spin_dark_scale.setValue(1.0)
+        self.spin_dark_scale.setDecimals(4)
+        self.spin_dark_scale.setSingleStep(0.01)
+        self.spin_dark_scale.setFixedWidth(int(75 * self._s))
+        self.spin_dark_scale.setToolTip("t_meas / t_dark  (1.0 = same integration time as measurement)")
+
+        lay_dark = QHBoxLayout()
+        lay_dark.addWidget(self.lbl_dark_path)
+        lay_dark.addWidget(btn_browse_dark)
+        lay_dark.addWidget(QLabel("×"))
+        lay_dark.addWidget(self.spin_dark_scale)
+        lay_det.addRow("Dark Current:", lay_dark)
+
+        # Detector Offset Setup
+        self.lbl_offset_path = QLabel("Not loaded")
+        self.lbl_offset_path.setStyleSheet("color: gray;")
+        btn_browse_offset = QPushButton("Browse Offset")
+        btn_browse_offset.clicked.connect(self.browse_offset_file)
+        self.spin_offset_scale = QDoubleSpinBox()
+        self.spin_offset_scale.setRange(0.0, 1000.0)
+        self.spin_offset_scale.setValue(1.0)
+        self.spin_offset_scale.setDecimals(4)
+        self.spin_offset_scale.setSingleStep(0.01)
+        self.spin_offset_scale.setFixedWidth(int(75 * self._s))
+        self.spin_offset_scale.setToolTip("n_meas / n_offset  (scan count ratio; 1.0 = same number of scans)")
+
+        lay_offset = QHBoxLayout()
+        lay_offset.addWidget(self.lbl_offset_path)
+        lay_offset.addWidget(btn_browse_offset)
+        lay_offset.addWidget(QLabel("×"))
+        lay_offset.addWidget(self.spin_offset_scale)
+        lay_det.addRow("Det. Offset:", lay_offset)
+
+        # Stray Light Correction
+        self.spin_stray_light = QDoubleSpinBox()
+        self.spin_stray_light.setRange(0.0, 0.10)
+        self.spin_stray_light.setValue(0.0)
+        self.spin_stray_light.setDecimals(4)
+        self.spin_stray_light.setSingleStep(0.001)
+        self.spin_stray_light.setToolTip(
+            "Stray light fraction ε  (Platt & Stutz 2008)\n"
+            "I_corr = (I − ε·mean(I)) / (1 − ε)\n"
+            "Typical UV: 0.001–0.01  |  0.0 = disabled"
+        )
+        lay_det.addRow("Stray Light ε:", self.spin_stray_light)
+
+        grp_det.setLayout(lay_det)
+        control_layout.addWidget(grp_det)
         
         # Group 3: Environment Settings (For real-time PPB)
         grp_env = QGroupBox("3. Environment Variables (PPB)")
@@ -502,6 +614,12 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_temp = QDoubleSpinBox()
         self.spin_temp.setRange(-50.0, 100.0)
         self.spin_temp.setValue(25.0)
+        self.spin_temp.setToolTip(
+            "Current measurement temperature (°C)\n"
+            "Used for: PPB conversion (N_air) and cross-section T-correction\n"
+            "Note: T_ref in Reference Properties = temperature at which the\n"
+            "reference spectrum was originally measured (usually 25°C)"
+        )
         lay_env.addRow("Temperature (°C):", self.spin_temp)
         
         self.spin_pres = QDoubleSpinBox()
@@ -558,23 +676,259 @@ class CAESARAnalyzer(QMainWindow):
         if filepath:
             self.set_i0_path(filepath)
 
+    def browse_dark_file(self):
+        """Browse and load a dark current spectrum (.dat/.txt/.csv 또는 MATLAB .mat)."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Select Dark Spectrum", "",
+            "Data Files (*.dat *.txt *.csv *.mat);;All Files (*)")
+        if not filepath:
+            return
+        try:
+            import numpy as np
+            if filepath.lower().endswith(".mat"):
+                import scipy.io
+                mat = scipy.io.loadmat(filepath)
+                # MATLAB 구조체: Dark_240224.ch1
+                struct_keys = [k for k in mat.keys() if not k.startswith('_')]
+                if not struct_keys:
+                    raise ValueError("mat 파일에 데이터 키가 없습니다.")
+                struct_key = struct_keys[0]
+                struct = mat[struct_key]
+                ch_key = "ch1"
+                if hasattr(struct, 'dtype') and ch_key in struct.dtype.names:
+                    dark_raw = np.asarray(struct[ch_key][0, 0], dtype=float).flatten()
+                else:
+                    dark_raw = np.asarray(struct, dtype=float).flatten()
+            else:
+                _, dark_raw = DataIO.load_measurement(filepath, pixel_min=0)
+            self.dark_data = dark_raw
+            self.lbl_dark_path.setText(os.path.basename(filepath))
+            self.lbl_dark_path.setStyleSheet("color: green; font-weight: bold;")
+            self.status.setText(
+                f"Dark current loaded: {os.path.basename(filepath)}  "
+                f"({len(dark_raw)} px, mean={dark_raw.mean():.1f})"
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Load Error", f"Failed to load dark file:\n{e}")
+
+    def browse_offset_file(self):
+        """Browse and load a detector offset spectrum (ADC pedestal, integration-time independent)."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select Offset Spectrum", "", "Data Files (*.dat *.txt *.csv)")
+        if not filepath:
+            return
+        try:
+            _, offset_raw = DataIO.load_measurement(filepath, pixel_min=0)
+            self.offset_data = offset_raw
+            self.lbl_offset_path.setText(os.path.basename(filepath))
+            self.lbl_offset_path.setStyleSheet("color: green; font-weight: bold;")
+            self.status.setText(f"Detector offset loaded: {os.path.basename(filepath)}")
+        except Exception as e:
+            QMessageBox.warning(self, "Load Error", f"Failed to load offset file:\n{e}")
+
+    def _parse_flags(self, text):
+        """'500, 503' → [500, 503]. Returns list of ints; falls back to [] on parse error."""
+        try:
+            return [int(v.strip()) for v in text.split(',') if v.strip()]
+        except ValueError:
+            return []
+
+    def browse_alpha_save_dir(self):
+        """Browse and set the output directory for intermediate alpha spectra."""
+        d = QFileDialog.getExistingDirectory(self, "Alpha 중간 저장 폴더 선택")
+        if d:
+            self.alpha_save_dir = d
+            self.lbl_alpha_dir.setText(os.path.basename(d) or d)
+            self.lbl_alpha_dir.setStyleSheet("color: #1565C0; font-weight: bold;")
+
+    def export_alpha_files(self):
+        """피팅 없이 BBCEAS alpha만 계산해서 파일로 저장한다."""
+        if not hasattr(self, 'file_list') or not self.file_list:
+            QMessageBox.warning(self, "No Files", "먼저 측정 파일을 로드하세요.")
+            return
+
+        if self.engine._wave_axis is None:
+            QMessageBox.warning(self, "No Wavelength Cal",
+                                "파장 캘리브레이션 파일을 먼저 로드하세요.")
+            return
+
+        out_dir = QFileDialog.getExistingDirectory(self, "Alpha 파일 저장 폴더 선택")
+        if not out_dir:
+            return
+
+        try:
+            pixel_min = int(self.txt_min.text())
+            pixel_max = int(self.txt_max.text())
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Pixel Min/Max를 확인하세요.")
+            return
+
+        import numpy as np
+        pixel_idx = np.arange(pixel_min, pixel_max)
+        wave_nm   = self.engine.pixel_to_wavelength(pixel_idx)
+
+        dark_spectrum = getattr(self, 'dark_data', None)   # Browse Dark로 로드한 경우
+
+        self._alpha_export_worker = AlphaExportWorker(
+            file_list     = self.file_list,
+            pixel_min     = pixel_min,
+            pixel_max     = pixel_max,
+            wave_nm       = wave_nm,
+            flag_za       = self._parse_flags(self.txt_flag_za.text()),
+            flag_he       = self._parse_flags(self.txt_flag_he.text()),
+            flag_amb      = self._parse_flags(self.txt_flag_amb.text()),
+            rl_factor     = self.spin_rl_factor.value(),
+            cavity_len    = self.spin_d_len.value(),
+            output_dir    = out_dir,
+            dark_spectrum = dark_spectrum,
+        )
+
+        self._alpha_export_worker.total_ready.connect(
+            lambda n: self.status.setText(f"📁 Alpha 내보내기: 총 {n:,} 스캔 처리 중...")
+        )
+        self._alpha_export_worker.progress.connect(
+            lambda n: self.status.setText(f"📁 Alpha 내보내기: {n} 스캔 완료...")
+        )
+        self._alpha_export_worker.status_msg.connect(
+            lambda msg: print(f"[AlphaExport] {msg}")
+        )
+        self._alpha_export_worker.finished.connect(self._on_alpha_export_done)
+        self._alpha_export_worker.start()
+        self.status.setText("📁 Alpha 내보내기 시작...")
+
+    def _on_alpha_export_done(self, result):
+        if result.startswith("ERROR"):
+            QMessageBox.warning(self, "Alpha Export 실패", result)
+            self.status.setText("❌ Alpha 내보내기 실패")
+        else:
+            msg = (f"Alpha 파일 저장 완료!\n\n저장 위치:\n{result}\n\n"
+                   f"각 파일: {{소스파일명}}_alpha_trace.dat\n"
+                   f"형식: row_idx / T / P / alpha[px{self.txt_min.text()}..{self.txt_max.text()}]\n\n"
+                   f"이 파일을 박사님 alpha_trace와 비교하거나\n"
+                   f"CAESAR Pro에 로드해서 Linear 피팅 가능.")
+            QMessageBox.information(self, "Alpha Export 완료", msg)
+            self.status.setText(f"✅ Alpha 내보내기 완료 → {result}")
+
+    def run_alpha_fit(self):
+        """저장된 alpha_trace.dat 파일을 선택해서 DOAS 피팅을 실행한다."""
+        if not hasattr(self.engine, 'gas_list') or not self.engine.gas_list:
+            QMessageBox.warning(self, "레퍼런스 없음",
+                                "먼저 레퍼런스 스펙트럼을 로드하세요.")
+            return
+
+        alpha_files, _ = QFileDialog.getOpenFileNames(
+            self, "Alpha Trace 파일 선택", "",
+            "Alpha Trace (*.dat);;All Files (*)"
+        )
+        if not alpha_files:
+            return
+
+        output_dir = QFileDialog.getExistingDirectory(
+            self, "결과 저장 폴더 선택",
+            os.path.dirname(alpha_files[0])
+        )
+        if not output_dir:
+            return
+
+        try:
+            poly_deg = int(self.txt_poly.text())
+        except (AttributeError, ValueError):
+            poly_deg = 4
+
+        self._alpha_fit_worker = AlphaFitWorker(
+            alpha_files=alpha_files,
+            engine=self.engine,
+            poly_deg=poly_deg,
+            output_dir=output_dir,
+        )
+        self._alpha_fit_worker.progress.connect(
+            lambda n: self.status.setText(f"📊 Alpha 피팅: {n}행 처리 중...")
+        )
+        self._alpha_fit_worker.status_msg.connect(
+            lambda msg: print(f"[AlphaFit] {msg}")
+        )
+        self._alpha_fit_worker.finished.connect(self._on_alpha_fit_done)
+        self._alpha_fit_worker.start()
+        self.status.setText("📊 Alpha 피팅 시작...")
+
+    def _on_alpha_fit_done(self, result):
+        if result.startswith("ERROR"):
+            QMessageBox.warning(self, "Alpha 피팅 실패", result)
+            self.status.setText("Alpha 피팅 실패")
+        else:
+            QMessageBox.information(
+                self, "Alpha 피팅 완료",
+                f"DOAS 피팅 결과 저장 완료!\n\n저장 위치:\n{result}\n\n"
+                f"각 파일: {{소스파일명}}_fit.tsv\n"
+                f"형식: row_idx / T / P / 가스별 ppb / rms"
+            )
+            self.status.setText(f"Alpha 피팅 완료 -> {result}")
+
+    def auto_extract_i0(self):
+        """Scans the loaded file list for ZA-flagged files and averages them to form I0."""
+        if not hasattr(self, 'file_list') or not self.file_list:
+            QMessageBox.warning(self, "No Files", "Load a measurement file list first.")
+            return
+
+        flag_za_list = self._parse_flags(self.txt_flag_za.text()) if hasattr(self, 'txt_flag_za') else [500, 501, 502, 503]
+        # I₀ 추출: 500(injecting)만 사용
+        za_meas_flag = 500 if 500 in flag_za_list else flag_za_list[0] if flag_za_list else 500
+        za_spectra = []
+        for entry in self.file_list:
+            fp = self._entry_filepath(entry)
+            ri = self._entry_row_index(entry)
+            try:
+                _, raw, flag, _, _ = DataIO.load_measurement_with_hk(fp, pixel_min=0, row_index=ri)
+                if flag == za_meas_flag and len(raw) > 0:
+                    za_spectra.append(raw)
+            except Exception:
+                pass
+
+        if not za_spectra:
+            QMessageBox.information(self, "Not Found", "No ZA-flagged scans found in the current file list.")
+            return
+
+        # Trim to common length and average
+        min_len = min(len(s) for s in za_spectra)
+        i0_avg = np.mean([s[:min_len] for s in za_spectra], axis=0)
+        self.i0_data = i0_avg
+        self.lbl_i0_path.setText(f"Auto ({len(za_spectra)} ZA scans averaged)")
+        self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
+        self.status.setText(f"Auto I0: averaged {len(za_spectra)} ZA scans.")
+        self.update_diagnostic_plot()
+
+    def update_leff(self):
+        """Recalculates and displays L_eff = d / (1 - R_mean) whenever R or d changes."""
+        if not hasattr(self, 'r_data') or self.r_data is None:
+            self.lbl_leff.setText("L_eff: — (load R-curve first)")
+            return
+        d = self.spin_d_len.value()
+        r_mean = np.mean(self.r_data)
+        r_min  = np.min(self.r_data)
+        r_max  = np.max(self.r_data)
+        leff_mean = d / (1.0 - r_mean)
+        leff_min  = d / (1.0 - r_max)   # higher R → longer path
+        leff_max  = d / (1.0 - r_min)
+        self.lbl_leff.setText(
+            f"L_eff ≈ {leff_mean:,.0f} cm  "
+            f"(range {leff_min:,.0f} – {leff_max:,.0f} cm,  R̄ = {r_mean:.6f})"
+        )
+
     def browse_r_file(self):
         """Browse and set the Reflectivity (R-Curve) file."""
         filepath, _ = QFileDialog.getOpenFileName(self, "Select R-Curve File", "", "Data Files (*.dat *.txt *.csv)")
         if filepath:
-            self.r_filepath = filepath
             self.lbl_r_path.setText(os.path.basename(filepath))
             self.lbl_r_path.setStyleSheet("color: blue; font-weight: bold;")
             
             # 🌟 Load R data and plot
             try:
-                # 일반적인 R 커브 파일(2열 데이터) 로드 로직
-                import pandas as pd
+                # Load logic for a standard R-Curve file (2-column data)
                 df = pd.read_csv(filepath, sep=None, engine='python', header=None, comment='#')
-                # 1열이 파장/픽셀, 2열이 R값이라고 가정
+                # Assumes column 1 is wavelength/pixel, column 2 is R value
                 r_y = pd.to_numeric(df.iloc[:, -1], errors='coerce').dropna().values
                 self.r_data = r_y
                 self.update_diagnostic_plot()
+                self.update_leff()
             except Exception as e:
                 print(f"Error loading R file: {e}")
                 QMessageBox.warning(self, "Load Error", "Failed to parse Reflectivity (R) file.")
@@ -595,23 +949,22 @@ class CAESARAnalyzer(QMainWindow):
     def set_i0_from_table(self, row):
         """Extracts the filepath from the table row and sets it as I0."""
         fname = self.table.item(row, 0).text()
-        filepath = next((f for f in self.file_list if os.path.basename(f) == fname), None)
-        
+        entry = self._entry_from_display_name(fname)
+        filepath = self._entry_filepath(entry) if entry else None
+
         if filepath:
             self.set_i0_path(filepath)
             self.main_tabs.setCurrentIndex(0)
             
     def set_i0_path(self, filepath):
         """Updates the I0 state, loads data, and updates UI."""
-        self.i0_filepath = filepath
         self.lbl_i0_path.setText(os.path.basename(filepath))
         self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
         self.status.setText(f"🎯 I0 set to: {os.path.basename(filepath)}")
         
         # 🌟 Load I0 data and plot
         try:
-            from data_io import DataIO
-            # 엔진과 동일한 방식으로 I0 파일 로드 (가장 안정적)
+            # Load I0 file using the same method as the engine (most stable)
             _, intensity_raw = DataIO.load_measurement(filepath, pixel_min=0)
             self.i0_data = intensity_raw
             self.update_diagnostic_plot()
@@ -624,7 +977,7 @@ class CAESARAnalyzer(QMainWindow):
         self.p1.clear()
         self.p2.clear()
         
-        # 파장(nm) 축이 로드되어 있으면 적용, 아니면 픽셀 축 적용
+        # Apply wavelength (nm) axis if loaded, otherwise use pixel axis
         x_axis = None
         if hasattr(self, 'wavelengths') and self.wavelengths is not None:
             x_axis = np.array(self.wavelengths).flatten()
@@ -632,29 +985,29 @@ class CAESARAnalyzer(QMainWindow):
         else:
             self.plot_diagnostic.setLabel('bottom', 'Pixel Index')
             
-        # 1. 검은색 선으로 I0 그리기 (Left Y-axis)
+        # 1. Draw I0 as a black line (Left Y-axis)
         if hasattr(self, 'i0_data') and self.i0_data is not None:
             x = x_axis if (x_axis is not None and len(x_axis) == len(self.i0_data)) else np.arange(len(self.i0_data))
             self.p1.plot(x, self.i0_data, pen=pg.mkPen('k', width=1.5), name="I0 (Zero-Air)")
             
-        # 2. 파란색 점선으로 R 그리기 (Right Y-axis)
+        # 2. Draw R as a blue dashed line (Right Y-axis)
         if hasattr(self, 'r_data') and self.r_data is not None:
             x = x_axis if (x_axis is not None and len(x_axis) == len(self.r_data)) else np.arange(len(self.r_data))
             
             curve_r = pg.PlotCurveItem(x, self.r_data, pen=pg.mkPen('b', width=2, style=Qt.PenStyle.DashLine))
             self.p2.addItem(curve_r)
             
-            # R값은 보통 0.99~0.999 수준이므로 범위를 보기 좋게 자동 조절
+            # R values are typically 0.99~0.999, so auto-range for a clean view
             self.p2.autoRange()
 
-    def open_r_generator(self):
-        """Opens the Reflectivity (R-Curve) Generator using the loaded wavelength axis."""
-        wl_data = getattr(self, 'wavelengths', getattr(self.monitor, 'wavelengths', None))
-        if wl_data is None:
-            QMessageBox.warning(self, "No Wavelength Data", "Please load the X-Axis (nm) wavelength file first.")
-            return
-        dialog = R_GeneratorDialog(self, np.array(wl_data))
-        dialog.exec()
+
+    def _on_r_curve_update(self, wave_nm, r_curve):
+        """Called by worker whenever a new R-curve is derived from ZA/He pair."""
+        self.r_data = np.array(r_curve)
+        if wave_nm is not None and len(wave_nm) == len(r_curve):
+            self.wavelengths = np.array(wave_nm)
+        self.update_diagnostic_plot()
+        self.update_leff()
 
     def open_ref_properties(self):
         """Opens the RefPropertiesDialog to configure Shift/Squeeze bounds."""
@@ -681,19 +1034,17 @@ class CAESARAnalyzer(QMainWindow):
         dialog.reference_saved.connect(self.add_ref_row) 
         dialog.exec()
 
-    def auto_register_reference(self, gas_name, filepath):
-        """Automatically places newly generated references into an empty UI slot."""
-        for widget in getattr(self, 'ref_widgets', []):
-            if widget['n'].text() == "" and widget['fp'] == "":
-                widget['n'].setText(gas_name)
-                widget['fp'] = filepath
-                widget['btn'].setText(f"Load ({os.path.basename(filepath)})")
-                widget['btn'].setStyleSheet("background-color: #e8f5e9; color: #2e7d32; font-weight: bold;")
-                
-                self.status.setText(f"✅ New reference auto-registered: {gas_name}")
-                return
-                
-        QMessageBox.warning(self, "Slot Full", "Reference slots are full. Please load manually.")
+
+    def open_r_generator(self):
+        """Opens the R-Curve Generator dialog. On success, loads the result directly into r_data."""
+        wave_data = getattr(self, 'wavelengths', None)
+        dialog = R_GeneratorDialog(self, wavelengths=wave_data)
+        if dialog.exec() and hasattr(dialog, 'r_curve_result'):
+            self.r_data = dialog.r_curve_result
+            self.update_diagnostic_plot()
+            self.update_leff()
+            self.status.setText(f"✅ R-Curve loaded ({len(self.r_data)} pixels)")
+            print(f"✅ R-Curve auto-loaded: {len(self.r_data)} pixels, mean R = {self.r_data.mean():.6f}")
 
     def open_wavelength_calibration(self):
         """Opens the interactive Wavelength Calibration tool."""
@@ -749,7 +1100,13 @@ class CAESARAnalyzer(QMainWindow):
     # Utility and Data Loading Functions
     # ---------------------------------------------------------
     def guess_gas_name(self, filename):
-        """Intelligently guesses the gas name based on the filename."""
+        """
+        Attempts to identify the gas species from common substrings in the filename.
+
+        Checks for known species names (NO2, O3, H2O, etc.) in the uppercased filename.
+        Falls back to the filename prefix before the first underscore if nothing matches.
+        Example: 'NO2_Vandaele_1998.txt' → 'NO2', 'ref_data.dat' → 'ref'.
+        """
         fname = filename.upper()
         targets = ["CHOCHO", "GLYOXAL", "NO2", "H2O", "O4", "O3", "HONO", "HCHO"]
         for t in targets: 
@@ -785,6 +1142,7 @@ class CAESARAnalyzer(QMainWindow):
                     
             if wl_data is not None:
                 self.wavelengths = wl_data
+                self.engine.set_wavelength_axis(wl_data)  # register immediately so pixel_to_wavelength works before lock_ref
                 self.monitor.set_wavelengths(wl_data)
                 self.lbl_fwhm_display.setText(f"💡 WL Loaded: {os.path.basename(filepath)}")
                 
@@ -827,9 +1185,14 @@ class CAESARAnalyzer(QMainWindow):
                 self.add_ref_row(self.guess_gas_name(f), f)
             
     def get_auto_scale_exponent(self, filepath):
-        """Automatically calculates the exponent multiplier to normalize data scale to ~1e-19."""
+        """
+        Calculates the integer power-of-10 multiplier needed to bring a reference
+        cross-section into the ~1e-19 cm² range expected by the engine.
+
+        Example: if the file peak is 1e-38 (very small), exponent = -19 - (-38) = 19,
+        so the spinner shows 19 and the engine multiplies by 10^19.
+        """
         try:
-            from data_io import DataIO
             _, intensity_raw = DataIO.load_reference(filepath)
             
             if intensity_raw is None or len(intensity_raw) == 0: 
@@ -839,7 +1202,6 @@ class CAESARAnalyzer(QMainWindow):
             if max_val == 0: 
                 return 0
                 
-            import math
             current_exp = math.floor(math.log10(max_val))
             target_exp = -19 
             return target_exp - current_exp
@@ -859,20 +1221,20 @@ class CAESARAnalyzer(QMainWindow):
         layout_row.addWidget(QLabel("x1e"))
         spin_mult = QSpinBox()
         spin_mult.setRange(-100, 100)
-        spin_mult.setFixedWidth(50)
-        
-        if path: 
+        spin_mult.setFixedWidth(int(50 * self._s))
+
+        if path:
             spin_mult.setValue(self.get_auto_scale_exponent(path))
-        else: 
+        else:
             spin_mult.setValue(0)
-            
+
         txt_name = QLineEdit()
-        txt_name.setFixedWidth(80)
+        txt_name.setFixedWidth(int(80 * self._s))
         lbl_path = QLabel("...")
-        
+
         btn_select = QPushButton("S")
         btn_delete = QPushButton("X")
-        btn_delete.setFixedWidth(30)
+        btn_delete.setFixedWidth(int(30 * self._s))
         
         def select_file_wrapper():
             f, _ = QFileDialog.getOpenFileName(self, "Select Reference", "", "All Files (*.*)")
@@ -938,7 +1300,17 @@ class CAESARAnalyzer(QMainWindow):
                     QMessageBox.warning(self, "Error", "Auto-masking failed.")
 
     def lock_ref(self):
-        """Locks the UI references and commits them to the UniversalEngine for analysis."""
+        """
+        Commits all configured references from the UI into the UniversalEngine.
+
+        'Locking' means:
+          1. The engine is cleared of any previous references.
+          2. Each reference file is loaded, resampled to the instrument wavelength
+             axis, scaled by its 10^exponent multiplier, and stored.
+          3. A zero-FWHM convolution pass is run to initialize the interpolators.
+
+        After locking, the engine is ready to call get_basis_matrix() for fitting.
+        """
         self.engine.clear_engine()
         success_count = 0
         
@@ -970,7 +1342,7 @@ class CAESARAnalyzer(QMainWindow):
                 else:
                     print(f"⚠️ Lock Failed ({widget['n'].text()}): {msg}")
                     
-        # 파장 축을 엔진에 등록 (pixel_to_wavelength 사용을 위해)
+        # Register wavelength axis in the engine (required for pixel_to_wavelength)
         if current_wave is not None:
             self.engine.set_wavelength_axis(current_wave)
 
@@ -1012,7 +1384,7 @@ class CAESARAnalyzer(QMainWindow):
         # Add custom buttons
         btn_files = msg_box.addButton("📄 Select Files", QMessageBox.ButtonRole.ActionRole)
         btn_folder = msg_box.addButton("📁 Load Entire Folder", QMessageBox.ButtonRole.ActionRole)
-        btn_cancel = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         
         msg_box.exec()
         
@@ -1047,26 +1419,57 @@ class CAESARAnalyzer(QMainWindow):
                 QMessageBox.warning(self
                                     , "No Data", "No analyzable files (.dat, .txt, .csv) found in the selected folder.")
 
+    # ── file_list entry helpers ──────────────────────────────────────────────
+    def _entry_filepath(self, entry):
+        """Returns the raw filepath string from a file_list entry (str or tuple)."""
+        return entry[0] if isinstance(entry, tuple) else entry
+
+    def _entry_display_name(self, entry):
+        """Returns the display name shown in the table for a file_list entry."""
+        if isinstance(entry, tuple):
+            fp, ri = entry
+            return f"{os.path.basename(fp)} [{ri:04d}]"
+        return os.path.basename(entry)
+
+    def _entry_row_index(self, entry):
+        """Returns the scan row index (0 for single-scan / plain files)."""
+        return entry[1] if isinstance(entry, tuple) else 0
+
+    def _entry_from_display_name(self, display_name):
+        """Finds the file_list entry whose display name matches display_name."""
+        return next((e for e in self.file_list if self._entry_display_name(e) == display_name), None)
+
+    # ────────────────────────────────────────────────────────────────────────
+
     def _update_file_table(self, file_list):
-        """Internal helper to update the UI table with the loaded file list."""
-        self.file_list = file_list
+        """
+        Stores file paths and shows them in the table.
+
+        Araon Mega-Matrix files contain many scans per row — expansion into
+        individual (filepath, row_index) entries is deferred to the Worker
+        thread so the UI never freezes during large folder loads.
+        """
+        self.file_list = list(file_list)          # plain strings only — no expansion here
         self.table.setRowCount(len(self.file_list))
-        
-        for i, filepath in enumerate(self.file_list): 
-            self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(filepath)))
-            
-        self.status.setText(f"📁 {len(self.file_list)} Measurement files loaded.")
+        self.table.clearContents()
+
+        for i, fp in enumerate(self.file_list):
+            self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(fp)))
+
+        self.status.setText(f"📁 {len(self.file_list)} file(s) loaded.")
 
     def apply_convolution(self):
-        """Applies Instrument Line Shape blur based on the entered FWHM."""
-        if not self.engine.is_engine_ready(): 
+        """Applies Instrument Line Shape blur (Voigt kernel) based on entered FWHM values."""
+        if not self.engine.is_engine_ready():
             QMessageBox.warning(self, "Warning", "Please load references first.")
             return
-            
-        fwhm_val = self.spin_fwhm.value()
-        self.engine.apply_ils_convolution(fwhm_val)
+
+        fwhm_g = self.spin_fwhm.value()
+        fwhm_l = self.spin_fwhm_lorentzian.value()
+        self.engine.apply_ils_convolution(fwhm_g, fwhm_l)
         self.refresh_viewer()
-        QMessageBox.information(self, "Applied", f"ILS Blur (FWHM={fwhm_val} nm) successfully applied.")
+        label = f"Voigt (G={fwhm_g:.2f}, L={fwhm_l:.2f} px)" if fwhm_l > 0.1 else f"Gaussian FWHM={fwhm_g:.2f} px"
+        QMessageBox.information(self, "Applied", f"ILS Blur ({label}) successfully applied.")
         
     def open_selector(self):
         """Opens the visual RangeSelectorDialog."""
@@ -1077,8 +1480,9 @@ class CAESARAnalyzer(QMainWindow):
         except Exception: 
             mn, mx = 0, 950
             
-        # Passes the middle file in the list for a representative preview
-        mid_file = self.file_list[len(self.file_list) // 2]
+        # Use the middle file as a representative spectrum for the visual preview
+        mid_entry = self.file_list[len(self.file_list) // 2]
+        mid_file = self._entry_filepath(mid_entry)
         self.sel_dlg = RangeSelectorDialog(mid_file, mn, mx, self.engine)
         self.sel_dlg.apply_range.connect(self.update_range)
         self.sel_dlg.exec()
@@ -1098,7 +1502,16 @@ class CAESARAnalyzer(QMainWindow):
     # Multithreading Analysis Execution (Worker)
     # ---------------------------------------------------------
     def start_analysis(self):
-        """Prepares UI, configs, and fires up the AnalysisWorker thread."""
+        """
+        Validates settings, builds the initial parameter vector p0, and starts
+        the AnalysisWorker background thread.
+
+        p0 layout: [shift, squeeze, gas_0, gas_1, …, poly_0, poly_1, …]
+          - shift    : initial wavelength offset guess (pixels)
+          - squeeze  : initial stretch factor (dimensionless, ~1.0)
+          - gas_i    : initial concentration guess for each loaded gas
+          - poly_j   : initial polynomial coefficient guesses
+        """
         if not self.file_list: 
             return
         if not self.engine.is_engine_ready(): 
@@ -1113,19 +1526,20 @@ class CAESARAnalyzer(QMainWindow):
         
         self.results = []
         
-        # 🌟 UI Table Reset: Disable sorting, clear, and reconstruct precisely
-        self.table.setSortingEnabled(False) 
+        # 🌟 UI Table Reset: start empty — rows are added dynamically as scans complete
+        self.table.setSortingEnabled(False)
         self.table.clearContents()
-        self.table.setRowCount(len(self.file_list)) 
+        self.table.setRowCount(0)
         
         # Lock in column headers dynamically based on loaded gases
         cols = ["File", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
         self.table.setColumnCount(len(cols))
         self.table.setHorizontalHeaderLabels(cols)
         
-        # Reset progress bar explicitly
+        # Progress bar: maximum is unknown until the worker expands Araon files.
+        # Set to 0 (indeterminate / busy animation) until scan_count_ready fires.
         self.pbar.setMinimum(0)
-        self.pbar.setMaximum(len(self.file_list))
+        self.pbar.setMaximum(0)
         self.pbar.setValue(0)
         
         self.monitor.clear_trend()
@@ -1139,10 +1553,14 @@ class CAESARAnalyzer(QMainWindow):
         poly_deg = self.spin_poly_deg.value()
         num_poly_params = poly_deg + 1
         
-        # p0 배열의 첫 번째 값은 0.0(start_shift)으로 고정되어 넘어감
+        # p0 layout: [shift, squeeze, gas_0 ... gas_N, poly_0 ... poly_P]
+        # bounds_low / bounds_high define the search box for the optimizer:
+        #   - shift is unconstrained globally (rolling window applied inside the worker)
+        #   - squeeze is limited to ±5% of 1.0  (physically reasonable range)
+        #   - gas concentrations are lower-bounded at 0 (NNLS ensures this anyway)
         p0 = [start_shift, self.calib_squeeze] + [0.1] * num_gases + [0] * num_poly_params
-        bounds_low = [-np.inf, 0.95] + [0.0] * num_gases + [-np.inf] * num_poly_params
-        bounds_high = [np.inf, 1.05] + [np.inf] * num_gases + [np.inf] * num_poly_params
+        bounds_low  = [-np.inf, 0.95] + [0.0]    * num_gases + [-np.inf] * num_poly_params
+        bounds_high = [ np.inf, 1.05] + [np.inf] * num_gases + [ np.inf] * num_poly_params
         
         interval = self.spin_update.value()
         
@@ -1153,40 +1571,89 @@ class CAESARAnalyzer(QMainWindow):
             delay_ms = 0
             
         # [ BBCEAS Data Preparation ]
-        sliced_i0 = None
-        sliced_r = None
-        cavity_d = self.spin_d_len.value()
-        
-        # Check if I0 and R are loaded, then slice them to match the fitting range
+        sliced_i0   = None
+        sliced_r    = None
+        sliced_dark = None
+        cavity_d    = self.spin_d_len.value()
+
         if hasattr(self, 'i0_data') and self.i0_data is not None:
             if len(self.i0_data) > pixel_max:
-                sliced_i0 = self.i0_data[ pixel_min : pixel_max ]
+                sliced_i0 = self.i0_data[pixel_min:pixel_max]
             else:
                 QMessageBox.warning(self, "Warning", "I0 data length is shorter than Fit Max Pixel.")
                 return
-                
+
         if hasattr(self, 'r_data') and self.r_data is not None:
-            # Handle R data assuming it matches the full pixel length (from R-Curve Generator)
             if len(self.r_data) > pixel_max:
-                sliced_r = self.r_data[ pixel_min : pixel_max ]
+                sliced_r = self.r_data[pixel_min:pixel_max]
             else:
-                QMessageBox.warning(self, "Warning", "Reflectivity (R) data length mismatch.")
-                return
+                # Plain 1D files (alpha traces, pre-computed OD) run in linear mode
+                # and never use R — silently ignore stale R from a previous BBCEAS run.
+                # Only block when the input is a BBCEAS Araon Mega-Matrix file.
+                first_is_matrix = (bool(self.file_list) and
+                                   DataIO.is_araon_mega_matrix(self.file_list[0]))
+                if first_is_matrix:
+                    QMessageBox.warning(self, "Warning", "Reflectivity (R) data length mismatch.")
+                    return
+                # else: sliced_r stays None → fallback handled below
+
+        if hasattr(self, 'dark_data') and self.dark_data is not None:
+            if len(self.dark_data) >= pixel_max:
+                sliced_dark = self.dark_data[pixel_min:pixel_max]
+
+        sliced_offset = None
+        if hasattr(self, 'offset_data') and self.offset_data is not None:
+            if len(self.offset_data) >= pixel_max:
+                sliced_offset = self.offset_data[pixel_min:pixel_max]
+            else:
+                QMessageBox.warning(self, "Warning", "Offset data length is shorter than Fit Max Pixel — offset ignored.")
+
+        use_temporal = self.chk_temporal_i0.isChecked()
 
         if sliced_i0 is None or sliced_r is None:
-            ans = QMessageBox.question(self, "Missing BBCEAS Params", 
-                                       "I0 or R is missing. Fallback to standard DOAS (Log)?", 
-                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if ans == QMessageBox.StandardButton.No:
-                self.b_run.setEnabled(True)
-                return
+            # Check if the first file is an Araon Mega-Matrix — if so, the worker
+            # will auto-derive I0 and R from the He/ZA rows embedded in each file.
+            has_embedded_calib = bool(self.file_list) and DataIO.is_araon_mega_matrix(self.file_list[0])
+            if has_embedded_calib:
+                ans = QMessageBox.question(
+                    self, "BBCEAS 자동 캘리브레이션",
+                    "R / I₀ 파일이 별도로 로드되지 않았습니다.\n\n"
+                    "측정 파일 내에 He 스캔(flag 510~513)과 ZA 스캔(flag 500~503)이\n"
+                    "포함돼 있어 R-curve(flag 510)와 I₀(flag 500)를 자동 계산합니다.\n\n"
+                    "피팅을 시작합니까?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if ans == QMessageBox.StandardButton.No:
+                    self.b_run.setEnabled(True)
+                    return
+            else:
+                ans = QMessageBox.question(
+                    self, "Missing BBCEAS Params",
+                    "I0 or R is missing.\nFallback to standard DOAS (Log intensity ratio)?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if ans == QMessageBox.StandardButton.No:
+                    self.b_run.setEnabled(True)
+                    return
 
         # Initialize and fire the Worker Thread with BBCEAS params
         self.worker = AnalysisWorker(
-            self.engine, self.file_list, pixel_min, pixel_max, 
+            self.engine, self.file_list, pixel_min, pixel_max,
             p0, (bounds_low, bounds_high), interval, delay_ms,
             ref_properties=getattr(self, 'ref_props', {}),
-            i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d
+            i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d,
+            dark_array=sliced_dark,
+            dark_scale_factor=self.spin_dark_scale.value(),
+            offset_array=sliced_offset,
+            offset_scale_factor=self.spin_offset_scale.value(),
+            stray_light_fraction=self.spin_stray_light.value(),
+            use_temporal_i0=use_temporal,
+            flag_za=self._parse_flags(self.txt_flag_za.text()),
+            flag_he=self._parse_flags(self.txt_flag_he.text()),
+            flag_amb=self._parse_flags(self.txt_flag_amb.text()),
+            save_alpha=self.chk_save_alpha.isChecked(),
+            alpha_save_dir=getattr(self, 'alpha_save_dir', ''),
+            rl_factor=self.spin_rl_factor.value()
         )
         
         self.worker.step_limit = step_limit_val
@@ -1196,6 +1663,7 @@ class CAESARAnalyzer(QMainWindow):
         self.worker.kalman_r = self.spin_kalman_r.value()
         self.worker.temperature = self.spin_temp.value()
         self.worker.pressure = self.spin_pres.value()
+        self.worker.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
 
         # ===============================================================
         # Connect Thread Signals to UI functions
@@ -1204,13 +1672,27 @@ class CAESARAnalyzer(QMainWindow):
         self.worker.plot_update.connect(self.monitor.update_spectrum)
         self.worker.trend_update.connect(self.monitor.update_trend)
         self.worker.finished.connect(self.analysis_finished)
+        self.worker.r_curve_update.connect(self._on_r_curve_update)
+        self.worker.scan_count_ready.connect(self._on_scan_count_ready)
         
         # Lock UI controls to prevent interference
         self.b_run.setEnabled(False)
         self.b_stop.setEnabled(True)
         self.status.setText("🏃 Analysis in progress...")
+
+        # Switch to the Analysis Monitor tab automatically
+        self.main_tabs.setCurrentIndex(1)
+
         self.worker.start()
         
+    def _on_scan_count_ready(self, total_scans):
+        """Called once the worker has finished expanding all files into individual scans."""
+        # Progress bar advances by file (not scan) to stay manageable
+        self.pbar.setMaximum(len(self.file_list))
+        # Pre-allocate table rows so each result_ready call is O(1)
+        self.table.setRowCount(total_scans)
+        self.status.setText(f"🏃 {total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
+
     def stop_analysis(self):
         """Safely stops the worker thread and re-enables UI controls."""
         if hasattr(self, 'worker') and self.worker.isRunning():
@@ -1223,8 +1705,11 @@ class CAESARAnalyzer(QMainWindow):
             
     def update_table(self, result_dict, row_index):
         """Triggered by the worker thread to update the table row-by-row."""
-        
         self.results.append(result_dict)
+
+        # Auto-expand if scan count grew beyond the pre-allocated row count
+        if row_index >= self.table.rowCount():
+            self.table.setRowCount(row_index + 1)
         
         self.table.setItem(row_index, 0, QTableWidgetItem(str(result_dict['File'])))
         self.table.setItem(row_index, 1, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
@@ -1273,12 +1758,20 @@ class CAESARAnalyzer(QMainWindow):
             QMessageBox.information(self, "Done", "All files analyzed successfully.")
 
     def save(self):
-        """Saves the current analysis results with an intelligently generated filename (in nm)."""
+        """
+        Exports all analysis results to a tab-separated .dat or .csv file.
+
+        The auto-generated filename encodes the key fit settings so you can
+        identify the run later without opening the file:
+          e.g.  240420_1523_Result_NO2_H2O_445.0-465.0nm_Poly3_L0.0001_Robust_Step[0.5]_...dat
+
+        A metadata header block is prepended with the exact fit parameters,
+        followed by the data table (one row per measurement file).
+        """
         if not hasattr(self, 'results') or not self.results:
             QMessageBox.warning(self, "Warning", "No analysis results to save. Please RUN the analysis first.")
             return
             
-        import datetime
         now_str = datetime.datetime.now().strftime("%y%m%d_%H%M") 
         
         gas_list_str = "_".join(self.engine.gas_list) if hasattr(self, 'engine') and self.engine.gas_list else "NoRefs"
@@ -1347,16 +1840,24 @@ class CAESARAnalyzer(QMainWindow):
 
         if path:
             try:
-                import pandas as pd
                 df = pd.DataFrame(self.results)
                 
                 if 'Params' in df.columns:
                     df = df.drop(columns=['Params'])
                     
-                import datetime
                 current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 robust_status = "ON" if hasattr(self, 'chk_robust') and self.chk_robust.isChecked() else "OFF"
                 
+                kalman_q = self.spin_kalman_q.value()
+                kalman_r = self.spin_kalman_r.value()
+                rms_thresh_pct = self.spin_rms_thresh.value()
+                temporal_i0 = "ON" if self.chk_temporal_i0.isChecked() else "OFF"
+                dark_loaded = "YES" if (hasattr(self, 'dark_data') and self.dark_data is not None) else "NO"
+                dark_scale_val = self.spin_dark_scale.value()
+                offset_loaded = "YES" if (hasattr(self, 'offset_data') and self.offset_data is not None) else "NO"
+                offset_scale_val = self.spin_offset_scale.value()
+                stray_light_val = self.spin_stray_light.value()
+
                 header_lines = [
                     "# ==========================================================",
                     "# CAESAR Pro Analysis Report",
@@ -1366,6 +1867,14 @@ class CAESARAnalyzer(QMainWindow):
                     f"# Tikhonov Lambda: {lam_val:g}",
                     f"# Robust Fitting (IRLS): {robust_status}",
                     f"# Step Limit: {step_val} px",
+                    f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (fit accepted when RMS/signal < threshold)",
+                    f"# Kalman Filter: Q={kalman_q:.4f}, R={kalman_r:.3f}  (concentration columns = raw fit; _Smooth = Kalman-filtered)",
+                    f"# Dark Current Subtraction: {dark_loaded}  (scale={dark_scale_val:.4f})",
+                    f"# Detector Offset Subtraction: {offset_loaded}  (scale={offset_scale_val:.4f})",
+                    f"# Stray Light Correction: {'ON' if stray_light_val > 0 else 'OFF'}  (epsilon={stray_light_val:.4f})",
+                    f"# Temporal I0 Interpolation: {temporal_i0}",
+                    f"# Purge Gas RL Factor: {self.spin_rl_factor.value():.4f}  (1.0 = no correction; CAESAR CH1=0.9330 CH2=0.9950 CH3=0.9968)",
+                    f"# Measurement Flags: Ambient={self.txt_flag_amb.text().strip()}, ZA={self.txt_flag_za.text().strip()}, He={self.txt_flag_he.text().strip()}",
                     f"# Reference Constraints: {sh_str}, {sq_str}",
                     "# ==========================================================\n"
                 ]
@@ -1387,25 +1896,38 @@ class CAESARAnalyzer(QMainWindow):
     # Viewer Events (Table Click Sync)
     # ---------------------------------------------------------
     def on_table_double_click(self, row, col):
-        """Reloads the exact mathematical fit of a specific row into the components view."""
+        """
+        Replays the stored fit for a completed row.
+
+        Double-clicking a result row re-evaluates the engine model using the
+        fit parameters (shifts, squeezes, gas_coeffs, etc.) that were saved for
+        that file, then sends the result to the monitor — allowing you to inspect
+        any individual spectrum without re-running the full analysis.
+        """
         if row >= len(self.file_list): 
             return
             
         fname = self.table.item(row, 0).text()
-        filepath = next((f for f in self.file_list if os.path.basename(f) == fname), None)
-        if not filepath: 
+        entry = self._entry_from_display_name(fname)
+        if not entry:
             return
-        
+        filepath = self._entry_filepath(entry)
+        row_idx  = self._entry_row_index(entry)
+
         if row < len(self.results) and self.results[row]['File'] == fname:
             params = self.results[row].get('Params')
-            if params is None: 
-                return 
-                
+            if params is None:
+                return
+
             try:
                 f_min, f_max = int(self.txt_min.text()), int(self.txt_max.text())
-                
-                from data_io import DataIO  
-                pixel_idx, intensity_raw = DataIO.load_measurement(filepath, f_min, f_max)
+
+                # For Araon Mega-Matrix entries use HK loader to get the correct row
+                if isinstance(entry, tuple):
+                    pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(
+                        filepath, f_min, f_max, row_index=row_idx)
+                else:
+                    pixel_idx, intensity_raw = DataIO.load_measurement(filepath, f_min, f_max)
                 
                 intensity_fit, _, intensity_poly, _, _ = self.engine.get_model_components(
                     pixel_idx, 
@@ -1439,13 +1961,17 @@ class CAESARAnalyzer(QMainWindow):
                 return
             
             fname = self.table.item(row, 0).text()
-            filepath = next((f for f in self.file_list if os.path.basename(f) == fname), None)
-            if filepath:
+            entry = self._entry_from_display_name(fname)
+            if entry:
+                fp  = self._entry_filepath(entry)
+                ri  = self._entry_row_index(entry)
                 try:
-                    from data_io import DataIO
-                    pixel_idx, intensity_raw = DataIO.load_measurement(filepath, pixel_min=0)
+                    if isinstance(entry, tuple):
+                        pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(fp, pixel_min=0, row_index=ri)
+                    else:
+                        pixel_idx, intensity_raw = DataIO.load_measurement(fp, pixel_min=0)
                     self.monitor.plot_viewer(pixel_idx, intensity_raw, f"Meas: {fname}", 'b')
-                except Exception as e: 
+                except Exception as e:
                     print(f"Viewer load failed: {e}")
         else: # Reference Data
             ref_name = self.monitor.cb_view.currentText().replace("Ref: ", "")
@@ -1458,66 +1984,35 @@ class CAESARAnalyzer(QMainWindow):
                 y = self.engine.interpolators[ref_name](np.arange(len(self.engine.raw_references[ref_name])))
                 self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (Conv): {ref_name}", 'r', style='-')
 
-    def auto_calculate_and_display_fwhm(self, lamp_spectrum, wavelengths):
-        """Automatically calculates FWHM from the passed lamp spectrum upon calibration completion."""
-        try:
-            # 1. Find the highest peak (usually the 435.83nm Hg line)
-            peak_px = int(np.argmax(lamp_spectrum))
-            
-            # 2. Extract ±15 pixels around the peak
-            window = 15
-            start = max(0, peak_px - window)
-            end = min(len(lamp_spectrum), peak_px + window + 1)
-            
-            x_data = np.arange(start, end)
-            y_data = lamp_spectrum[start:end]
-            
-            # 3. Gaussian Fitting
-            offset_guess = np.min(y_data)
-            a_guess = np.max(y_data) - offset_guess
-            
-            def gauss(x, a, mu, sigma, offset):
-                return a * np.exp(-((x - mu)**2) / (2 * sigma**2)) + offset
-                
-            popt, _ = curve_fit(gauss, x_data, y_data, p0=[a_guess, peak_px, 2.0, offset_guess])
-            sigma = abs(popt[2])
-            fwhm_px = 2.3548 * sigma
-            
-            # 4. Convert pixel FWHM to nanometers (nm)
-            dispersion = (wavelengths[end-1] - wavelengths[start]) / (end - 1 - start)
-            fwhm_nm = abs(fwhm_px * dispersion)
-            
-            # 5. Display prominently on the Main UI
-            self.lbl_fwhm_display.setText(f"ILS FWHM: {fwhm_nm:.4f} nm")
-            self.lbl_fwhm_display.setStyleSheet("color: #E65100; font-weight: bold; background-color: #FFF3E0; border-radius: 4px; padding: 4px;")
-            
-            return fwhm_nm
-            
-        except Exception as e:
-            print(f"Auto FWHM calculation failed: {e}")
-            self.lbl_fwhm_display.setText("⚠️ Auto FWHM Failed")
-            self.lbl_fwhm_display.setStyleSheet("color: #D32F2F; font-weight: bold;")
-            return None
 
-    # =========================================================
-    # 🌟 [V11.0] Scenario Auto-Save & Load System
-    # =========================================================
     def save_scenario(self):
-        """설정값, 경로, 그리고 새로운 파라미터(람다, 로버스트)를 포함하여 파일명 자동 생성"""
-        # 1. 가스 리스트 및 기본 정보 추출
+        """
+        Serializes the current fit configuration to a JSON file.
+
+        Everything needed to reproduce a run is stored:
+          - Reference file paths and their 10^exponent multipliers
+          - Wavelength calibration file path
+          - Pixel range, polynomial degree, step limit
+          - Shift/Squeeze mode constraints per gas (ref_props)
+          - Tikhonov λ, Robust flag, Kalman Q and R
+
+        The JSON can be reloaded via load_scenario() to instantly restore the
+        entire setup including auto-locking the references.
+        """
+        # 1. Extract gas list and basic info
         gas_list_str = "_".join(self.engine.gas_list) if hasattr(self, 'engine') and self.engine.gas_list else "NoRefs"
         f_min = self.txt_min.text()
         f_max = self.txt_max.text()
         poly = self.spin_poly_deg.value()
         
-        # 파일명에 넣을 새로운 파라미터 정보 정리
+        # Prepare new parameter info for filename
         lam_val = self.spin_lambda.value()
         robust_str = "Robust" if self.chk_robust.isChecked() else "Std"
         
-        # 예: FitSet_NO2_H2O_1453-1646px_Poly4_L0.0001_Robust.json
+        # e.g., FitSet_NO2_H2O_1453-1646px_Poly4_L0.0001_Robust.json
         default_fname = f"FitSet_{gas_list_str}_{f_min}-{f_max}px_Poly{poly}_L{lam_val:g}_{robust_str}.json"
 
-        # 2. 기존 데이터 수집 로직
+        # 2. Collect existing data
         refs_data = []
         if hasattr(self, 'ref_widgets'):
             for rw in self.ref_widgets:
@@ -1542,7 +2037,7 @@ class CAESARAnalyzer(QMainWindow):
             "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050
         }
 
-        # 3. 파일 저장 다이얼로그 실행
+        # 3. Open file save dialog
         path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", default_fname, "JSON Files (*.json)")
         if path:
             try:
@@ -1553,7 +2048,17 @@ class CAESARAnalyzer(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Save Failed:\n{e}")
 
     def load_scenario(self):
-        """Deserializes a JSON scenario file, populates UI, and auto-locks references."""
+        """
+        Restores a saved fit configuration from a JSON file.
+
+        Full automation sequence:
+          1. Restore all numeric UI parameters (pixel range, poly, lambda, etc.)
+          2. Auto-load the wavelength calibration file (if the path still exists)
+          3. Add each reference file back to the UI list with its multiplier
+          4. Auto-click 'Lock' to commit references to the engine
+
+        After load_scenario() the user only needs to click 'Load Data' then 'RUN'.
+        """
         path, _ = QFileDialog.getOpenFileName(self, "Load Fit Scenario", "", "JSON Files (*.json)")
         if not path: return
         
@@ -1569,7 +2074,7 @@ class CAESARAnalyzer(QMainWindow):
                 self.spin_step_limit.setValue(scenario.get("step_limit", 0.5))
             self.ref_props = scenario.get("ref_props", {})
             
-            #람다 및 로버스트 복구
+            # Restore lambda and robust settings
             if hasattr(self, 'spin_lambda'):
                 self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
             if hasattr(self, 'chk_robust'):
@@ -1579,10 +2084,6 @@ class CAESARAnalyzer(QMainWindow):
             if hasattr(self, 'spin_kalman_r'):
                 self.spin_kalman_r.setValue(scenario.get("kalman_r", 0.050))
             
-            # 프리셋을 'Custom'으로 변경하여 불러온 값 유지
-            if hasattr(self, 'combo_preset'):
-                self.combo_preset.setCurrentIndex(0)
-
             # 🌟 2. Auto-load wavelength file
             wl_path = scenario.get("wl_path", "")
             if wl_path and os.path.exists(wl_path):

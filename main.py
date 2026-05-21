@@ -1,87 +1,58 @@
 import sys
-import os
-import math
-import datetime
 import time
-import json
-import numpy as np
-import pandas as pd
-import pyqtgraph as pg
-pg.setConfigOption('background', 'w')
-pg.setConfigOption('foreground', 'k')
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.rcParams['font.family'] = 'Malgun Gothic'
-matplotlib.rcParams['axes.unicode_minus'] = False
 
-# [PyQt6] Backend
+from PyQt6.QtWidgets import QApplication, QSplashScreen
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
-from matplotlib.figure import Figure
-from matplotlib.widgets import SpanSelector
-from matplotlib.ticker import ScalarFormatter
+from app_window import CAESARAnalyzer  # The main application window class
 
-
-from scipy.optimize import curve_fit, least_squares, lsq_linear
-from scipy.interpolate import interp1d
-from scipy.signal import convolve
-from scipy.signal import find_peaks
-from scipy.stats import norm
-from scipy.signal.windows import tukey
-from scipy.ndimage import gaussian_filter1d
-from numpy.polynomial import chebyshev
-
-
-
-# [PyQt6] Modules
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
-                             QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, 
-                             QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
-                             QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
-                             QCheckBox, QGridLayout, QInputDialog, QRadioButton, QButtonGroup,
-                             QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPixmap
-
-from app_window import CAESARAnalyzer
-
+# ─── Entry point ────────────────────────────────────────────────────────────
+# Everything starts here when you run  python main.py
 if __name__ == '__main__':
+    # Qt requires one QApplication instance per process before any widgets exist
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    app.setStyle("Fusion")  # Fusion style: clean, modern look on all platforms
 
-    # 1. Load splash image (High-res PNG is recommended over ico)
-    # The image file must be located in the same directory as the script.
-    splash_pixmap = QPixmap("Argos.png") 
-    
-    # 2. Create splash screen object and display it in the center
+    # Scale font size relative to screen height (reference: 1080p → 9pt)
+    from data_io import ui_scale
+    _s = ui_scale()
+    _font = app.font()
+    _font.setPointSize(max(7, round(9 * _s)))
+    app.setFont(_font)
+
+    # ── Splash screen ────────────────────────────────────────────────────────
+    # Show a logo image while the heavy main window is initializing in the background
+    splash_pixmap = QPixmap("Argos.png")
     splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
     splash.show()
-    
-    # 3. Show loading message
-    splash.showMessage(
-        "Loading CAESAR Pro V1.0 Engine...", 
-        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter, 
-        Qt.GlobalColor.white # Text color (Change to black if background is bright)
-    )
-    
-    # Process events to prevent the splash screen from freezing/turning white during load
-    app.processEvents() 
 
-    # 4. Initialize the heavy main engine and UI (Splash screen remains visible)
-    ex = CAESARAnalyzer() # Note: You can rename this class to CAESARAnalyzer if you wish!
-    
-    # (Optional) Force the s
-    # plash screen to remain visible for 1 second for aesthetics 
-    # just in case the program loads too quickly.
+    # Print a loading message at the bottom-center of the splash image
+    splash.showMessage(
+        "Loading CAESAR Pro V1.0 Engine...",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
+        Qt.GlobalColor.white
+    )
+
+    # Force the event loop to process pending events so the splash actually
+    # renders on screen before the next line blocks the thread
+    app.processEvents()
+
+
+    # ── Main window initialization ───────────────────────────────────────────
+    # CAESARAnalyzer.__init__ loads the engine, builds every widget, and
+    # connects all signals — this is the slow part covered by the splash
+    ex = CAESARAnalyzer()
+
+    # Brief pause so the splash remains visible before the main window appears
     time.sleep(0.5)
 
-    
-    # 5. Show the main application window maximized
     ex.showMaximized()
-    
-    # 6. Naturally fade out/close the splash screen once the main window appears
+
+    # Dissolve the splash and bring the fully loaded main window to the front
     if 'splash' in locals():
         splash.finish(ex)
-        
+
+    # Hand control over to the Qt event loop.
+    # This call blocks until the user closes the window, then returns an exit code.
     sys.exit(app.exec())
