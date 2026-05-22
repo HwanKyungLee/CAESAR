@@ -250,18 +250,22 @@ class DataIO:
                 #   Cold: pressure=6160 (~1010 mbar), cavity-T=6173 (~24°C, unheated)
                 #   Hot:  pressure=6162 (~971 mbar),  cavity-T=6155 (~75°C, heated)
                 #
-                # Auto-detect: try Cold columns first, fall back to Hot columns.
-                # Detect channel by pressure column: Cold=6160, Hot=6162.
-                # Then read the matching temperature column so Cold files don't
-                # accidentally pick up the Hot cavity sensor (col 6155).
+                # Auto-detect channel: Cold=col6160 (~1010 mbar), Hot=col6162 (~970 mbar).
+                # BUG-FIX: col6160 in Hot files contains ~3500 (non-zero, non-65535) which
+                # previously caused Hot to be mis-detected as Cold.
+                # Fix: require the converted pressure to be physically plausible (800-1200 mbar).
+                _P_SCALE = 0.01 * 6894.73326 / 100.0   # raw count → mbar  (~0.6895)
+                _P_LO, _P_HI = 800.0, 1200.0            # valid atmospheric pressure range
                 raw_p_count = np.nan
                 _t_col_for_channel = 6173  # default: Cold ambient (~24 °C)
                 for _pcol, _tcol in ((6160, 6173), (6162, 6155)):
                     _v = raw_probe[_pcol] if _pcol < len(raw_probe) else np.nan
                     if np.isfinite(_v) and _v not in (0, 65535):
-                        raw_p_count = _v
-                        _t_col_for_channel = _tcol
-                        break
+                        _p_mbar = float(_v) * _P_SCALE
+                        if _P_LO <= _p_mbar <= _P_HI:   # sanity check
+                            raw_p_count = _v
+                            _t_col_for_channel = _tcol
+                            break
 
                 raw_t_count = np.nan
                 _v = raw_probe[_t_col_for_channel] if _t_col_for_channel < len(raw_probe) else np.nan

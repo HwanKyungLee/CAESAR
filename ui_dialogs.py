@@ -444,31 +444,62 @@ class WavelengthCalibrationDialog(QDialog):
                 return float(peak_pixel)
     
     def calculate_fwhm(self, peak_pixel, intensities, current_wavelengths=None):
-        """Extract data around the peak, apply Gaussian fit, and calculate FWHM."""
+        """Extract data around the peak, apply Gaussian fit, and calculate FWHM.
+
+        Window is auto-detected from the half-max crossing points so that broad
+        ILS peaks (Cold, FWHM ~3-4 nm = ~76 px) and narrow ILS peaks (Hot,
+        FWHM ~0.7 nm = ~15 px) are both handled correctly.
+        """
         try:
-            # 1. Extract data around the clicked peak (±15 pixels)
-            window = 15
-            start = max(0, int(peak_pixel) - window)
-            end = min(len(intensities), int(peak_pixel) + window + 1)
+            full = np.asarray(intensities, dtype=float)
+            pk   = int(np.clip(round(peak_pixel), 0, len(full) - 1))
 
+            # ── Step 1: rough baseline & half-max scan ────────────────────────
+            # Use a wide context (±200 px) just to estimate the local baseline.
+            ctx_start = max(0, pk - 200)
+            ctx_end   = min(len(full), pk + 201)
+            ctx       = full[ctx_start:ctx_end]
+            baseline  = float(np.percentile(ctx, 10))
+            peak_val  = float(full[pk])
+            amplitude = peak_val - baseline
+            if amplitude <= 0:
+                return None, None
+
+            half_level = baseline + amplitude * 0.5
+
+            # Walk outward from peak to find half-max crossing points
+            left_hm = pk
+            while left_hm > 0 and full[left_hm] > half_level:
+                left_hm -= 1
+
+            right_hm = pk
+            while right_hm < len(full) - 1 and full[right_hm] > half_level:
+                right_hm += 1
+
+            # Window = 1.5 × half-width on each side (to include peak tails for
+            # Gaussian fit), but at least 15 px and at most 300 px.
+            half_width = max(right_hm - pk, pk - left_hm, 1)
+            window = max(15, min(300, int(half_width * 1.5)))
+
+            # ── Step 2: extract fit region ────────────────────────────────────
+            start = max(0, pk - window)
+            end   = min(len(full), pk + window + 1)
             x_data = np.arange(start, end, dtype=float)
-            y_data = np.asarray(intensities[start:end], dtype=float)
+            y_data = full[start:end]
 
-            # 2. Initial estimates — 데이터에서 자동 추정
-            offset_guess = float(np.percentile(y_data, 10))   # 하위 10% → 베이스라인
-            a_guess      = float(np.max(y_data)) - offset_guess
-            mu_guess     = float(x_data[np.argmax(y_data)])   # 실제 최대값 위치
+            # ── Step 3: initial estimates ─────────────────────────────────────
+            offset_guess = baseline
+            a_guess      = amplitude
+            mu_guess     = float(pk)
+            # sigma from half-max walk (in pixels)
+            sigma_guess  = max(0.5, half_width / 2.3548)
+            sigma_guess  = min(sigma_guess, window * 0.8)
 
-            # sigma 초기값: 반치폭 픽셀 수에서 추정
-            y_above_half = np.where((y_data - offset_guess) >= a_guess / 2.0)[0]
-            sigma_guess  = (len(y_above_half) / 2.3548) if len(y_above_half) >= 2 else 2.0
-            sigma_guess  = max(0.5, min(sigma_guess, window * 0.8))
+            p0_guess  = [a_guess, mu_guess, sigma_guess, offset_guess]
+            bounds_lo = [0.0,  float(start), 0.3,            -np.inf]
+            bounds_hi = [np.inf, float(end), float(window),   np.inf]
 
-            # 3. Curve Fitting — bounds로 발산 방지
-            p0_guess = [a_guess, mu_guess, sigma_guess, offset_guess]
-            bounds_lo = [0.0,   float(start),  0.3,      -np.inf]
-            bounds_hi = [np.inf, float(end),   float(window), np.inf]
-
+            # ── Step 4: Gaussian fit ──────────────────────────────────────────
             popt, _ = curve_fit(
                 self._gaussian_model, x_data, y_data,
                 p0=p0_guess,
@@ -477,16 +508,16 @@ class WavelengthCalibrationDialog(QDialog):
             )
             a, mu, sigma, offset = popt
 
-            # 4. Convert Gaussian sigma → FWHM
-            # For a Gaussian: FWHM = 2 · √(2 · ln 2) · σ ≈ 2.3548 · σ
+            # ── Step 5: convert sigma → FWHM ─────────────────────────────────
+            # FWHM = 2.3548 × σ  (standard Gaussian relation)
             fwhm_pixels = 2.3548 * abs(sigma)
 
-            # 5. Convert to nm — 피팅된 peak center(mu) 근방 로컬 분산율 사용
+            # ── Step 6: FWHM in nm using local polynomial dispersion ──────────
             fwhm_nm = None
             if current_wavelengths is not None:
-                wl = np.asarray(current_wavelengths)
-                mu_i = int(np.clip(round(mu), 1, len(wl) - 2))
-                dispersion = (wl[mu_i + 1] - wl[mu_i - 1]) / 2.0  # nm/px (로컬)
+                wl    = np.asarray(current_wavelengths)
+                mu_i  = int(np.clip(round(mu), 1, len(wl) - 2))
+                dispersion = (wl[mu_i + 1] - wl[mu_i - 1]) / 2.0  # nm/px (local)
                 if dispersion > 0:
                     fwhm_nm = fwhm_pixels * dispersion
 
@@ -1980,8 +2011,19 @@ class MonitorWidget(QWidget):
         return None
 
     def _r_get_ts(self, label, raw_dir):
-        """label(YYYY-MM-DD-NNN)에 해당하는 unix timestamp 반환."""
+        """label(YYYY-MM-DD-NNN)에 해당하는 unix timestamp(UTC epoch) 반환.
+
+        Cold .dat  col1 = UTC seconds since UTC midnight  → day_epoch + col1
+        Hot  .dat  col1 = KST seconds since KST midnight  → (day_epoch - 9h) + col1
+          KST midnight = UTC midnight - 9h (같은 KST 날짜 기준)
+          예) KST 2026-05-18 00:00 = UTC 2026-05-17 15:00
+          따라서 UTC epoch = UTC_midnight_of_KSTdate - 9*3600 + col1_kst
+        """
         day_epoch = self._r_date_epoch(label)
+        # 경로에 'hot'이 포함되면 KST 기준 파일
+        is_hot = raw_dir is not None and "hot" in raw_dir.lower()
+        tz_offset = -9 * 3600 if is_hot else 0  # Hot: KST→UTC 보정
+
         if raw_dir:
             src = label + ".dat"
             for candidate in [
@@ -1991,13 +2033,13 @@ class MonitorWidget(QWidget):
                 if os.path.exists(candidate):
                     col1 = self._r_read_col1(candidate)
                     if col1 is not None:
-                        return day_epoch + col1   # UTC초 → 절대 시각
+                        return day_epoch + tz_offset + col1
         # 원본 없을 때: 파일명 시퀀스로 1시간 간격 추정
         try:
             seq = int(label.split("-")[3]) - 1
         except Exception:
             seq = 0
-        return day_epoch + seq * 3600.0
+        return day_epoch + tz_offset + seq * 3600.0
 
     def _r_load_records(self, ch_dir, raw_dir=None):
         """*_R.dat 읽기 → [(label, wave, r, ts_unix), ...] 시간순
