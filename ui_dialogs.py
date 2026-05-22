@@ -1644,18 +1644,23 @@ class MonitorWidget(QWidget):
     def __init__(self, engine):
         super().__init__()
         self.engine = engine
-        self.wavelengths = None 
+        self.wavelengths = None
         self.latest_fit_data = None
         self.latest_raw_data = None
-        
+
         # Graph object cache (key to anti-flicker rendering)
-        self.plot_items = {} 
+        self.plot_items = {}
         self.curve_items = {}
-        
+
+        # ── R Viewer 자동갱신 타이머 ──────────────────────────────
+        from PyQt6.QtCore import QTimer
+        self._r_auto_timer = QTimer(self)
+        self._r_auto_timer.timeout.connect(self._r_auto_refresh)
+
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
-        
+
         self.init_tab_components_pg()
         self.init_tab_fit_view_pg()
         self.init_tab_trend_pg()
@@ -1872,6 +1877,29 @@ class MonitorWidget(QWidget):
         btn_load = QPushButton("▶ 불러오기")
         btn_load.setStyleSheet("background-color:#4CAF50;color:white;font-weight:bold;")
         btn_load.clicked.connect(self._r_load_all)
+
+        # 자동갱신 토글 버튼
+        from PyQt6.QtWidgets import QSpinBox
+        self._r_auto_btn = QPushButton("🔄 자동갱신 OFF")
+        self._r_auto_btn.setCheckable(True)
+        self._r_auto_btn.setFixedWidth(130)
+        self._r_auto_btn.setStyleSheet(
+            "QPushButton{background:#888;color:white;font-weight:bold;border-radius:4px;}"
+            "QPushButton:checked{background:#FF5722;color:white;}"
+        )
+        self._r_auto_btn.toggled.connect(self._r_toggle_auto)
+
+        self._r_interval_spin = QSpinBox()
+        self._r_interval_spin.setRange(1, 60)
+        self._r_interval_spin.setValue(5)
+        self._r_interval_spin.setSuffix(" 분")
+        self._r_interval_spin.setFixedWidth(65)
+        self._r_interval_spin.setToolTip("자동갱신 간격 (분)")
+        self._r_interval_spin.valueChanged.connect(self._r_update_interval)
+
+        self._r_last_lbl = QLabel("")
+        self._r_last_lbl.setStyleSheet("color:#555; font-size:11px;")
+
         # 채널 가시성 체크박스
         self._r_chk = {}
         for ch, col in [("Cold","#1f77b4"), ("Hot ANs","#d62728"), ("Hot PNs","#ff7f0e")]:
@@ -1888,6 +1916,9 @@ class MonitorWidget(QWidget):
         self._r_mode_cb.setToolTip("시계열·스펙트럼을 반사율(R) 또는 유효경로(Leff)로 전환")
         self._r_mode_cb.currentIndexChanged.connect(self._r_on_display_change)
         row4.addWidget(btn_load)
+        row4.addWidget(self._r_auto_btn)
+        row4.addWidget(self._r_interval_spin)
+        row4.addWidget(self._r_last_lbl)
         row4.addWidget(QLabel("  채널:"))
         for chk in self._r_chk.values(): row4.addWidget(chk)
         row4.addWidget(QLabel("  단위:"))
@@ -1977,6 +2008,31 @@ class MonitorWidget(QWidget):
 
     def _r_use_leff(self):
         return hasattr(self, '_r_mode_cb') and self._r_mode_cb.currentIndex() == 1
+
+    # ── 자동갱신 ─────────────────────────────────────────────
+
+    def _r_toggle_auto(self, checked: bool):
+        """자동갱신 ON/OFF 토글."""
+        if checked:
+            interval_ms = self._r_interval_spin.value() * 60 * 1000
+            self._r_auto_timer.start(interval_ms)
+            self._r_auto_btn.setText(f"🔄 자동갱신 ON")
+        else:
+            self._r_auto_timer.stop()
+            self._r_auto_btn.setText("🔄 자동갱신 OFF")
+            self._r_last_lbl.setText("")
+
+    def _r_update_interval(self, value: int):
+        """스핀박스 변경 시 이미 실행 중이면 타이머 재시작."""
+        if self._r_auto_timer.isActive():
+            self._r_auto_timer.start(value * 60 * 1000)
+
+    def _r_auto_refresh(self):
+        """타이머 틱마다 호출 — 파일 다시 읽고 그래프 갱신."""
+        self._r_load_all()
+        import datetime
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        self._r_last_lbl.setText(f"갱신: {now}")
 
     def _r_pick(self, line_edit):
         from PyQt6.QtWidgets import QFileDialog
