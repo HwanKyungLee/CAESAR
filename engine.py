@@ -184,7 +184,7 @@ class UniversalEngine:
                 )
             return
 
-        sigma_g = fwhm_gaussian / 2.355
+        sigma_g = fwhm_gaussian / 2.3548
         gamma_l = fwhm_lorentzian / 2.0
 
         # Truncate at 4σ_G or 10γ_L (whichever is larger) to capture tails
