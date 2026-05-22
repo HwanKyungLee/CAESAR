@@ -421,12 +421,12 @@ class WavelengthCalibrationDialog(QDialog):
             
             # 5. Run optimization (curve_fit)
             popt, _ = curve_fit(self._gaussian_model, x_data, y_data, p0=p0_guess, maxfev=2000)
-            sub_pixel_mu = popt
-            
+            sub_pixel_mu = popt[1]  # mu is the second parameter: [a, mu, sigma, offset]
+
             # 6. If fitting diverged too far, safely fall back to centroid
             if abs(sub_pixel_mu - peak_pixel) > window:
                 return centroid_x
-                
+
             return sub_pixel_mu
             
         except Exception as e:
