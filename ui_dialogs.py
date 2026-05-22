@@ -1630,6 +1630,7 @@ class MonitorWidget(QWidget):
         self.init_tab_trend_pg()
         self.init_tab_viewer_pg()
         self.init_tab_hq_mpl()
+        self.init_tab_r_viewer()
 
     # Shared toolbar factory
     def _create_reset_toolbar(self, target_glw=None, target_pw=None):
@@ -1798,6 +1799,438 @@ class MonitorWidget(QWidget):
         l_hq.addWidget(self.cv_hq)
         
         self.tabs.addTab(self.tab_hq, "📸 HQ Export (Pro)")
+
+
+    # [Tab 6] R Viewer — 거울 반사율 시계열 + 스펙트럼 뷰어
+    # =========================================================
+    def init_tab_r_viewer(self):
+        self.tab_r = QWidget()
+        lay = QVBoxLayout(self.tab_r)
+
+        from PyQt6.QtWidgets import QLineEdit, QComboBox
+
+        # ── 행1: R 결과 폴더 ──────────────────────────────────
+        row1 = QHBoxLayout()
+        self._r_dir_edit = QLineEdit()
+        self._r_dir_edit.setPlaceholderText("R 결과 폴더  (R_Cold / R_Hot_ANs / R_Hot_PNs 포함)")
+        btn_r = QPushButton("📂"); btn_r.setFixedWidth(30)
+        btn_r.clicked.connect(lambda: self._r_pick(self._r_dir_edit))
+        row1.addWidget(QLabel("결과 폴더:")); row1.addWidget(self._r_dir_edit, 4); row1.addWidget(btn_r)
+        lay.addLayout(row1)
+
+        # ── 행2: 원본 Cold .dat 폴더 ──────────────────────────
+        row2 = QHBoxLayout()
+        self._r_cold_edit = QLineEdit()
+        self._r_cold_edit.setPlaceholderText("Cold 원본 폴더  (타임스탬프용, 없으면 파일명 날짜로 추정)")
+        btn_c = QPushButton("📂"); btn_c.setFixedWidth(30)
+        btn_c.clicked.connect(lambda: self._r_pick(self._r_cold_edit))
+        row2.addWidget(QLabel("Cold 원본:")); row2.addWidget(self._r_cold_edit, 4); row2.addWidget(btn_c)
+        lay.addLayout(row2)
+
+        # ── 행3: 원본 Hot .dat 폴더 ───────────────────────────
+        row3 = QHBoxLayout()
+        self._r_hot_edit = QLineEdit()
+        self._r_hot_edit.setPlaceholderText("Hot 원본 폴더  (타임스탬프용, 없으면 파일명 날짜로 추정)")
+        btn_h = QPushButton("📂"); btn_h.setFixedWidth(30)
+        btn_h.clicked.connect(lambda: self._r_pick(self._r_hot_edit))
+        row3.addWidget(QLabel("Hot 원본:")); row3.addWidget(self._r_hot_edit, 4); row3.addWidget(btn_h)
+        lay.addLayout(row3)
+
+        # ── 행4: 컨트롤 ───────────────────────────────────────
+        row4 = QHBoxLayout()
+        btn_load = QPushButton("▶ 불러오기")
+        btn_load.setStyleSheet("background-color:#4CAF50;color:white;font-weight:bold;")
+        btn_load.clicked.connect(self._r_load_all)
+        # 채널 가시성 체크박스
+        self._r_chk = {}
+        for ch, col in [("Cold","#1f77b4"), ("Hot ANs","#d62728"), ("Hot PNs","#ff7f0e")]:
+            chk = QCheckBox(ch)
+            chk.setChecked(True)
+            chk.setStyleSheet(f"color:{col}; font-weight:bold;")
+            chk.stateChanged.connect(self._r_update_visibility)
+            self._r_chk[ch] = chk
+        self._r_info_lbl = QLabel("—")
+        self._r_info_lbl.setStyleSheet("color:#1565C0; font-weight:bold;")
+        # 표시 단위 콤보박스 (R % / Leff km)
+        self._r_mode_cb = QComboBox()
+        self._r_mode_cb.addItems(["R (%)", "Leff (km)"])
+        self._r_mode_cb.setToolTip("시계열·스펙트럼을 반사율(R) 또는 유효경로(Leff)로 전환")
+        self._r_mode_cb.currentIndexChanged.connect(self._r_on_display_change)
+        row4.addWidget(btn_load)
+        row4.addWidget(QLabel("  채널:"))
+        for chk in self._r_chk.values(): row4.addWidget(chk)
+        row4.addWidget(QLabel("  단위:"))
+        row4.addWidget(self._r_mode_cb)
+        row4.addWidget(self._r_info_lbl, 1)
+        lay.addLayout(row4)
+
+        # ── 그래프 영역 ────────────────────────────────────────
+        self._r_glw = pg.GraphicsLayoutWidget()
+        lay.addWidget(self._r_glw)
+
+        # 시계열 플롯 — DateAxisItem (KST = UTC+9)
+        _date_ax = pg.DateAxisItem(orientation='bottom', utcOffset=9*3600)
+        self._r_p_ts = self._r_glw.addPlot(
+            row=0, col=0,
+            title="R 시계열  |  휠: Y줌  Ctrl+휠: X줌  우클릭: 이동  점 클릭: 스펙트럼",
+            axisItems={'bottom': _date_ax})
+        self._r_p_ts.setLabel('left',   'R (%)')
+        self._r_p_ts.setLabel('bottom', 'Time (KST)')
+        self._r_p_ts.showGrid(x=True, y=True, alpha=0.4)
+        self._r_p_ts.addLegend(offset=(10, 10))
+
+        # 채널별 커브
+        _CH = {"Cold":"#1f77b4", "Hot ANs":"#d62728", "Hot PNs":"#ff7f0e"}
+        self._r_curves = {}
+        self._r_marks  = {}
+        for ch, col in _CH.items():
+            self._r_curves[ch] = self._r_p_ts.plot(
+                pen=pg.mkPen(col, width=2),
+                symbol='o', symbolSize=6, symbolBrush=col,
+                symbolPen=None, name=ch)
+            self._r_marks[ch] = self._r_p_ts.plot(
+                pen=None, symbol='star', symbolSize=16,
+                symbolBrush=pg.mkBrush(255,80,0,230),
+                symbolPen=pg.mkPen('k', width=1))
+
+        # 수직선 (마우스 커서)
+        self._r_vline = pg.InfiniteLine(angle=90, movable=False,
+                                         pen=pg.mkPen('gray', style=Qt.PenStyle.DashLine))
+        self._r_p_ts.addItem(self._r_vline, ignoreBounds=True)
+        self._r_p_ts.scene().sigMouseMoved.connect(self._r_on_mouse_move)
+        self._r_p_ts.scene().sigMouseClicked.connect(self._r_on_ts_click)
+
+        # 스펙트럼 플롯
+        self._r_glw.nextRow()
+        self._r_p_sp = self._r_glw.addPlot(row=1, col=0,
+                                             title="R 스펙트럼  (시계열 점 클릭 시 표시)")
+        self._r_p_sp.setLabel('left',   'R (%)')
+        self._r_p_sp.setLabel('bottom', 'Wavelength (nm)')
+        self._r_p_sp.showGrid(x=True, y=True, alpha=0.4)
+        self._r_p_sp.addLegend(offset=(10, 10))
+        self._r_curve_sp = self._r_p_sp.plot(pen=pg.mkPen('#1f77b4', width=1.5), name='R(λ)')
+
+        # 내부 데이터  {ch: [(label, wave, r, ts_unix), ...]}
+        self._r_data = {}
+        self._r_ch_colors = _CH
+        self._r_sel_ch  = None   # 마지막으로 클릭한 채널
+        self._r_sel_idx = 0
+
+        self.tabs.addTab(self.tab_r, "🪞 R Viewer")
+
+    # ── 헬퍼 ─────────────────────────────────────────────────
+
+    _R_D_CM = 51.8   # 캐비티 길이 [cm]
+
+    @staticmethod
+    def _r_mean_r(r_arr, trim=0.05):
+        """엣지 픽셀 제외(양쪽 trim×100%) 후 평균 R (0~1)"""
+        n = len(r_arr)
+        lo, hi = int(n * trim), n - int(n * trim)
+        return float(np.mean(r_arr[lo:hi])) if lo < hi else float(np.mean(r_arr))
+
+    @classmethod
+    def _r_leff_from_r(cls, r_arr, trim=0.05):
+        """중앙 픽셀 평균 R → Leff (km).  Leff = d / (1-R)"""
+        mean_r = cls._r_mean_r(r_arr, trim)
+        omr = 1.0 - mean_r          # (1-R), 0~1
+        if omr <= 0.0:
+            return np.nan
+        return cls._R_D_CM / omr * 1e-5   # cm → km
+
+    def _r_on_display_change(self):
+        """R/Leff 모드 전환 시 시계열·스펙트럼 동시 갱신"""
+        self._r_draw_all()
+        if self._r_sel_ch and self._r_sel_ch in self._r_data:
+            self._r_show_spectrum(self._r_sel_ch, self._r_sel_idx)
+
+    def _r_use_leff(self):
+        return hasattr(self, '_r_mode_cb') and self._r_mode_cb.currentIndex() == 1
+
+    def _r_pick(self, line_edit):
+        from PyQt6.QtWidgets import QFileDialog
+        d = QFileDialog.getExistingDirectory(self, "폴더 선택")
+        if d: line_edit.setText(d)
+
+    @staticmethod
+    def _r_date_epoch(label):
+        """YYYY-MM-DD-NNN → 해당 날짜 자정 UTC unix timestamp"""
+        import calendar, datetime as _dt
+        p = label.split("-")
+        try:
+            return float(calendar.timegm(_dt.date(int(p[0]),int(p[1]),int(p[2])).timetuple()))
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _r_read_col1(raw_path, flag=500):
+        """raw .dat에서 flag=500인 첫 행의 col1(UTC초) 반환. 없으면 None."""
+        try:
+            with open(raw_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    tok = line.strip().split("\t")
+                    if len(tok) < 5: continue
+                    try:
+                        if int(tok[4].strip()) == flag:
+                            return float(tok[1].strip())
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return None
+
+    def _r_get_ts(self, label, raw_dir):
+        """label(YYYY-MM-DD-NNN)에 해당하는 unix timestamp 반환."""
+        day_epoch = self._r_date_epoch(label)
+        if raw_dir:
+            src = label + ".dat"
+            for candidate in [
+                os.path.join(raw_dir, src),
+                os.path.join(raw_dir, "-".join(label.split("-")[:3]), src),
+            ]:
+                if os.path.exists(candidate):
+                    col1 = self._r_read_col1(candidate)
+                    if col1 is not None:
+                        return day_epoch + col1   # UTC초 → 절대 시각
+        # 원본 없을 때: 파일명 시퀀스로 1시간 간격 추정
+        try:
+            seq = int(label.split("-")[3]) - 1
+        except Exception:
+            seq = 0
+        return day_epoch + seq * 3600.0
+
+    def _r_load_records(self, ch_dir, raw_dir=None):
+        """*_R.dat 읽기 → [(label, wave, r, ts_unix), ...] 시간순
+
+        타임스탬프 전략:
+          1순위: raw_dir 있으면 원본 .dat col1(UTC초, flag=500) 사용  → 정확한 절대 시각
+          2순위: raw_dir 없으면 파일명 (YYYY-MM-DD-NNN) 날짜 기반 추정
+                 - 날짜 자정 UTC + (NNN-1)×3600  — 하루 25+파일 시 날짜 경계 충돌 방지:
+                   전체 파일을 (날짜, 일련번호) 순 정렬 후 global index × 3600 으로 단조증가 보장
+        """
+        # ── 1단계: 파일 목록 수집 ─────────────────────────────────────────
+        raw_list = []   # [(label, fp)]
+        for root, _, fnames in os.walk(ch_dir):
+            for fn in sorted(fnames):
+                if not fn.endswith("_R.dat"): continue
+                label = fn.replace("_R.dat", "")
+                raw_list.append((label, os.path.join(root, fn)))
+        # 파일명 사전순 정렬 (YYYY-MM-DD-NNN 포맷은 사전순 = 시간순)
+        raw_list.sort(key=lambda x: x[0])
+
+        # ── 2단계: 타임스탬프 계산 ────────────────────────────────────────
+        records = []
+        for global_idx, (label, fp) in enumerate(raw_list):
+            try:
+                rows = []
+                with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        s = line.strip()
+                        if not s or s.startswith("#"): continue
+                        parts = s.split("\t")
+                        try: rows.append([float(x) for x in parts])
+                        except ValueError: continue
+                if not rows: continue
+                d = np.array(rows)
+
+                # 타임스탬프 결정
+                if raw_dir:
+                    ts = self._r_get_ts(label, raw_dir)   # 원본에서 실제 시각 읽기
+                else:
+                    # 날짜 자정 + (NNN-1)시간; 단, 하루 24h 초과 시 global index로 보정
+                    day_epoch = self._r_date_epoch(label)
+                    try:
+                        seq = int(label.split("-")[3]) - 1
+                    except Exception:
+                        seq = global_idx
+                    ts_cand = day_epoch + seq * 3600.0
+                    # 이전 레코드와 충돌(≤0 간격) 나면 global_idx 기반으로 대체
+                    if records and ts_cand <= records[-1][3]:
+                        ts_cand = records[-1][3] + 3600.0
+                    ts = ts_cand
+
+                records.append((label, d[:, 0], d[:, 1], ts))
+            except Exception:
+                continue
+        # records는 이미 시간순 (raw_list가 사전순 = 시간순)
+        return records
+
+    def _r_load_all(self):
+        base     = self._r_dir_edit.text().strip()
+        cold_raw = self._r_cold_edit.text().strip() or None
+        hot_raw  = self._r_hot_edit.text().strip()  or None
+        if not base or not os.path.isdir(base):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "경고", "R 결과 폴더를 선택하세요."); return
+
+        sub = {
+            "Cold":    (os.path.join(base, "R_Cold"),    cold_raw),
+            "Hot ANs": (os.path.join(base, "R_Hot_ANs"), hot_raw),
+            "Hot PNs": (os.path.join(base, "R_Hot_PNs"), hot_raw),
+        }
+        self._r_data = {}
+        total = 0
+        for ch, (d, raw) in sub.items():
+            if os.path.isdir(d):
+                recs = self._r_load_records(d, raw)
+                self._r_data[ch] = recs
+                total += len(recs)
+
+        has_real = cold_raw or hot_raw
+        self._r_info_lbl.setText(
+            f"총 {total}개 파일  ({'실제 시각' if has_real else '추정 시각 — 원본 폴더 지정 시 정확해짐'})")
+        self._r_draw_all()
+
+    def _r_draw_all(self):
+        """3채널 모두 시계열 플롯에 그리기  (R % 또는 Leff km, 엣지 trimmed mean)"""
+        use_leff = self._r_use_leff()
+        all_ys = []
+
+        for ch, recs in self._r_data.items():
+            if not recs:
+                self._r_curves[ch].setData([], [])
+                self._r_marks[ch].setData([], [])
+                continue
+            ts = np.array([r[3] for r in recs])
+            if use_leff:
+                ys = np.array([self._r_leff_from_r(r[2]) for r in recs])
+            else:
+                ys = np.array([self._r_mean_r(r[2]) * 100.0 for r in recs])
+            self._r_curves[ch].setData(ts, ys)
+            self._r_marks[ch].setData([], [])
+            all_ys.append(ys[np.isfinite(ys)])
+            self._r_curves[ch].setVisible(self._r_chk[ch].isChecked())
+            self._r_marks[ch].setVisible(self._r_chk[ch].isChecked())
+
+        # y축 레이블·범위
+        if use_leff:
+            self._r_p_ts.setLabel('left', 'Leff (km)')
+            pad_min = 0.5
+        else:
+            self._r_p_ts.setLabel('left', 'R (%)')
+            pad_min = 0.02
+
+        if all_ys:
+            flat = np.concatenate(all_ys)
+            flat = flat[np.isfinite(flat)]
+            if len(flat):
+                span = flat.max() - flat.min()
+                pad  = max(span * 0.20, pad_min)
+                self._r_p_ts.setYRange(flat.min()-pad, flat.max()+pad, padding=0)
+        self._r_p_ts.enableAutoRange(axis='x')
+
+        # 첫 채널 첫 파일 스펙트럼 기본 표시
+        for ch in ["Cold", "Hot ANs", "Hot PNs"]:
+            if self._r_data.get(ch):
+                self._r_sel_ch  = ch
+                self._r_sel_idx = 0
+                self._r_show_spectrum(ch, 0)
+                break
+
+    def _r_update_visibility(self):
+        for ch in self._r_chk:
+            vis = self._r_chk[ch].isChecked()
+            self._r_curves[ch].setVisible(vis)
+            self._r_marks[ch].setVisible(vis)
+
+    def _r_nearest(self, ts_x):
+        """ts_x(unix)에 가장 가까운 (채널, 인덱스) 반환"""
+        best_ch, best_idx, best_d = None, 0, float('inf')
+        for ch, recs in self._r_data.items():
+            if not recs or not self._r_chk[ch].isChecked(): continue
+            ts_arr = np.array([r[3] for r in recs])
+            idx    = int(np.argmin(np.abs(ts_arr - ts_x)))
+            d      = abs(ts_arr[idx] - ts_x)
+            if d < best_d:
+                best_ch, best_idx, best_d = ch, idx, d
+        return best_ch, best_idx
+
+    def _r_on_mouse_move(self, pos):
+        if not self._r_p_ts.sceneBoundingRect().contains(pos): return
+        mp = self._r_p_ts.vb.mapSceneToView(pos)
+        self._r_vline.setPos(mp.x())
+        ch, idx = self._r_nearest(mp.x())
+        if ch is None: return
+        lbl, _, r, ts = self._r_data[ch][idx]
+        import datetime as _dt
+        kst = _dt.datetime.fromtimestamp(ts + 9*3600, tz=_dt.timezone.utc)
+        if self._r_use_leff():
+            val_str = f"Leff={self._r_leff_from_r(r):.3f} km"
+        else:
+            val_str = f"R={self._r_mean_r(r)*100:.5f}%"
+        self._r_p_ts.setTitle(
+            f"R 시계열  |  커서 근처: [{ch}] {lbl}  "
+            f"{kst.strftime('%m-%d %H:%M')} KST  {val_str}"
+        )
+
+    def _r_on_ts_click(self, event):
+        from PyQt6.QtCore import Qt as _Qt
+        if event.button() != _Qt.MouseButton.LeftButton: return
+        pos = event.scenePos()
+        if not self._r_p_ts.sceneBoundingRect().contains(pos): return
+        mp  = self._r_p_ts.vb.mapSceneToView(pos)
+        ch, idx = self._r_nearest(mp.x())
+        if ch is None: return
+        self._r_sel_ch  = ch
+        self._r_sel_idx = idx
+        self._r_show_spectrum(ch, idx)
+
+    def _r_show_spectrum(self, ch, idx):
+        if ch not in self._r_data or idx >= len(self._r_data[ch]): return
+        label, wave, r, ts = self._r_data[ch][idx]
+        use_leff = self._r_use_leff()
+        color = self._r_ch_colors.get(ch, '#1f77b4')
+        self._r_curve_sp.setPen(pg.mkPen(color, width=1.5))
+
+        if use_leff:
+            r_safe = np.clip(r, 0.0, 1.0 - 1e-9)
+            y_sp   = self._R_D_CM / (1.0 - r_safe) * 1e-5   # km per pixel
+            self._r_p_sp.setLabel('left', 'Leff (km)')
+        else:
+            y_sp = r * 100.0
+            self._r_p_sp.setLabel('left', 'R (%)')
+
+        self._r_curve_sp.setData(wave, y_sp)
+
+        # 선택 마커 (시계열 위에)
+        for c in self._r_marks: self._r_marks[c].setData([], [])
+        ts_arr = np.array([rec[3] for rec in self._r_data[ch]])
+        if use_leff:
+            ys_arr = np.array([self._r_leff_from_r(rec[2]) for rec in self._r_data[ch]])
+        else:
+            ys_arr = np.array([self._r_mean_r(rec[2])*100.0 for rec in self._r_data[ch]])
+        self._r_marks[ch].setData([ts_arr[idx]], [ys_arr[idx]])
+
+        # y축 범위: 엣지 제외한 1~99%ile 기준
+        y_fin = y_sp[np.isfinite(y_sp)]
+        if len(y_fin):
+            n = len(y_sp)
+            lo, hi = int(n*0.05), n - int(n*0.05)
+            y_core = y_sp[lo:hi] if lo < hi else y_sp
+            y_core = y_core[np.isfinite(y_core)]
+            if len(y_core):
+                p01 = float(np.percentile(y_core, 1))
+                p99 = float(np.percentile(y_core, 99))
+                pad = max((p99-p01)*0.15, 0.02 if not use_leff else 0.1)
+                self._r_p_sp.setYRange(p01-pad, p99+pad, padding=0)
+
+        import datetime as _dt
+        kst = _dt.datetime.fromtimestamp(ts + 9*3600, tz=_dt.timezone.utc)
+        kst_str = kst.strftime('%Y-%m-%d %H:%M KST')
+        kst_short = kst.strftime('%m-%d %H:%M')
+
+        if use_leff:
+            leff = self._r_leff_from_r(r)
+            val_str   = f"Leff={leff:.3f} km"
+            info_str  = f"[{ch}]  {label}  {kst_short} KST  {val_str}"
+        else:
+            mean_r = self._r_mean_r(r)
+            val_str  = f"R_mean={mean_r*100:.5f}%  R_max={float(np.max(r))*100:.5f}%"
+            info_str = f"[{ch}]  {label}  {kst_short} KST  R={mean_r*100:.5f}%"
+
+        self._r_p_sp.setTitle(f"[{ch}]  {label}  {kst_str}  {val_str}")
+        self._r_info_lbl.setText(info_str)
+
 
     # ---------------------------------------------------------
     # Utilities

@@ -18,43 +18,60 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 class RayleighPhysics:
     """
-    Calculates Rayleigh scattering extinction coefficients α(λ) [cm⁻¹].
+    Calculates Rayleigh scattering extinction coefficients α(λ) [cm⁻¹] — Sellmeier 굴절률 기반.
 
-    Clausius-Mossotti 형태 + Sellmeier 분산식을 사용하는 물리 기반 모델.
-    σ = Fk × (24π³v⁴/N²) × ((n²-1)/(n²+2))²,  α = σ × N
+    Zero-Air (N₂ 79% + O₂ 21%):
+      Peck & Reeder (1972) Sellmeier for N₂; Bates (1984) for O₂.
+      σ(λ) = 0.79·σ_N₂ + 0.21·σ_O₂  [cm²/molecule]
 
-    Zero-Air: N₂ (79%) + O₂ (21%) 혼합
-      N₂ — Peck & Khanna (1966) Sellmeier, King factor: Fk_N2 = 1.034 + 3.17e-12·v
-      O₂ — Peck & Reeder (1972) Sellmeier, King factor: Fk_O2 = 1.09 + 1.385e-11·v² + 1.448e-20·v⁴
-    Helium: Cuthbertson & Cuthbertson (1936) Sellmeier, Fk = 1 (noble gas)
+    Helium:
+      Cuthbertson & Cuthbertson (1936) Sellmeier.
 
     Number density: N = N_Loschmidt × (P/P₀) × (T₀/T)  [molecules cm⁻³]
     α(T,P,λ) = σ(λ) × N(T,P)  [cm⁻¹]
+
+    Note: σ는 N²에 반비례하므로 α = σ × N ∝ N (pressure/temperature에 정상 비례).
     """
     @staticmethod
     def get_alpha_rayleigh(wave_nm, temp_c, press_mbar, gas_type='zero_air'):
         wave_nm = np.asarray(wave_nm, dtype=float)
         # Loschmidt 수 → T, P 보정된 수밀도 [molecules/cm³]
         N = 2.68678e19 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
-        v = 1e7 / wave_nm  # 파수 [cm⁻¹]
+        v = 1e7 / wave_nm   # 파수 [cm⁻¹], 단 λ는 nm 단위
 
         gas = gas_type.lower()
         if gas in ('zero_air', 'air'):
-            # N₂ — Peck & Khanna (1966)
+            # ── MATLAB 경험식 (주석 보존) ───────────────────────────────────────
+            # 출처: Rs2_CAESAR_Cold_Yeosu_2026.m (optimize_ZA_Rayleigh.m 피팅)
+            #   σ_ZA = 3.019852e-14 × λ_nm^-3.87465  [cm²/molecule]
+            # ※ MATLAB fun_air의 N 단위 관례에 맞게 피팅된 상수이므로,
+            #   Python의 표준 Loschmidt N (2.688e19 cm⁻³)과 함께 쓰면 α가 ~100배 커짐.
+            #   Python에서는 아래 Sellmeier 공식을 사용한다.
+            # sigma = 3.019852e-14 * wave_nm ** (-3.87465)
+            # ────────────────────────────────────────────────────────────────────
+
+            # N₂: Peck & Reeder (1972) Sellmeier
             A_n2, B_n2, C_n2 = 5677.465, 318.81874e12, 14.4e9
             n_n2 = 1.0 + (A_n2 + B_n2 / (C_n2 - v**2)) * 1e-8
-            Fk_n2 = 1.034 + 3.17e-12 * v
+            Fk_n2 = 1.034 + 3.17e-12 * v        # King factor N₂
             s_n2 = Fk_n2 * (24 * np.pi**3 * v**4 / N**2) * ((n_n2**2 - 1) / (n_n2**2 + 2))**2
 
-            # O₂ — Peck & Reeder (1972)
+            # O₂: Bates (1984) Sellmeier
             A_o2, B_o2, C_o2 = 20564.8, 2.480899e13, 4.09e9
             n_o2 = 1.0 + (A_o2 + B_o2 / (C_o2 - v**2)) * 1e-8
-            Fk_o2 = 1.09 + 1.385e-11 * v**2 + 1.448e-20 * v**4
+            Fk_o2 = 1.09 + 1.385e-11 * v**2 + 1.448e-20 * v**4  # King factor O₂
             s_o2 = Fk_o2 * (24 * np.pi**3 * v**4 / N**2) * ((n_o2**2 - 1) / (n_o2**2 + 2))**2
 
             sigma = 0.79 * s_n2 + 0.21 * s_o2
 
         else:  # helium — Cuthbertson & Cuthbertson (1936)
+            # ── MATLAB 경험식 (주석 보존) ───────────────────────────────────────
+            # 출처: Rs2_CAESAR_Cold_Yeosu_2026.m
+            #   σ_He = 1.336e-17 × λ_nm^-4.1287  [cm²/molecule]
+            # ※ 위 ZA 경험식과 동일한 이유로 Python에서는 Sellmeier 사용.
+            # sigma = 1.336e-17 * wave_nm ** (-4.1287)
+            # ────────────────────────────────────────────────────────────────────
+
             A_he, B_he, C_he = 2283.0, 1.8102e13, 1.5342e10
             n_he = 1.0 + (A_he + B_he / (C_he - v**2)) * 1e-8
             sigma = (24 * np.pi**3 * v**4 / N**2) * ((n_he**2 - 1) / (n_he**2 + 2))**2
@@ -1155,7 +1172,7 @@ class AlphaExportWorker(QThread):
 
                 if i_za_dc is not None and i_he_last is not None:
                     # R-calibration: dark-corrected ZA / dark-corrected He
-                    # Sellmeier 기반 물리 모델 + rl_factor 퍼지 보정 적용
+                    # MATLAB 경험식 Rayleigh + rl_factor 퍼지 보정 적용
                     alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, env_t, env_p, 'zero_air')
                     alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_he_last, p_he_last, 'helium')
                     i_he_s = np.where(np.abs(i_he_last) > 1.0, i_he_last, 1.0)
