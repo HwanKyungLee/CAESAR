@@ -558,7 +558,9 @@ class WavelengthCalibrationDialog(QDialog):
                 # Average intensity per X value when multiple frames/rows are stored
                 avg_spec = df.groupby(x_col)[y_col].mean()
                 self.spectrum = avg_spec.values
-                self.pixels = avg_spec.index.values
+                # Always use integer pixel indices so click events map to array positions
+                # correctly in FWHM calculation (nm values must not be used as indices)
+                self.pixels = np.arange(len(self.spectrum))
             elif y_col:
                 # Intensity only (no X-axis info)
                 self.spectrum = df[y_col].values
@@ -576,11 +578,7 @@ class WavelengthCalibrationDialog(QDialog):
             self.ax.clear()
             self.ax.plot(self.pixels, self.spectrum, 'k-', alpha=0.7, label='Lamp Spectrum')
             
-            # Update X-axis label if wavelength data is available
-            if x_col == 'wavelength':
-                self.ax.set_xlabel('Wavelength (nm)')
-            else:
-                self.ax.set_xlabel('Pixel Index')
+            self.ax.set_xlabel('Pixel Index')
                 
             self.ax.set_ylabel('Intensity')
             self.ax.legend()

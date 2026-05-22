@@ -742,7 +742,7 @@ class AnalysisWorker(QThread):
                             # RL (Purge Length Ratio): CH1=0.9330, CH2=0.9950, CH3=0.9968
                             alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_za_last, self.p_za_last, 'zero_air')
                             alpha_ray_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.temperature, self.pressure, 'zero_air')
-                            optical_depth = (self.rl_factor * (self.one_minus_r_over_d + alpha_ref) * ((I_0 - I_meas) / I_meas)
+                            optical_depth = ((self.one_minus_r_over_d / self.rl_factor + alpha_ref) * ((I_0 - I_meas) / I_meas)
                                             - (alpha_ray_sample - alpha_ref))
                             fit_sign = 1.0
                             # [DEBUG] 처음 ambient 스캔에서만 파일에 저장
@@ -1285,7 +1285,7 @@ class AlphaExportWorker(QThread):
             alpha_ref    = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
             alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
 
-            alpha = (self.rl_factor * (best_omr_d + alpha_ref)
+            alpha = ((best_omr_d / self.rl_factor + alpha_ref)
                      * ((i0_s - i_am_s) / i_am_s)
                      - (alpha_sample - alpha_ref))
 
