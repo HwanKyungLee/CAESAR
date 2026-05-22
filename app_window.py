@@ -1104,9 +1104,18 @@ class CAESARAnalyzer(QMainWindow):
                 print("✅ [Lamp Sync] Lamp data auto-saved for the reference generator.")
 
             # 4. Smart UI Update for FWHM Label
+            # dialog.fwhm_records 는 fit_calibration() 실행 시 채워진다.
+            # (3. Fit → 4. Save & Apply 순서로 진행한 경우 반드시 존재)
             fwhm_text = "✅ Wavelength Updated"
-            if hasattr(dialog, 'help_label') and "FWHM" in dialog.help_label.text():
-                fwhm_text = f"💡 {dialog.help_label.text().split('|')[-1].strip()}"
+            if hasattr(dialog, 'fwhm_records') and dialog.fwhm_records:
+                valid_fwhms = [v['fwhm_nm'] for v in dialog.fwhm_records.values()
+                               if v.get('fwhm_nm') is not None]
+                if valid_fwhms:
+                    avg_fwhm  = float(np.mean(valid_fwhms))
+                    avg_sigma = avg_fwhm / 2.3548
+                    fwhm_text = (f"💡 FWHM={avg_fwhm:.3f} nm  "
+                                 f"σ={avg_sigma:.3f} nm  "
+                                 f"({len(valid_fwhms)} peaks)")
 
             target_label = getattr(self, 'lbl_fwhm_display', getattr(self, 'fwhm_label', None))
             if target_label:

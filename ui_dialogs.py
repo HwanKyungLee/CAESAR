@@ -2862,8 +2862,9 @@ class R_GeneratorDialog(QDialog):
 # do not break with an ImportError.
 class _RTrendWorker(QThread):
     """백그라운드에서 r_trend_monitor.main()을 실행."""
-    log      = pyqtSignal(str)
-    finished = pyqtSignal(str)   # 결과 폴더 경로
+    log        = pyqtSignal(str)
+    finished   = pyqtSignal(str)    # 결과 폴더 경로
+    data_ready = pyqtSignal(object, object)  # (cold_results, hot_results) — inline plot용
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -2889,15 +2890,23 @@ class _RTrendWorker(QThread):
             import sys as _sys
             old_stdout = _sys.stdout
             _sys.stdout = buf = _io.StringIO()
+            _rtm_result = None
             try:
-                rtm.main()
+                _rtm_result = rtm.main()
             finally:
                 _sys.stdout = old_stdout
 
             for line in buf.getvalue().splitlines():
                 self.log.emit(line)
 
-            self.finished.emit(rtm.OUTPUT_DIR)
+            # main()이 (results_cold, results_hot, out_folder) 튜플을 반환하면
+            # data_ready 시그널로 인라인 플롯에 전달한다
+            _out_dir = rtm.OUTPUT_DIR
+            if _rtm_result and len(_rtm_result) >= 3:
+                self.data_ready.emit(_rtm_result[0], _rtm_result[1])
+                _out_dir = _rtm_result[2] or _out_dir
+
+            self.finished.emit(_out_dir)
 
         except Exception as e:
             import traceback
@@ -2906,12 +2915,12 @@ class _RTrendWorker(QThread):
 
 
 class RTrendMonitorDialog(QDialog):
-    """R Trend Monitor 설정 + 실행 + 로그 표시 다이얼로그."""
+    """R Trend Monitor 설정 + 실행 + 로그 표시 + 인라인 시계열 그래프 다이얼로그."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열")
-        self.resize(720, 560)
+        self.resize(1150, 720)
         self._worker = None
         self._init_ui()
 
@@ -2927,9 +2936,10 @@ class RTrendMonitorDialog(QDialog):
             line_edit.setText(f)
 
     def _init_ui(self):
-        from PyQt6.QtWidgets import QTextEdit
+        from PyQt6.QtWidgets import QTextEdit, QSplitter
         main = QVBoxLayout(self)
 
+        # ── 상단: 입력 폼 ──────────────────────────────────────────
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -2966,11 +2976,29 @@ class RTrendMonitorDialog(QDialog):
         main.addWidget(btn_run)
         self._btn_run = btn_run
 
+        # ── 하단: 로그(왼쪽) + 시계열 플롯(오른쪽) ────────────────────
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setFontFamily("Consolas")
         self._log.setFontPointSize(9)
-        main.addWidget(self._log)
+        self._log.setMinimumWidth(340)
+        splitter.addWidget(self._log)
+
+        # pyqtgraph R 시계열 위젯 (DateAxisItem 으로 실제 시각 표시)
+        _date_axis = pg.DateAxisItem(orientation='bottom')
+        self._pw = pg.PlotWidget(axisItems={'bottom': _date_axis},
+                                 title="R 시계열 (Cold / Hot)")
+        self._pw.setBackground('w')
+        self._pw.showGrid(x=True, y=True, alpha=0.3)
+        self._pw.setLabel('left', 'R mean (%)')
+        self._pw.setLabel('bottom', 'Time (KST)')
+        self._pw.addLegend(offset=(10, 10))
+        splitter.addWidget(self._pw)
+        splitter.setSizes([380, 720])
+
+        main.addWidget(splitter, stretch=1)
 
     def _run(self):
         cfg = {
@@ -2985,11 +3013,49 @@ class RTrendMonitorDialog(QDialog):
             return
 
         self._log.clear()
+        self._pw.clear()
         self._btn_run.setEnabled(False)
         self._worker = _RTrendWorker(cfg)
         self._worker.log.connect(self._log.append)
+        self._worker.data_ready.connect(self._on_data_ready)
         self._worker.finished.connect(self._on_done)
         self._worker.start()
+
+    def _on_data_ready(self, cold_results, hot_results):
+        """워커가 계산 완료한 R 시계열을 인라인 플롯에 표시한다."""
+        self._pw.clear()
+        self._pw.addLegend(offset=(10, 10))
+
+        def _plot_channel(results, color_hex, name):
+            if not results:
+                return
+            import numpy as np
+            times  = np.array([r["timestamp"].timestamp() for r in results], dtype=float)
+            r_pct  = np.array([r["r_mean"] * 100.0         for r in results], dtype=float)
+            r_std  = np.array([r["r_std"]  * 100.0         for r in results], dtype=float)
+
+            pen  = pg.mkPen(color=color_hex, width=2)
+            brsh = pg.mkBrush(color_hex)
+            self._pw.plot(times, r_pct, pen=pen, symbol='o',
+                          symbolSize=7, symbolBrush=brsh, name=name)
+
+            # ±1σ 음영 (ErrorBarItem)
+            err = pg.ErrorBarItem(x=times, y=r_pct,
+                                  top=r_std, bottom=r_std,
+                                  beam=0, pen=pg.mkPen(color_hex, width=1, style=Qt.PenStyle.DotLine))
+            self._pw.addItem(err)
+
+        _plot_channel(cold_results, '#2196F3', 'Cold R mean')
+        _plot_channel(hot_results,  '#FF6F00', 'Hot R mean')
+
+        # Y축 범위: 전체 데이터 기준 ±0.05 % 여백
+        all_r = ([r["r_mean"] * 100 for r in cold_results] +
+                 [r["r_mean"] * 100 for r in hot_results])
+        if all_r:
+            import numpy as np
+            lo = min(all_r) - 0.05
+            hi = max(all_r) + 0.05
+            self._pw.setYRange(lo, hi, padding=0)
 
     def _on_done(self, out_dir: str):
         self._btn_run.setEnabled(True)

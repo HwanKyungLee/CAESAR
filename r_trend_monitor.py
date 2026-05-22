@@ -341,5 +341,7 @@ def main():
         print(f"║  {ch}: 사이클 {len(res)}개  R_mean={np.mean(r_vals):.6f}  경고={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}건")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
+    return results_cold, results_hot, out_folder
+
 if __name__ == "__main__":
     main()
