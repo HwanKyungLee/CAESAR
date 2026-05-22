@@ -745,17 +745,6 @@ class AnalysisWorker(QThread):
                             optical_depth = ((self.one_minus_r_over_d / self.rl_factor + alpha_ref) * ((I_0 - I_meas) / I_meas)
                                             - (alpha_ray_sample - alpha_ref))
                             fit_sign = 1.0
-                            # [DEBUG] 처음 ambient 스캔에서만 파일에 저장
-                            if not getattr(self, '_debug_alpha_printed', False):
-                                self._debug_alpha_printed = True
-                                _dbg_path = os.path.join(os.path.dirname(__file__), 'debug_fit.txt')
-                                with open(_dbg_path, 'w', encoding='utf-8') as _dbf:
-                                    _dbf.write(f"[DEBUG-ALPHA] row={row_idx}  omr_d_mean={np.mean(self.one_minus_r_over_d):.4e}  "
-                                               f"I0_mean={np.mean(I_0):.1f}  Imeas_mean={np.mean(I_meas):.1f}  "
-                                               f"ratio=(I0-Im)/Im_mean={np.mean((I_0-I_meas)/I_meas):.6f}  "
-                                               f"OD_mean={np.mean(optical_depth):.4e}  OD_std={np.std(optical_depth):.4e}\n")
-                                    _dbf.write(f"[DEBUG-ALPHA] scale_factor={scale_factor}\n")
-                                    _dbf.write(f"[DEBUG-ALPHA] engine refs: {[(n, self.engine.scaling_factors[n]) for n in self.engine.gas_list]}\n")
 
                             # Save alpha spectrum as intermediate product (per박사님 request)
                             if self.save_alpha and self.alpha_save_dir:
@@ -886,19 +875,7 @@ class AnalysisWorker(QThread):
                             result[f"{nm}_Shift"]       = opt_shifts[gi]
                             result[f"{nm}_Squeeze"]     = opt_squeezes[gi]
 
-                        # [DEBUG] 처음 ambient 스캔에서만 파일에 저장
-                        if not getattr(self, '_debug_fit_printed', False):
-                            self._debug_fit_printed = True
-                            _dbg_path = os.path.join(os.path.dirname(__file__), 'debug_fit.txt')
-                            with open(_dbg_path, 'a', encoding='utf-8') as _dbf:
-                                _dbf.write(f"[DEBUG-FIT] gas_coeffs_scaled={gas_coeffs_scaled.tolist()}\n")
-                                _dbf.write(f"[DEBUG-FIT] scaling_factors={[(n, self.engine.scaling_factors[n]) for n in self.engine.gas_list]}\n")
-                                _dbf.write(f"[DEBUG-FIT] scale_factor={scale_factor}  n_air={n_air:.4e}\n")
-                                for gi2, nm2 in enumerate(self.engine.gas_list):
-                                    _dbf.write(f"[DEBUG-FIT] {nm2}: coeff={gas_coeffs_scaled[gi2]:.4e}  "
-                                               f"scale_div={self.engine.scaling_factors[nm2]:.4e}  "
-                                               f"real_conc={raw_concentrations[gi2]:.4e} cm-3  "
-                                               f"ppb={result[nm2]:.4f}\n")
+
 
                         # ── Spectral quality metrics ─────────────────────────────────────
                         # DOF = n_pixels − n_free_params (Shift, Squeeze, gases, poly, etalon)
