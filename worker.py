@@ -183,6 +183,9 @@ class AnalysisWorker(QThread):
         # ZA scan T&P — updated each time a ZA scan is seen; used in Rayleigh correction
         self.t_za_last = temperature
         self.p_za_last = pressure
+        # He scan T&P — updated each time a He (flag 510) scan is seen
+        self.t_he_last = temperature
+        self.p_he_last = pressure
 
         # Explicit initialization (directly accessed in run())
         self.params = list(p0) if p0 is not None else [0.0, 1.0]
@@ -637,6 +640,8 @@ class AnalysisWorker(QThread):
                     # If 510 is not configured (legacy data), all He flags update i_he_last.
                     if 510 not in self.flag_he or state_flag == 510:
                         self.i_he_last = intensity_raw.copy()
+                        self.t_he_last = env_t
+                        self.p_he_last = env_p
                     result['Status'] = f"Helium (Flag {state_flag} - {'Updated' if (510 not in self.flag_he or state_flag == 510) else 'i_he Kept'})"
                     if getattr(self, 'i_za_last', None) is not None:
                         self.update_mirror_reflectivity(wave_nm, env_t, env_p)
@@ -737,20 +742,9 @@ class AnalysisWorker(QThread):
                             # RL (Purge Length Ratio): CH1=0.9330, CH2=0.9950, CH3=0.9968
                             alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_za_last, self.p_za_last, 'zero_air')
                             alpha_ray_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.temperature, self.pressure, 'zero_air')
-                            optical_depth = (self.rl_factor * (self.one_minus_r_over_d + alpha_ref) * ((I_0 - I_meas) / I_meas)
+                            optical_depth = ((self.one_minus_r_over_d / self.rl_factor + alpha_ref) * ((I_0 - I_meas) / I_meas)
                                             - (alpha_ray_sample - alpha_ref))
                             fit_sign = 1.0
-                            # [DEBUG] 처음 ambient 스캔에서만 파일에 저장
-                            if not getattr(self, '_debug_alpha_printed', False):
-                                self._debug_alpha_printed = True
-                                _dbg_path = os.path.join(os.path.dirname(__file__), 'debug_fit.txt')
-                                with open(_dbg_path, 'w', encoding='utf-8') as _dbf:
-                                    _dbf.write(f"[DEBUG-ALPHA] row={row_idx}  omr_d_mean={np.mean(self.one_minus_r_over_d):.4e}  "
-                                               f"I0_mean={np.mean(I_0):.1f}  Imeas_mean={np.mean(I_meas):.1f}  "
-                                               f"ratio=(I0-Im)/Im_mean={np.mean((I_0-I_meas)/I_meas):.6f}  "
-                                               f"OD_mean={np.mean(optical_depth):.4e}  OD_std={np.std(optical_depth):.4e}\n")
-                                    _dbf.write(f"[DEBUG-ALPHA] scale_factor={scale_factor}\n")
-                                    _dbf.write(f"[DEBUG-ALPHA] engine refs: {[(n, self.engine.scaling_factors[n]) for n in self.engine.gas_list]}\n")
 
                             # Save alpha spectrum as intermediate product (per박사님 request)
                             if self.save_alpha and self.alpha_save_dir:
@@ -881,19 +875,7 @@ class AnalysisWorker(QThread):
                             result[f"{nm}_Shift"]       = opt_shifts[gi]
                             result[f"{nm}_Squeeze"]     = opt_squeezes[gi]
 
-                        # [DEBUG] 처음 ambient 스캔에서만 파일에 저장
-                        if not getattr(self, '_debug_fit_printed', False):
-                            self._debug_fit_printed = True
-                            _dbg_path = os.path.join(os.path.dirname(__file__), 'debug_fit.txt')
-                            with open(_dbg_path, 'a', encoding='utf-8') as _dbf:
-                                _dbf.write(f"[DEBUG-FIT] gas_coeffs_scaled={gas_coeffs_scaled.tolist()}\n")
-                                _dbf.write(f"[DEBUG-FIT] scaling_factors={[(n, self.engine.scaling_factors[n]) for n in self.engine.gas_list]}\n")
-                                _dbf.write(f"[DEBUG-FIT] scale_factor={scale_factor}  n_air={n_air:.4e}\n")
-                                for gi2, nm2 in enumerate(self.engine.gas_list):
-                                    _dbf.write(f"[DEBUG-FIT] {nm2}: coeff={gas_coeffs_scaled[gi2]:.4e}  "
-                                               f"scale_div={self.engine.scaling_factors[nm2]:.4e}  "
-                                               f"real_conc={raw_concentrations[gi2]:.4e} cm-3  "
-                                               f"ppb={result[nm2]:.4f}\n")
+
 
                         # ── Spectral quality metrics ─────────────────────────────────────
                         # DOF = n_pixels − n_free_params (Shift, Squeeze, gases, poly, etalon)
@@ -985,10 +967,10 @@ class AnalysisWorker(QThread):
         This quantity is stored and reused for every subsequent ambient measurement
         to convert raw intensity ratios into absolute optical depth.
         """
-        # Get theoretical Alpha Rayleigh (cm^-1) using current T, P
-        # Sellmeier 기반 물리 모델 사용 (power-law 경험식 대체)
-        alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t, p, 'zero_air')
-        alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t, p, 'helium')
+        # ZA Rayleigh uses ZA scan's T/P; He Rayleigh uses He scan's T/P.
+        # Using the same T/P for both would bias (1-R)/d when ZA and He scans differ in T/P.
+        alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_za_last, self.p_za_last, 'zero_air')
+        alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_he_last, self.p_he_last, 'helium')
 
         # Apply the Ratio Formula
         # Guard: pixels where I_ZA == I_He (saturated or dead pixels) give ratio=1.0,
@@ -997,7 +979,8 @@ class AnalysisWorker(QThread):
         ratio = self.i_za_last / i_he_safe
 
         print(f"[R-CAL] wave={wave_nm[len(wave_nm)//2]:.2f}nm  "
-              f"T={t:.1f}C  P={p:.1f}mbar  "
+              f"T_ZA={self.t_za_last:.1f}C P_ZA={self.p_za_last:.1f}mbar  "
+              f"T_He={self.t_he_last:.1f}C P_He={self.p_he_last:.1f}mbar  "
               f"I_ZA_mean={np.mean(self.i_za_last):.0f}  I_He_mean={np.mean(self.i_he_last):.0f}  "
               f"ratio_mean={np.mean(ratio):.4f}  "
               f"a_za={alpha_ray_za[len(alpha_ray_za)//2]:.3e}  a_he={alpha_ray_he[len(alpha_ray_he)//2]:.3e}  "
@@ -1279,7 +1262,7 @@ class AlphaExportWorker(QThread):
             alpha_ref    = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
             alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
 
-            alpha = (self.rl_factor * (best_omr_d + alpha_ref)
+            alpha = ((best_omr_d / self.rl_factor + alpha_ref)
                      * ((i0_s - i_am_s) / i_am_s)
                      - (alpha_sample - alpha_ref))
 
@@ -1328,18 +1311,20 @@ class AlphaFitWorker(QThread):
     status_msg  = pyqtSignal(str)
     finished    = pyqtSignal(str)
 
-    def __init__(self, alpha_files, engine, poly_deg, output_dir):
+    def __init__(self, alpha_files, engine, poly_deg, output_dir, pixel_min=0):
         """
         alpha_files : list of str — alpha_trace.dat 경로 목록
         engine      : UniversalEngine 인스턴스 (레퍼런스 & 파장 포함)
         poly_deg    : int — Chebyshev 다항식 차수 (baseline)
         output_dir  : str — 결과 저장 디렉터리
+        pixel_min   : int — 피팅 윈도우 시작 픽셀 (레퍼런스 슬라이싱에 사용)
         """
         super().__init__()
         self.alpha_files = alpha_files
         self.engine      = engine
         self.poly_deg    = poly_deg
         self.output_dir  = output_dir
+        self.pixel_min   = pixel_min
         self.is_running  = True
 
     def stop(self):
@@ -1356,7 +1341,11 @@ class AlphaFitWorker(QThread):
         os.makedirs(self.output_dir, exist_ok=True)
 
         engine   = self.engine
-        wave_nm  = np.asarray(engine.wave_nm, dtype=float)
+        if engine._wave_axis is None:
+            self.finished.emit("ERROR: 엔진에 파장 보정(X-축)이 로드되지 않았습니다. "
+                               "먼저 Load X-Axis (nm)를 실행하세요.")
+            return
+        wave_nm  = np.asarray(engine._wave_axis, dtype=float)
         n_pix    = len(wave_nm)
         gas_list = engine.gas_list
         n_gas    = len(gas_list)
@@ -1374,9 +1363,8 @@ class AlphaFitWorker(QThread):
             ref_raw = np.asarray(engine.raw_references[name], dtype=float)
             scale   = engine.scaling_factors[name]
             if len(ref_raw) > n_pix:
-                # 전체 스펙트럼이면 fit window만 자름
-                pmin = engine.pixel_min if hasattr(engine, 'pixel_min') else 0
-                ref_raw = ref_raw[pmin: pmin + n_pix]
+                # 전체 스펙트럼(2048 px)이면 self.pixel_min 기준으로 fit window 자름
+                ref_raw = ref_raw[self.pixel_min: self.pixel_min + n_pix]
             ref_cols.append(ref_raw / scale)
 
         A_ref = np.column_stack(ref_cols)           # (n_pix, n_gas)

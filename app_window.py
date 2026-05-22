@@ -844,11 +844,17 @@ class CAESARAnalyzer(QMainWindow):
         except (AttributeError, ValueError):
             poly_deg = 4
 
+        try:
+            pixel_min = int(self.txt_min.text())
+        except (AttributeError, ValueError):
+            pixel_min = 0
+
         self._alpha_fit_worker = AlphaFitWorker(
             alpha_files=alpha_files,
             engine=self.engine,
             poly_deg=poly_deg,
             output_dir=output_dir,
+            pixel_min=pixel_min,
         )
         self._alpha_fit_worker.progress.connect(
             lambda n: self.status.setText(f"📊 Alpha 피팅: {n}행 처리 중...")
