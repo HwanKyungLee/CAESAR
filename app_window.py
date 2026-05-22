@@ -48,34 +48,20 @@ class CAESARAnalyzer(QMainWindow):
         self._s = s
         self.setWindowTitle('CAESAR Pro v1.0')
         self.resize(int(1400 * s), int(850 * s))
-        
+
+        # ILS state tracking
+        self._ils_applied = False
+
         # Create horizontal splitter (Left: Control Panel / Right: Monitor Tabs)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(splitter)
-        
+
         # =========================================================
         # [Left] Main Control Panel
         # =========================================================
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        
-        # --- Save/Load Fit Scenario ---
-        grp_scenario = QGroupBox("💾 Fit Scenario")
-        grp_scenario.setStyleSheet("QGroupBox { font-weight: bold; color: #2E7D32; }")
-        lay_scenario = QHBoxLayout()
-        
-        btn_save_scen = QPushButton("📥 Save Settings")
-        btn_load_scen = QPushButton("📂 Load Settings")
-        
-        btn_save_scen.clicked.connect(self.save_scenario)
-        btn_load_scen.clicked.connect(self.load_scenario)
-        
-        lay_scenario.addWidget(btn_save_scen)
-        lay_scenario.addWidget(btn_load_scen)
-        grp_scenario.setLayout(lay_scenario)
-        
-        left_layout.addWidget(grp_scenario)
-        
+
         # --- 1. Reference Management Section ---
         grp_ref = QGroupBox("1. Reference")
         grp_ref.setMinimumHeight(int(250 * self._s))
@@ -112,26 +98,47 @@ class CAESARAnalyzer(QMainWindow):
         btn_lock.setStyleSheet("background-color: #e1f5fe; color: #0277bd; font-weight: bold; padding: 5px;")
         lay_ref.addWidget(btn_lock)
         
-        # ILS Convolution Blur (Voigt = Gaussian ⊗ Lorentzian)
+        # ILS Convolution — nm (primary) + px (secondary, auto-filled)
         layout_conv = QHBoxLayout()
-        layout_conv.addWidget(QLabel("Gaussian:"))
+        layout_conv.addWidget(QLabel("ILS:"))
+
+        self.spin_fwhm_nm = QDoubleSpinBox()
+        self.spin_fwhm_nm.setRange(0.0, 20.0)
+        self.spin_fwhm_nm.setDecimals(3)
+        self.spin_fwhm_nm.setSuffix(" nm")
+        self.spin_fwhm_nm.setToolTip(
+            "Gaussian FWHM in nm (auto-filled from wavelength calibration)\n"
+            "σ = FWHM / 2.3548  — used to convolve cross-sections to match ILS")
+        self.spin_fwhm_nm.valueChanged.connect(self._update_fwhm_px_from_nm)
+        layout_conv.addWidget(self.spin_fwhm_nm)
+
+        layout_conv.addWidget(QLabel("="))
         self.spin_fwhm = QDoubleSpinBox()
         self.spin_fwhm.setRange(0, 50)
         self.spin_fwhm.setDecimals(2)
         self.spin_fwhm.setSuffix(" px")
-        self.spin_fwhm.setToolTip("Gaussian FWHM — slit-width broadening (σ = FWHM/2.355)")
+        self.spin_fwhm.setToolTip(
+            "Gaussian FWHM in pixels (auto-filled from nm spinbox)\n"
+            "Can also be set directly; nm display will not update.")
+        self.spin_fwhm.valueChanged.connect(self._on_ils_dirty)
         layout_conv.addWidget(self.spin_fwhm)
-        layout_conv.addWidget(QLabel("Lorentzian:"))
+
+        layout_conv.addWidget(QLabel("L:"))
         self.spin_fwhm_lorentzian = QDoubleSpinBox()
         self.spin_fwhm_lorentzian.setRange(0, 20)
         self.spin_fwhm_lorentzian.setValue(0.0)
         self.spin_fwhm_lorentzian.setDecimals(2)
         self.spin_fwhm_lorentzian.setSuffix(" px")
-        self.spin_fwhm_lorentzian.setToolTip("Lorentzian FWHM — optical aberrations, grating scatter\n0.0 = pure Gaussian ILS")
+        self.spin_fwhm_lorentzian.setToolTip(
+            "Lorentzian FWHM — optical aberrations, grating scatter\n"
+            "0.0 = pure Gaussian ILS")
+        self.spin_fwhm_lorentzian.valueChanged.connect(self._on_ils_dirty)
         layout_conv.addWidget(self.spin_fwhm_lorentzian)
-        btn_conv = QPushButton("Apply ILS")
-        btn_conv.clicked.connect(self.apply_convolution)
-        layout_conv.addWidget(btn_conv)
+
+        self.btn_apply_ils = QPushButton("Apply ILS")
+        self.btn_apply_ils.setStyleSheet("background-color: #e0e0e0; font-weight: bold;")
+        self.btn_apply_ils.clicked.connect(self.apply_convolution)
+        layout_conv.addWidget(self.btn_apply_ils)
         lay_ref.addLayout(layout_conv)
         
         grp_ref.setLayout(lay_ref)
@@ -157,7 +164,7 @@ class CAESARAnalyzer(QMainWindow):
         self.txt_min.setFixedWidth(int(50 * self._s))
         layout_px.addWidget(self.txt_min)
         layout_px.addWidget(QLabel("Max:"))
-        self.txt_max = QLineEdit("950")
+        self.txt_max = QLineEdit("2047")
         self.txt_max.setFixedWidth(int(50 * self._s))
         layout_px.addWidget(self.txt_max)
         
@@ -188,18 +195,28 @@ class CAESARAnalyzer(QMainWindow):
         grp_set.setLayout(lay_set)
         left_layout.addWidget(grp_set)
         
-        # --- Detailed Parameters Section (Poly, Shift Center, Precision Control) ---
+        # --- Parameters Section (Collapsible) ---
+        self._params_visible = True
+        self._btn_toggle_params = QPushButton("▼  Parameters")
+        self._btn_toggle_params.setStyleSheet(
+            "text-align: left; font-weight: bold; background: #ECEFF1; "
+            "border: 1px solid #B0BEC5; padding: 4px 8px;")
+        left_layout.addWidget(self._btn_toggle_params)
+
+        self._params_container = QWidget()
+        lay_params_outer = QVBoxLayout(self._params_container)
+        lay_params_outer.setContentsMargins(0, 0, 0, 0)
+
         grp_calib = QGroupBox("Parameters")
-        lay_calib_main = QVBoxLayout() # Changed to vertical layout to split top/bottom
-        
+        lay_calib_main = QVBoxLayout()
+
         lay_calib = QHBoxLayout()
-        
         lay_calib.addWidget(QLabel("Step Limit:"))
         self.spin_step_limit = QDoubleSpinBox()
         self.spin_step_limit.setRange(0.01, 10.0)
         self.spin_step_limit.setSingleStep(0.1)
         self.spin_step_limit.setDecimals(2)
-        self.spin_step_limit.setValue(0.5) 
+        self.spin_step_limit.setValue(0.5)
         self.spin_step_limit.setToolTip("Maximum pixels that can be moved per frame")
         lay_calib.addWidget(self.spin_step_limit)
 
@@ -208,28 +225,26 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_poly_deg.setRange(0, 10)
         self.spin_poly_deg.setValue(3)
         lay_calib.addWidget(self.spin_poly_deg)
-        
+
         lay_calib.addWidget(QLabel("Tikhonov λ:"))
         self.spin_lambda = QDoubleSpinBox()
         self.spin_lambda.setRange(0.0, 10.0)
-        self.spin_lambda.setSingleStep(0.0001) 
-        self.spin_lambda.setDecimals(6)        
-        self.spin_lambda.setValue(0.0000) 
+        self.spin_lambda.setSingleStep(0.0001)
+        self.spin_lambda.setDecimals(6)
+        self.spin_lambda.setValue(0.0000)
         self.spin_lambda.setToolTip("Ridge Penalty: 0 = Off, 1e-4 = Monitoring")
         lay_calib.addWidget(self.spin_lambda)
 
         self.chk_robust = QCheckBox("🛡️ Robust (IRLS)")
         self.chk_robust.setToolTip("Auto-ignore spike noise and cosmic rays")
-        self.chk_robust.setChecked(False) 
+        self.chk_robust.setChecked(False)
         lay_calib.addWidget(self.chk_robust)
 
-        self.ref_props = {} 
-        
+        self.ref_props = {}
         btn_props = QPushButton("⚙️ Properties")
         btn_props.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
         btn_props.clicked.connect(self.open_ref_properties)
         lay_calib.addWidget(btn_props)
-        
         lay_calib_main.addLayout(lay_calib)
 
         lay_thresh = QHBoxLayout()
@@ -242,8 +257,7 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_rms_thresh.setToolTip(
             "A fit is accepted as OK when RMS residual < (signal mean × threshold).\n"
             "10% = standard DOAS quality criterion.\n"
-            "Lower = stricter. Raise only if data is extremely noisy."
-        )
+            "Lower = stricter. Raise only if data is extremely noisy.")
         lay_thresh.addWidget(self.spin_rms_thresh)
         lay_thresh.addWidget(QLabel("  (10% = standard DOAS criterion)"))
         lay_calib_main.addLayout(lay_thresh)
@@ -258,8 +272,7 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_kalman_q.setToolTip(
             "Kalman Q — process noise / tracking speed\n"
             "Higher = tracks rapid changes faster (e.g. vehicle plumes)\n"
-            "Lower = smoother output for stable ambient monitoring"
-        )
+            "Lower = smoother output for stable ambient monitoring")
         lay_kalman.addWidget(self.spin_kalman_q)
         lay_kalman.addWidget(QLabel("R:"))
         self.spin_kalman_r = QDoubleSpinBox()
@@ -270,13 +283,20 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_kalman_r.setToolTip(
             "Kalman R — measurement noise / smoothing strength\n"
             "Higher = stronger smoothing (stable background)\n"
-            "Lower = faster response, less smoothing"
-        )
+            "Lower = faster response, less smoothing")
         lay_kalman.addWidget(self.spin_kalman_r)
         lay_calib_main.addLayout(lay_kalman)
 
         grp_calib.setLayout(lay_calib_main)
-        left_layout.addWidget(grp_calib)
+        lay_params_outer.addWidget(grp_calib)
+        left_layout.addWidget(self._params_container)
+
+        def _toggle_params():
+            self._params_visible = not self._params_visible
+            self._params_container.setVisible(self._params_visible)
+            self._btn_toggle_params.setText(
+                "▼  Parameters" if self._params_visible else "▶  Parameters (hidden)")
+        self._btn_toggle_params.clicked.connect(_toggle_params)
 
         # --- 3. Analysis Control Section ---
         grp_ctl = QGroupBox("3. Analysis")
@@ -343,15 +363,20 @@ class CAESARAnalyzer(QMainWindow):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         
-        # 1. Main Tab Widget
+        # Main Tab Widget
         self.main_tabs = QTabWidget()
-        
-        # 2. [Tab 1] New Cavity Setup Tab (Pre-Analysis)
+
+        # Tab 0: Daily Run (scenario + setup status checklist + R trend)
+        self.daily_run_tab = QWidget()
+        self.setup_daily_run_tab()
+        self.main_tabs.addTab(self.daily_run_tab, "📋 Daily Run")
+
+        # Tab 1: Cavity Setup
         self.setup_tab = QWidget()
         self.setup_cavity_tab()
-        self.main_tabs.addTab(self.setup_tab, "🛠️ Cavity Setup")
-        
-        # 3. [Tab 2] Analysis Monitor (High-Speed Fit Viewer)
+        self.main_tabs.addTab(self.setup_tab, "🛠️ Setup")
+
+        # Tab 2: Analysis Monitor
         self.monitor = MonitorWidget(self.engine)
         self.main_tabs.addTab(self.monitor, "📈 Analysis Monitor")
         
@@ -370,6 +395,262 @@ class CAESARAnalyzer(QMainWindow):
         QShortcut(QKeySequence("F5"),      self).activated.connect(self.start_analysis)
         QShortcut(QKeySequence("Escape"),  self).activated.connect(self.stop_analysis)
         QShortcut(QKeySequence("Ctrl+S"),  self).activated.connect(self.save)
+
+    # =========================================================
+    # Tab 0: Daily Run
+    # =========================================================
+    def setup_daily_run_tab(self):
+        """Build the Daily Run tab: scenario, setup status checklist, R trend charts."""
+        lay = QVBoxLayout(self.daily_run_tab)
+
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # ── Left: Scenario + Setup Status ────────────────────────────
+        left_w = QWidget()
+        left_v = QVBoxLayout(left_w)
+
+        grp_scenario = QGroupBox("💾 Fit Scenario")
+        grp_scenario.setStyleSheet("QGroupBox { font-weight: bold; color: #2E7D32; }")
+        lay_scen = QHBoxLayout()
+        btn_save_scen = QPushButton("📥 Save Settings")
+        btn_load_scen = QPushButton("📂 Load Settings")
+        btn_save_scen.clicked.connect(self.save_scenario)
+        btn_load_scen.clicked.connect(self.load_scenario)
+        lay_scen.addWidget(btn_save_scen)
+        lay_scen.addWidget(btn_load_scen)
+        grp_scenario.setLayout(lay_scen)
+        left_v.addWidget(grp_scenario)
+
+        grp_status = QGroupBox("✅ Setup Status")
+        grp_status.setStyleSheet("QGroupBox { font-weight: bold; color: #1565C0; }")
+        lay_status = QVBoxLayout()
+
+        self.lbl_st_wl    = QLabel("❌  Wavelength calibration: not loaded")
+        self.lbl_st_i0    = QLabel("⚠️   I₀ (Zero-Air): not set (auto from ZA scans)")
+        self.lbl_st_r     = QLabel("⚠️   R-Curve: not loaded (auto from He scans)")
+        self.lbl_st_refs  = QLabel("❌  References: not locked")
+        self.lbl_st_ils   = QLabel("⚠️   ILS: FWHM=0 (references not convolved)")
+        self.lbl_st_range = QLabel("⚠️   Fit range: 0–2047 px (full sensor)")
+
+        for lbl in (self.lbl_st_wl, self.lbl_st_i0, self.lbl_st_r,
+                    self.lbl_st_refs, self.lbl_st_ils, self.lbl_st_range):
+            lbl.setStyleSheet("padding: 2px 6px; font-size: 11px;")
+            lay_status.addWidget(lbl)
+
+        btn_refresh = QPushButton("🔄 Refresh Status")
+        btn_refresh.clicked.connect(self._refresh_setup_status)
+        lay_status.addWidget(btn_refresh)
+        grp_status.setLayout(lay_status)
+        left_v.addWidget(grp_status)
+        left_v.addStretch(1)
+        top_splitter.addWidget(left_w)
+
+        # ── Right: R(λ) curve + R time series ────────────────────────
+        right_w = QWidget()
+        right_v = QVBoxLayout(right_w)
+
+        grp_r = QGroupBox("🪞 Mirror Reflectivity — Current Session")
+        grp_r.setStyleSheet("QGroupBox { font-weight: bold; color: #6A1B9A; }")
+        lay_r = QVBoxLayout()
+
+        self._daily_r_pw = pg.PlotWidget()
+        self._daily_r_pw.setLabel('left', 'R (%)')
+        self._daily_r_pw.setLabel('bottom', 'Wavelength (nm)')
+        self._daily_r_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._daily_r_pw.setTitle("R(λ) from last ZA/He calibration")
+        self._daily_r_pw.setMinimumHeight(190)
+        lay_r.addWidget(self._daily_r_pw)
+
+        self._daily_rt_pw = pg.PlotWidget()
+        self._daily_rt_pw.setLabel('left', 'R median (%)')
+        self._daily_rt_pw.setLabel('bottom', 'UTC Time')
+        self._daily_rt_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._daily_rt_pw.setTitle("R time series (run R Trend Monitor to populate)")
+        self._daily_rt_pw.setMinimumHeight(160)
+        _ts_axis = pg.DateAxisItem(orientation='bottom')
+        self._daily_rt_pw.setAxisItems({'bottom': _ts_axis})
+        lay_r.addWidget(self._daily_rt_pw)
+
+        grp_r.setLayout(lay_r)
+        right_v.addWidget(grp_r)
+        top_splitter.addWidget(right_w)
+
+        top_splitter.setSizes([320, 620])
+        lay.addWidget(top_splitter)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Daily Run helpers
+    # ──────────────────────────────────────────────────────────────────
+    def _refresh_setup_status(self):
+        """Update all checklist labels in the Daily Run tab."""
+        if not hasattr(self, 'lbl_st_wl'):
+            return  # tab not built yet
+
+        # Wavelength calibration
+        wl_ok = hasattr(self, 'wavelengths') and self.wavelengths is not None
+        if wl_ok:
+            wl = np.asarray(self.wavelengths).flatten()
+            self.lbl_st_wl.setText(
+                f"✅  Wavelength: {wl.min():.2f}–{wl.max():.2f} nm  ({len(wl)} px)")
+            self.lbl_st_wl.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+            # Auto-correct txt_max if it still holds the default 2047 and wl is shorter
+            try:
+                n = len(wl)
+                if int(self.txt_max.text()) >= n:
+                    self.txt_max.setText(str(n - 1))
+            except ValueError:
+                pass
+        else:
+            self.lbl_st_wl.setText("❌  Wavelength calibration: not loaded")
+            self.lbl_st_wl.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+
+        # I₀
+        i0_ok = hasattr(self, 'i0_data') and self.i0_data is not None
+        if i0_ok:
+            self.lbl_st_i0.setText(
+                f"✅  I₀: loaded ({len(self.i0_data)} px,  mean={self.i0_data.mean():.1f})")
+            self.lbl_st_i0.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+        else:
+            self.lbl_st_i0.setText("⚠️   I₀: not set  (auto-extracted from ZA scans during run)")
+            self.lbl_st_i0.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
+
+        # R-curve
+        r_ok = hasattr(self, 'r_data') and self.r_data is not None
+        if r_ok:
+            r_arr = np.asarray(self.r_data, dtype=float)
+            r_fin = r_arr[np.isfinite(r_arr)]
+            if len(r_fin) > 0:
+                r_med = float(np.median(r_fin))
+                leff  = self.spin_d_len.value() / (1.0 - r_med)
+                self.lbl_st_r.setText(
+                    f"✅  R: {r_med*100:.4f}%  Leff ≈ {leff:.0f} cm")
+            else:
+                self.lbl_st_r.setText("✅  R: loaded (no finite values in pixel range)")
+            self.lbl_st_r.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+            self._update_daily_r_chart()
+        else:
+            self.lbl_st_r.setText("⚠️   R-Curve: not loaded  (auto from He scans during run)")
+            self.lbl_st_r.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
+
+        # References locked
+        refs_ok = hasattr(self, 'engine') and len(self.engine.gas_list) > 0
+        if refs_ok:
+            self.lbl_st_refs.setText(
+                f"✅  References locked: {', '.join(self.engine.gas_list)}")
+            self.lbl_st_refs.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+        else:
+            self.lbl_st_refs.setText("❌  References: not locked  (lock before RUN)")
+            self.lbl_st_refs.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+
+        # ILS
+        fwhm_px = self.spin_fwhm.value()
+        fwhm_nm = self.spin_fwhm_nm.value() if hasattr(self, 'spin_fwhm_nm') else 0.0
+        ils_applied = getattr(self, '_ils_applied', False)
+        if fwhm_px > 0.01 and ils_applied:
+            self.lbl_st_ils.setText(
+                f"✅  ILS applied: FWHM={fwhm_nm:.3f} nm  ({fwhm_px:.2f} px)")
+            self.lbl_st_ils.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+        elif fwhm_px > 0.01:
+            self.lbl_st_ils.setText(
+                f"⚠️   ILS set but NOT applied: {fwhm_nm:.3f} nm  — press 'Apply ILS'")
+            self.lbl_st_ils.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
+        else:
+            self.lbl_st_ils.setText("⚠️   ILS: FWHM=0  (cross-sections not convolved with ILS)")
+            self.lbl_st_ils.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
+
+        # Fit range
+        try:
+            fmin = int(self.txt_min.text())
+            fmax = int(self.txt_max.text())
+            rng  = fmax - fmin
+            if wl_ok:
+                wl = np.asarray(self.wavelengths).flatten()
+                lo = wl[fmin] if fmin < len(wl) else 0
+                hi = wl[min(fmax, len(wl)-1)]
+                self.lbl_st_range.setText(
+                    f"✅  Fit range: px {fmin}–{fmax}  ({lo:.1f}–{hi:.1f} nm,  {rng} px)")
+            else:
+                self.lbl_st_range.setText(
+                    f"✅  Fit range: px {fmin}–{fmax}  ({rng} px)")
+            self.lbl_st_range.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+        except ValueError:
+            self.lbl_st_range.setText("❌  Fit range: invalid pixel values")
+            self.lbl_st_range.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+
+    def _update_fwhm_px_from_nm(self, nm_val):
+        """Convert FWHM nm → px using loaded wavelength axis; update spin_fwhm."""
+        if hasattr(self, 'wavelengths') and self.wavelengths is not None:
+            wl = np.asarray(self.wavelengths).flatten()
+            if len(wl) > 2:
+                mid  = len(wl) // 2
+                disp = abs(float(wl[mid+1] - wl[mid-1])) / 2.0
+            else:
+                disp = 0.051
+        else:
+            disp = 0.051  # nm/px rough estimate from default calibration
+
+        if disp > 0:
+            self.spin_fwhm.blockSignals(True)
+            self.spin_fwhm.setValue(round(nm_val / disp, 2))
+            self.spin_fwhm.blockSignals(False)
+        self._on_ils_dirty()
+
+    def _on_ils_dirty(self):
+        """Mark ILS as requiring re-application; turn Apply ILS button orange."""
+        self._ils_applied = False
+        if hasattr(self, 'btn_apply_ils'):
+            self.btn_apply_ils.setStyleSheet(
+                "background-color: #FF6F00; color: white; font-weight: bold;")
+
+    def _update_daily_r_chart(self):
+        """Plot current R(λ) in the Daily Run tab."""
+        if not hasattr(self, '_daily_r_pw'):
+            return
+        if not (hasattr(self, 'r_data') and self.r_data is not None):
+            return
+        self._daily_r_pw.clear()
+        r_arr = np.asarray(self.r_data, dtype=float)
+        if hasattr(self, 'wavelengths') and self.wavelengths is not None:
+            wl = np.asarray(self.wavelengths).flatten()
+            x  = wl[:len(r_arr)] if len(wl) >= len(r_arr) else np.arange(len(r_arr))
+            self._daily_r_pw.setLabel('bottom', 'Wavelength (nm)')
+        else:
+            x = np.arange(len(r_arr))
+            self._daily_r_pw.setLabel('bottom', 'Pixel')
+        r_fin = r_arr[np.isfinite(r_arr)]
+        if len(r_fin) > 0:
+            r_med = float(np.median(r_fin))
+            d     = self.spin_d_len.value()
+            leff  = d / (1.0 - r_med)
+            self._daily_r_pw.plot(x, r_arr * 100,
+                                  pen=pg.mkPen('#6A1B9A', width=1.5))
+            self._daily_r_pw.addLine(
+                y=r_med * 100,
+                pen=pg.mkPen('r', width=1.5, style=Qt.PenStyle.DashLine))
+            self._daily_r_pw.setTitle(
+                f"R(λ)  median={r_med*100:.4f}%  Leff≈{leff:.0f} cm")
+
+    def _update_daily_rt_chart(self, cold_results, hot_results):
+        """Populate the R time-series chart in Daily Run from R Trend Monitor results."""
+        if not hasattr(self, '_daily_rt_pw'):
+            return
+        self._daily_rt_pw.clear()
+        self._daily_rt_pw.addLegend(offset=(10, 10))
+
+        def _plot_series(results, color, label):
+            if not results:
+                return
+            ts = [r.get('timestamp', 0) for r in results if r.get('R_median') is not None]
+            rv = [r['R_median'] * 100 for r in results if r.get('R_median') is not None]
+            if ts and rv:
+                self._daily_rt_pw.plot(ts, rv,
+                                       pen=pg.mkPen(color, width=2),
+                                       symbol='o', symbolSize=5,
+                                       name=label)
+
+        _plot_series(cold_results, '#2196F3', 'Cold')
+        _plot_series(hot_results,  '#FF6F00', 'Hot')
+        self._daily_rt_pw.setTitle("R time series (Cold/Hot)")
 
     def setup_cavity_tab(self):
         """Configure the layout for the Pre-Analysis Cavity Setup tab."""
@@ -911,6 +1192,7 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
         self.status.setText(f"Auto I0: averaged {len(za_spectra)} ZA scans.")
         self.update_diagnostic_plot()
+        self._refresh_setup_status()
 
     def update_leff(self):
         """Recalculates and displays L_eff = d / (1 - R_mean) whenever R or d changes."""
@@ -948,6 +1230,7 @@ class CAESARAnalyzer(QMainWindow):
             except Exception as e:
                 print(f"Error loading R file: {e}")
                 QMessageBox.warning(self, "Load Error", "Failed to parse Reflectivity (R) file.")
+            self._refresh_setup_status()
 
     def show_table_context_menu(self, pos):
         """Shows context menu on the measurement table."""
@@ -970,7 +1253,7 @@ class CAESARAnalyzer(QMainWindow):
 
         if filepath:
             self.set_i0_path(filepath)
-            self.main_tabs.setCurrentIndex(0)
+            self.main_tabs.setCurrentIndex(1)   # switch to Setup tab
             
     def set_i0_path(self, filepath):
         """Updates the I0 state, loads data, and updates UI."""
@@ -987,6 +1270,7 @@ class CAESARAnalyzer(QMainWindow):
         except Exception as e:
             print(f"Error loading I0 file: {e}")
             QMessageBox.warning(self, "Load Error", "Failed to read I0 measurement file.")
+        self._refresh_setup_status()
 
     def update_diagnostic_plot(self):
         """Draws I0 and R on the diagnostic viewer."""
@@ -1036,6 +1320,7 @@ class CAESARAnalyzer(QMainWindow):
             self.wavelengths = np.array(wave_nm)
         self.update_diagnostic_plot()
         self.update_leff()
+        self._refresh_setup_status()
 
     def open_ref_properties(self):
         """Opens the RefPropertiesDialog to configure Shift/Squeeze bounds."""
@@ -1078,6 +1363,9 @@ class CAESARAnalyzer(QMainWindow):
         """R Trend Monitor: raw .dat 파일 디렉토리를 스캔해 파일별 R 시계열을 계산·저장·플롯."""
         from ui_dialogs import RTrendMonitorDialog
         dialog = RTrendMonitorDialog(self)
+        # Wire R trend results into the Daily Run tab chart
+        if hasattr(dialog, 'data_ready'):
+            dialog.data_ready.connect(self._update_daily_rt_chart)
         dialog.exec()
 
     def open_wavelength_calibration(self):
@@ -1103,9 +1391,7 @@ class CAESARAnalyzer(QMainWindow):
                 self.spectrum = dialog.spectrum
                 print("✅ [Lamp Sync] Lamp data auto-saved for the reference generator.")
 
-            # 4. Smart UI Update for FWHM Label
-            # dialog.fwhm_records 는 fit_calibration() 실행 시 채워진다.
-            # (3. Fit → 4. Save & Apply 순서로 진행한 경우 반드시 존재)
+            # 4. Smart UI Update for FWHM Label + auto-fill nm spinbox
             fwhm_text = "✅ Wavelength Updated"
             if hasattr(dialog, 'fwhm_records') and dialog.fwhm_records:
                 valid_fwhms = [v['fwhm_nm'] for v in dialog.fwhm_records.values()
@@ -1116,11 +1402,20 @@ class CAESARAnalyzer(QMainWindow):
                     fwhm_text = (f"💡 FWHM={avg_fwhm:.3f} nm  "
                                  f"σ={avg_sigma:.3f} nm  "
                                  f"({len(valid_fwhms)} peaks)")
+                    # Auto-populate the nm spinbox (triggers px conversion)
+                    if hasattr(self, 'spin_fwhm_nm'):
+                        self.spin_fwhm_nm.blockSignals(True)
+                        self.spin_fwhm_nm.setValue(avg_fwhm)
+                        self.spin_fwhm_nm.blockSignals(False)
+                        # Now compute px using the just-loaded wavelength axis
+                        self._update_fwhm_px_from_nm(avg_fwhm)
 
             target_label = getattr(self, 'lbl_fwhm_display', getattr(self, 'fwhm_label', None))
             if target_label:
                 target_label.setText(fwhm_text)
                 target_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
+
+            self._refresh_setup_status()
 
         dialog.calibration_finished.connect(on_calib_done)
         dialog.exec()
@@ -1188,11 +1483,14 @@ class CAESARAnalyzer(QMainWindow):
                 self.engine.set_wavelength_axis(wl_data)  # register immediately so pixel_to_wavelength works before lock_ref
                 self.monitor.set_wavelengths(wl_data)
                 self.lbl_fwhm_display.setText(f"💡 WL Loaded: {os.path.basename(filepath)}")
-                
+                # Recompute px from nm spinbox with the new dispersion
+                if hasattr(self, 'spin_fwhm_nm') and self.spin_fwhm_nm.value() > 0:
+                    self._update_fwhm_px_from_nm(self.spin_fwhm_nm.value())
+                self._refresh_setup_status()
                 # Show popup only if loaded manually
-                if not auto_path: 
+                if not auto_path:
                     QMessageBox.information(self, "Loaded", f"X-Axis Calibration Loaded.\nRange: {wl_data.min():.2f} ~ {wl_data.max():.2f} nm")
-            else: 
+            else:
                 QMessageBox.warning(self, "Error", "No valid numeric data found in the file.")
                 
         except Exception as e: 
@@ -1405,8 +1703,14 @@ class CAESARAnalyzer(QMainWindow):
             if hasattr(self, 'monitor') and hasattr(self.monitor, 'cb_view'):
                 self.monitor.cb_view.clear()
                 self.monitor.cb_view.addItem("Measurement")
-                for name in self.engine.gas_list: 
+                for name in self.engine.gas_list:
                     self.monitor.cb_view.addItem(f"Ref: {name}")
+            # ILS was applied to the old interpolators — mark dirty so user re-applies
+            self._ils_applied = False
+            if hasattr(self, 'btn_apply_ils'):
+                self.btn_apply_ils.setStyleSheet(
+                    "background-color: #FF6F00; color: white; font-weight: bold;")
+            self._refresh_setup_status()
         else:
             QMessageBox.warning(self, "Error", "No valid references found to lock, or an error occurred.")
 
@@ -1511,7 +1815,16 @@ class CAESARAnalyzer(QMainWindow):
         fwhm_l = self.spin_fwhm_lorentzian.value()
         self.engine.apply_ils_convolution(fwhm_g, fwhm_l)
         self.refresh_viewer()
-        label = f"Voigt (G={fwhm_g:.2f}, L={fwhm_l:.2f} px)" if fwhm_l > 0.1 else f"Gaussian FWHM={fwhm_g:.2f} px"
+        label = (f"Voigt (G={fwhm_g:.2f}, L={fwhm_l:.2f} px)"
+                 if fwhm_l > 0.1 else f"Gaussian FWHM={fwhm_g:.2f} px")
+
+        # Mark ILS as applied → button turns green
+        self._ils_applied = True
+        if hasattr(self, 'btn_apply_ils'):
+            self.btn_apply_ils.setStyleSheet(
+                "background-color: #2E7D32; color: white; font-weight: bold;")
+
+        self._refresh_setup_status()
         QMessageBox.information(self, "Applied", f"ILS Blur ({label}) successfully applied.")
         
     def open_selector(self):
@@ -1723,8 +2036,8 @@ class CAESARAnalyzer(QMainWindow):
         self.b_stop.setEnabled(True)
         self.status.setText("🏃 Analysis in progress...")
 
-        # Switch to the Analysis Monitor tab automatically
-        self.main_tabs.setCurrentIndex(1)
+        # Switch to the Analysis Monitor tab automatically (index 2 in new 3-tab layout)
+        self.main_tabs.setCurrentIndex(2)
 
         self.worker.start()
         

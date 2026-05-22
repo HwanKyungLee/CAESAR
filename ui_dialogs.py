@@ -2917,6 +2917,9 @@ class _RTrendWorker(QThread):
 class RTrendMonitorDialog(QDialog):
     """R Trend Monitor 설정 + 실행 + 로그 표시 + 인라인 시계열 그래프 다이얼로그."""
 
+    # Forwarded from the worker so the parent main window can connect to it
+    data_ready = pyqtSignal(object, object)   # (cold_results, hot_results)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열")
@@ -3018,6 +3021,7 @@ class RTrendMonitorDialog(QDialog):
         self._worker = _RTrendWorker(cfg)
         self._worker.log.connect(self._log.append)
         self._worker.data_ready.connect(self._on_data_ready)
+        self._worker.data_ready.connect(self.data_ready)   # forward to dialog signal
         self._worker.finished.connect(self._on_done)
         self._worker.start()
 
