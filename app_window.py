@@ -631,26 +631,42 @@ class CAESARAnalyzer(QMainWindow):
                 f"R(λ)  median={r_med*100:.4f}%  Leff≈{leff:.0f} cm")
 
     def _update_daily_rt_chart(self, cold_results, hot_results):
-        """Populate the R time-series chart in Daily Run from R Trend Monitor results."""
+        """Populate the R time-series chart in Daily Run from R Trend Monitor results.
+
+        Each result dict has keys: timestamp (datetime), r_mean, r_std, leff_mean, …
+        """
         if not hasattr(self, '_daily_rt_pw'):
             return
         self._daily_rt_pw.clear()
         self._daily_rt_pw.addLegend(offset=(10, 10))
 
+        import datetime as _dt
+
         def _plot_series(results, color, label):
             if not results:
                 return
-            ts = [r.get('timestamp', 0) for r in results if r.get('R_median') is not None]
-            rv = [r['R_median'] * 100 for r in results if r.get('R_median') is not None]
-            if ts and rv:
-                self._daily_rt_pw.plot(ts, rv,
-                                       pen=pg.mkPen(color, width=2),
-                                       symbol='o', symbolSize=5,
-                                       name=label)
+            pts = [(r['timestamp'], r['r_mean'])
+                   for r in results
+                   if r.get('r_mean') is not None and r.get('timestamp') is not None]
+            if not pts:
+                return
+            # Convert datetime → Unix epoch float for DateAxisItem
+            ts = []
+            for t, _ in pts:
+                if isinstance(t, _dt.datetime):
+                    ts.append(t.timestamp())
+                else:
+                    ts.append(float(t))
+            rv = [r * 100 for _, r in pts]
+            self._daily_rt_pw.plot(ts, rv,
+                                   pen=pg.mkPen(color, width=2),
+                                   symbol='o', symbolSize=5,
+                                   name=label)
 
         _plot_series(cold_results, '#2196F3', 'Cold')
         _plot_series(hot_results,  '#FF6F00', 'Hot')
-        self._daily_rt_pw.setTitle("R time series (Cold/Hot)")
+        n = (len(cold_results) if cold_results else 0) + (len(hot_results) if hot_results else 0)
+        self._daily_rt_pw.setTitle(f"R time series — {n} cycles (Cold/Hot)")
 
     def setup_cavity_tab(self):
         """Configure the layout for the Pre-Analysis Cavity Setup tab."""
