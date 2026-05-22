@@ -676,36 +676,16 @@ class CAESARAnalyzer(QMainWindow):
         # --- Left Panel: Controls ---
         control_layout = QVBoxLayout()
         
-        # Group 1: Calibration Tools
-        grp_calib = QGroupBox("1. Calibration & Generators")
+        # Group 1: Daily-use tools
+        grp_calib = QGroupBox("1. Tools")
         lay_calib = QVBoxLayout()
-        
+
         btn_calib_tool = QPushButton("🔍 Wavelength Calibration Tool")
         btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
-        
+
         btn_ref_gen = QPushButton("✂️ Reference Generator")
         btn_ref_gen.clicked.connect(self.open_reference_generator)
         btn_ref_gen.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
-
-        btn_r_gen = QPushButton("📊 R-Curve Generator (Rayleigh Method)")
-        btn_r_gen.clicked.connect(self.open_r_generator)
-        btn_r_gen.setStyleSheet("background-color: #e8f5e9; font-weight: bold;")
-
-        btn_alpha_export = QPushButton("📁 Alpha 내보내기 (피팅 없이 α 파일 생성)")
-        btn_alpha_export.clicked.connect(self.export_alpha_files)
-        btn_alpha_export.setStyleSheet("background-color: #e3f2fd; font-weight: bold;")
-        btn_alpha_export.setToolTip(
-            "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm-1) 계산 → .dat 파일 저장\n"
-            "DOAS 피팅 없이 alpha만 추출해서 박사님 alpha_trace와 직접 비교 가능"
-        )
-
-        btn_alpha_fit = QPushButton("📊 Alpha 피팅 (저장된 α 파일로 DOAS 피팅)")
-        btn_alpha_fit.clicked.connect(self.run_alpha_fit)
-        btn_alpha_fit.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
-        btn_alpha_fit.setToolTip(
-            "Alpha 내보내기로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
-            "DOAS 피팅만 수행 → *_fit.tsv 결과 저장"
-        )
 
         btn_r_trend = QPushButton("📈 R Trend Monitor (거울 반사율 시계열)")
         btn_r_trend.clicked.connect(self.open_r_trend_monitor)
@@ -718,12 +698,78 @@ class CAESARAnalyzer(QMainWindow):
 
         lay_calib.addWidget(btn_calib_tool)
         lay_calib.addWidget(btn_ref_gen)
-        lay_calib.addWidget(btn_r_gen)
-        lay_calib.addWidget(btn_alpha_export)
-        lay_calib.addWidget(btn_alpha_fit)
         lay_calib.addWidget(btn_r_trend)
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
+
+        # Specialized / one-off tools (collapsible, hidden by default)
+        self._spec_tools_visible = False
+        self._btn_toggle_spec = QPushButton("▶  Specialized Tools (alpha export, R-curve offline)")
+        self._btn_toggle_spec.setStyleSheet(
+            "text-align: left; color: #757575; background: #FAFAFA; "
+            "border: 1px solid #E0E0E0; padding: 3px 8px;")
+        control_layout.addWidget(self._btn_toggle_spec)
+
+        self._spec_tools_container = QWidget()
+        self._spec_tools_container.setVisible(False)
+        lay_spec = QVBoxLayout(self._spec_tools_container)
+        lay_spec.setContentsMargins(0, 0, 0, 0)
+
+        grp_spec = QGroupBox("🔧 Specialized Tools")
+        grp_spec.setStyleSheet("QGroupBox { color: #757575; }")
+        lay_spec_inner = QVBoxLayout()
+
+        btn_r_gen = QPushButton("📊 R-Curve Generator (offline .mat / separate files)")
+        btn_r_gen.clicked.connect(self.open_r_generator)
+        btn_r_gen.setStyleSheet("background-color: #e8f5e9;")
+        btn_r_gen.setToolTip(
+            "별도 He/ZA 파일(또는 .mat)에서 R-Curve를 계산합니다.\n"
+            "Araon 측정 파일처럼 He/ZA가 내장된 경우에는 불필요합니다.\n"
+            "(R은 RUN 중 자동 추출되거나 R Trend Monitor로 배치 계산됩니다.)")
+
+        btn_alpha_export = QPushButton("📁 Alpha 내보내기 (피팅 없이 α 파일 생성)")
+        btn_alpha_export.clicked.connect(self.export_alpha_files)
+        btn_alpha_export.setToolTip(
+            "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm⁻¹) 계산 → .dat 저장\n"
+            "DOAS 피팅 없이 alpha만 추출 — 박사님 alpha_trace 비교용 1회성 도구")
+
+        btn_alpha_fit = QPushButton("📊 Alpha 피팅 (저장된 α 파일로 DOAS 피팅)")
+        btn_alpha_fit.clicked.connect(self.run_alpha_fit)
+        btn_alpha_fit.setToolTip(
+            "Alpha 내보내기로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
+            "DOAS 피팅만 수행 → *_fit.tsv 결과 저장")
+
+        # Alpha intermediate save (kept here so start_analysis() can read it)
+        lay_alpha_save = QHBoxLayout()
+        self.chk_save_alpha = QCheckBox("α 스펙트럼 중간 저장")
+        self.chk_save_alpha.setToolTip(
+            "BBCEAS 광학 깊이 계산 후 각 스캔의 α 스펙트럼을 파일로 저장합니다.\n"
+            "파일명: {원본파일명}_alpha.dat  단위: cm⁻¹")
+        self.lbl_alpha_dir = QLabel("(폴더 미설정)")
+        self.lbl_alpha_dir.setStyleSheet("color: gray;")
+        btn_alpha_dir = QPushButton("폴더")
+        btn_alpha_dir.setFixedWidth(50)
+        btn_alpha_dir.clicked.connect(self.browse_alpha_save_dir)
+        lay_alpha_save.addWidget(self.chk_save_alpha)
+        lay_alpha_save.addWidget(self.lbl_alpha_dir, 1)
+        lay_alpha_save.addWidget(btn_alpha_dir)
+
+        lay_spec_inner.addWidget(btn_r_gen)
+        lay_spec_inner.addWidget(btn_alpha_export)
+        lay_spec_inner.addWidget(btn_alpha_fit)
+        lay_spec_inner.addLayout(lay_alpha_save)
+        grp_spec.setLayout(lay_spec_inner)
+        lay_spec.addWidget(grp_spec)
+        control_layout.addWidget(self._spec_tools_container)
+
+        def _toggle_spec():
+            self._spec_tools_visible = not self._spec_tools_visible
+            self._spec_tools_container.setVisible(self._spec_tools_visible)
+            self._btn_toggle_spec.setText(
+                "▼  Specialized Tools (alpha export, R-curve offline)"
+                if self._spec_tools_visible else
+                "▶  Specialized Tools (alpha export, R-curve offline)")
+        self._btn_toggle_spec.clicked.connect(_toggle_spec)
         
         # Group 2: Cavity Parameters (BBCEAS Physics)
         grp_physics = QGroupBox("2. Cavity Parameters")
@@ -812,22 +858,6 @@ class CAESARAnalyzer(QMainWindow):
         lay_flags.addStretch()
         lay_physics.addRow("측정 상태 플래그:", lay_flags)
 
-        # Alpha Intermediate Save
-        lay_alpha_save = QHBoxLayout()
-        self.chk_save_alpha = QCheckBox("α 스펙트럼 저장")
-        self.chk_save_alpha.setToolTip(
-            "BBCEAS 광학 깊이 계산 후 각 스캔의 α 스펙트럼을 중간 파일로 저장합니다.\n"
-            "파일명: {원본파일명}_alpha.dat  단위: cm⁻¹"
-        )
-        self.lbl_alpha_dir = QLabel("(디렉토리 미설정)")
-        self.lbl_alpha_dir.setStyleSheet("color: gray;")
-        btn_alpha_dir = QPushButton("폴더 선택")
-        btn_alpha_dir.clicked.connect(self.browse_alpha_save_dir)
-        lay_alpha_save.addWidget(self.chk_save_alpha)
-        lay_alpha_save.addWidget(self.lbl_alpha_dir, 1)
-        lay_alpha_save.addWidget(btn_alpha_dir)
-        lay_physics.addRow("Alpha 중간 저장:", lay_alpha_save)
-
         # Purge Gas Length Ratio (RL)
         lay_rl = QHBoxLayout()
         self.spin_rl_factor = QDoubleSpinBox()
@@ -854,7 +884,19 @@ class CAESARAnalyzer(QMainWindow):
         grp_physics.setLayout(lay_physics)
         control_layout.addWidget(grp_physics)
 
-        # Group 2b: Detector Corrections
+        # Group 2b: Detector Corrections (collapsible — rarely needed in daily ops)
+        self._det_corr_visible = False
+        self._btn_toggle_det = QPushButton("▶  Detector Corrections (dark / offset / stray light)")
+        self._btn_toggle_det.setStyleSheet(
+            "text-align: left; color: #546E7A; background: #FAFAFA; "
+            "border: 1px solid #E0E0E0; padding: 3px 8px;")
+        control_layout.addWidget(self._btn_toggle_det)
+
+        self._det_corr_container = QWidget()
+        self._det_corr_container.setVisible(False)
+        _det_outer = QVBoxLayout(self._det_corr_container)
+        _det_outer.setContentsMargins(0, 0, 0, 0)
+
         grp_det = QGroupBox("2b. Detector Corrections")
         lay_det = QFormLayout()
 
@@ -912,8 +954,18 @@ class CAESARAnalyzer(QMainWindow):
         lay_det.addRow("Stray Light ε:", self.spin_stray_light)
 
         grp_det.setLayout(lay_det)
-        control_layout.addWidget(grp_det)
-        
+        _det_outer.addWidget(grp_det)
+        control_layout.addWidget(self._det_corr_container)
+
+        def _toggle_det():
+            self._det_corr_visible = not self._det_corr_visible
+            self._det_corr_container.setVisible(self._det_corr_visible)
+            self._btn_toggle_det.setText(
+                "▼  Detector Corrections (dark / offset / stray light)"
+                if self._det_corr_visible else
+                "▶  Detector Corrections (dark / offset / stray light)")
+        self._btn_toggle_det.clicked.connect(_toggle_det)
+
         # Group 3: Environment Settings (For real-time PPB)
         grp_env = QGroupBox("3. Environment Variables (PPB)")
         lay_env = QFormLayout()
