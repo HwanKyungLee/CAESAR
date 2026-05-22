@@ -251,22 +251,22 @@ class DataIO:
                 #   Hot:  pressure=6162 (~971 mbar),  cavity-T=6155 (~75°C, heated)
                 #
                 # Auto-detect: try Cold columns first, fall back to Hot columns.
-                # Pressure — try 6160 (Cold), then 6162 (Hot)
+                # Detect channel by pressure column: Cold=6160, Hot=6162.
+                # Then read the matching temperature column so Cold files don't
+                # accidentally pick up the Hot cavity sensor (col 6155).
                 raw_p_count = np.nan
-                for _pcol in (6160, 6162):
+                _t_col_for_channel = 6173  # default: Cold ambient (~24 °C)
+                for _pcol, _tcol in ((6160, 6173), (6162, 6155)):
                     _v = raw_probe[_pcol] if _pcol < len(raw_probe) else np.nan
                     if np.isfinite(_v) and _v not in (0, 65535):
                         raw_p_count = _v
+                        _t_col_for_channel = _tcol
                         break
 
-                # Temperature — hot cavity (col 6155 ~75°C) takes priority;
-                # fall back to cold ambient (col 6173 ~24°C)
                 raw_t_count = np.nan
-                for _tcol in (6155, 6173):
-                    _v = raw_probe[_tcol] if _tcol < len(raw_probe) else np.nan
-                    if np.isfinite(_v) and _v not in (0, 65535):
-                        raw_t_count = _v
-                        break
+                _v = raw_probe[_t_col_for_channel] if _t_col_for_channel < len(raw_probe) else np.nan
+                if np.isfinite(_v) and _v not in (0, 65535):
+                    raw_t_count = _v
 
                 if np.isfinite(raw_p_count):
                     env_p = float(raw_p_count) * (0.01 * 6894.73326 / 100.0)
