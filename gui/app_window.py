@@ -1459,7 +1459,7 @@ class CAESARAnalyzer(QMainWindow):
 
     def open_r_trend_monitor(self):
         """R Trend Monitor: raw .dat 파일 디렉토리를 스캔해 파일별 R 시계열을 계산·저장·플롯."""
-        from ui_dialogs import RTrendMonitorDialog
+        from .ui_dialogs_r import RTrendMonitorDialog
         dialog = RTrendMonitorDialog(self)
         # Wire R trend results into the Daily Run tab chart
         if hasattr(dialog, 'data_ready'):
