@@ -771,43 +771,9 @@ class CAESARAnalyzer(QMainWindow):
                 "▶  Specialized Tools (alpha export, R-curve offline)")
         self._btn_toggle_spec.clicked.connect(_toggle_spec)
         
-        # Group 2: Cavity Parameters (BBCEAS Physics)
-        grp_physics = QGroupBox("2. Cavity Parameters")
+        # Group 2: Cavity Setup — only d, RL, Leff (everything else comes from raw file)
+        grp_physics = QGroupBox("2. Cavity Setup")
         lay_physics = QFormLayout()
-
-        # I0 Setup
-        self.lbl_i0_path = QLabel("Not selected")
-        self.lbl_i0_path.setStyleSheet("color: red;")
-        btn_browse_i0 = QPushButton("Browse I0")
-        btn_browse_i0.clicked.connect(self.browse_i0_file)
-        btn_auto_i0 = QPushButton("🔍 Auto from ZA scans")
-        btn_auto_i0.clicked.connect(self.auto_extract_i0)
-
-        lay_i0 = QHBoxLayout()
-        lay_i0.addWidget(self.lbl_i0_path)
-        lay_i0.addWidget(btn_browse_i0)
-        lay_i0.addWidget(btn_auto_i0)
-        lay_physics.addRow("I0 (Zero-Air):", lay_i0)
-
-        # Temporal I0 interpolation toggle
-        self.chk_temporal_i0 = QCheckBox("Temporal I0 interpolation (correct lamp drift)")
-        self.chk_temporal_i0.setToolTip(
-            "Pre-scans the dataset for periodic ZA calibration files and linearly\n"
-            "interpolates I0 between them so each ambient file uses the closest\n"
-            "calibration rather than a single fixed reference."
-        )
-        lay_physics.addRow("", self.chk_temporal_i0)
-
-        # R Curve Setup
-        self.lbl_r_path = QLabel("Not selected")
-        self.lbl_r_path.setStyleSheet("color: red;")
-        btn_browse_r = QPushButton("Browse R")
-        btn_browse_r.clicked.connect(self.browse_r_file)
-
-        lay_r = QHBoxLayout()
-        lay_r.addWidget(self.lbl_r_path)
-        lay_r.addWidget(btn_browse_r)
-        lay_physics.addRow("R (Reflectivity):", lay_r)
 
         # Cavity Length
         self.spin_d_len = QDoubleSpinBox()
@@ -818,15 +784,89 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_d_len.valueChanged.connect(self.update_leff)
         lay_physics.addRow("Cavity Length d (cm):", self.spin_d_len)
 
-        # Effective path length display (L_eff = d / (1 - R_mean))
-        self.lbl_leff = QLabel("L_eff: — (load R-curve first)")
-        self.lbl_leff.setStyleSheet("color: #0277BD; font-weight: bold;")
-        lay_physics.addRow("Effective Path Length:", self.lbl_leff)
+        # Purge Gas Length Ratio (RL)
+        lay_rl = QHBoxLayout()
+        self.spin_rl_factor = QDoubleSpinBox()
+        self.spin_rl_factor.setRange(0.01, 1.0)
+        self.spin_rl_factor.setSingleStep(0.001)
+        self.spin_rl_factor.setDecimals(4)
+        self.spin_rl_factor.setValue(1.0)
+        self.spin_rl_factor.setFixedWidth(int(80 * self._s))
+        self.spin_rl_factor.setToolTip(
+            "퍼지 가스 유효 캐비티 보정 계수 RL = d_eff / d\n"
+            "거울 오염 방지용 퍼지 가스가 흐르는 구간은 샘플이 없으므로\n"
+            "유효 측정 경로가 물리적 길이보다 짧아집니다.\n"
+            "MATLAB 기준 (CAESAR Araon 2025 ASIA-AQ 실측):\n"
+            "  CH1 (NO2/CHOCHO): 0.9330\n"
+            "  CH2 (HONO/HCHO): 0.9950\n"
+            "  CH3 (NO2/CHOCHO): 0.9968\n"
+            "1.0 = 보정 없음 (기본값; 측정값 있으면 반드시 입력)"
+        )
+        lay_rl.addWidget(self.spin_rl_factor)
+        lay_rl.addWidget(QLabel("  ← CH1: 0.9330 / CH2: 0.9950 / CH3: 0.9968"))
+        lay_rl.addStretch()
+        lay_physics.addRow("RL (Purge 보정):", lay_rl)
 
-        # Measurement State Flags — supports multiple values (comma-separated)
-        # CAESAR Araon 2025: ZA=500~503 / He=510~513 / Ambient=1
-        # 500=ZA injecting(실측), 501=setflow, 502=wait before, 503=wait after
-        # 510=He injecting(실측), 511=setflow, 512=wait before, 513=wait after
+        # Effective path length display (L_eff = d / (1 - R_mean))
+        self.lbl_leff = QLabel("L_eff: — (auto-calculated from He scans during RUN)")
+        self.lbl_leff.setStyleSheet("color: #0277BD; font-weight: bold;")
+        lay_physics.addRow("Effective Path:", self.lbl_leff)
+
+        grp_physics.setLayout(lay_physics)
+        control_layout.addWidget(grp_physics)
+
+        # ▶ Manual Override (collapsed by default)
+        # I₀ / R / flags / T / P all come from raw file HK data.
+        # This section is only for edge cases: separate files, non-standard flags, fallback T/P.
+        self._manual_override_visible = False
+        self._btn_toggle_override = QPushButton("▶  Manual Override  (I₀, R, flags, T/P fallback)")
+        self._btn_toggle_override.setStyleSheet(
+            "text-align: left; color: #546E7A; background: #F5F5F5; "
+            "border: 1px solid #CFD8DC; padding: 3px 8px;")
+        control_layout.addWidget(self._btn_toggle_override)
+
+        self._manual_override_container = QWidget()
+        self._manual_override_container.setVisible(False)
+        _ov_outer = QVBoxLayout(self._manual_override_container)
+        _ov_outer.setContentsMargins(0, 0, 0, 0)
+
+        grp_ov = QGroupBox("⚙️ Manual Override")
+        grp_ov.setStyleSheet("QGroupBox { color: #546E7A; }")
+        lay_ov = QFormLayout()
+
+        # I0 Setup
+        self.lbl_i0_path = QLabel("Auto from ZA scans")
+        self.lbl_i0_path.setStyleSheet("color: #546E7A;")
+        btn_browse_i0 = QPushButton("Browse I₀")
+        btn_browse_i0.clicked.connect(self.browse_i0_file)
+        btn_auto_i0 = QPushButton("🔍 Auto from ZA scans")
+        btn_auto_i0.clicked.connect(self.auto_extract_i0)
+        lay_i0 = QHBoxLayout()
+        lay_i0.addWidget(self.lbl_i0_path)
+        lay_i0.addWidget(btn_browse_i0)
+        lay_i0.addWidget(btn_auto_i0)
+        lay_ov.addRow("I₀ (Zero-Air):", lay_i0)
+
+        # Temporal I0 interpolation toggle
+        self.chk_temporal_i0 = QCheckBox("Temporal I₀ interpolation (correct lamp drift)")
+        self.chk_temporal_i0.setToolTip(
+            "Pre-scans the dataset for periodic ZA calibration files and linearly\n"
+            "interpolates I0 between them so each ambient file uses the closest\n"
+            "calibration rather than a single fixed reference."
+        )
+        lay_ov.addRow("", self.chk_temporal_i0)
+
+        # R Curve Setup
+        self.lbl_r_path = QLabel("Auto from He scans")
+        self.lbl_r_path.setStyleSheet("color: #546E7A;")
+        btn_browse_r = QPushButton("Browse R")
+        btn_browse_r.clicked.connect(self.browse_r_file)
+        lay_r = QHBoxLayout()
+        lay_r.addWidget(self.lbl_r_path)
+        lay_r.addWidget(btn_browse_r)
+        lay_ov.addRow("R (Reflectivity):", lay_r)
+
+        # Measurement State Flags — CAESAR Araon 2025: ZA=500~503 / He=510~513 / Ambient=1
         lay_flags = QHBoxLayout()
         self.txt_flag_za = QLineEdit("500, 501, 502, 503")
         self.txt_flag_za.setFixedWidth(int(130 * self._s))
@@ -856,33 +896,39 @@ class CAESARAnalyzer(QMainWindow):
         )
         lay_flags.addWidget(self.txt_flag_amb)
         lay_flags.addStretch()
-        lay_physics.addRow("측정 상태 플래그:", lay_flags)
+        lay_ov.addRow("측정 상태 플래그:", lay_flags)
 
-        # Purge Gas Length Ratio (RL)
-        lay_rl = QHBoxLayout()
-        self.spin_rl_factor = QDoubleSpinBox()
-        self.spin_rl_factor.setRange(0.01, 1.0)
-        self.spin_rl_factor.setSingleStep(0.001)
-        self.spin_rl_factor.setDecimals(4)
-        self.spin_rl_factor.setValue(1.0)
-        self.spin_rl_factor.setFixedWidth(int(80 * self._s))
-        self.spin_rl_factor.setToolTip(
-            "퍼지 가스 유효 캐비티 보정 계수 RL = d_eff / d\n"
-            "거울 오염 방지용 퍼지 가스가 흐르는 구간은 샘플이 없으므로\n"
-            "유효 측정 경로가 물리적 길이보다 짧아집니다.\n"
-            "MATLAB 기준 (CAESAR Araon 2025 ASIA-AQ 실측):\n"
-            "  CH1 (NO2/CHOCHO): 0.9330\n"
-            "  CH2 (HONO/HCHO): 0.9950\n"
-            "  CH3 (NO2/CHOCHO): 0.9968\n"
-            "1.0 = 보정 없음 (기본값; 측정값 있으면 반드시 입력)"
+        # Temperature / Pressure — fallback only; normally read per-scan from HK data
+        self.spin_temp = QDoubleSpinBox()
+        self.spin_temp.setRange(-50.0, 100.0)
+        self.spin_temp.setValue(25.0)
+        self.spin_temp.setToolTip(
+            "Fallback temperature (°C) — used only when HK data is unavailable\n"
+            "Normally T is read per-scan from col 75 of the raw .dat file"
         )
-        lay_rl.addWidget(self.spin_rl_factor)
-        lay_rl.addWidget(QLabel("  ← CH1: 0.9330 / CH2: 0.9950 / CH3: 0.9968"))
-        lay_rl.addStretch()
-        lay_physics.addRow("RL (Purge 보정):", lay_rl)
+        lay_ov.addRow("Temperature °C (fallback):", self.spin_temp)
 
-        grp_physics.setLayout(lay_physics)
-        control_layout.addWidget(grp_physics)
+        self.spin_pres = QDoubleSpinBox()
+        self.spin_pres.setRange(500.0, 1500.0)
+        self.spin_pres.setValue(1013.25)
+        self.spin_pres.setToolTip(
+            "Fallback pressure (mbar) — used only when HK data is unavailable\n"
+            "Normally P is read per-scan from col 76 of the raw .dat file"
+        )
+        lay_ov.addRow("Pressure mbar (fallback):", self.spin_pres)
+
+        grp_ov.setLayout(lay_ov)
+        _ov_outer.addWidget(grp_ov)
+        control_layout.addWidget(self._manual_override_container)
+
+        def _toggle_override():
+            self._manual_override_visible = not self._manual_override_visible
+            self._manual_override_container.setVisible(self._manual_override_visible)
+            self._btn_toggle_override.setText(
+                "▼  Manual Override  (I₀, R, flags, T/P fallback)"
+                if self._manual_override_visible else
+                "▶  Manual Override  (I₀, R, flags, T/P fallback)")
+        self._btn_toggle_override.clicked.connect(_toggle_override)
 
         # Group 2b: Detector Corrections (collapsible — rarely needed in daily ops)
         self._det_corr_visible = False
@@ -966,29 +1012,6 @@ class CAESARAnalyzer(QMainWindow):
                 "▶  Detector Corrections (dark / offset / stray light)")
         self._btn_toggle_det.clicked.connect(_toggle_det)
 
-        # Group 3: Environment Settings (For real-time PPB)
-        grp_env = QGroupBox("3. Environment Variables (PPB)")
-        lay_env = QFormLayout()
-        
-        self.spin_temp = QDoubleSpinBox()
-        self.spin_temp.setRange(-50.0, 100.0)
-        self.spin_temp.setValue(25.0)
-        self.spin_temp.setToolTip(
-            "Current measurement temperature (°C)\n"
-            "Used for: PPB conversion (N_air) and cross-section T-correction\n"
-            "Note: T_ref in Reference Properties = temperature at which the\n"
-            "reference spectrum was originally measured (usually 25°C)"
-        )
-        lay_env.addRow("Temperature (°C):", self.spin_temp)
-        
-        self.spin_pres = QDoubleSpinBox()
-        self.spin_pres.setRange(500.0, 1500.0)
-        self.spin_pres.setValue(1013.25)
-        lay_env.addRow("Pressure (mbar):", self.spin_pres)
-        
-        grp_env.setLayout(lay_env)
-        control_layout.addWidget(grp_env)
-        
         control_layout.addStretch(1)
         main_layout.addLayout(control_layout, stretch=1)
         
