@@ -87,19 +87,36 @@ def read_all_scans(filepath, col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
     """파일에서 flag=FLAG_ZA / flag=FLAG_HE 스캔을 읽어 (za, he) 리스트로 반환.
     각 항목: (spectrum_array, temp_c, press_mbar)
 
-    return_ts=True 로 호출하면 (za, he, min_secs_utc, first_za_secs, first_he_secs) 를 반환한다.
-    min_secs_utc  : 파일 내 모든 행의 col-1(UTC 초) 최솟값 (다중-일 파일에서 부정확할 수 있음)
-    first_za_secs : 첫 번째 ZA(flag=500) 스캔 행의 col-1 (= ZA 캘리브레이션 시작 시각)
-    first_he_secs : 첫 번째 He(flag=510) 스캔 행의 col-1 (= He 캘리브레이션 시작 시각, 없으면 None)
+    ★ col1(tokens[1]) 단위 주의 ★
+    ─────────────────────────────────────────────────────────────────
+    col1 값은 센티초(centiseconds, 1/100초) 단위이다. UTC 초(seconds)가 아님!
+    - 행 간 증가량: 약 +97 centiseconds = 0.97 초/행
+    - 값이 65444 → 5로 감소: 스캔 사이클 재시작 (자정(day crossing) 아님!)
+      · 65444 centisec = 654 초 ≈ 10.9분 (1사이클 활성 구간)
+      · 1파일에 약 7회 발생, 각 간격 ≈ 14.4분 (활성 10.9분 + 리셋 대기 3.5분)
+    - 파일 1개 = 약 3,700행 × 0.97초 ≈ 1시간 분량
+
+    타임스탬프가 필요하면 col1이 아닌 파일 mtime을 사용할 것.
+    (r_trend_monitor.py 상단 docstring 및 _parse_timestamp 함수 참조)
+    ─────────────────────────────────────────────────────────────────
+
+    return_ts=True 로 호출하면 8-튜플을 반환한다:
+      (za, he, min_val, first_za_val, first_he_val, first_val, last_val, n_resets)
+      min_val      : 파일 내 col1 최솟값 (센티초 단위, UTC 초 아님)
+      first_za_val : 첫 번째 ZA 스캔 행의 col1 (센티초)
+      first_he_val : 첫 번째 He 스캔 행의 col1 (센티초, 없으면 None)
+      first_val    : 파일 내 첫 번째 유효 col1 (센티초)
+      last_val     : 파일 내 마지막 유효 col1 (센티초)
+      n_resets     : col1 감소(스캔 사이클 재시작) 횟수 — 날짜 계산에 사용 금지
     """
     za, he = [], []
     min_secs: float | None = None
     first_za_secs: float | None = None
     first_he_secs: float | None = None
-    first_secs: float | None = None   # 파일 내 첫 번째 유효 UTC 초
-    last_secs: float | None = None    # 파일 내 마지막 유효 UTC 초
-    n_crossings: int = 0              # col1 자정 교차 횟수 (파일이 걸치는 날 수 - 1)
-    _prev_s: float | None = None      # 이전 행의 col1 (자정 교차 감지용)
+    first_secs: float | None = None   # 파일 내 첫 번째 유효 col1 (센티초)
+    last_secs: float | None = None    # 파일 내 마지막 유효 col1 (센티초)
+    n_crossings: int = 0              # col1 감소 횟수 (스캔 사이클 재시작 횟수, 자정 교차 아님)
+    _prev_s: float | None = None      # 이전 행의 col1 (사이클 재시작 감지용)
 
     with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
@@ -107,7 +124,10 @@ def read_all_scans(filepath, col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
             if len(tokens) < 6:
                 continue
             try:
-                # ── 타임스탬프 추적 ──────────────────────────────────────────
+                # ── col1 추적 (return_ts 용) ──────────────────────────────
+                # col1(tokens[1])은 센티초 단위. UTC 초로 오해하지 말 것.
+                # 0 < s < 86400 조건은 "센티초 값이 양수인 유효 행"을 걸러냄
+                # (86400 centisec = 864초 = 14.4분, 즉 1 사이클 최대치 이내)
                 if return_ts and len(tokens) >= 6175:
                     s = float(tokens[1])
                     if 0.0 < s < 86400.0:
@@ -115,7 +135,8 @@ def read_all_scans(filepath, col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                             min_secs = s
                         if first_secs is None:
                             first_secs = s
-                        # 자정 교차: 이전 값보다 1시간 이상 감소 (wrap-around)
+                        # 스캔 사이클 재시작: 이전 값보다 3600 centisec(=36초) 이상 감소
+                        # ※ 자정 교차가 아니라 스캔 사이클 wrap-around임
                         if _prev_s is not None and s < _prev_s - 3600:
                             n_crossings += 1
                         _prev_s = s
@@ -147,6 +168,8 @@ def read_all_scans(filepath, col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                 continue
 
     if return_ts:
+        # n_crossings = 스캔 사이클 재시작 횟수 (자정 교차 횟수가 아님!)
+        # 모든 값(min_secs 등)은 센티초 단위임. UTC 초로 쓰면 날짜 계산 크게 틀림.
         return za, he, min_secs, first_za_secs, first_he_secs, first_secs, last_secs, n_crossings
     return za, he
 
