@@ -29,7 +29,10 @@ from scipy.io import savemat
 #   col 6~10 : 기타 채널
 # ================================================================
 def Func_Read_2026_Yeosu_Inlet(filename: str) -> np.ndarray:
-    return np.loadtxt(filename, delimiter='\t')
+    # on_bad_lines='skip': 열 수가 다른 불완전 행(LabVIEW 중단 등) 자동 제거
+    df = pd.read_csv(filename, sep='\t', header=None, on_bad_lines='skip')
+    df = df.dropna()   # NaN이 포함된 행(열 부족) 추가 제거
+    return df.values
 
 
 def main():
