@@ -14,11 +14,15 @@ CEASER/
 │
 ├── core/                      ← 공용 연산·IO 모듈 (패키지)
 │   ├── data_io.py             ← 파일 I/O, 아라온 HK 파싱
-│   └── engine.py              ← DOAS 분석 엔진 (shift/squeeze/ILS/etalon)
+│   ├── engine.py              ← DOAS 분석 엔진 (shift/squeeze/ILS/etalon)
+│   └── physics.py             ← 공용 물리 클래스 (RayleighPhysics, KalmanTracker)
 │
 ├── gui/                       ← PyQt6 UI 레이어 (패키지)
 │   ├── app_window.py          ← 메인 창 (CAESARAnalyzer)
-│   ├── ui_dialogs.py          ← 다이얼로그 / 모니터 위젯
+│   ├── ui_dialogs.py          ← re-export wrapper (하위 호환용)
+│   ├── ui_dialogs_calib.py    ← 교정 다이얼로그 (NavigationHelper, WavelengthCalibrationDialog, RangeSelectorDialog)
+│   ├── ui_dialogs_ref.py      ← 레퍼런스 관리 (MaskDialog, RefPropertiesDialog, ReferenceGeneratorDialog, MonitorWidget)
+│   ├── ui_dialogs_r.py        ← R 커브 & 시계열 (R_GeneratorDialog, RTrendMonitorDialog)
 │   └── worker.py              ← 분석 QThread 워커
 │
 ├── tools/                     ← 독립 실행 오프라인 분석 도구
@@ -36,8 +40,7 @@ CEASER/
 │       └── inlet_jno2_jo3.py  ← jNO2/jO3 Inlet 데이터 처리 (여수 2026)
 │
 └── diagnostics/               ← 진단·검증 스크립트
-    ├── cold_fwhm_r_check.py   ← Cold FWHM 측정 + R 진단
-    ├── hot_fwhm_r_check.py    ← Hot FWHM 측정 + R 진단
+    ├── fwhm_r_check.py        ← Cold/Hot FWHM 측정 + R 진단 (--mode cold|hot)
     └── r_trimmed_mean_check.py ← R trimmed mean vs 전체 평균 검증
 ```
 
@@ -49,12 +52,17 @@ CEASER/
 main.py
  ├── gui.app_window  →  core.engine
  │                  →  core.data_io
- │                  →  gui.worker       →  core.data_io
- │                  →  gui.ui_dialogs   →  core.data_io
+ │                  →  gui.worker              →  core.data_io
+ │                  │                          →  core.physics  (RayleighPhysics, KalmanTracker)
+ │                  →  gui.ui_dialogs          →  gui.ui_dialogs_calib
+ │                                             →  gui.ui_dialogs_ref
+ │                                             →  gui.ui_dialogs_r
  └── core.data_io
 
-tools/r_trend_monitor.py  →  tools/reflectance_calc.py
-                          →  tools/r_batch_calculator.py  →  tools/reflectance_calc.py
+tools/r_trend_monitor.py   →  tools/reflectance_calc.py  →  core.physics
+                           →  tools/r_batch_calculator.py →  tools/reflectance_calc.py
+
+diagnostics/fwhm_r_check.py  →  core.physics
 ```
 
 ---
@@ -74,6 +82,12 @@ python tools/r_trend_monitor.py
 **배치 R 계산 (채널별 폴더 전체)**
 ```
 python tools/r_batch_calculator.py
+```
+
+**FWHM + R 진단 (Cold 또는 Hot)**
+```
+python diagnostics/fwhm_r_check.py --mode cold
+python diagnostics/fwhm_r_check.py --mode hot
 ```
 
 ---
