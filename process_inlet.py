@@ -19,23 +19,31 @@ from scipy.io import savemat
 
 # ================================================================
 # LabVIEW .dat 파일 읽기 함수
-# 포맷: 탭 구분 텍스트, 11열, 헤더 없음, CRLF 줄바꿈
+# 포맷: 탭 구분 텍스트, CRLF 줄바꿈, 열 수는 파일마다 다를 수 있음
 #   col 0 : timestamp 상위 16비트
 #   col 1 : timestamp 하위 16비트
 #   col 2 : jNO2 upward   × 1000
 #   col 3 : jNO2 downward × 1000
 #   col 4 : jO3 upward    × 1000  (2026 N/A)
 #   col 5 : jO3 downward  × 1000  (2026 N/A)
-#   col 6~10 : 기타 채널
+#   col 6+ : 기타 채널 (있을 수도 없을 수도 있음)
 # ================================================================
 def Func_Read_2026_Yeosu_Inlet(filename: str) -> np.ndarray:
-    # names=range(11): 열 수를 11로 강제 고정 (첫 행이 불완전해도 오탐 방지)
-    # on_bad_lines='skip': 열이 더 많은 이상 행 스킵
-    # dropna: 11열 미만인 불완전 행 제거
-    df = pd.read_csv(filename, sep='\t', header=None,
-                     names=range(11), on_bad_lines='skip')
-    df = df.dropna()
-    return df.values
+    # 줄 단위로 읽어 6열 이상인 행만 수집, 항상 앞 6열만 반환
+    # → 11열짜리든 6열짜리든 일관된 shape으로 vstack 가능
+    rows = []
+    with open(filename, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) < 6:
+                continue
+            try:
+                rows.append([float(x) for x in parts[:6]])
+            except ValueError:
+                continue
+    if not rows:
+        return np.empty((0, 6))
+    return np.array(rows)
 
 
 def main():
@@ -170,6 +178,7 @@ def main():
     ])
 
     save_path = r'D:\FieldData_Yeosu_2026\Inlet'
+    os.makedirs(save_path, exist_ok=True)   # 폴더 없으면 자동 생성
     savemat(
         os.path.join(save_path, 'data_inlet_May.mat'),
         {
