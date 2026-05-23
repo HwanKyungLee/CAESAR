@@ -82,30 +82,72 @@ def _extract_spectrum_and_hk(tokens, col_press=COL_PRESS_COLD, col_temp=COL_TEMP
 
 
 def read_all_scans(filepath, col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
-                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT):
+                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                   return_ts=False):
     """파일에서 flag=FLAG_ZA / flag=FLAG_HE 스캔을 읽어 (za, he) 리스트로 반환.
     각 항목: (spectrum_array, temp_c, press_mbar)
+
+    return_ts=True 로 호출하면 (za, he, min_secs_utc, first_za_secs, first_he_secs) 를 반환한다.
+    min_secs_utc  : 파일 내 모든 행의 col-1(UTC 초) 최솟값 (다중-일 파일에서 부정확할 수 있음)
+    first_za_secs : 첫 번째 ZA(flag=500) 스캔 행의 col-1 (= ZA 캘리브레이션 시작 시각)
+    first_he_secs : 첫 번째 He(flag=510) 스캔 행의 col-1 (= He 캘리브레이션 시작 시각, 없으면 None)
     """
     za, he = [], []
+    min_secs: float | None = None
+    first_za_secs: float | None = None
+    first_he_secs: float | None = None
+    first_secs: float | None = None   # 파일 내 첫 번째 유효 UTC 초
+    last_secs: float | None = None    # 파일 내 마지막 유효 UTC 초
+    n_crossings: int = 0              # col1 자정 교차 횟수 (파일이 걸치는 날 수 - 1)
+    _prev_s: float | None = None      # 이전 행의 col1 (자정 교차 감지용)
+
     with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             tokens = line.strip().split("\t")
             if len(tokens) < 6:
                 continue
             try:
+                # ── 타임스탬프 추적 ──────────────────────────────────────────
+                if return_ts and len(tokens) >= 6175:
+                    s = float(tokens[1])
+                    if 0.0 < s < 86400.0:
+                        if min_secs is None or s < min_secs:
+                            min_secs = s
+                        if first_secs is None:
+                            first_secs = s
+                        # 자정 교차: 이전 값보다 1시간 이상 감소 (wrap-around)
+                        if _prev_s is not None and s < _prev_s - 3600:
+                            n_crossings += 1
+                        _prev_s = s
+                        last_secs = s   # 항상 마지막 값으로 갱신
+
+                # ── ZA / He 스캔 추출 ────────────────────────────────────────
                 flag = int(tokens[4].strip())
                 if flag == FLAG_ZA:
                     sp, t, p = _extract_spectrum_and_hk(tokens, col_press, col_temp,
                                                         spec_start, spec_end)
                     if len(sp) > 0:
                         za.append((sp, t, p))
+                        # 첫 번째 ZA 스캔 타임스탬프 기록
+                        if return_ts and first_za_secs is None and len(tokens) >= 6175:
+                            s = float(tokens[1])
+                            if 0.0 < s < 86400.0:
+                                first_za_secs = s
                 elif flag == FLAG_HE:
                     sp, t, p = _extract_spectrum_and_hk(tokens, col_press, col_temp,
                                                         spec_start, spec_end)
                     if len(sp) > 0:
                         he.append((sp, t, p))
+                        # 첫 번째 He 스캔 타임스탬프 기록
+                        if return_ts and first_he_secs is None and len(tokens) >= 6175:
+                            s = float(tokens[1])
+                            if 0.0 < s < 86400.0:
+                                first_he_secs = s
             except:
                 continue
+
+    if return_ts:
+        return za, he, min_secs, first_za_secs, first_he_secs, first_secs, last_secs, n_crossings
     return za, he
 
 
@@ -150,7 +192,11 @@ def process_channel(channel_name, directory, wave_cal_path, output_dir,
           f"  P=col{col_press}  T=col{col_temp}"
           f"  스펙트럼=cols{spec_start}-{spec_end-1}")
 
-    wave_nm = np.loadtxt(wave_cal_path) if wave_cal_path and os.path.exists(wave_cal_path) else None
+    if wave_cal_path and os.path.exists(wave_cal_path):
+        with open(wave_cal_path, "r", encoding="utf-8") as _f:
+            wave_nm = np.loadtxt(_f)
+    else:
+        wave_nm = None
     if wave_cal_path and not os.path.exists(wave_cal_path):
         print(f"  ⚠️  파장 교정 파일 없음: {wave_cal_path}  → 픽셀 인덱스로 진행")
 

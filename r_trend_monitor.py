@@ -49,12 +49,12 @@ def file_range(directory: str, date: str, start: int, end: int) -> list:
 # ════════════════════════════════════════════════════════════════
 #  사용자 설정 
 # ════════════════════════════════════════════════════════════════
-COLD_DIR = r"H:\Yeosu_2026\CAESAR_Cold\2026-05"
-HOT_DIR  = r"H:\Yeosu_2026\CAESAR_Hot\2026-05"
+COLD_DIR = r"D:\CAESAR cold\2026-05"
+HOT_DIR  = r"D:\CAESAR hot\2026-05"
 
 # 파장 보정 파일 경로 (정확한 파일명 적용 완료)
-WAVE_CAL_COLD = r"C:\CAESAR_pro_package\reference\wavelength_cal\CAESAR cold\Calib_20260507_Hg_399-494nm_Poly2.txt"
-WAVE_CAL_HOT  = r"C:\CAESAR_pro_package\reference\wavelength_cal\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
+WAVE_CAL_COLD = r"D:\CAESAR cold\Calib_20260507_Hg_399-494nm_Poly2.txt"
+WAVE_CAL_HOT  = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
 
 OUTPUT_DIR  = r"."
 FILE_PATTERN = "*.dat"
@@ -142,17 +142,80 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     last_he = []          # 가장 최근 양질의 He 스캔 (파일 간 유지)
     skip = fail = 0
 
+    # ── 세션 기반 날짜 추적 ─────────────────────────────────────────────────
+    # 파일명 날짜는 DAQ 세션 시작일이므로 이후 파일들은 자정을 넘어 다른 날에 속할 수 있다.
+    # _day_offset 을 누적해 실제 UTC 날짜를 복원한다.
+    _prev_last_secs: float | None = None   # 이전 파일 마지막 UTC 초
+    _day_offset: int = 0                   # 세션 기준일로부터 자정 교차 누적 횟수
+    _session_base: tuple | None = None     # 세션 기준 날짜 (year, month, day)
+
     for fp in files:
         fname = os.path.basename(fp)
-        za, he = read_all_scans(fp, col_press, col_temp)
+        # return_ts=True: ZA/He 첫 스캔 타임스탬프 및 파일 시작/끝 UTC 초, 자정 교차 횟수 수집
+        za, he, min_secs, first_za_secs, first_he_secs, first_secs, last_secs, n_crossings = \
+            read_all_scans(fp, col_press, col_temp, return_ts=True)
+
+        # ── 세션 기반 타임스탬프 계산 ──────────────────────────────────────
+        # 파일명 날짜 = DAQ 세션 시작일. 이후 파일들은 자정을 넘어 실제로는 다른 날이지만
+        # 모두 같은 날짜 이름을 씀. day_offset 누적으로 실제 UTC 날짜를 복원.
+        m_fname = _DATE_RE.search(fname)
+        fy = fm = fd = None
+        if m_fname:
+            fy = int(m_fname.group(1)); fm = int(m_fname.group(2)); fd = int(m_fname.group(3))
+
+        # 새 세션 감지: 이전 파일 끝과 현재 파일 시작 간격 > 5분 → 세션 리셋
+        if _session_base is None:
+            if fy is not None:
+                _session_base = (fy, fm, fd)
+                _day_offset = 0
+        elif first_secs is not None and _prev_last_secs is not None:
+            if abs(first_secs - _prev_last_secs) > 300:
+                if fy is not None:
+                    _session_base = (fy, fm, fd)
+                    _day_offset = 0
+
+        # ZA 캘리브레이션이 파일 시작 이후 몇 번의 자정 교차 후에 있는지 계산
+        # ZA는 보통 파일 맨 앞(대기 스캔 이전)에 위치 → 자정 교차 전에 발생
+        # first_secs < first_za_secs 이면 같은 날, first_secs > first_za_secs 이면 자정을 1회 넘긴 것
+        _za_day_extra = 0
+        if first_secs is not None and first_za_secs is not None:
+            if first_za_secs < first_secs - 3600:
+                _za_day_extra = 1   # ZA가 자정을 한 번 넘겨서 발생
+
+        # 타임스탬프 계산
+        ts = None
+        _ts_start = None
+        if _session_base is not None:
+            sy, sm, sd = _session_base
+            _base = datetime(sy, sm, sd, tzinfo=_UTC)
+            if first_secs is not None:
+                _ts_start = (_base + timedelta(days=_day_offset, seconds=first_secs)).astimezone(_KST_TZ)
+            if first_za_secs is not None:
+                ts = (_base + timedelta(days=_day_offset + _za_day_extra,
+                                        seconds=first_za_secs)).astimezone(_KST_TZ)
+            elif _ts_start is not None:
+                ts = _ts_start
+        if ts is None:
+            ts = _parse_timestamp(fp)
+
+        ts_str = ts.astimezone(_KST_TZ).strftime("%m/%d %H:%M")
+        if _ts_start is not None:
+            _diff_min = round((ts - _ts_start).total_seconds() / 60, 1)
+            if abs(_diff_min) > 1:
+                print(f"  [{fname}] 📍 파일시작={_ts_start.strftime('%m/%d %H:%M')} → ZA캘={ts_str} (Δ{_diff_min:+.0f}분)")
 
         # He 스캔을 만나도 보정 품질을 먼저 확인한 뒤에만 last_he 갱신
         # → 나쁜 파일의 He가 다음 파일로 오염되는 것 방지
         candidate_he = he if he else last_he
 
         if not za or not candidate_he:
-            print(f"  [{fname}] ⏳ 스킵 (ZA:{len(za)} He후보:{len(candidate_he)})")
+            reason = []
+            if not za:            reason.append(f"ZA스캔=0 (flag={FLAG_ZA} 행 없음)")
+            if not candidate_he:  reason.append("He없음(last_he도 없음)")
+            print(f"  [{fname}] ⏳ 스킵 @ {ts_str}  {', '.join(reason)}")
             skip += 1
+            _prev_last_secs = last_secs
+            _day_offset += n_crossings
             continue
 
         try:
@@ -167,6 +230,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             if rc.valid_fraction == 0.0:
                 print(f"  [{fname}] ⏭️  valid=0% (R=1.0 dummy) 스킵 — last_he 유지")
                 skip += 1
+                _prev_last_secs = last_secs
+                if _crossed: _day_offset += 1
                 continue
 
             # 품질이 OK인 경우에만 last_he 갱신
@@ -175,7 +240,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
 
             leff_arr = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
             res = {
-                "timestamp":  _parse_timestamp(fp),
+                "timestamp":  ts,   # 위에서 이미 파싱한 값 재사용
                 "filename":   fname,
                 "r_mean":     float(np.mean(r_curve)),
                 "r_std":      float(np.std(r_curve)),
@@ -189,11 +254,15 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             results.append(res)
             tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
                   ("  ⚠️ 이상값" if not rc.quality_ok else "")
-            print(f"  [{fname}] ✅ R_mean={res['r_mean']:.6f}  "
+            print(f"  [{fname}] ✅ @ {ts_str}  R_mean={res['r_mean']:.6f}  "
                   f"Leff={res['leff_mean']:.2f}km  valid={res['valid_frac']*100:.1f}%{tag}")
         except Exception as e:
             print(f"  [{fname}] ❌ {e}")
             fail += 1
+
+        # ── 세션 상태 갱신 (자정 교차 횟수 누적) ────────────────────────────
+        _prev_last_secs = last_secs
+        _day_offset += n_crossings
 
     # ── 타임스탬프 순 정렬 ──────────────────────────────────────────────────────
     # 파일명 순서 ≠ 시간 순서인 경우(아라온 DAQ가 번호를 역순 또는 교차 할당할 때)
@@ -219,7 +288,7 @@ def save_dat(results: list[dict], out_path: str) -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# CAESAR Pro — Mirror Reflectivity Trend\n")
         fh.write(f"# cavity={CAVITY_LEN} cm  RL={RL_FACTOR}  ZA_flag={FLAG_ZA}  He_flag={FLAG_HE}\n")
-        fh.write("timestamp\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
+        fh.write("timestamp(KST)\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
         for r in results:
             fh.write(
                 f"{r['timestamp'].strftime('%Y-%m-%d %H:%M')}\t"
@@ -235,7 +304,9 @@ def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
         ax_r.text(0.5, 0.5, f"{channel_name}\nNo Data", ha="center", va="center", transform=ax_r.transAxes, fontsize=12, color="gray")
         return
 
-    times  = [r["timestamp"] for r in results]
+    # KST-aware datetime을 naive KST로 변환 → matplotlib이 UTC로 변환하는 것 방지
+    # (timezone-aware datetime을 그대로 넘기면 matplotlib이 UTC로 9시간 당겨서 표시함)
+    times  = [r["timestamp"].astimezone(_KST_TZ).replace(tzinfo=None) for r in results]
     r_mean = np.array([r["r_mean"]  for r in results])
     r_std  = np.array([r["r_std"]   for r in results])
     leff   = np.array([r["leff_mean"] for r in results])
@@ -278,6 +349,8 @@ def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d\n%H:%M"))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
         plt.setp(ax.xaxis.get_majorticklabels(), fontsize=7)
+    # X축 레이블에 KST 표기 (naive datetime이므로 명시적으로 기재)
+    (ax_l if ax_l else ax_r).set_xlabel("Date / Time (KST)")
 
 def plot_single_channel(results, channel_name, r_expected, out_path, color="steelblue"):
     n_panels = 2 if SHOW_LEFF else 1
@@ -286,8 +359,6 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
     ax_r = axes[0, 0]
     ax_l = axes[1, 0] if SHOW_LEFF else None
     _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color)
-    if ax_l: ax_l.set_xlabel("Date / Time")
-    else: ax_r.set_xlabel("Date / Time")
     plt.tight_layout()
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
@@ -301,7 +372,6 @@ def plot_combined(results_cold, results_hot, out_path):
     fig.suptitle("CAESAR Pro — Cold / Hot Channel Mirror Reflectivity Trend", fontsize=12)
     _plot_channel(axes[0, 0], axes[1, 0] if SHOW_LEFF else None, results_cold, "Cold", R_EXPECTED_COLD, "steelblue")
     _plot_channel(axes[2, 0], axes[3, 0] if SHOW_LEFF else None, results_hot, "Hot", R_EXPECTED_HOT, "darkorange")
-    for i in range(n_rows): axes[i, 0].set_xlabel("Date / Time")
     plt.tight_layout()
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
@@ -322,12 +392,16 @@ def main():
     wave_nm_cold, wave_nm_hot = None, None
 
     if os.path.isfile(WAVE_CAL_COLD):
-        try: wave_nm_cold = np.loadtxt(WAVE_CAL_COLD)
+        try:
+            with open(WAVE_CAL_COLD, "r", encoding="utf-8") as _f:
+                wave_nm_cold = np.loadtxt(_f)
         except Exception as exc: print(f"[경고] Cold 파장 로드 실패: {exc}")
     else: print(f"[경고] 파일 없음: {WAVE_CAL_COLD}")
 
     if os.path.isfile(WAVE_CAL_HOT):
-        try: wave_nm_hot = np.loadtxt(WAVE_CAL_HOT)
+        try:
+            with open(WAVE_CAL_HOT, "r", encoding="utf-8") as _f:
+                wave_nm_hot = np.loadtxt(_f)
         except Exception as exc: print(f"[경고] Hot 파장 로드 실패: {exc}")
     else: print(f"[경고] 파일 없음: {WAVE_CAL_HOT}")
 
