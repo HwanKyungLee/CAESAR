@@ -8,9 +8,14 @@ raw .dat 파일들을 스캔하여 파일 하나당 R_mean 값을 계산하고,
 import os
 import re
 import sys
+import io
 import glob
 from datetime import datetime, timedelta, timezone
 import numpy as np
+
+# Windows CP949 콘솔에서 이모지/한글 깨짐 방지
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # 모듈 경로 문제 해결을 위한 강제 패스 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,7 +58,7 @@ COLD_DIR = r"D:\CAESAR cold\2026-05"
 HOT_DIR  = r"D:\CAESAR hot\2026-05"
 
 # 파장 보정 파일 경로 (정확한 파일명 적용 완료)
-WAVE_CAL_COLD = r"D:\CAESAR cold\Calib_20260507_Hg_399-494nm_Poly2.txt"
+WAVE_CAL_COLD = r"D:\CAESAR cold\Calib_20260523_Hg_400-497nm_Poly2_cold.txt"
 WAVE_CAL_HOT  = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
 
 OUTPUT_DIR  = r"."
@@ -80,39 +85,15 @@ _UTC      = timezone.utc
 _KST_TZ   = timezone(timedelta(hours=9))
 
 def _parse_timestamp(filepath: str) -> datetime:
-    """
-    Araon Mega-Matrix 파일에서 첫 번째 스캔 시각을 읽어 KST로 반환.
-      col 1  = 자정 기준 UTC 경과 초  (예: 44207 = 12:16:47 UTC)
-      파일명 = UTC 날짜  (예: "2026-05-18-023.dat")
-    """
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                tokens = line.split("\t")
-                if len(tokens) >= 6175:
-                    secs = float(tokens[1])
-                    if 0.0 <= secs < 86400.0:
-                        fname = os.path.basename(filepath)
-                        m = _DATE_RE.search(fname)
-                        if m:
-                            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                            base_utc = datetime(y, mo, d, tzinfo=_UTC)
-                            return (base_utc + timedelta(seconds=secs)).astimezone(_KST_TZ)
-                break   # 첫 번째 유효 행만 읽음
-    except Exception:
-        pass
+    """파일 mtime (DAQ가 파일을 연 시각)을 KST로 반환.
 
-    # fallback 1: 파일 mtime → KST
+    col1 값은 센티초(centiseconds) 단위로 UTC 초가 아니므로 날짜 계산에 사용하지 않는다.
+    mtime은 1시간 간격으로 찍혀 있어 측정 시각을 잘 나타낸다.
+    """
     try:
         return datetime.fromtimestamp(os.path.getmtime(filepath), tz=_KST_TZ)
     except OSError:
-        pass
-
-    # fallback 2: 현재 시각
-    return datetime.now(tz=_KST_TZ)
+        return datetime.now(tz=_KST_TZ)
 
 def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD) -> list[dict]:
@@ -142,67 +123,15 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     last_he = []          # 가장 최근 양질의 He 스캔 (파일 간 유지)
     skip = fail = 0
 
-    # ── 세션 기반 날짜 추적 ─────────────────────────────────────────────────
-    # 파일명 날짜는 DAQ 세션 시작일이므로 이후 파일들은 자정을 넘어 다른 날에 속할 수 있다.
-    # _day_offset 을 누적해 실제 UTC 날짜를 복원한다.
-    _prev_last_secs: float | None = None   # 이전 파일 마지막 UTC 초
-    _day_offset: int = 0                   # 세션 기준일로부터 자정 교차 누적 횟수
-    _session_base: tuple | None = None     # 세션 기준 날짜 (year, month, day)
-
     for fp in files:
         fname = os.path.basename(fp)
-        # return_ts=True: ZA/He 첫 스캔 타임스탬프 및 파일 시작/끝 UTC 초, 자정 교차 횟수 수집
-        za, he, min_secs, first_za_secs, first_he_secs, first_secs, last_secs, n_crossings = \
-            read_all_scans(fp, col_press, col_temp, return_ts=True)
+        za, he = read_all_scans(fp, col_press, col_temp, return_ts=False)
 
-        # ── 세션 기반 타임스탬프 계산 ──────────────────────────────────────
-        # 파일명 날짜 = DAQ 세션 시작일. 이후 파일들은 자정을 넘어 실제로는 다른 날이지만
-        # 모두 같은 날짜 이름을 씀. day_offset 누적으로 실제 UTC 날짜를 복원.
-        m_fname = _DATE_RE.search(fname)
-        fy = fm = fd = None
-        if m_fname:
-            fy = int(m_fname.group(1)); fm = int(m_fname.group(2)); fd = int(m_fname.group(3))
-
-        # 새 세션 감지: 이전 파일 끝과 현재 파일 시작 간격 > 5분 → 세션 리셋
-        if _session_base is None:
-            if fy is not None:
-                _session_base = (fy, fm, fd)
-                _day_offset = 0
-        elif first_secs is not None and _prev_last_secs is not None:
-            if abs(first_secs - _prev_last_secs) > 300:
-                if fy is not None:
-                    _session_base = (fy, fm, fd)
-                    _day_offset = 0
-
-        # ZA 캘리브레이션이 파일 시작 이후 몇 번의 자정 교차 후에 있는지 계산
-        # ZA는 보통 파일 맨 앞(대기 스캔 이전)에 위치 → 자정 교차 전에 발생
-        # first_secs < first_za_secs 이면 같은 날, first_secs > first_za_secs 이면 자정을 1회 넘긴 것
-        _za_day_extra = 0
-        if first_secs is not None and first_za_secs is not None:
-            if first_za_secs < first_secs - 3600:
-                _za_day_extra = 1   # ZA가 자정을 한 번 넘겨서 발생
-
-        # 타임스탬프 계산
-        ts = None
-        _ts_start = None
-        if _session_base is not None:
-            sy, sm, sd = _session_base
-            _base = datetime(sy, sm, sd, tzinfo=_UTC)
-            if first_secs is not None:
-                _ts_start = (_base + timedelta(days=_day_offset, seconds=first_secs)).astimezone(_KST_TZ)
-            if first_za_secs is not None:
-                ts = (_base + timedelta(days=_day_offset + _za_day_extra,
-                                        seconds=first_za_secs)).astimezone(_KST_TZ)
-            elif _ts_start is not None:
-                ts = _ts_start
-        if ts is None:
-            ts = _parse_timestamp(fp)
-
-        ts_str = ts.astimezone(_KST_TZ).strftime("%m/%d %H:%M")
-        if _ts_start is not None:
-            _diff_min = round((ts - _ts_start).total_seconds() / 60, 1)
-            if abs(_diff_min) > 1:
-                print(f"  [{fname}] 📍 파일시작={_ts_start.strftime('%m/%d %H:%M')} → ZA캘={ts_str} (Δ{_diff_min:+.0f}분)")
+        # ── 타임스탬프: 파일 mtime (DAQ가 파일을 연 시각, 1시간 간격) ─────────
+        # col1 값은 센티초(centiseconds) 단위이므로 UTC 초로 해석하면 날짜가 크게 틀린다.
+        # mtime은 파일 생성 시각으로서 측정 시각을 1시간 이내 정확도로 나타낸다.
+        ts = datetime.fromtimestamp(os.path.getmtime(fp), tz=_KST_TZ)
+        ts_str = ts.strftime("%m/%d %H:%M")
 
         # He 스캔을 만나도 보정 품질을 먼저 확인한 뒤에만 last_he 갱신
         # → 나쁜 파일의 He가 다음 파일로 오염되는 것 방지
@@ -214,8 +143,6 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             if not candidate_he:  reason.append("He없음(last_he도 없음)")
             print(f"  [{fname}] ⏳ 스킵 @ {ts_str}  {', '.join(reason)}")
             skip += 1
-            _prev_last_secs = last_secs
-            _day_offset += n_crossings
             continue
 
         try:
@@ -230,8 +157,6 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             if rc.valid_fraction == 0.0:
                 print(f"  [{fname}] ⏭️  valid=0% (R=1.0 dummy) 스킵 — last_he 유지")
                 skip += 1
-                _prev_last_secs = last_secs
-                if _crossed: _day_offset += 1
                 continue
 
             # 품질이 OK인 경우에만 last_he 갱신
@@ -260,9 +185,6 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             print(f"  [{fname}] ❌ {e}")
             fail += 1
 
-        # ── 세션 상태 갱신 (자정 교차 횟수 누적) ────────────────────────────
-        _prev_last_secs = last_secs
-        _day_offset += n_crossings
 
     # ── 타임스탬프 순 정렬 ──────────────────────────────────────────────────────
     # 파일명 순서 ≠ 시간 순서인 경우(아라온 DAQ가 번호를 역순 또는 교차 할당할 때)
