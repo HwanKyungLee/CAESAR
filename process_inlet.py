@@ -169,22 +169,22 @@ def main():
     data_inlet_may = data_inlet
 
     time_inlet_may_datenum = np.array([
-        t.toordinal() + 366
+        float(t.toordinal() + 366)
         + t.hour / 24.0
         + t.minute / 1440.0
         + t.second / 86400.0
         + t.microsecond / 86400e6
         for t in time_inlet_may
-    ])
+    ], dtype=np.float64)
 
     save_path = r'D:\FieldData_Yeosu_2026\Inlet'
-    os.makedirs(save_path, exist_ok=True)   # 폴더 없으면 자동 생성
+    os.makedirs(save_path, exist_ok=True)
     savemat(
         os.path.join(save_path, 'data_inlet_May.mat'),
         {
-            'time_inlet_may': time_inlet_may_datenum,
-            'data_inlet_may': data_inlet_may,
-            'vrn_inlet':      vrn_inlet,
+            'time_inlet_may': np.ascontiguousarray(time_inlet_may_datenum, dtype=np.float64),
+            'data_inlet_may': np.ascontiguousarray(data_inlet_may, dtype=np.float64),
+            'vrn_inlet':      np.array(vrn_inlet, dtype=object),
         }
     )
 
