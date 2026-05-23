@@ -7,7 +7,7 @@ import json
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from data_io import ui_scale as _ui_scale
+from core.data_io import ui_scale as _ui_scale
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 import matplotlib.pyplot as plt
@@ -29,7 +29,7 @@ from scipy.signal.windows import tukey
 from scipy.ndimage import gaussian_filter1d
 from numpy.polynomial import chebyshev
 
-from data_io import DataIO
+from core.data_io import DataIO
 
 # [PyQt6] Modules
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 

@@ -3,7 +3,7 @@ from scipy.interpolate import interp1d
 from scipy.signal import convolve
 from scipy.stats import norm
 from numpy.polynomial import chebyshev
-from data_io import DataIO
+from .data_io import DataIO
 
 class UniversalEngine:
     """

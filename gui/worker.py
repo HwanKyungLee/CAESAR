@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 # DataIO gatekeeper call
-from data_io import DataIO
+from core.data_io import DataIO
 
 # Core engine imports
 from scipy.linalg import lstsq as scipy_lstsq

@@ -19,10 +19,10 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 
-from engine import UniversalEngine
-from worker import AnalysisWorker, AlphaExportWorker, AlphaFitWorker
-from data_io import DataIO
-from ui_dialogs import *
+from core.engine import UniversalEngine
+from .worker import AnalysisWorker, AlphaExportWorker, AlphaFitWorker
+from core.data_io import DataIO
+from .ui_dialogs import *
 
 class CAESARAnalyzer(QMainWindow):
     """
