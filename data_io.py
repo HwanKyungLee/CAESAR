@@ -137,6 +137,32 @@ class DataIO:
         return False
 
     @staticmethod
+    def has_ch2(filepath) -> bool:
+        """Returns True when the file contains a valid CH2 spectrum (ROI2 / PNs).
+
+        Cold files have CH1 only (CH2 block ≈ 500 ADU noise floor).
+        Hot files have both CH1 and CH2 active (max > 5000 ADU).
+        Checks only the first ambient row to avoid reading the whole file.
+        """
+        try:
+            rows = DataIO._load_file_to_cache(filepath)
+            for raw in rows:
+                if len(raw) < 6149:
+                    continue
+                flag = int(raw[4]) if len(raw) > 4 else 0
+                if flag not in (0, 500, 501, 502, 503, 510, 511, 512, 513):
+                    ch2 = raw[4101:6149]
+                    return float(np.nanmax(ch2)) > 5000.0
+            # Fallback: check first valid row
+            for raw in rows:
+                if len(raw) >= 6149:
+                    ch2 = raw[4101:6149]
+                    return float(np.nanmax(ch2)) > 5000.0
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
     def count_scan_rows(filepath):
         """Counts the number of non-empty rows (= scans) in a Mega-Matrix file."""
         count = 0
@@ -251,18 +277,30 @@ class DataIO:
                 f"Failed to read measurement file ({os.path.basename(filepath)}): {str(e)}"
             )
 
+    # Araon Mega-Matrix spectrum column offsets
+    # CH1 (ROI1 / ANs / 180°C inlet):  cols 2053–4100  (2048 px)
+    # CH2 (ROI2 / PNs / 300°C inlet):  cols 4101–6148  (2048 px)
+    # HK block starts at col 6149.
+    # Cold files have CH1 only (CH2 block is noise ~500 ADU).
+    _CH_OFFSET = {1: (2053, 4101), 2: (4101, 6149)}
+
     @staticmethod
-    def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None, row_index=0):
+    def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None,
+                                 row_index=0, channel=1):
         """
         Extracts spectrum + housekeeping scalars from the Araon Raw .dat format.
 
         The Araon LabVIEW system saves each scan as a single horizontal row with
         6175+ columns (the 'Mega-Matrix' format):
 
-          Column range  2053–4100  →  CH1 NO2 spectrum  (2048 pixels)
+          Column range  2053–4100  →  CH1 spectrum  (ROI1 / ANs / 180°C inlet)
+          Column range  4101–6148  →  CH2 spectrum  (ROI2 / PNs / 300°C inlet)
           Column        4          →  state flag  (1=Ambient, 500~503=ZA, 510~513=He)
-          Column        6162       →  cell pressure  (mbar)
-          Column        6174       →  cell temperature (°C)
+          HK block      6149+      →  T, P, oven temps, etc.
+
+        channel : int, 1 or 2
+            Which spectrum to extract.  Default=1 (CH1/ROI1).
+            Use channel=2 for CH2/ROI2 (PNs, hot files only).
 
         row_index selects which row (scan) to read from a multi-scan file.
         Falls back to treating the whole file as a plain 1D spectrum when the
@@ -283,7 +321,8 @@ class DataIO:
 
             if len(raw_probe) >= 6175:
                 # ── Araon Mega-Matrix format ─────────────────────────────────
-                intensity_full = raw_probe[2053:4101]  # 2048-pixel CH1 spectrum
+                col_start, col_end = DataIO._CH_OFFSET.get(channel, (2053, 4101))
+                intensity_full = raw_probe[col_start:col_end]  # 2048-pixel spectrum
 
                 # Extract housekeeping scalars from their fixed byte offsets
                 state_flag = int(raw_probe[4])   # Measurement state flag

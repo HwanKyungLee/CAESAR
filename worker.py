@@ -156,7 +156,7 @@ class AnalysisWorker(QThread):
     r_curve_update = pyqtSignal(object, object)
     scan_count_ready = pyqtSignal(int)   # emitted once after all files are expanded
 
-    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=None, flag_he=None, flag_amb=None, dark_array=None, dark_scale_factor=1.0, offset_array=None, offset_scale_factor=1.0, stray_light_fraction=0.0, use_temporal_i0=False, save_alpha=False, alpha_save_dir='', rl_factor=1.0):
+    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=None, flag_he=None, flag_amb=None, dark_array=None, dark_scale_factor=1.0, offset_array=None, offset_scale_factor=1.0, stray_light_fraction=0.0, use_temporal_i0=False, save_alpha=False, alpha_save_dir='', rl_factor=1.0, channel=1):
         super().__init__()
         self.engine = engine
         self.file_list = file_list
@@ -165,6 +165,9 @@ class AnalysisWorker(QThread):
         self.update_interval = update_interval
         self.delay_ms = delay_ms
         self.ref_properties = ref_properties if ref_properties is not None else {}
+
+        # Spectrum channel: 1=CH1/ROI1/ANs (180°C), 2=CH2/ROI2/PNs (300°C)
+        self.channel = int(channel) if channel in (1, 2) else 1
 
         # [ BBCEAS Physics Parameters ]
         self.i0_array = i0_array
@@ -518,7 +521,7 @@ class AnalysisWorker(QThread):
         for idx, entry in enumerate(self.file_list):
             fp, row_idx = (entry[0], entry[1]) if isinstance(entry, tuple) else (entry, 0)
             try:
-                _, raw, flag, _, _ = DataIO.load_measurement_with_hk(fp, self.pixel_min, self.pixel_max, row_index=row_idx)
+                _, raw, flag, _, _ = DataIO.load_measurement_with_hk(fp, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
                 if flag in self.flag_za and len(raw) > 0:
                     i0 = raw.astype(float)
                     za_list.append((idx, i0))
@@ -603,8 +606,8 @@ class AnalysisWorker(QThread):
 
             try:
                 # 1. Load Spectrum and Housekeeping (including Flag)
-                pixel_idx, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(file_path, self.pixel_min, self.pixel_max, row_index=row_idx)
-                
+                pixel_idx, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(file_path, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
+
                 # Update current environment for PPB calculation
                 self.temperature = env_t
                 self.pressure = env_p
@@ -1139,7 +1142,7 @@ class AlphaExportWorker(QThread):
 
             try:
                 _, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(
-                    fp, self.pixel_min, self.pixel_max, row_index=row_idx)
+                    fp, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
             except Exception as e:
                 self.status_msg.emit(f"SKIP {os.path.basename(fp)}[{row_idx}]: {e}")
                 continue

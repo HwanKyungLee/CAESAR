@@ -771,9 +771,24 @@ class CAESARAnalyzer(QMainWindow):
                 "▶  Specialized Tools (alpha export, R-curve offline)")
         self._btn_toggle_spec.clicked.connect(_toggle_spec)
         
-        # Group 2: Cavity Setup — only d, RL, Leff (everything else comes from raw file)
+        # Group 2: Cavity Setup — only d, RL, Leff, Channel (everything else from raw file)
         grp_physics = QGroupBox("2. Cavity Setup")
         lay_physics = QFormLayout()
+
+        # Spectrum Channel selector — CH1=ROI1/ANs(180°C) or CH2=ROI2/PNs(300°C)
+        lay_ch = QHBoxLayout()
+        self.combo_channel = QComboBox()
+        self.combo_channel.addItem("CH1  —  ROI1 / ANs  (180°C inlet)")
+        self.combo_channel.addItem("CH2  —  ROI2 / PNs  (300°C inlet)")
+        self.combo_channel.setToolTip(
+            "Spectrum channel to analyze:\n"
+            "  CH1 (ROI1): cols 2053–4100 in Araon Mega-Matrix → ANs thermal dissociation at 180°C\n"
+            "  CH2 (ROI2): cols 4101–6148 in Araon Mega-Matrix → PNs thermal dissociation at 300°C\n"
+            "Cold files only have CH1.  Hot files contain both CH1 and CH2."
+        )
+        lay_ch.addWidget(self.combo_channel)
+        lay_ch.addStretch()
+        lay_physics.addRow("Spectrum Channel:", lay_ch)
 
         # Cavity Length
         self.spin_d_len = QDoubleSpinBox()
@@ -2100,7 +2115,8 @@ class CAESARAnalyzer(QMainWindow):
             flag_amb=self._parse_flags(self.txt_flag_amb.text()),
             save_alpha=self.chk_save_alpha.isChecked(),
             alpha_save_dir=getattr(self, 'alpha_save_dir', ''),
-            rl_factor=self.spin_rl_factor.value()
+            rl_factor=self.spin_rl_factor.value(),
+            channel=self.combo_channel.currentIndex() + 1  # 0-indexed combo → 1-based channel
         )
         
         self.worker.step_limit = step_limit_val
