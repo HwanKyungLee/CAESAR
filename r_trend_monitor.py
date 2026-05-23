@@ -116,10 +116,14 @@ def _parse_timestamp(filepath: str) -> datetime:
 
 def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD) -> list[dict]:
-    """파일마다 R을 계산해 결과 목록을 반환한다.
-    He가 있는 파일: He 갱신 후 해당 파일 ZA + 새 He로 계산.
-    He가 없는 파일: 직전 He + 해당 파일 ZA로 계산.
-    col_press/col_temp: 채널별 HK 컬럼 인덱스 (Cold/Hot 다름).
+    """파일마다 R을 계산해 결과 목록을 **타임스탬프 순**으로 반환한다.
+
+    수정 내역
+    ---------
+    * 파일명 순서가 아닌 타임스탬프 순으로 정렬 후 반환 → 지그재그 선 해소.
+    * valid_fraction = 0 (완전 보정 실패, R=1.0 dummy) 결과는 저장하지 않음.
+    * 보정 실패 파일에서 He 스캔이 나와도 last_he를 오염시키지 않음.
+    * quality_ok 기준을 실측 valid_fraction(~44 %)에 맞게 0.30으로 완화.
     """
     if file_list is not None:
         files = sorted(str(f) for f in file_list if os.path.isfile(str(f)))
@@ -135,25 +139,41 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     print(f"  {len(files)}개 파일 연속 처리 시작...\n")
 
     results = []
-    last_he = []   # 가장 최근 He 스캔 (파일 간 유지)
+    last_he = []          # 가장 최근 양질의 He 스캔 (파일 간 유지)
+    skip = fail = 0
 
     for fp in files:
         fname = os.path.basename(fp)
         za, he = read_all_scans(fp, col_press, col_temp)
 
-        if he:
-            last_he = he   # 새 He 캘리브레이션 갱신
+        # He 스캔을 만나도 보정 품질을 먼저 확인한 뒤에만 last_he 갱신
+        # → 나쁜 파일의 He가 다음 파일로 오염되는 것 방지
+        candidate_he = he if he else last_he
 
-        if not za or not last_he:
-            print(f"  [{fname}] ⏳ 스킵 (ZA:{len(za)} He누적:{len(last_he)})")
+        if not za or not candidate_he:
+            print(f"  [{fname}] ⏳ 스킵 (ZA:{len(za)} He후보:{len(candidate_he)})")
+            skip += 1
             continue
 
         try:
             rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
-            for sp, t, p in za:      rc.add_za_spectrum(sp, t, p)
-            for sp, t, p in last_he: rc.add_he_spectrum(sp, t, p)
-            wave_out, r_curve, omr_d = rc.calculate(wave_nm)
+            for sp, t, p in za:            rc.add_za_spectrum(sp, t, p)
+            for sp, t, p in candidate_he: rc.add_he_spectrum(sp, t, p)
+            # quality threshold 완화: 실측 valid_fraction ~44 % 는 정상이므로 0.30으로 설정
+            wave_out, r_curve, omr_d = rc.calculate(wave_nm, min_valid_fraction=0.30)
 
+            # valid=0%는 ratio≈1 (He/ZA 신호 동일) → omr_d=0 → R=1.0 dummy
+            # 이 파일은 결과에 포함하지 않고 last_he도 갱신하지 않는다
+            if rc.valid_fraction == 0.0:
+                print(f"  [{fname}] ⏭️  valid=0% (R=1.0 dummy) 스킵 — last_he 유지")
+                skip += 1
+                continue
+
+            # 품질이 OK인 경우에만 last_he 갱신
+            if he and rc.quality_ok:
+                last_he = he
+
+            leff_arr = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
             res = {
                 "timestamp":  _parse_timestamp(fp),
                 "filename":   fname,
@@ -161,18 +181,27 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 "r_std":      float(np.std(r_curve)),
                 "r_min":      float(np.min(r_curve)),
                 "r_max":      float(np.max(r_curve)),
-                "leff_mean":  float(np.nanmean(np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan))),
+                "leff_mean":  float(np.nanmean(leff_arr)),
                 "valid_frac": rc.valid_fraction,
                 "n_za":       len(za),
-                "n_he":       len(last_he),
+                "n_he":       len(candidate_he),
             }
             results.append(res)
-            tag = ("  [He갱신]" if he else "") + ("  ⚠️ 이상값" if not rc.quality_ok else "")
-            print(f"  [{fname}] ✅ R_mean={res['r_mean']:.6f}  valid={res['valid_frac']*100:.1f}%{tag}")
+            tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
+                  ("  ⚠️ 이상값" if not rc.quality_ok else "")
+            print(f"  [{fname}] ✅ R_mean={res['r_mean']:.6f}  "
+                  f"Leff={res['leff_mean']:.2f}km  valid={res['valid_frac']*100:.1f}%{tag}")
         except Exception as e:
             print(f"  [{fname}] ❌ {e}")
+            fail += 1
 
-    print(f"\n  총 파일: {len(files)}  성공: {len(results)}  실패/스킵: {len(files)-len(results)}")
+    # ── 타임스탬프 순 정렬 ──────────────────────────────────────────────────────
+    # 파일명 순서 ≠ 시간 순서인 경우(아라온 DAQ가 번호를 역순 또는 교차 할당할 때)
+    # 정렬 없이 plot 하면 선이 아침↔저녁을 오가며 지그재그가 된다.
+    results.sort(key=lambda x: x["timestamp"])
+
+    saved = len(results)
+    print(f"\n  총 파일: {len(files)}  저장: {saved}  스킵: {skip}  실패: {fail}")
     return results
 
 def _stem_digits(filename: str) -> str:

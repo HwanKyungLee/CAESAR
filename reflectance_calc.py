@@ -171,7 +171,15 @@ class ReflectanceCalculator:
         p_use = p_mbar if p_mbar != 1013.25 else p_f
         self._he_spectra.append((sp, t_use, p_use))
 
-    def calculate(self, wave_nm=None, min_valid_fraction=0.50):
+    def calculate(self, wave_nm=None, min_valid_fraction=0.30):
+        """R 커브를 계산한다.
+
+        min_valid_fraction
+            유효 픽셀 비율 하한.  기본값 0.30.
+            실측 장비에서 CCD 엣지 저신호 픽셀로 인해 valid_fraction ≈ 0.44 가
+            정상이므로, 과거 기본값 0.50 은 모든 파일을 quality_ok=False로 판정하는
+            오류를 일으켰다.  0.30으로 완화하여 정상 파일을 올바르게 OK로 분류한다.
+        """
         if not self._za_spectra or not self._he_spectra:
             raise RuntimeError("ZA/He spectra missing.")
 
@@ -223,7 +231,13 @@ class ReflectanceCalculator:
             x = np.arange(n_pix)
             omr_d = np.interp(x, x[valid], omr_d[valid])
         else:
-            omr_d = np.zeros(n_pix)
+            # 유효 픽셀 0개 = ratio ≈ 1 전체 (He/ZA 신호 구별 불가).
+            # zeros → R=1.0 dummy 를 내보내면 호출자가 이를 정상값으로 오인하므로
+            # 예외를 던져 호출자가 이 파일을 명시적으로 스킵하게 한다.
+            raise RuntimeError(
+                "valid_fraction=0: 모든 픽셀에서 He/ZA ratio≈1 "
+                "(퍼지 불완전 또는 전환 스캔). 이 파일의 R 계산 불가."
+            )
 
         r_curve = np.clip(1.0 - omr_d * self.cavity_len, 0.0, 1.0)
         self.omr_d = omr_d
