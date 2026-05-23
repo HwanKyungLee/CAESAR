@@ -771,24 +771,15 @@ class CAESARAnalyzer(QMainWindow):
                 "▶  Specialized Tools (alpha export, R-curve offline)")
         self._btn_toggle_spec.clicked.connect(_toggle_spec)
         
-        # Group 2: Cavity Setup — only d, RL, Leff, Channel (everything else from raw file)
+        # Group 2: Cavity Setup — only d, RL, Leff (everything else from raw file)
         grp_physics = QGroupBox("2. Cavity Setup")
         lay_physics = QFormLayout()
 
-        # Spectrum Channel selector — CH1=ROI1/ANs(180°C) or CH2=ROI2/PNs(300°C)
-        lay_ch = QHBoxLayout()
-        self.combo_channel = QComboBox()
-        self.combo_channel.addItem("CH1  —  ROI1 / ANs  (180°C inlet)")
-        self.combo_channel.addItem("CH2  —  ROI2 / PNs  (300°C inlet)")
-        self.combo_channel.setToolTip(
-            "Spectrum channel to analyze:\n"
-            "  CH1 (ROI1): cols 2053–4100 in Araon Mega-Matrix → ANs thermal dissociation at 180°C\n"
-            "  CH2 (ROI2): cols 4101–6148 in Araon Mega-Matrix → PNs thermal dissociation at 300°C\n"
-            "Cold files only have CH1.  Hot files contain both CH1 and CH2."
-        )
-        lay_ch.addWidget(self.combo_channel)
-        lay_ch.addStretch()
-        lay_physics.addRow("Spectrum Channel:", lay_ch)
+        # Auto-detected channel info (read-only — updated when files are loaded)
+        self._detected_channels = 1   # updated by _auto_detect_channels()
+        self.lbl_channel_info = QLabel("—  (파일 로드 후 자동 감지)")
+        self.lbl_channel_info.setStyleSheet("color: #546E7A; font-style: italic;")
+        lay_physics.addRow("채널 감지:", self.lbl_channel_info)
 
         # Cavity Length
         self.spin_d_len = QDoubleSpinBox()
@@ -1901,6 +1892,7 @@ class CAESARAnalyzer(QMainWindow):
         Araon Mega-Matrix files contain many scans per row — expansion into
         individual (filepath, row_index) entries is deferred to the Worker
         thread so the UI never freezes during large folder loads.
+        After loading, auto-detect the channel count from the first file.
         """
         self.file_list = list(file_list)          # plain strings only — no expansion here
         self.table.setRowCount(len(self.file_list))
@@ -1910,6 +1902,32 @@ class CAESARAnalyzer(QMainWindow):
             self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(fp)))
 
         self.status.setText(f"📁 {len(self.file_list)} file(s) loaded.")
+        self._auto_detect_channels()
+
+    def _auto_detect_channels(self):
+        """Detect how many spectrum channels the loaded files contain and update the UI label."""
+        if not self.file_list:
+            return
+        try:
+            first = self._entry_filepath(self.file_list[0])
+            from data_io import DataIO
+            n = DataIO.detect_channels(first)
+            self._detected_channels = n
+            ch_names = {1: "CH1", 2: "CH1+CH2", 3: "CH1+CH2+CH3"}
+            ch_labels = {
+                1: "1채널  (Cold / single-cavity)",
+                2: "2채널  (Hot:  CH1 ANs 180°C  +  CH2 PNs 300°C)",
+                3: "3채널  (CH1 + CH2 + CH3)",
+            }
+            label = ch_labels.get(n, f"{n}채널")
+            self.lbl_channel_info.setText(label)
+            colours = {1: "#1565C0", 2: "#6A1B9A", 3: "#2E7D32"}
+            self.lbl_channel_info.setStyleSheet(
+                f"color: {colours.get(n, '#333')}; font-weight: bold;")
+            self.status.setText(
+                f"📁 {len(self.file_list)} file(s) loaded  —  {ch_names.get(n, str(n)+'CH')} 감지됨")
+        except Exception as e:
+            print(f"[channel detect] {e}")
 
     def apply_convolution(self):
         """Applies Instrument Line Shape blur (Voigt kernel) based on entered FWHM values."""
@@ -1987,14 +2005,26 @@ class CAESARAnalyzer(QMainWindow):
             return
         
         self.results = []
-        
+
+        # Multi-channel state
+        n_ch = self._detected_channels
+        self._multi_channel_mode = (n_ch > 1)
+        self._workers = []
+        self._workers_done = 0
+        self._workers_total = n_ch
+        self._next_table_row = 0   # dynamic row counter for multi-channel append
+
         # 🌟 UI Table Reset: start empty — rows are added dynamically as scans complete
         self.table.setSortingEnabled(False)
         self.table.clearContents()
         self.table.setRowCount(0)
-        
+
         # Lock in column headers dynamically based on loaded gases
-        cols = ["File", "Time", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
+        # Add "Ch" prefix column when multiple channels detected
+        if self._multi_channel_mode:
+            cols = ["Ch", "File", "Time", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
+        else:
+            cols = ["File", "Time", "RMS", "Chi2", "SNR", "Status"] + self.engine.gas_list + ["Shift", "Squeeze"]
         self.table.setColumnCount(len(cols))
         self.table.setHorizontalHeaderLabels(cols)
         
@@ -2098,46 +2128,56 @@ class CAESARAnalyzer(QMainWindow):
                     self.b_run.setEnabled(True)
                     return
 
-        # Initialize and fire the Worker Thread with BBCEAS params
-        self.worker = AnalysisWorker(
-            self.engine, self.file_list, pixel_min, pixel_max,
-            p0, (bounds_low, bounds_high), interval, delay_ms,
-            ref_properties=getattr(self, 'ref_props', {}),
-            i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d,
-            dark_array=sliced_dark,
-            dark_scale_factor=self.spin_dark_scale.value(),
-            offset_array=sliced_offset,
-            offset_scale_factor=self.spin_offset_scale.value(),
-            stray_light_fraction=self.spin_stray_light.value(),
-            use_temporal_i0=use_temporal,
-            flag_za=self._parse_flags(self.txt_flag_za.text()),
-            flag_he=self._parse_flags(self.txt_flag_he.text()),
-            flag_amb=self._parse_flags(self.txt_flag_amb.text()),
-            save_alpha=self.chk_save_alpha.isChecked(),
-            alpha_save_dir=getattr(self, 'alpha_save_dir', ''),
-            rl_factor=self.spin_rl_factor.value(),
-            channel=self.combo_channel.currentIndex() + 1  # 0-indexed combo → 1-based channel
-        )
-        
-        self.worker.step_limit = step_limit_val
-        self.worker.tikhonov_lambda = self.spin_lambda.value()
-        self.worker.use_robust_fitting = self.chk_robust.isChecked()
-        self.worker.kalman_q = self.spin_kalman_q.value()
-        self.worker.kalman_r = self.spin_kalman_r.value()
-        self.worker.temperature = self.spin_temp.value()
-        self.worker.pressure = self.spin_pres.value()
-        self.worker.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
+        # Initialize and fire Worker Thread(s) — one per detected channel
+        # All channels run in parallel from the same file list
+        flag_za  = self._parse_flags(self.txt_flag_za.text())
+        flag_he  = self._parse_flags(self.txt_flag_he.text())
+        flag_amb = self._parse_flags(self.txt_flag_amb.text())
 
-        # ===============================================================
-        # Connect Thread Signals to UI functions
-        self.worker.progress.connect(self.pbar.setValue)
-        self.worker.result_ready.connect(self.update_table)
-        self.worker.plot_update.connect(self.monitor.update_spectrum)
-        self.worker.trend_update.connect(self.monitor.update_trend)
-        self.worker.finished.connect(self.analysis_finished)
-        self.worker.r_curve_update.connect(self._on_r_curve_update)
-        self.worker.scan_count_ready.connect(self._on_scan_count_ready)
-        
+        for ch in range(1, n_ch + 1):
+            w = AnalysisWorker(
+                self.engine, self.file_list, pixel_min, pixel_max,
+                p0, (bounds_low, bounds_high), interval, delay_ms,
+                ref_properties=getattr(self, 'ref_props', {}),
+                i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d,
+                dark_array=sliced_dark,
+                dark_scale_factor=self.spin_dark_scale.value(),
+                offset_array=sliced_offset,
+                offset_scale_factor=self.spin_offset_scale.value(),
+                stray_light_fraction=self.spin_stray_light.value(),
+                use_temporal_i0=use_temporal,
+                flag_za=flag_za,
+                flag_he=flag_he,
+                flag_amb=flag_amb,
+                save_alpha=self.chk_save_alpha.isChecked(),
+                alpha_save_dir=getattr(self, 'alpha_save_dir', ''),
+                rl_factor=self.spin_rl_factor.value(),
+                channel=ch
+            )
+
+            w.step_limit = step_limit_val
+            w.tikhonov_lambda = self.spin_lambda.value()
+            w.use_robust_fitting = self.chk_robust.isChecked()
+            w.kalman_q = self.spin_kalman_q.value()
+            w.kalman_r = self.spin_kalman_r.value()
+            w.temperature = self.spin_temp.value()
+            w.pressure = self.spin_pres.value()
+            w.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
+
+            # Connect signals
+            w.progress.connect(self.pbar.setValue)
+            w.result_ready.connect(self.update_table)
+            w.plot_update.connect(self.monitor.update_spectrum)
+            w.trend_update.connect(self.monitor.update_trend)
+            w.finished.connect(self.analysis_finished)
+            w.r_curve_update.connect(self._on_r_curve_update)
+            w.scan_count_ready.connect(self._on_scan_count_ready)
+
+            self._workers.append(w)
+
+        # Keep self.worker pointing to CH1 worker for legacy stop/wait references
+        self.worker = self._workers[0]
+
         # Lock UI controls to prevent interference
         self.b_run.setEnabled(False)
         self.b_stop.setEnabled(True)
@@ -2146,44 +2186,73 @@ class CAESARAnalyzer(QMainWindow):
         # Switch to the Analysis Monitor tab automatically (index 2 in new 3-tab layout)
         self.main_tabs.setCurrentIndex(2)
 
-        self.worker.start()
+        for w in self._workers:
+            w.start()
         
     def _on_scan_count_ready(self, total_scans):
-        """Called once the worker has finished expanding all files into individual scans."""
+        """Called once a worker has finished expanding all files into individual scans."""
         # Progress bar advances by file (not scan) to stay manageable
         self.pbar.setMaximum(len(self.file_list))
-        # Pre-allocate table rows so each result_ready call is O(1)
-        self.table.setRowCount(total_scans)
-        self.status.setText(f"🏃 {total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
+        if self._multi_channel_mode:
+            # Multi-channel: rows arrive interleaved from parallel workers — grow dynamically
+            n_ch = self._workers_total
+            self.status.setText(
+                f"🏃 {total_scans:,} scans × {n_ch} CH / {len(self.file_list)} file(s) — processing..."
+            )
+        else:
+            # Single-channel: pre-allocate rows for O(1) update_table writes
+            self.table.setRowCount(total_scans)
+            self.status.setText(f"🏃 {total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
 
     def stop_analysis(self):
-        """Safely stops the worker thread and re-enables UI controls."""
-        if hasattr(self, 'worker') and self.worker.isRunning():
-            self.worker.stop()
+        """Safely stops all worker threads and re-enables UI controls."""
+        workers = getattr(self, '_workers', [])
+        if not workers and hasattr(self, 'worker'):
+            workers = [self.worker]   # legacy fallback
+
+        running = [w for w in workers if w.isRunning()]
+        if running:
+            for w in running:
+                w.stop()
             self.status.setText("🛑 Halting analysis... please wait.")
             self.status.setStyleSheet("color: red; font-weight: bold;")
             self.b_stop.setEnabled(False)
-            self.worker.wait()
+            for w in running:
+                w.wait()
             self.analysis_finished(stopped=True)
             
     def update_table(self, result_dict, row_index):
         """Triggered by the worker thread to update the table row-by-row."""
         self.results.append(result_dict)
 
-        # Auto-expand if scan count grew beyond the pre-allocated row count
-        if row_index >= self.table.rowCount():
-            self.table.setRowCount(row_index + 1)
-        
-        # col 0: filename + scan index
-        self.table.setItem(row_index, 0, QTableWidgetItem(str(result_dict['File'])))
-        # col 1: measurement timestamp (from Araon col 0, or file mtime as fallback)
-        self.table.setItem(row_index, 1, QTableWidgetItem(str(result_dict.get('Time', ''))))
-        # col 2-4: fit quality metrics
-        self.table.setItem(row_index, 2, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
-        self.table.setItem(row_index, 3, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
-        self.table.setItem(row_index, 4, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
+        multi = getattr(self, '_multi_channel_mode', False)
 
-        # col 5: status with conditional background colour
+        if multi:
+            # Parallel workers share a dynamic row counter — use next free row
+            row = self._next_table_row
+            self._next_table_row += 1
+            if row >= self.table.rowCount():
+                self.table.setRowCount(row + 1)
+            # col 0: channel tag (CH1 / CH2 / CH3)
+            ch = result_dict.get('Channel', 1)
+            self.table.setItem(row, 0, QTableWidgetItem(f"CH{ch}"))
+            c = 1   # column offset for remaining fields
+        else:
+            row = row_index
+            if row >= self.table.rowCount():
+                self.table.setRowCount(row + 1)
+            c = 0   # no Ch column
+
+        # col c+0: filename + scan index
+        self.table.setItem(row, c + 0, QTableWidgetItem(str(result_dict['File'])))
+        # col c+1: measurement timestamp
+        self.table.setItem(row, c + 1, QTableWidgetItem(str(result_dict.get('Time', ''))))
+        # col c+2..4: fit quality metrics
+        self.table.setItem(row, c + 2, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
+        self.table.setItem(row, c + 3, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
+        self.table.setItem(row, c + 4, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
+
+        # col c+5: status with conditional background colour
         item_status = QTableWidgetItem(str(result_dict.get('Status', '')))
         try:
             status = result_dict.get('Status', '')
@@ -2193,36 +2262,54 @@ class CAESARAnalyzer(QMainWindow):
                 item_status.setBackground(QColor(255, 220, 100))
         except Exception:
             pass
+        self.table.setItem(row, c + 5, item_status)
 
-        self.table.setItem(row_index, 5, item_status)
-
-        # col 6+: gas concentrations, then Shift, Squeeze
+        # col c+6+i: gas concentrations, then Shift, Squeeze
         for i, gas_name in enumerate(self.engine.gas_list):
-            self.table.setItem(row_index, 6 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
+            self.table.setItem(row, c + 6 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
 
         gas_offset = len(self.engine.gas_list)
-        self.table.setItem(row_index, 6 + gas_offset, QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
-        self.table.setItem(row_index, 7 + gas_offset, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
+        self.table.setItem(row, c + 6 + gas_offset,     QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
+        self.table.setItem(row, c + 6 + gas_offset + 1, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
 
         # Force UI scroll to follow the latest row
-        item = self.table.item(row_index, 0)
+        item = self.table.item(row, 0)
         if item:
             self.table.scrollToItem(item)
-            
-        # Explicitly enforce progress bar value increment
-        self.pbar.setValue(row_index + 1)
+
+        # Advance progress bar
+        self.pbar.setValue(row + 1)
         
     def analysis_finished(self, stopped=False):
-        """Re-enables UI and displays completion message when the worker finishes."""
-        self.b_run.setEnabled(True)
-        self.b_stop.setEnabled(False)
+        """Re-enables UI once ALL channel workers have finished."""
         if stopped:
+            # Stop requested — re-enable immediately regardless of pending workers
+            self.b_run.setEnabled(True)
+            self.b_stop.setEnabled(False)
             self.status.setText("🛑 Analysis stopped by user.")
             self.status.setStyleSheet("color: red; font-weight: bold;")
-        else:
-            self.status.setText("✅ Analysis Completed!")
-            self.status.setStyleSheet("color: green; font-weight: bold;")
-            QMessageBox.information(self, "Done", "All files analyzed successfully.")
+            return
+
+        # Count completed workers; wait until the last one finishes
+        self._workers_done = getattr(self, '_workers_done', 0) + 1
+        total = getattr(self, '_workers_total', 1)
+
+        if self._workers_done < total:
+            # Still waiting for other channels
+            remaining = total - self._workers_done
+            self.status.setText(
+                f"✅ CH{self._workers_done} done — waiting for {remaining} more channel(s)..."
+            )
+            return
+
+        # All workers finished
+        self.b_run.setEnabled(True)
+        self.b_stop.setEnabled(False)
+        n_ch = total
+        ch_label = f"{n_ch}-channel " if n_ch > 1 else ""
+        self.status.setText(f"✅ {ch_label}Analysis Completed!")
+        self.status.setStyleSheet("color: green; font-weight: bold;")
+        QMessageBox.information(self, "Done", f"All files analyzed successfully ({n_ch} channel(s)).")
 
     def save(self):
         """

@@ -136,31 +136,71 @@ class DataIO:
             pass
         return False
 
-    @staticmethod
-    def has_ch2(filepath) -> bool:
-        """Returns True when the file contains a valid CH2 spectrum (ROI2 / PNs).
+    # ── Multi-channel layout constants ───────────────────────────────────────
+    # Araon Mega-Matrix column layout:
+    #   META block  : cols    0 – 2052   (2053 cols, metadata + UTC + flags)
+    #   CH1 spectrum: cols 2053 – 4100   (2048 px)
+    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot ROI2/PNs only
+    #   CH3 spectrum: cols 6149 – 8196   (2048 px)  — 3-channel config only
+    #   HK block    : cols (2053 + N×2048) onward
+    #
+    # HK offsets *relative* to hk_start (so they work for any channel count):
+    _META_COLS = 2053
+    _CH_PIXELS = 2048
+    _SIG_THRESHOLD = 5000.0     # ADU — below this = noise / inactive channel
+    # Relative HK column offsets (verified from 2-channel hot file 2026-05-18):
+    _HK_REL = {
+        'cold_p':   11,   # Cold inlet pressure raw count → ×0.6895 = mbar
+        'hot_p':    13,   # Hot inlet pressure  raw count → ×0.6895 = mbar
+        'hot_cav_t': 6,   # Heated cavity temperature    → /100 = °C (~75°C)
+        'cold_cav_t':24,  # Unheated cavity temperature  → /100 = °C (~24°C)
+        'oven_ans': 5,    # ANs oven setpoint             → /100 = °C (~180°C)
+        'oven_pns': 2,    # PNs oven setpoint             → /100 = °C (~300°C)
+    }
+    _P_SCALE = 0.01 * 6894.73326 / 100.0   # raw count → mbar (~0.6895)
+    _P_LO, _P_HI = 800.0, 1200.0           # plausible atmospheric pressure range
 
-        Cold files have CH1 only (CH2 block ≈ 500 ADU noise floor).
-        Hot files have both CH1 and CH2 active (max > 5000 ADU).
-        Checks only the first ambient row to avoid reading the whole file.
+    @staticmethod
+    def _detect_n_channels_from_row(raw: np.ndarray) -> int:
+        """Returns the number of active spectrum channels (1–3) in one row array.
+
+        Checks each 2048-pixel block after the 2053-col metadata section.
+        A block is considered active when its max exceeds _SIG_THRESHOLD ADU.
         """
+        n = 0
+        for i in range(1, 4):
+            start = DataIO._META_COLS + (i - 1) * DataIO._CH_PIXELS
+            end   = start + DataIO._CH_PIXELS
+            if end > len(raw):
+                break
+            if float(np.nanmax(raw[start:end])) > DataIO._SIG_THRESHOLD:
+                n = i
+            else:
+                break   # channel absent → no point checking further
+        return max(n, 1)
+
+    @staticmethod
+    def detect_channels(filepath) -> int:
+        """Auto-detect the number of active spectrum channels in an Araon file.
+
+        Returns 1, 2, or 3.  Uses the first non-empty row (fast: cache hit after
+        the first call).  Non-Araon files always return 1.
+        """
+        if not DataIO.is_araon_mega_matrix(filepath):
+            return 1
         try:
             rows = DataIO._load_file_to_cache(filepath)
             for raw in rows:
-                if len(raw) < 6149:
-                    continue
-                flag = int(raw[4]) if len(raw) > 4 else 0
-                if flag not in (0, 500, 501, 502, 503, 510, 511, 512, 513):
-                    ch2 = raw[4101:6149]
-                    return float(np.nanmax(ch2)) > 5000.0
-            # Fallback: check first valid row
-            for raw in rows:
-                if len(raw) >= 6149:
-                    ch2 = raw[4101:6149]
-                    return float(np.nanmax(ch2)) > 5000.0
+                if len(raw) >= DataIO._META_COLS + DataIO._CH_PIXELS:
+                    return DataIO._detect_n_channels_from_row(raw)
         except Exception:
             pass
-        return False
+        return 1
+
+    @staticmethod
+    def has_ch2(filepath) -> bool:
+        """Convenience wrapper — True when the file has ≥ 2 active channels."""
+        return DataIO.detect_channels(filepath) >= 2
 
     @staticmethod
     def count_scan_rows(filepath):
@@ -321,44 +361,46 @@ class DataIO:
 
             if len(raw_probe) >= 6175:
                 # ── Araon Mega-Matrix format ─────────────────────────────────
-                col_start, col_end = DataIO._CH_OFFSET.get(channel, (2053, 4101))
-                intensity_full = raw_probe[col_start:col_end]  # 2048-pixel spectrum
+                # Dynamic channel slice: CH1=2053:4101, CH2=4101:6149, CH3=6149:8197
+                n_ch_in_file = DataIO._detect_n_channels_from_row(raw_probe)
+                ch = max(1, min(channel, n_ch_in_file))   # clamp to available channels
+                col_start = DataIO._META_COLS + (ch - 1) * DataIO._CH_PIXELS
+                col_end   = col_start + DataIO._CH_PIXELS
+                intensity_full = raw_probe[col_start:col_end]
 
-                # Extract housekeeping scalars from their fixed byte offsets
-                state_flag = int(raw_probe[4])   # Measurement state flag
+                state_flag = int(raw_probe[4])   # Measurement state flag (col 4)
 
-                # Araon Mega-Matrix HK columns (verified 2026-05-18/19 samples):
-                #   col  4    → state flag
-                #   col  1    → seconds since UTC midnight
-                #   Cold: pressure=6160 (~1010 mbar), cavity-T=6173 (~24°C, unheated)
-                #   Hot:  pressure=6162 (~971 mbar),  cavity-T=6155 (~75°C, heated)
-                #
-                # Auto-detect channel: Cold=col6160 (~1010 mbar), Hot=col6162 (~970 mbar).
-                # BUG-FIX: col6160 in Hot files contains ~3500 (non-zero, non-65535) which
-                # previously caused Hot to be mis-detected as Cold.
-                # Fix: require the converted pressure to be physically plausible (800-1200 mbar).
-                _P_SCALE = 0.01 * 6894.73326 / 100.0   # raw count → mbar  (~0.6895)
-                _P_LO, _P_HI = 800.0, 1200.0            # valid atmospheric pressure range
+                # ── HK reading — relative offsets from the HK block start ────
+                # HK block begins immediately after all spectrum channels:
+                #   hk_start = META_COLS + n_channels × CH_PIXELS
+                # Using relative offsets makes this layout-independent so the
+                # same code works for 1-, 2- and 3-channel Araon files.
+                hk = DataIO._META_COLS + n_ch_in_file * DataIO._CH_PIXELS
+
+                def _hk(rel):
+                    c = hk + rel
+                    v = raw_probe[c] if c < len(raw_probe) else np.nan
+                    return v if (np.isfinite(v) and v not in (0, 65535)) else np.nan
+
                 raw_p_count = np.nan
-                _t_col_for_channel = 6173  # default: Cold ambient (~24 °C)
-                for _pcol, _tcol in ((6160, 6173), (6162, 6155)):
-                    _v = raw_probe[_pcol] if _pcol < len(raw_probe) else np.nan
-                    if np.isfinite(_v) and _v not in (0, 65535):
-                        _p_mbar = float(_v) * _P_SCALE
-                        if _P_LO <= _p_mbar <= _P_HI:   # sanity check
-                            raw_p_count = _v
-                            _t_col_for_channel = _tcol
+                _t_rel = DataIO._HK_REL['cold_cav_t']   # default: cold cavity T
+                for p_rel, t_rel in (
+                    (DataIO._HK_REL['cold_p'], DataIO._HK_REL['cold_cav_t']),
+                    (DataIO._HK_REL['hot_p'],  DataIO._HK_REL['hot_cav_t']),
+                ):
+                    pv = _hk(p_rel)
+                    if np.isfinite(pv):
+                        pm = float(pv) * DataIO._P_SCALE
+                        if DataIO._P_LO <= pm <= DataIO._P_HI:
+                            raw_p_count = pv
+                            _t_rel = t_rel
                             break
 
-                raw_t_count = np.nan
-                _v = raw_probe[_t_col_for_channel] if _t_col_for_channel < len(raw_probe) else np.nan
-                if np.isfinite(_v) and _v not in (0, 65535):
-                    raw_t_count = _v
-
                 if np.isfinite(raw_p_count):
-                    env_p = float(raw_p_count) * (0.01 * 6894.73326 / 100.0)
-                if np.isfinite(raw_t_count):
-                    env_t = float(raw_t_count) / 100.0
+                    env_p = float(raw_p_count) * DataIO._P_SCALE
+                tv = _hk(_t_rel)
+                if np.isfinite(tv):
+                    env_t = float(tv) / 100.0
             else:
                 # ── Regular 1D file (one value per line, e.g. alpha trace) ──
                 # Re-read the whole file to get all rows, not just the target row.

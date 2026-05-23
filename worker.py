@@ -166,8 +166,8 @@ class AnalysisWorker(QThread):
         self.delay_ms = delay_ms
         self.ref_properties = ref_properties if ref_properties is not None else {}
 
-        # Spectrum channel: 1=CH1/ROI1/ANs (180°C), 2=CH2/ROI2/PNs (300°C)
-        self.channel = int(channel) if channel in (1, 2) else 1
+        # Spectrum channel: 1=CH1/ROI1/ANs (180°C), 2=CH2/ROI2/PNs (300°C), 3=CH3
+        self.channel = int(channel) if channel in (1, 2, 3) else 1
 
         # [ BBCEAS Physics Parameters ]
         self.i0_array = i0_array
@@ -598,7 +598,7 @@ class AnalysisWorker(QThread):
 
             initial_shift_center = last_valid_shift
             # Always display as "filename [NNNN]" so results are unambiguous
-            result = {'File': f"{os.path.basename(file_path)} [{row_idx:04d}]", 'Params': {}}
+            result = {'File': f"{os.path.basename(file_path)} [{row_idx:04d}]", 'Channel': self.channel, 'Params': {}}
             # Try to read the measurement timestamp from column 0 of the Araon row.
             # Falls back to file mtime → KST if column 0 is not a recognisable timestamp.
             _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
