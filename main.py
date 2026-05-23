@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 
-from app_window import CAESARAnalyzer  # The main application window class
+from gui.app_window import CAESARAnalyzer  # The main application window class
 
 # ─── Entry point ────────────────────────────────────────────────────────────
 # Everything starts here when you run  python main.py
@@ -15,7 +15,7 @@ if __name__ == '__main__':
     app.setStyle("Fusion")  # Fusion style: clean, modern look on all platforms
 
     # Scale font size relative to screen height (reference: 1080p → 9pt)
-    from data_io import ui_scale
+    from core.data_io import ui_scale
     _s = ui_scale()
     _font = app.font()
     _font.setPointSize(max(7, round(9 * _s)))

@@ -10,12 +10,16 @@ raw .dat 데이터에서 파장 보정·ILS 적용·DOAS 피팅까지 한 번에
 ```
 CEASER/
 ├── main.py              ← GUI 진입점 (python main.py)
-├── app_window.py        ← PyQt6 메인 창
-├── ui_dialogs.py        ← 다이얼로그 / 모니터 위젯
-├── worker.py            ← 분석 QThread 워커
-├── engine.py            ← DOAS 분석 엔진 (shift/squeeze/ILS/etalon)
-├── data_io.py           ← 파일 I/O, 아라온 HK 파싱
 ├── Argos.png            ← 스플래시 스크린 이미지
+│
+├── core/                ← 공용 연산·IO 모듈 (패키지)
+│   ├── data_io.py       ← 파일 I/O, 아라온 HK 파싱
+│   └── engine.py        ← DOAS 분석 엔진 (shift/squeeze/ILS/etalon)
+│
+├── gui/                 ← PyQt6 UI 레이어 (패키지)
+│   ├── app_window.py    ← 메인 창 (CAESARAnalyzer)
+│   ├── ui_dialogs.py    ← 다이얼로그 / 모니터 위젯
+│   └── worker.py        ← 분석 QThread 워커
 │
 ├── tools/               ← 독립 실행 오프라인 분석 도구
 │   ├── reflectance_calc.py   ← 반사율 계산 핵심 모듈 (Rayleigh + CEAS)
@@ -32,9 +36,22 @@ CEASER/
 │       └── process_inlet.py  ← jNO2/jO3 Inlet 데이터 처리
 │
 └── scratch/             ← 일회성 진단·탐색 스크립트
-    ├── _fwhm_r_analysis.py      ← Cold FWHM 측정 진단
-    ├── _hot_fwhm_r_analysis.py  ← Hot FWHM 측정 진단
-    └── _test_rv.py              ← R 값 trim mean 검증
+    ├── _fwhm_r_analysis.py
+    ├── _hot_fwhm_r_analysis.py
+    └── _test_rv.py
+```
+
+---
+
+## 임포트 구조
+
+```
+main.py
+ ├── gui.app_window  →  core.engine
+ │                  →  core.data_io
+ │                  →  gui.worker    →  core.data_io
+ │                  →  gui.ui_dialogs →  core.data_io
+ └── core.data_io
 ```
 
 ---
@@ -46,12 +63,10 @@ CEASER/
 python main.py
 ```
 
-**오프라인 R 시계열 모니터 (tools/)**
+**오프라인 R 시계열 모니터**
 ```
 python tools/r_trend_monitor.py
 ```
-- `COLD_DIR`, `COLD_FILES` 등 스크립트 상단 설정 변수 조정 후 실행
-- 출력: `<날짜범위>/R_trend_Cold.png`, `R_trend_Hot.png`, `*.dat`
 
 ---
 
