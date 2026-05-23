@@ -32,6 +32,14 @@ class DataIO:
     no instance required.
     """
 
+    # ── Araon Mega-Matrix row cache ─────────────────────────────────────────
+    # Without caching, _read_row_raw scans from line 0 every call → O(n²) for
+    # n-row files.  The cache stores the entire file as a list[np.ndarray] keyed
+    # by (filepath, mtime).  Stays in memory only for the most-recently-used file
+    # (LRU-1) so a folder of many files doesn't exhaust RAM.
+    _row_cache: dict = {}   # { (path, mtime): [row0_arr, row1_arr, ...] }
+    _cached_key: tuple | None = None  # key of the currently cached file
+
     @staticmethod
     def enforce_1d_array(data):
         """
@@ -54,28 +62,64 @@ class DataIO:
     # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
+    def _parse_line_to_array(line: str) -> np.ndarray:
+        """Parse a tab-delimited line into a float numpy array."""
+        vals = line.strip().split('\t')
+        raw = np.empty(len(vals), dtype=float)
+        for j, v in enumerate(vals):
+            try:
+                raw[j] = float(v)
+            except (ValueError, TypeError):
+                raw[j] = np.nan
+        return raw
+
+    @staticmethod
+    def _load_file_to_cache(filepath: str) -> list:
+        """Read the entire Mega-Matrix file into a list of row arrays (once per file).
+
+        Uses an LRU-1 cache keyed by (filepath, mtime) so re-reading the same
+        file within one session is O(1).  Switching to a different file evicts the
+        old entry to keep memory usage bounded.
+        """
+        try:
+            mtime = os.path.getmtime(filepath)
+        except OSError:
+            mtime = 0.0
+        key = (filepath, mtime)
+
+        if DataIO._cached_key == key and key in DataIO._row_cache:
+            return DataIO._row_cache[key]
+
+        # Evict previous cached file to free memory
+        DataIO._row_cache.clear()
+
+        rows: list = []
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                rows.append(DataIO._parse_line_to_array(line))
+
+        DataIO._row_cache[key] = rows
+        DataIO._cached_key = key
+        return rows
+
+    @staticmethod
     def _read_row_raw(filepath, row_index):
         """
-        Reads one specific row from a tab-delimited file and returns it as a
-        float numpy array.  Rows with different column counts (e.g. Araon's
-        6177-col init row vs 6181-col data rows) are handled correctly because
-        we read line-by-line rather than using pandas, which enforces a fixed
-        column count across the whole file.
+        Returns one row from a tab-delimited file as a float numpy array.
+
+        For Araon Mega-Matrix files (6175+ columns) the whole file is read once
+        and cached in memory so repeated calls for different row_index values are
+        O(1) after the first call instead of O(n) each.
+        Rows with different column counts are handled correctly because we parse
+        line-by-line rather than using pandas.
         """
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-            for i, line in enumerate(fh):
-                if not line.strip():
-                    continue
-                if i == row_index:
-                    vals = line.strip().split('\t')
-                    raw = np.empty(len(vals), dtype=float)
-                    for j, v in enumerate(vals):
-                        try:
-                            raw[j] = float(v)
-                        except (ValueError, TypeError):
-                            raw[j] = np.nan
-                    return raw
-        raise ValueError(f"Row {row_index} not found in {os.path.basename(filepath)}")
+        rows = DataIO._load_file_to_cache(filepath)
+        if row_index < len(rows):
+            return rows[row_index]
+        raise ValueError(f"Row {row_index} not found in {os.path.basename(filepath)} ({len(rows)} rows)")
 
     @staticmethod
     def is_araon_mega_matrix(filepath):
