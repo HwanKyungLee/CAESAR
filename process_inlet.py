@@ -19,17 +19,31 @@ from scipy.io import savemat
 
 # ================================================================
 # LabVIEW .dat 파일 읽기 함수
-# 포맷: 탭 구분 텍스트, 11열, 헤더 없음, CRLF 줄바꿈
+# 포맷: 탭 구분 텍스트, CRLF 줄바꿈, 열 수는 파일마다 다를 수 있음
 #   col 0 : timestamp 상위 16비트
 #   col 1 : timestamp 하위 16비트
 #   col 2 : jNO2 upward   × 1000
 #   col 3 : jNO2 downward × 1000
 #   col 4 : jO3 upward    × 1000  (2026 N/A)
 #   col 5 : jO3 downward  × 1000  (2026 N/A)
-#   col 6~10 : 기타 채널
+#   col 6+ : 기타 채널 (있을 수도 없을 수도 있음)
 # ================================================================
 def Func_Read_2026_Yeosu_Inlet(filename: str) -> np.ndarray:
-    return np.loadtxt(filename, delimiter='\t')
+    # 줄 단위로 읽어 6열 이상인 행만 수집, 항상 앞 6열만 반환
+    # → 11열짜리든 6열짜리든 일관된 shape으로 vstack 가능
+    rows = []
+    with open(filename, 'r', encoding='utf-8', errors='replace') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) < 6:
+                continue
+            try:
+                rows.append([float(x) for x in parts[:6]])
+            except ValueError:
+                continue
+    if not rows:
+        return np.empty((0, 6))
+    return np.array(rows)
 
 
 def main():
@@ -41,7 +55,7 @@ def main():
     # ----------------------------------------------------------
     # 경로 설정
     # ----------------------------------------------------------
-    BASE_PATH = r'H:\Yeosu_2026\Inlet_Oven_Box'
+    BASE_PATH = r'D:\Inlet_Oven_Box'
 
     crunchingdate = date
     year  = crunchingdate[0:4]
@@ -65,6 +79,9 @@ def main():
     for fname in rawfilenames:
         print(fname)
         temp = Func_Read_2026_Yeosu_Inlet(fname)
+        if len(temp) == 0:
+            print(f"  → 유효 데이터 없음, 건너뜀")
+            continue
         data_list.append(temp)
 
     data = np.vstack(data_list)
@@ -152,21 +169,22 @@ def main():
     data_inlet_may = data_inlet
 
     time_inlet_may_datenum = np.array([
-        t.toordinal() + 366
+        float(t.toordinal() + 366)
         + t.hour / 24.0
         + t.minute / 1440.0
         + t.second / 86400.0
         + t.microsecond / 86400e6
         for t in time_inlet_may
-    ])
+    ], dtype=np.float64)
 
-    save_path = r'D:\FieldData_Yeosu_2026\Inlet'
+    save_path = r'C:\LGH\Inlet'
+    os.makedirs(save_path, exist_ok=True)
     savemat(
         os.path.join(save_path, 'data_inlet_May.mat'),
         {
-            'time_inlet_may': time_inlet_may_datenum,
-            'data_inlet_may': data_inlet_may,
-            'vrn_inlet':      vrn_inlet,
+            'time_inlet_may': np.ascontiguousarray(time_inlet_may_datenum, dtype=np.float64),
+            'data_inlet_may': np.ascontiguousarray(data_inlet_may, dtype=np.float64),
+            'vrn_inlet':      np.array(vrn_inlet, dtype=object),
         }
     )
 
