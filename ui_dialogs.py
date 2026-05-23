@@ -1559,10 +1559,12 @@ class ReferenceGeneratorDialog(QDialog):
         """Automatically imports lamp data if available from the main application."""
         if intensity_array is not None:
             self.lamp_intensity = intensity_array
-            self.radio_measured.setChecked(True)
-            peak_idx = int(np.argmax(intensity_array))
-            self.spin_peak_px.setValue(peak_idx)
-            
+            # Guard widgets that only exist in older UI revisions
+            if hasattr(self, 'radio_measured'):
+                self.radio_measured.setChecked(True)
+            if hasattr(self, 'spin_peak_px'):
+                peak_idx = int(np.argmax(intensity_array))
+                self.spin_peak_px.setValue(peak_idx)
             if hasattr(self, 'btn_load_lamp'):
                 self.btn_load_lamp.setText("✅ Lamp Synced from Calibration")
                 self.btn_load_lamp.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; font-weight: bold;")

@@ -1413,6 +1413,7 @@ class CAESARAnalyzer(QMainWindow):
     def _on_r_curve_update(self, wave_nm, r_curve):
         """Called by worker whenever a new R-curve is derived from ZA/He pair."""
         self.r_data = np.array(r_curve)
+        self._r_auto_derived = True   # mark: this R came from a run, not a manual load
         if wave_nm is not None and len(wave_nm) == len(r_curve):
             self.wavelengths = np.array(wave_nm)
         self.update_diagnostic_plot()
@@ -2035,7 +2036,14 @@ class CAESARAnalyzer(QMainWindow):
         self.pbar.setValue(0)
         
         self.monitor.clear_trend()
-        
+
+        # R-curve from a previous run is in fit-pixel-range length, not full-spectrum
+        # length, so the slicing guard below would misfire. Clear it so this run
+        # derives R fresh from its own He/ZA scans.
+        if getattr(self, '_r_auto_derived', False):
+            self.r_data = None
+            self._r_auto_derived = False
+
         # Configure Initial Parameters and Bounds
         num_gases = len(self.engine.gas_list)
         
