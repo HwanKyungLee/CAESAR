@@ -928,10 +928,73 @@ class RangeSelectorDialog(QDialog):
         btns_layout.addWidget(self.b_close)
         self.main_layout.addLayout(btns_layout)
 
+    def _load_araon_spectrum_for_display(self):
+        """Read a representative ZA/ambient spectrum from an Araon mega-matrix file.
+
+        Scans up to the first 300 rows and averages up to 5 ZA (flag 500-503) or
+        ambient (flag 1) scans from CH1. Falls back to the first parsable row if
+        no such scan is found.  Returns (pixel_idx, intensity).
+        """
+        _META  = DataIO._META_COLS   # 2053
+        _NPIX  = DataIO._CH_PIXELS   # 2048
+        col_start, col_end = _META, _META + _NPIX
+
+        GOOD_FLAGS = {1, 500, 501, 502, 503}
+        spectra = []
+        fallback = None
+
+        try:
+            with open(self.data_path, 'r', encoding='utf-8', errors='replace') as fh:
+                for i, line in enumerate(fh):
+                    if i > 300:
+                        break
+                    tokens = line.strip().split('\t')
+                    if len(tokens) < col_end:
+                        continue
+                    try:
+                        raw = np.array([float(t) if t.strip() else np.nan
+                                        for t in tokens[col_start:col_end]])
+                    except Exception:
+                        continue
+
+                    # Require at least 500 finite values above noise floor
+                    fin = np.isfinite(raw)
+                    if fin.sum() < 500 or np.nanmax(raw) < 500:
+                        continue
+
+                    if fallback is None:
+                        fallback = raw.copy()
+
+                    try:
+                        flag = int(tokens[4])
+                    except Exception:
+                        flag = 0
+
+                    if flag in GOOD_FLAGS:
+                        spectra.append(raw)
+                    if len(spectra) >= 5:
+                        break
+        except Exception as e:
+            raise RuntimeError(f"Cannot read Araon file for vis.select: {e}")
+
+        if spectra:
+            arr = np.nanmean(spectra, axis=0)
+        elif fallback is not None:
+            arr = fallback
+        else:
+            raise RuntimeError("No usable scan found in Araon file")
+
+        # Replace remaining NaN with zero so the plot doesn't have gaps
+        arr = np.where(np.isfinite(arr), arr, 0.0)
+        return np.arange(len(arr)), arr
+
     def load_plot(self):
         """Loads selected data, plots it on a nm axis (if calibration available), and activates SpanSelector."""
         try:
-            pixel_idx, intensity_raw = DataIO.load_measurement(self.data_path, pixel_min=0)
+            if DataIO.is_araon_mega_matrix(self.data_path):
+                pixel_idx, intensity_raw = self._load_araon_spectrum_for_display()
+            else:
+                pixel_idx, intensity_raw = DataIO.load_measurement(self.data_path, pixel_min=0)
 
             self.y = intensity_raw
             self._pixel_idx = pixel_idx   # always keep original pixel indices
