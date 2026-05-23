@@ -29,8 +29,10 @@ try:
         COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT, COL_TEMP_HOT,
     )
 except ImportError as e:
-    print(f"[오류] 필수 모듈을 찾을 수 없습니다: {e}")
-    sys.exit(1)
+    # sys.exit()는 QThread 안에서 SystemExit를 던져 스레드를 비정상 종료시키므로 사용 금지.
+    # ImportError를 그대로 re-raise하면 _RTrendWorker.run()의 except Exception이 잡아서
+    # 로그에 표시하고 finished("")를 emit한다.
+    raise ImportError(f"필수 모듈을 찾을 수 없습니다: {e}") from e
 
 # ════════════════════════════════════════════════════════════════
 #  유틸리티 함수 (반드시 설정보다 위에 있어야 합니다)

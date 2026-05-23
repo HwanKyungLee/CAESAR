@@ -49,6 +49,8 @@ COL_TEMP_COLD  = 6173   # 캐비티 온도: ÷100 → ~24°C
 COL_PRESS_HOT_ANS = 6162   # ANs 캐비티 압력: ×0.6895 → ~987 mbar
 COL_PRESS_HOT_PNS = 6164   # PNs 캐비티 압력: ×0.6895 → ~971 mbar  ※ tentative
 COL_TEMP_HOT      = 6155   # 캐비티 온도 (ANs/PNs 공통): ÷100 → ~75°C
+# 하위 호환 별칭 — r_trend_monitor.py 등 구버전 코드가 COL_PRESS_HOT를 참조
+COL_PRESS_HOT = COL_PRESS_HOT_ANS
 #  참고: col6154=ANs 오븐(~180°C), col6151=PNs 오븐(~300°C)
 # ════════════════════════════════════════════════════════════════
 

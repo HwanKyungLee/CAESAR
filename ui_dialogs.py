@@ -3110,3 +3110,12 @@ class RTrendMonitorDialog(QDialog):
             QMessageBox.information(self, "완료", f"R Trend Monitor 완료!\n결과 폴더:\n{out_dir}")
         else:
             self._log.append("\n❌ 오류 발생 — 위 로그를 확인하세요.")
+
+    def closeEvent(self, event):
+        """다이얼로그 닫힐 때 백그라운드 스레드가 살아있으면 안전하게 종료 대기."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.quit()   # event loop 종료 요청
+            if not self._worker.wait(3000):   # 3초 대기 후 강제 terminate
+                self._worker.terminate()
+                self._worker.wait()
+        super().closeEvent(event)
