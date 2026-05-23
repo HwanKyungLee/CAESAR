@@ -1,11 +1,11 @@
 """
-process_inlet.py
+inlet_jno2_jo3.py
 
 Yeosu 2026 Inlet(jNO2/jO3) 데이터 처리 스크립트
 원본 MATLAB 코드의 기능을 그대로 Python으로 변환.
 
 사용법:
-    python process_inlet.py
+    python campaigns/yeosu_2026/inlet_jno2_jo3.py
     (하단 main() 내 date 변수만 바꿔서 사용)
 """
 

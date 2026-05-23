@@ -70,7 +70,7 @@ HAS_MPL = True
 
 try:
     from reflectance_calc import ReflectanceCalculator
-    from auto_r_calculator import (
+    from r_batch_calculator import (
         read_all_scans, FLAG_ZA, FLAG_HE,
         CAVITY_LEN, RL_FACTOR, PIXEL_MIN, PIXEL_MAX,
         COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT, COL_TEMP_HOT,

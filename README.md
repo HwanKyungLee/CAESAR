@@ -9,36 +9,36 @@ raw .dat 데이터에서 파장 보정·ILS 적용·DOAS 피팅까지 한 번에
 
 ```
 CEASER/
-├── main.py              ← GUI 진입점 (python main.py)
-├── Argos.png            ← 스플래시 스크린 이미지
+├── main.py                    ← GUI 진입점 (python main.py)
+├── Argos.png                  ← 스플래시 스크린 이미지
 │
-├── core/                ← 공용 연산·IO 모듈 (패키지)
-│   ├── data_io.py       ← 파일 I/O, 아라온 HK 파싱
-│   └── engine.py        ← DOAS 분석 엔진 (shift/squeeze/ILS/etalon)
+├── core/                      ← 공용 연산·IO 모듈 (패키지)
+│   ├── data_io.py             ← 파일 I/O, 아라온 HK 파싱
+│   └── engine.py              ← DOAS 분석 엔진 (shift/squeeze/ILS/etalon)
 │
-├── gui/                 ← PyQt6 UI 레이어 (패키지)
-│   ├── app_window.py    ← 메인 창 (CAESARAnalyzer)
-│   ├── ui_dialogs.py    ← 다이얼로그 / 모니터 위젯
-│   └── worker.py        ← 분석 QThread 워커
+├── gui/                       ← PyQt6 UI 레이어 (패키지)
+│   ├── app_window.py          ← 메인 창 (CAESARAnalyzer)
+│   ├── ui_dialogs.py          ← 다이얼로그 / 모니터 위젯
+│   └── worker.py              ← 분석 QThread 워커
 │
-├── tools/               ← 독립 실행 오프라인 분석 도구
-│   ├── reflectance_calc.py   ← 반사율 계산 핵심 모듈 (Rayleigh + CEAS)
-│   ├── auto_r_calculator.py  ← 배치 R 계산기 (ZA/He flag 파싱)
-│   ├── r_trend_monitor.py    ← R 시계열 모니터 / PNG·DAT 저장
-│   └── plot_r_results.py     ← 기계산된 _R.dat 파일 시각화
+├── tools/                     ← 독립 실행 오프라인 분석 도구
+│   ├── reflectance_calc.py    ← 반사율 계산 모듈 (Rayleigh + CEAS)
+│   ├── r_batch_calculator.py  ← 배치 R 계산기 (ZA/He flag 파싱, 폴더 단위)
+│   ├── r_trend_monitor.py     ← R 시계열 모니터 / PNG·DAT 저장
+│   └── r_results_plotter.py   ← 기계산된 _R.dat 파일 시각화
 │
-├── calibration/         ← 교정 파일 생성·갱신 스크립트
-│   ├── regen_cold_refs.py    ← Cold ILS 적용 reference 재생성
-│   └── mission_20260523.py   ← Hot/Cold sigma sweep + 파장 교정 미션
+├── calibration/               ← 교정 파일 생성·갱신 스크립트
+│   ├── build_cold_refs.py     ← Cold ILS 적용 reference 재생성
+│   └── ils_sigma_sweep.py     ← Hot/Cold ILS sigma 파라미터 스윕 + 파장 교정
 │
-├── campaigns/           ← 캠페인별 데이터 처리
+├── campaigns/                 ← 캠페인별 데이터 처리
 │   └── yeosu_2026/
-│       └── process_inlet.py  ← jNO2/jO3 Inlet 데이터 처리
+│       └── inlet_jno2_jo3.py  ← jNO2/jO3 Inlet 데이터 처리 (여수 2026)
 │
-└── scratch/             ← 일회성 진단·탐색 스크립트
-    ├── _fwhm_r_analysis.py
-    ├── _hot_fwhm_r_analysis.py
-    └── _test_rv.py
+└── diagnostics/               ← 진단·검증 스크립트
+    ├── cold_fwhm_r_check.py   ← Cold FWHM 측정 + R 진단
+    ├── hot_fwhm_r_check.py    ← Hot FWHM 측정 + R 진단
+    └── r_trimmed_mean_check.py ← R trimmed mean vs 전체 평균 검증
 ```
 
 ---
@@ -49,9 +49,12 @@ CEASER/
 main.py
  ├── gui.app_window  →  core.engine
  │                  →  core.data_io
- │                  →  gui.worker    →  core.data_io
- │                  →  gui.ui_dialogs →  core.data_io
+ │                  →  gui.worker       →  core.data_io
+ │                  →  gui.ui_dialogs   →  core.data_io
  └── core.data_io
+
+tools/r_trend_monitor.py  →  tools/reflectance_calc.py
+                          →  tools/r_batch_calculator.py  →  tools/reflectance_calc.py
 ```
 
 ---
@@ -66,6 +69,11 @@ python main.py
 **오프라인 R 시계열 모니터**
 ```
 python tools/r_trend_monitor.py
+```
+
+**배치 R 계산 (채널별 폴더 전체)**
+```
+python tools/r_batch_calculator.py
 ```
 
 ---

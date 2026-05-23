@@ -1,7 +1,7 @@
 """
-regen_cold_refs.py
+build_cold_refs.py
 ==================
-Regenerate Cold CAESAR ILS-Applied reference files with the correct FWHM.
+Cold CAESAR ILS-Applied reference 파일 재생성 (올바른 FWHM 적용).
 
 Background
 ----------
@@ -18,7 +18,7 @@ This script:
   6. Saves corrected Ref_*.dat files to D:\\CAESAR cold\\
   7. Also regenerates sigma(cold)_corrected.xlsx
 
-Run:  py regen_cold_refs.py
+Run:  py calibration/build_cold_refs.py
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """
-mission_20260523.py  ─  2026-05-23 박사님 New Mission
-======================================================
+ils_sigma_sweep.py — ILS sigma 파라미터 스윕 + Cold 파장 교정
+==============================================================
 
 Task 1. Hot sigma sweep   FWHM 0.60 → 0.80 nm (step 0.02, 11값)
         NO2 / CHOCHO / H2O / O4   → D:\CAESAR hot\roi1\sigma_sweep\
@@ -9,7 +9,7 @@ Task 3. Cold sigma sweep  측정 FWHM ±범위 (0.02 step)
 Task 4. Cold sigma sweep  3.0 → 4.0 nm (step 0.1, 11값)
         → D:\CAESAR cold\sigma_sweep\
 
-Run:  python mission_20260523.py
+Run:  python calibration/ils_sigma_sweep.py
 """
 
 from __future__ import annotations
