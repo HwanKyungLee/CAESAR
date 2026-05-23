@@ -1784,17 +1784,37 @@ class MonitorWidget(QWidget):
         self.p_sq = self.glw_trend.addPlot(row=1, col=0, title="Squeeze Trend")
         self.p_rms = self.glw_trend.addPlot(row=2, col=0, title="RMS Error Trend")
         self.p_rms.setLogMode(y=True)
-        
+
         for p in [self.p_sh, self.p_sq, self.p_rms]:
-            p.setClipToView(True) 
+            p.setClipToView(True)
             p.showGrid(x=True, y=True)
             p.setLabel('bottom', 'File Index')
-            
-        self.curve_sh = self.p_sh.plot(pen='g', symbol='o', symbolSize=4)
-        self.curve_sq = self.p_sq.plot(pen='b', symbol='o', symbolSize=4)
-        self.curve_rms = self.p_rms.plot(pen='k', symbol='o', symbolSize=4)
-        
-        self.x_data, self.y_sh, self.y_sq, self.y_rms = [], [], [], []
+            p.addLegend(offset=(10, 10))
+
+        # Channel colour palette  CH1=blue  CH2=orange  CH3=green
+        _CH_COLORS = {1: '#1f77b4', 2: '#ff7f0e', 3: '#2ca02c'}
+
+        # _trend_curves[ch][metric] → PlotDataItem
+        # _trend_data[ch][metric]   → list
+        self._trend_curves = {}
+        self._trend_data   = {}
+        for ch, col in _CH_COLORS.items():
+            pen = pg.mkPen(col, width=1.5)
+            lbl = f"CH{ch}"
+            self._trend_curves[ch] = {
+                'sh':  self.p_sh.plot(pen=pen, symbol='o', symbolSize=4, symbolBrush=col, name=lbl),
+                'sq':  self.p_sq.plot(pen=pen, symbol='o', symbolSize=4, symbolBrush=col, name=lbl),
+                'rms': self.p_rms.plot(pen=pen, symbol='o', symbolSize=4, symbolBrush=col, name=lbl),
+            }
+            self._trend_data[ch] = {'x': [], 'sh': [], 'sq': [], 'rms': []}
+
+        # Legacy single-channel aliases (keep for any external code that reads them)
+        self.curve_sh  = self._trend_curves[1]['sh']
+        self.curve_sq  = self._trend_curves[1]['sq']
+        self.curve_rms = self._trend_curves[1]['rms']
+        self.x_data, self.y_sh, self.y_sq, self.y_rms = \
+            self._trend_data[1]['x'], self._trend_data[1]['sh'], \
+            self._trend_data[1]['sq'], self._trend_data[1]['rms']
         
         layout.addWidget(self.glw_trend)
         self.tabs.addTab(self.tab_trend, "📈 Trend (Fast)")
@@ -2525,47 +2545,66 @@ class MonitorWidget(QWidget):
 
     def update_trend(self, data: dict):
         """
-        Appends one new data point to each trend graph (Shift, Squeeze, RMS).
+        Appends one new data point to the trend graphs for the correct channel.
+
+        Routes by data['channel'] so CH1 and CH2 (etc.) each draw their own
+        colour-coded curves without overwriting each other.
 
         Trend graphs keep the entire history in memory so the user can freely
         zoom and scroll without data being thrown away.  Auto-range is only
         applied along the X-axis (file index) to follow new data, while Y-axis
         zoom is left under user control.
         """
-        idx = data.get('idx', 0)
-        shift = data.get('shift', 0.0)
+        idx     = data.get('idx', 0)
+        shift   = data.get('shift', 0.0)
         squeeze = data.get('squeeze', 1.0)
-        rms = data.get('rms', 0.0)
-        self.x_data.append(idx)
-        self.y_sh.append(shift)
-        self.y_sq.append(squeeze)
-        self.y_rms.append(rms)
-        
-        # Keep full dataset for free zoom/pan
-        self.curve_sh.setData(self.x_data, self.y_sh)
-        self.curve_sq.setData(self.x_data, self.y_sq)
-        
-        rms_data = np.array(self.y_rms)
-        rms_data[rms_data <= 0] = 1e-9
-        self.curve_rms.setData(self.x_data, rms_data)
-        
+        rms     = data.get('rms', 0.0)
+        ch      = data.get('channel', 1)
+
+        # Fall back to CH1 bucket if an unsupported channel number arrives
+        if ch not in self._trend_data:
+            ch = 1
+
+        td = self._trend_data[ch]
+        td['x'].append(idx)
+        td['sh'].append(shift)
+        td['sq'].append(squeeze)
+        td['rms'].append(rms)
+
+        tc = self._trend_curves[ch]
+        tc['sh'].setData(td['x'], td['sh'])
+        tc['sq'].setData(td['x'], td['sq'])
+
+        rms_arr = np.array(td['rms'])
+        rms_arr[rms_arr <= 0] = 1e-9
+        tc['rms'].setData(td['x'], rms_arr)
+
         # Update Shift graph if in auto-range mode
-        if self.p_sh.getViewBox().autoRangeEnabled(): 
+        if self.p_sh.getViewBox().autoRangeEnabled():
             self.p_sh.enableAutoRange(axis='x', enable=True)
-            
+
         # Update Squeeze graph if in auto-range mode
-        if self.p_sq.getViewBox().autoRangeEnabled(): 
+        if self.p_sq.getViewBox().autoRangeEnabled():
             self.p_sq.enableAutoRange(axis='x', enable=True)
-            
+
         # Update RMS graph if in auto-range mode
-        if self.p_rms.getViewBox().autoRangeEnabled(): 
+        if self.p_rms.getViewBox().autoRangeEnabled():
             self.p_rms.enableAutoRange(axis='x', enable=True)
 
     def clear_trend(self):
-        self.x_data, self.y_sh, self.y_sq, self.y_rms = [], [], [], []
-        self.curve_sh.setData([], [])
-        self.curve_sq.setData([], [])
-        self.curve_rms.setData([], [])
+        """Clears trend history for all channels."""
+        for ch, td in self._trend_data.items():
+            for k in ('x', 'sh', 'sq', 'rms'):
+                td[k].clear()
+            tc = self._trend_curves[ch]
+            tc['sh'].setData([], [])
+            tc['sq'].setData([], [])
+            tc['rms'].setData([], [])
+        # Keep legacy aliases consistent
+        self.x_data = self._trend_data[1]['x']
+        self.y_sh   = self._trend_data[1]['sh']
+        self.y_sq   = self._trend_data[1]['sq']
+        self.y_rms  = self._trend_data[1]['rms']
 
     # =========================================================
     # [HQ Export] 

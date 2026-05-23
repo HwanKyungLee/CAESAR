@@ -953,9 +953,10 @@ class AnalysisWorker(QThread):
                     plot_signal = intensity_raw if is_linear_mode else optical_depth
                     diff_data = plot_signal - poly_val_orig - etalon_part_orig
                     diff_fit = fit_sign * abs_val_orig
-                    self.plot_update.emit(pixel_idx, diff_data, diff_fit, np.zeros_like(pixel_idx), final_params_dict, os.path.basename(file_path))
+                    ch_label = f"[CH{self.channel}] " if self.channel > 1 else ""
+                    self.plot_update.emit(pixel_idx, diff_data, diff_fit, np.zeros_like(pixel_idx), final_params_dict, ch_label + os.path.basename(file_path))
                     sh_val, sq_val = opt_shifts[ 0 ] if len(opt_shifts) > 0 else 0, opt_squeezes[ 0 ] if len(opt_squeezes) > 0 else 1
-                    self.trend_update.emit({'idx': i, 'shift': sh_val, 'squeeze': sq_val, 'rms': rms})
+                    self.trend_update.emit({'idx': i, 'shift': sh_val, 'squeeze': sq_val, 'rms': rms, 'channel': self.channel})
                     
             except Exception as e: 
                 result['Status'] = f"Skip: {str(e)}"
