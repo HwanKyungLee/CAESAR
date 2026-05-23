@@ -929,54 +929,96 @@ class RangeSelectorDialog(QDialog):
         self.main_layout.addLayout(btns_layout)
 
     def load_plot(self):
-        """Loads selected data, plots it, and activates the SpanSelector."""
+        """Loads selected data, plots it on a nm axis (if calibration available), and activates SpanSelector."""
         try:
             pixel_idx, intensity_raw = DataIO.load_measurement(self.data_path, pixel_min=0)
-            
+
             self.y = intensity_raw
-            self.x = pixel_idx
-            
-            # Plot main measured data
+            self._pixel_idx = pixel_idx   # always keep original pixel indices
+
+            # Use wavelength axis when available and length-matched
+            wave = getattr(self.engine, '_wave_axis', None)
+            if wave is not None:
+                wave = np.asarray(wave, dtype=float).flatten()
+            if wave is not None and len(wave) == len(intensity_raw):
+                self.x = wave
+                self._wave_mode = True
+                xlabel = "Wavelength (nm)"
+                # Convert current pixel selection → nm for the initial display marker
+                n = len(wave)
+                x0 = wave[min(self.min_sel, n - 1)]
+                x1 = wave[min(self.max_sel, n - 1)]
+            else:
+                self.x = pixel_idx
+                self._wave_mode = False
+                xlabel = "Pixel Index"
+                x0, x1 = self.min_sel, self.max_sel
+
             self.ax.clear()
-            self.ax.plot(self.x, self.y, 'k-', alpha=0.5, label='Measured Data')
-            self.ax.legend(loc='upper right')
-            
+            self.ax.plot(self.x, self.y, 'k-', alpha=0.6, label='Measured Spectrum')
+            self.ax.axvspan(x0, x1, alpha=0.15, color='steelblue', label='Current Range')
+            self.ax.set_xlabel(xlabel)
+            self.ax.legend(loc='upper right', fontsize=8)
+
             # Activate Range Selector (Semi-transparent yellow box)
             self.span = SpanSelector(
-                self.ax, self.on_select, 'horizontal', useblit=True, 
+                self.ax, self.on_select, 'horizontal', useblit=True,
                 props=dict(alpha=0.3, facecolor='yellow')
             )
-            
+
             # Update initial reference overlay
             self.update_ref(self.combo.currentText())
-            
+
         except Exception as e:
             print(f"Failed to load plot data: {e}")
 
     def update_ref(self, name):
         """Draws the selected reference gas spectrum on the secondary Y-axis."""
         self.ax2.clear()
-        
+
         if name in self.engine.interpolators:
-            # Fetch the interpolated data for the selected gas from the engine
-            y_ref = self.engine.interpolators[name](self.x.astype(float))
-            
+            wave_mode = getattr(self, '_wave_mode', False)
+            if wave_mode:
+                # x is already in nm — interpolators expect nm
+                x_nm = self.x.astype(float)
+            else:
+                # x is pixel index — convert to nm via engine wave axis if possible
+                wave = getattr(self.engine, '_wave_axis', None)
+                if wave is not None:
+                    wave = np.asarray(wave, dtype=float).flatten()
+                    x_nm = np.interp(self.x, np.arange(len(wave)), wave)
+                else:
+                    # No calibration at all — interpolators won't align; skip overlay
+                    self.canvas.draw()
+                    return
+
+            y_ref = self.engine.interpolators[name](x_nm)
+
             self.ax2.plot(self.x, y_ref, 'r--', alpha=0.8, label=f'Ref: {name}')
-            
-            # Secure margin for Y-axis scale
+
             ymin, ymax = np.min(y_ref), np.max(y_ref)
-            if ymax - ymin > 1e-65: 
+            if ymax - ymin > 1e-65:
                 margin = (ymax - ymin) * 0.1
                 self.ax2.set_ylim(ymin - margin, ymax + margin)
-                
-            self.ax2.legend(loc='upper left')
-            
+
+            self.ax2.legend(loc='upper left', fontsize=8)
+
         self.canvas.draw()
 
     def on_select(self, val_min, val_max):
-        """Stores the min/max indices of the range dragged via SpanSelector."""
-        self.min_sel = int(val_min)
-        self.max_sel = int(val_max)
+        """Stores pixel indices of the dragged range (converting from nm if needed)."""
+        if getattr(self, '_wave_mode', False):
+            # Convert nm → nearest pixel index
+            wave = self.x   # sorted ascending or descending
+            # Use argmin for robustness (handles both ascending and descending wavelength axes)
+            self.min_sel = int(np.argmin(np.abs(wave - val_min)))
+            self.max_sel = int(np.argmin(np.abs(wave - val_max)))
+            # Ensure min < max
+            if self.min_sel > self.max_sel:
+                self.min_sel, self.max_sel = self.max_sel, self.min_sel
+        else:
+            self.min_sel = int(val_min)
+            self.max_sel = int(val_max)
 
     def emit_apply(self):
         """Sends the selected range to the main program and closes the dialog."""
