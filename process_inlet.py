@@ -29,9 +29,12 @@ from scipy.io import savemat
 #   col 6~10 : 기타 채널
 # ================================================================
 def Func_Read_2026_Yeosu_Inlet(filename: str) -> np.ndarray:
-    # on_bad_lines='skip': 열 수가 다른 불완전 행(LabVIEW 중단 등) 자동 제거
-    df = pd.read_csv(filename, sep='\t', header=None, on_bad_lines='skip')
-    df = df.dropna()   # NaN이 포함된 행(열 부족) 추가 제거
+    # names=range(11): 열 수를 11로 강제 고정 (첫 행이 불완전해도 오탐 방지)
+    # on_bad_lines='skip': 열이 더 많은 이상 행 스킵
+    # dropna: 11열 미만인 불완전 행 제거
+    df = pd.read_csv(filename, sep='\t', header=None,
+                     names=range(11), on_bad_lines='skip')
+    df = df.dropna()
     return df.values
 
 
@@ -68,6 +71,9 @@ def main():
     for fname in rawfilenames:
         print(fname)
         temp = Func_Read_2026_Yeosu_Inlet(fname)
+        if len(temp) == 0:
+            print(f"  → 유효 데이터 없음, 건너뜀")
+            continue
         data_list.append(temp)
 
     data = np.vstack(data_list)
