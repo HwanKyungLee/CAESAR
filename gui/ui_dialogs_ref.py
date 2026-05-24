@@ -580,15 +580,29 @@ class ReferenceGeneratorDialog(QDialog):
             
             # 4. Extract data
             if 'pixel' in clean_cols and 'abssigma(nm)' in clean_cols:
-                self.ils_pixels = df['pixel'].values
-                self.ils_sigmas = df['abssigma(nm)'].values
+                px_raw = df['pixel'].values
+                sg_raw = df['abssigma(nm)'].values
             elif len(df.columns) >= 4:
                 # Fallback: force-extract column 1 (pixel) and column 4 (Sigma nm)
-                self.ils_pixels = df.iloc[:, 0].values
-                self.ils_sigmas = df.iloc[:, 3].values
+                px_raw = df.iloc[:, 0].values
+                sg_raw = df.iloc[:, 3].values
+            elif len(df.columns) >= 3:
+                # 3-column layout: Pixel | FWHM(nm) | abs_Sigma(nm)
+                px_raw = df.iloc[:, 0].values
+                sg_raw = df.iloc[:, 2].values
             else:
                 raise ValueError("Invalid FWHM file format. Cannot find Pixel and abs_Sigma(nm) columns.")
-            
+
+            # Coerce to numeric and drop non-data rows (e.g. a trailing 'AVERAGE'
+            # summary line) so .astype(float) downstream never sees a string.
+            px_num = pd.to_numeric(pd.Series(px_raw), errors='coerce')
+            sg_num = pd.to_numeric(pd.Series(sg_raw), errors='coerce')
+            valid = px_num.notna() & sg_num.notna()
+            if valid.sum() == 0:
+                raise ValueError("No numeric (Pixel, Sigma) rows found in FWHM file.")
+            self.ils_pixels = px_num[valid].to_numpy()
+            self.ils_sigmas = sg_num[valid].to_numpy()
+
             self.lbl_fwhm_info.setText(f"✅ Loaded: {len(self.ils_pixels)} Sigma points")
             self.lbl_fwhm_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
             QMessageBox.information(self, "Success", "FWHM Profile loaded successfully.")
