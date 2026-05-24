@@ -10,3 +10,6 @@ __pycache__/
 
 # 기타 분석 결과 출력
 *.dat.bak
+
+# HITRAN 라인리스트 로컬 캐시 (대용량, 사용자별 다운로드)
+hitran_data/

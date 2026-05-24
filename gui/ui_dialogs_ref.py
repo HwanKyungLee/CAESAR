@@ -526,8 +526,20 @@ class ReferenceGeneratorDialog(QDialog):
             gas_name = selected_text.split(':')[1].split('(')[0].strip()
             table_name = f"{gas_name}_Lines"
             
-            hapi.db_begin('hitran_data')
-            hapi.fetch(table_name, gas_id, 1, 1e7/w_max, 1e7/w_min)
+            # hitran_data 폴더는 리포 루트 기준 절대경로로 고정 (CWD 무관하게 캐시 재사용)
+            hitran_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'hitran_data'
+            )
+            os.makedirs(hitran_dir, exist_ok=True)
+            hapi.db_begin(hitran_dir)
+
+            # 이미 받아둔 라인리스트가 있으면 다운로드 생략 (오프라인 / hitran.org API 다운 시에도 동작)
+            if table_name not in hapi.LOCAL_TABLE_CACHE:
+                hapi.fetch(table_name, gas_id, 1, 1e7/w_max, 1e7/w_min)
+            else:
+                print(f"[HITRAN] '{table_name}' 로컬 캐시 사용 (다운로드 생략)")
+
             nu, coef = hapi.absorptionCoefficient_Voigt(
                 SourceTables=table_name, Environment={'p': P, 'T': T}, 
                 OmegaStep=0.02, HITRAN_units=False
