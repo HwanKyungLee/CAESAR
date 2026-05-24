@@ -102,12 +102,43 @@ class AnalysisWorker(QThread):
         self.etalon_freq_min = 0.02
         self.etalon_freq_max = 0.40
 
+    def _gas_active_in_window(self, gas_name: str, pixel_idx: np.ndarray) -> bool:
+        """
+        Returns True if gas_name should be included in the current fit window.
+
+        If ref_properties contains 'active_bands_nm' for this gas (e.g. '460,495'
+        or '360,380|460,495'), the current wavelength window must overlap with at
+        least one band.  An empty string means always active.
+
+        This prevents gases like O4 (bands only at ~360 nm and ~477 nm) from
+        polluting fits run in wavelength ranges where their cross-section is zero.
+        """
+        props = self.ref_properties.get(gas_name, {})
+        bands_str = props.get("active_bands_nm", "").strip()
+        if not bands_str:
+            return True  # No restriction
+
+        wave_nm = self.engine.pixel_to_wavelength(pixel_idx)
+        win_lo, win_hi = float(wave_nm.min()), float(wave_nm.max())
+
+        for seg in bands_str.split("|"):
+            parts = seg.strip().split(",")
+            if len(parts) == 2:
+                try:
+                    b_lo, b_hi = float(parts[0]), float(parts[1])
+                    if win_hi >= b_lo and win_lo <= b_hi:
+                        return True
+                except ValueError:
+                    pass
+        return False  # Fit window has no overlap with any declared band
+
     def auto_pre_calibrate(self, pixel_idx, optical_depth, poly_order):
         best_rms = np.inf
         best_shift = float(np.atleast_1d(self.params[ 0 ])[ 0 ])
         best_squeeze = 1.0
-        
-        shifts = np.arange(best_shift - 0.5, best_shift + 0.6, 0.5)
+
+        # Finer grid (0.1 px steps instead of 0.5) for better initial guess
+        shifts = np.arange(best_shift - 0.5, best_shift + 0.51, 0.1)
         squeezes = np.arange(0.999, 1.002, 0.001)
         
         for sh in shifts:
@@ -269,6 +300,14 @@ class AnalysisWorker(QThread):
             t_coeff = float(props.get("t_coeff",  0.0))
             t_corr[name] = 1.0 + t_coeff * (self.temperature - t_ref) / 100.0
 
+        # Pre-compute per-gas band activity for the current fit window.
+        # A gas with 'active_bands_nm' set is zeroed out when its absorption
+        # bands don't overlap the current wavelength range (e.g. O4 at 426-440 nm).
+        gas_active = {
+            name: self._gas_active_in_window(name, pixel_idx)
+            for name in self.engine.gas_list
+        }
+
         W_current = W_initial.copy()
         max_iters = 10 if use_robust else 1  # Up to 10 IRLS iterations; break early on convergence
         prev_weights = np.diag(W_current).copy()
@@ -280,13 +319,16 @@ class AnalysisWorker(QThread):
                 val_dict.update(fixed_vars)
                 for v, t in linked_vars.items(): val_dict[ v ] = val_dict.get(t, 0.0)
                 
-                e_p = theta[ -1 ]           
+                e_p = theta[ -1 ]
                 cols = []
                 for name in self.engine.gas_list:
                     sh_i, sq_i = val_dict[ f"{name}_sh" ], val_dict[ f"{name}_sq" ]
                     pixel_shifted = (pixel_idx - absolute_center) * sq_i + absolute_center + sh_i
                     raw_ref = fit_sign * self.engine.interpolators[ name ](pixel_shifted) / self.engine.scaling_factors[ name ]
                     raw_ref = raw_ref * t_corr[name]
+                    # Zero out gases whose absorption band doesn't cover this fit window
+                    if not gas_active[name]:
+                        raw_ref = np.zeros_like(raw_ref)
                     cols.append(raw_ref)
 
                 for j in range(poly_order + 1): cols.append(T[ :, j ])
@@ -328,7 +370,10 @@ class AnalysisWorker(QThread):
             for i, name in enumerate(self.engine.gas_list):
                 pixel_shifted = (pixel_idx - absolute_center) * opt_squeezes[ i ] + absolute_center + opt_shifts[ i ]
                 raw_ref = fit_sign * self.engine.interpolators[ name ](pixel_shifted) / self.engine.scaling_factors[ name ]
-                cols.append(raw_ref * t_corr[name])
+                col = raw_ref * t_corr[name]
+                if not gas_active[name]:
+                    col = np.zeros_like(col)
+                cols.append(col)
             for j in range(poly_order + 1): cols.append(T[ :, j ])
             cols.append(np.sin(fixed_e_f * pixel_idx + best_ep))
             
@@ -813,9 +858,12 @@ class AnalysisWorker(QThread):
 
                         result['Status'] = status
 
-                        # [Bug Fix 2]: If fitting succeeds, register this Shift as the center for the next file (last_valid_shift)!
-                        # Completely removed the < 0.5 condition to free the Step Limit constraint.
-                        if status in ["OK", "Recovered"] and len(opt_shifts) > 0:
+                        # Always update last_valid_shift so the step-limit window can
+                        # drift even during Unstable periods.  Without this the optimizer
+                        # stays locked at the same center and perpetually hits the wall.
+                        # The per-scan step_limit in _setup_fit_parameters already
+                        # guarantees the shift cannot jump more than step_limit px/scan.
+                        if len(opt_shifts) > 0:
                             last_valid_shift = opt_shifts[ 0 ]
 
                         # If OK or already retrying, exit the loop

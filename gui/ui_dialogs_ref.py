@@ -162,18 +162,25 @@ class RefPropertiesDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("⚙️ Edit Reference Properties")
         _s = _ui_scale()
-        self.resize(int(1020 * _s), int(350 * _s))
+        self.resize(int(1200 * _s), int(350 * _s))
         layout = QVBoxLayout(self)
 
-        self.table = QTableWidget(len(gas_list), 7)
-        self.table.setHorizontalHeaderLabels(["Gas Name", "Shift Mode", "Shift Params", "Squeeze Mode", "Squeeze Params", "T_ref (°C)", "dσ/dT (%/°C)"])
+        self.table = QTableWidget(len(gas_list), 8)
+        self.table.setHorizontalHeaderLabels([
+            "Gas Name", "Shift Mode", "Shift Params",
+            "Squeeze Mode", "Squeeze Params",
+            "T_ref (°C)", "dσ/dT (%/°C)",
+            "Active Bands (nm)",
+        ])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        # Last two columns are numeric spinboxes — cap their width
+        # Fixed-width columns: T_ref, dσ/dT, Active Bands
         hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(5, 90)
         self.table.setColumnWidth(6, 110)
+        self.table.setColumnWidth(7, 160)
         
         # Synchronized variable name with UniversalEngine
         self.gas_list = gas_list
@@ -261,11 +268,23 @@ class RefPropertiesDialog(QDialog):
             t_coeff_spin.setToolTip("Temperature coefficient: σ(T) = σ(T_ref)×(1 + coeff×ΔT/100)\n0.0 = no correction")
             self.table.setCellWidget(i, 6, t_coeff_spin)
 
+            # --- Active absorption bands ---
+            bands_edit = QLineEdit(props.get("active_bands_nm", ""))
+            bands_edit.setPlaceholderText("e.g. 460,495 or 360,380|460,495")
+            bands_edit.setToolTip(
+                "Wavelength bands (nm) where this gas has real absorption.\n"
+                "Format: 'lo,hi' or 'lo1,hi1|lo2,hi2' for multiple bands.\n"
+                "Leave empty → always included in the fit.\n"
+                "Example (O4): '460,495'  — disables O4 outside that range."
+            )
+            self.table.setCellWidget(i, 7, bands_edit)
+
             # Save widget references for data extraction
             self.param_widgets[gas] = {
                 "sh_cmb": cmb_sh, "sh_lim": sh_lim, "sh_fix": sh_fix, "sh_lnk": sh_lnk,
                 "sq_cmb": cmb_sq, "sq_lim": sq_lim, "sq_fix": sq_fix, "sq_lnk": sq_lnk,
-                "t_ref_spin": t_ref_spin, "t_coeff_spin": t_coeff_spin
+                "t_ref_spin": t_ref_spin, "t_coeff_spin": t_coeff_spin,
+                "bands_edit": bands_edit,
             }
         
         layout.addWidget(self.table)
@@ -300,7 +319,8 @@ class RefPropertiesDialog(QDialog):
                 "sh_mode": sh_mode, "sh_val": sh_val,
                 "sq_mode": sq_mode, "sq_val": sq_val,
                 "t_ref": w["t_ref_spin"].value(),
-                "t_coeff": w["t_coeff_spin"].value()
+                "t_coeff": w["t_coeff_spin"].value(),
+                "active_bands_nm": w["bands_edit"].text().strip(),
             }
         return props
        
