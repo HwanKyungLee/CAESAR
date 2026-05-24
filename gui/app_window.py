@@ -43,7 +43,7 @@ class CAESARAnalyzer(QMainWindow):
         self.init_ui()
         
     def init_ui(self):
-        from data_io import ui_scale
+        from core.data_io import ui_scale
         s = ui_scale()
         self._s = s
         self.setWindowTitle('CAESAR Pro v1.0')
@@ -1911,7 +1911,7 @@ class CAESARAnalyzer(QMainWindow):
             return
         try:
             first = self._entry_filepath(self.file_list[0])
-            from data_io import DataIO
+            from core.data_io import DataIO
             n = DataIO.detect_channels(first)
             self._detected_channels = n
             ch_names = {1: "CH1", 2: "CH1+CH2", 3: "CH1+CH2+CH3"}
