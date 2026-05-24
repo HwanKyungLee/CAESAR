@@ -647,18 +647,25 @@ class ReferenceGeneratorDialog(QDialog):
             # 4. Wavelength-Dependent Convolution (per-pixel Gaussian kernel)
             for i, target_w in enumerate(self.target_wavelengths):
                 inst_sigma = target_sigmas[i]
-                
+
                 # Variance addition: σ_applied² = σ_inst² − σ_lit²
-                # If the literature resolution is already coarser than our instrument,
-                # we set added_var to a tiny positive number (no de-sharpening possible).
-                if inst_sigma <= lit_sigma:
-                    added_var = 1e-10   # Effectively no extra broadening
-                else:
-                    added_var = (inst_sigma**2) - (lit_sigma**2)
-                
+                added_var = (inst_sigma**2) - (lit_sigma**2)
+
+                # Direct-sampling fallback (convolution with a delta = identity):
+                #  - inst_sigma invalid (NaN / ≤0 from edge extrapolation), or
+                #  - the extra-broadening kernel would be narrower than the
+                #    integration grid, in which case the discrete Gaussian sum
+                #    can miss the peak entirely and return ~0 instead of the
+                #    true value.  Sampling the raw spectrum at target_w is the
+                #    mathematically correct limit here.
+                if (not np.isfinite(inst_sigma) or inst_sigma <= 0
+                        or added_var <= (2.0 * hr_step)**2):
+                    degraded_data[i] = float(f_raw(target_w))
+                    continue
+
                 kernel = (1.0 / np.sqrt(2 * np.pi * added_var)) * \
                          np.exp(-0.5 * ((hr_wave - target_w)**2) / added_var)
-                
+
                 degraded_data[i] = np.sum(hr_data * kernel) * hr_step
             
             self.final_ready_data = degraded_data
