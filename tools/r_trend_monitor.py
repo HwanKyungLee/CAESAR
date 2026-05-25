@@ -109,6 +109,10 @@ R_EXPECTED_COLD = 0.9990
 R_EXPECTED_HOT  = 0.9990
 R_WARN_DELTA = 0.0005
 
+# 타임존 상수 (설정에서 참조하므로 여기서 먼저 정의)
+_UTC      = timezone.utc
+_KST_TZ   = timezone(timedelta(hours=9))
+
 # Cold DAQ는 파일 mtime을 UTC로 기록 → _UTC 사용 (KST로 읽으면 +9시간 오차 발생)
 # Hot DAQ는 KST로 기록 → _KST_TZ 사용
 COLD_TS_TZ = _UTC
@@ -128,8 +132,6 @@ PLOT_DPI   = 150
 # ════════════════════════════════════════════════════════════════
 
 _DATE_RE  = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
-_UTC      = timezone.utc
-_KST_TZ   = timezone(timedelta(hours=9))
 
 def _parse_timestamp(filepath: str) -> datetime:
     """파일 mtime (DAQ가 파일을 연 시각)을 KST datetime으로 반환.
