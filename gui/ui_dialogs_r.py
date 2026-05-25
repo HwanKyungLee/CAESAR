@@ -351,6 +351,10 @@ class _RTrendWorker(QThread):
     def run(self):
         import io as _io
         try:
+            import sys as _sys, os as _os
+            _tools_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
+            if _tools_dir not in _sys.path:
+                _sys.path.insert(0, _tools_dir)
             import r_trend_monitor as rtm
             cfg = self.cfg
 
