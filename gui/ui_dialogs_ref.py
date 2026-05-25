@@ -507,12 +507,19 @@ class ReferenceGeneratorDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to load Raw file:\n{e}")
 
     def generate_hitran_gas(self):
-        try: 
+        try:
             import hapi
-        except ImportError: 
+        except ImportError:
             QMessageBox.critical(self, "Dependency Error", "The 'hapi' library is not installed.")
             return
-            
+
+        # hitran.org가 HTTPS 전용으로 전환됨 → hapi 기본값 http:// 는 연결 거부됨.
+        # GLOBAL_HOST를 https로 강제 지정해야 fetch가 동작한다.
+        try:
+            hapi.GLOBAL_HOST = "https://hitran.org"
+        except Exception:
+            pass
+
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             T, P = self.spin_temp.value(), self.spin_press.value()
