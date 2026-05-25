@@ -989,12 +989,12 @@ class AlphaExportWorker(QThread):
                  rl_factor, cavity_len,
                  output_dir,
                  dark_spectrum=None,    # 1-D float array (full 2048 px), or None
-                 channel=1):            # spectrometer channel number (default 1)
+                 channel=1):            # spectrometer channel (1=CH1/ROI1)
         super().__init__()
+        self.channel     = channel
         self.file_list   = file_list
         self.pixel_min   = pixel_min
         self.pixel_max   = pixel_max
-        self.channel     = channel
         self.wave_nm     = np.asarray(wave_nm, dtype=float)
         self.flag_za     = flag_za
         self.flag_he     = flag_he
@@ -1044,6 +1044,12 @@ class AlphaExportWorker(QThread):
         za_t_list  = []   # ZA temperature
         za_p_list  = []   # ZA pressure
 
+        # He measurements — collected for clean (block-averaged) R-calibration
+        he_gidx    = []
+        he_spectra = []
+        he_t_list  = []
+        he_p_list  = []
+
         # R-calibration candidates (He/ZA pairs)
         calib_candidates = []   # list of (1-R)/d arrays — take median later
 
@@ -1086,49 +1092,20 @@ class AlphaExportWorker(QThread):
                       (self.flag_amb and state_flag in self.flag_amb) or
                       (not self.flag_amb and not is_za and not is_he))
 
+            # ── 단순 수집만 (R/I0는 Pass 1 종료 후 injection 블록평균으로 계산) ──
+            # 개별 단일 스캔은 noise(~1%)가 커서 I0에 그대로 실리면 alpha가 망가진다.
+            # 한 injection의 모든 ZA/He 스캔을 모아 두었다가 블록평균한다.
             if is_he:
-                if 510 not in self.flag_he or state_flag == 510:
-                    # 다크 보정 후 He 스펙트럼 저장 (injecting=510만 사용)
-                    i_he_raw = intensity_raw.copy()
-                    i_he_last   = (i_he_raw - dark) if has_dark else i_he_raw
-                    t_he_last   = env_t
-                    p_he_last   = env_p
+                he_gidx.append(global_idx)
+                he_spectra.append(intensity_raw.copy())
+                he_t_list.append(env_t)
+                he_p_list.append(env_p)
 
             elif is_za:
-                if 500 not in self.flag_za or state_flag == 500:
-                    # 500=injecting만 PCHIP I₀ 및 R-cal에 사용
-                    # 501=setflow, 502=wait before, 503=wait after 는 스킵
-                    i_za_dc = (intensity_raw - dark) if has_dark else intensity_raw.copy()
-                    za_gidx.append(global_idx)
-                    za_spectra.append(i_za_dc)
-                    za_t_list.append(env_t)
-                    za_p_list.append(env_p)
-                else:
-                    i_za_dc = None
-
-                if i_za_dc is not None and i_he_last is not None:
-                    # R-calibration: dark-corrected ZA / dark-corrected He
-                    # MATLAB 경험식 Rayleigh + rl_factor 퍼지 보정 적용
-                    alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, env_t, env_p, 'zero_air')
-                    alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_he_last, p_he_last, 'helium')
-                    i_he_s = np.where(np.abs(i_he_last) > 1.0, i_he_last, 1.0)
-                    ratio  = i_za_dc / i_he_s
-                    with np.errstate(divide='ignore', invalid='ignore'):
-                        omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
-                    valid = np.isfinite(omr_d) & (omr_d > 0)
-                    if valid.mean() >= 0.90 and np.nanmean(omr_d[valid]) < 1e-5:
-                        x = np.arange(n_pix)
-                        omr_d_clean = np.interp(x, x[valid], omr_d[valid])
-                        calib_candidates.append(omr_d_clean)
-                        if fp not in calib_info_per_file:
-                            leff  = np.mean(1.0 / omr_d_clean) * 1e-5
-                            rmean = 1.0 - np.mean(omr_d_clean) * self.cavity_len
-                            calib_info_per_file[fp] = (
-                                f"omr_d={np.mean(omr_d_clean):.3e} cm-1  "
-                                f"Leff={leff:.2f} km  R={rmean:.6f}")
-                            self.status_msg.emit(
-                                f"[R-CAL] {os.path.basename(fp)} row{row_idx}: "
-                                f"Leff={leff:.2f} km  R={rmean:.6f}")
+                za_gidx.append(global_idx)
+                za_spectra.append(intensity_raw.copy())
+                za_t_list.append(env_t)
+                za_p_list.append(env_p)
 
             elif is_amb:
                 amb_buffer.append((fp, row_idx, global_idx, env_t, env_p,
@@ -1139,6 +1116,66 @@ class AlphaExportWorker(QThread):
         if not self.is_running:
             self.finished.emit("ERROR: 중단됨")
             return
+
+        # ── Block-average each ZA / He injection into one clean spectrum ──────
+        # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.
+        # 한 injection(연속 global idx)의 모든 스캔을 평균해 깨끗한 I0/R을 만든다.
+        # (박사님 MATLAB Zs/Alpha 의 blockfinder 평균과 동일 접근)
+        def _block_average(gidx_list, spec_list, t_list, p_list, gap=10):
+            if not gidx_list:
+                return [], [], [], []
+            g = np.array(gidx_list, dtype=float)
+            order = np.argsort(g)
+            g = g[order]
+            S = np.array(spec_list, dtype=float)[order]
+            T = np.array(t_list, dtype=float)[order]
+            P = np.array(p_list, dtype=float)[order]
+            splits = np.where(np.diff(g) > gap)[0] + 1
+            bg = [float(np.mean(b))     for b in np.split(g, splits)]
+            bs = [np.nanmean(b, axis=0) for b in np.split(S, splits)]
+            bt = [float(np.nanmean(b))  for b in np.split(T, splits)]
+            bp = [float(np.nanmean(b))  for b in np.split(P, splits)]
+            return bg, bs, bt, bp
+
+        n_za_raw, n_he_raw = len(za_gidx), len(he_gidx)
+        za_gidx, za_spectra, za_t_list, za_p_list = _block_average(
+            za_gidx, za_spectra, za_t_list, za_p_list)
+        he_gidx, he_spectra, he_t_list, he_p_list = _block_average(
+            he_gidx, he_spectra, he_t_list, he_p_list)
+        self.status_msg.emit(
+            f"[I0] ZA {n_za_raw}스캔→{len(za_gidx)}블록, He {n_he_raw}스캔→{len(he_gidx)}블록 평균")
+
+        # dark 보정 (블록평균 후 한 번만)
+        if has_dark:
+            za_spectra = [s - dark for s in za_spectra]
+            he_spectra = [s - dark for s in he_spectra]
+
+        # ── R-calibration: clean ZA block / clean He(mean) ───────────────────
+        if za_spectra and he_spectra:
+            i_he_clean   = np.nanmean(np.array(he_spectra), axis=0)
+            t_he_clean   = float(np.nanmean(he_t_list))
+            p_he_clean   = float(np.nanmean(he_p_list))
+            i_he_s       = np.where(np.abs(i_he_clean) > 1.0, i_he_clean, 1.0)
+            alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_he_clean, p_he_clean, 'helium')
+            for i_za_b, t_za_b, p_za_b, g_za_b in zip(za_spectra, za_t_list, za_p_list, za_gidx):
+                alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_za_b, p_za_b, 'zero_air')
+                ratio = i_za_b / i_he_s
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
+                valid = np.isfinite(omr_d) & (omr_d > 0)
+                if valid.mean() >= 0.90 and np.nanmean(omr_d[valid]) < 1e-5:
+                    x = np.arange(n_pix)
+                    omr_d_clean = np.interp(x, x[valid], omr_d[valid])
+                    calib_candidates.append(omr_d_clean)
+                    leff  = np.mean(1.0 / omr_d_clean) * 1e-5
+                    rmean = 1.0 - np.mean(omr_d_clean) * self.cavity_len
+                    info  = f"omr_d={np.mean(omr_d_clean):.3e} cm-1  Leff={leff:.2f} km  R={rmean:.6f}"
+                    self.status_msg.emit(f"[R-CAL] block g~{g_za_b:.0f}: {info}")
+            # 헤더용 R 정보(전 파일 공통)
+            calib_str = (f"Leff={np.mean(1.0/np.median(np.array(calib_candidates),axis=0))*1e-5:.2f} km"
+                         if calib_candidates else "unknown")
+            for fp_amb in {e[0] for e in amb_buffer}:
+                calib_info_per_file[fp_amb] = calib_str
 
         # ── Build PCHIP I₀ interpolator ───────────────────────────────────────
         if len(za_gidx) < 2:
