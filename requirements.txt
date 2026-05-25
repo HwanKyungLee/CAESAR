@@ -4,3 +4,4 @@ scipy>=1.10.0
 matplotlib>=3.7.0
 pandas>=2.0.0
 pyqtgraph>=0.13.0
+hitran-api>=1.2.0
