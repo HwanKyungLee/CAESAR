@@ -109,6 +109,11 @@ R_EXPECTED_COLD = 0.9990
 R_EXPECTED_HOT  = 0.9990
 R_WARN_DELTA = 0.0005
 
+# Cold DAQ는 파일 mtime을 UTC로 기록 → _UTC 사용 (KST로 읽으면 +9시간 오차 발생)
+# Hot DAQ는 KST로 기록 → _KST_TZ 사용
+COLD_TS_TZ = _UTC
+HOT_TS_TZ  = _KST_TZ
+
 # [방법 1] 전체 처리 시 None 사용
 COLD_FILES = None
 HOT_FILES  = None
@@ -151,7 +156,8 @@ def _parse_timestamp(filepath: str) -> datetime:
         return datetime.now(tz=_KST_TZ)
 
 def scan_directory(directory: str, wave_nm, file_list=None,
-                   col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD) -> list[dict]:
+                   col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
+                   ts_tz=None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 **타임스탬프 순**으로 반환한다.
 
     수정 내역
@@ -186,7 +192,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
         # ※ col1은 센티초(centiseconds) 단위 → UTC 초로 오해하면 날짜가 수백 일 틀림.
         #   col1의 0→65444 리셋은 스캔 사이클 재시작일 뿐, 자정 crossing이 아님.
         #   상세 설명은 파일 맨 위 docstring 참조.
-        ts = datetime.fromtimestamp(os.path.getmtime(fp), tz=_KST_TZ)
+        _tz = ts_tz if ts_tz is not None else _KST_TZ
+        ts = datetime.fromtimestamp(os.path.getmtime(fp), tz=_tz)
         ts_str = ts.strftime("%m/%d %H:%M")
 
         # He 스캔을 만나도 보정 품질을 먼저 확인한 뒤에만 last_he 갱신
@@ -387,13 +394,15 @@ def main():
     bar = "=" * 64
     print(f"\n{bar}\n  Cold 채널 처리\n{bar}")
     results_cold = scan_directory(COLD_DIR, wave_nm_cold, COLD_FILES,
-                                  col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD) \
+                                  col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
+                                  ts_tz=COLD_TS_TZ) \
                    if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
     # ── Hot 채널 ──────────────────────────────────────────────────
     print(f"\n{bar}\n  Hot 채널 처리\n{bar}")
     results_hot = scan_directory(HOT_DIR, wave_nm_hot, HOT_FILES,
-                                 col_press=COL_PRESS_HOT, col_temp=COL_TEMP_HOT) \
+                                 col_press=COL_PRESS_HOT, col_temp=COL_TEMP_HOT,
+                                 ts_tz=HOT_TS_TZ) \
                   if (HOT_FILES is not None or os.path.isdir(HOT_DIR)) else []
 
     # ── 출력 폴더 이름 결정 및 저장 ──────────────────────────────────
