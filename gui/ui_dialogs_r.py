@@ -42,7 +42,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
                              QCheckBox, QGridLayout, QInputDialog, QRadioButton, QButtonGroup,
                              QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
 
 
@@ -338,6 +338,27 @@ class R_GeneratorDialog(QDialog):
 # PostProcessDialog: functionality superseded by save() in app_window.py.
 # Retained here as a stub so that any external scripts importing this class
 # do not break with an ImportError.
+class _LiveStream:
+    """sys.stdout 대체 — write() 호출마다 log 시그널로 실시간 전달."""
+    def __init__(self, emit_fn):
+        self._emit = emit_fn
+        self._buf  = ""
+
+    def write(self, text):
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self._emit(line)
+
+    def flush(self):
+        if self._buf:
+            self._emit(self._buf)
+            self._buf = ""
+
+    def isatty(self):
+        return False
+
+
 class _RTrendWorker(QThread):
     """백그라운드에서 r_trend_monitor.main()을 실행."""
     log        = pyqtSignal(str)
@@ -368,18 +389,16 @@ class _RTrendWorker(QThread):
             rtm.HOT_FILES     = cfg.get("hot_files",  None)
             rtm.SHOW_PLOT     = False
 
-            # stdout 캡처 → log 시그널
-            import sys as _sys
+            # stdout → log 시그널 실시간 전달
+            _live = _LiveStream(self.log.emit)
             old_stdout = _sys.stdout
-            _sys.stdout = buf = _io.StringIO()
+            _sys.stdout = _live
             _rtm_result = None
             try:
                 _rtm_result = rtm.main()
             finally:
                 _sys.stdout = old_stdout
-
-            for line in buf.getvalue().splitlines():
-                self.log.emit(line)
+                _live.flush()
 
             # main()이 (results_cold, results_hot, out_folder) 튜플을 반환하면
             # data_ready 시그널로 인라인 플롯에 전달한다
@@ -407,8 +426,11 @@ class RTrendMonitorDialog(QDialog):
         self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열")
         self.resize(1150, 720)
         self._worker = None
-        self._cold_files_list: list = []   # 파일 직접 선택 시 채워짐
+        self._cold_files_list: list = []
         self._hot_files_list:  list = []
+        self._t_start = None
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick_elapsed)
         self._init_ui()
 
     def _pick_dir(self, line_edit):
@@ -512,6 +534,18 @@ class RTrendMonitorDialog(QDialog):
         main.addWidget(btn_run)
         self._btn_run = btn_run
 
+        # ── 진행 상태 표시 ──────────────────────────────────────────
+        prog_row = QHBoxLayout()
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)   # indeterminate (애니메이션)
+        self._progress.setFixedHeight(16)
+        self._progress.setVisible(False)
+        self._lbl_elapsed = QLabel("")
+        self._lbl_elapsed.setStyleSheet("color: #555; font-size: 11px; min-width: 80px;")
+        prog_row.addWidget(self._progress, stretch=1)
+        prog_row.addWidget(self._lbl_elapsed)
+        main.addLayout(prog_row)
+
         # ── 하단: 로그(왼쪽) + 시계열 플롯(오른쪽) ────────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -562,6 +596,10 @@ class RTrendMonitorDialog(QDialog):
         self._log.clear()
         self._pw.clear()
         self._btn_run.setEnabled(False)
+        self._progress.setVisible(True)
+        self._t_start = time.time()
+        self._timer.start(1000)
+        self._lbl_elapsed.setText("경과: 00:00")
         self._worker = _RTrendWorker(cfg)
         self._worker.log.connect(self._log.append)
         self._worker.data_ready.connect(self._on_data_ready)
@@ -605,7 +643,19 @@ class RTrendMonitorDialog(QDialog):
             hi = max(all_r) + 0.05
             self._pw.setYRange(lo, hi, padding=0)
 
+    def _tick_elapsed(self):
+        if self._t_start is not None:
+            elapsed = int(time.time() - self._t_start)
+            m, s = divmod(elapsed, 60)
+            self._lbl_elapsed.setText(f"경과: {m:02d}:{s:02d}")
+
     def _on_done(self, out_dir: str):
+        self._timer.stop()
+        self._progress.setVisible(False)
+        elapsed = int(time.time() - self._t_start) if self._t_start else 0
+        m, s = divmod(elapsed, 60)
+        self._lbl_elapsed.setText(f"완료 ({m:02d}:{s:02d})")
+        self._t_start = None
         self._btn_run.setEnabled(True)
         if out_dir:
             self._log.append(f"\n✅ 완료 → 결과 폴더: {out_dir}")
