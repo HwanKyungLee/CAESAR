@@ -1,135 +1,110 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: 2026-05-24
+> 최종 업데이트: **2026-05-26**  (이전 내용은 git history 참조)
 
 ---
 
-## 0. 현재 깃 상태
+## 0. 한 줄 요약
 
-- **작업 브랜치**: `claude/great-bardeen-s28sN` (GitHub PR #6, DRAFT)
-- **PR #6 = main + 4커밋** (충돌 없음, main보다 앞서 있음):
-  ```
-  7b49bdd  fix: HITRAN 생성 시 로컬 캐시 재사용 (오프라인/API 다운 대응)   ← 이번 세션
-  6a00399  fix: FWHM 프로파일 로더가 AVERAGE 요약 행에서 죽던 문제 해결      ← 이번 세션
-  b017f26  Make reference-generator ILS convolution robust ...            ← 클라우드 세션(원래 PR#6)
-  d89e2fb  Fix O4 band-gating, shift drift lock, and pre-calibration grid ← 클라우드 세션(원래 PR#6)
-  ```
-- **main 브랜치**에는 이 세션 전반부의 리팩토링이 이미 푸시됨 (아래 2번). PR #6는 그 위에서 분기되어 전부 포함.
+**오늘의 성과: Stage 4 알파 추출의 핵심 버그를 찾아 고쳤다.**
+DOAS 피팅 잔차가 **96% → 10.6%** 로 개선됨 (못 쓰던 상태 → ~1ppb NO2 검출 가능한 실용 수준).
+커밋 `5864c0e` (main에 푸시 완료). 1%(논문급, ~0.2ppb)까지는 추가 작업 필요 (4번 참조).
 
 ---
 
-## 1. 이번 세션 전반부 — 깃 구조 리팩토링 (main에 푸시 완료)
+## 1. 현재 깃 상태
 
-원래 평평했던 루트를 패키지/폴더 구조로 정리하고 GitHub에 푸시.
-
-| 커밋 | 내용 |
-|---|---|
-| `06a8577` | `RayleighPhysics`, `KalmanTracker` 중복 제거 → `core/physics.py`로 통합. `gui/worker.py`·`tools/reflectance_calc.py`가 거기서 import |
-| `fe6c6bd` | 144KB짜리 `gui/ui_dialogs.py`를 3개로 분리: `ui_dialogs_calib.py`(교정), `ui_dialogs_ref.py`(레퍼런스/모니터), `ui_dialogs_r.py`(R 도구). 기존 `ui_dialogs.py`는 하위호환 re-export wrapper |
-| `a70ad5c` | `diagnostics/cold_fwhm_r_check.py` + `hot_fwhm_r_check.py` → `fwhm_r_check.py`로 병합 (`--mode cold\|hot`) |
-| `ac0f1fa` | README를 새 구조로 갱신 |
-| `e4c998a` | `app_window.py`에 남아있던 `from data_io import` (lazy import 2곳) → `from core.data_io import`로 수정 |
-
-폴더 구조 요약: `core/`(연산·IO·물리), `gui/`(PyQt6 UI), `tools/`(오프라인 R 계산), `calibration/`, `campaigns/`, `diagnostics/`. 자세한 건 `README.md` 참조.
+- **브랜치: `main`** (모든 작업 머지·푸시 완료). 작업트리 깨끗.
+- 오늘 핵심 커밋: **`5864c0e` fix: AlphaExportWorker I0 노이즈 버그 수정**
+- 그 아래로 다른 세션/PR들도 머지됨:
+  - `d0b502f` Add two-step analysis workflow (Raw→Alpha→Fitting) (#14)
+  - `cf24ac9` Hide ILS convolution (#15), `fd0ad43` r_trend_monitor NameError 수정 (#16)
+  - PR #13(=이전 great-bardeen 브랜치: core/physics 분리, ui_dialogs 3분할, FWHM/HITRAN 수정 등) 머지됨
+- 다른 컴퓨터에서 이어받기: `git clone` 또는 `git pull origin main` 한 방이면 됨.
 
 ---
 
-## 2. PR #6 검증 결과 (실제 데이터로 검증함)
-
-클라우드 세션이 만든 DOAS 피팅 수정 2커밋(`d89e2fb`, `b017f26`)을 로컬 실데이터로 검증.
-
-### 수정 내용 & 판정
-| 수정 | 판정 |
-|---|---|
-| **O4 밴드 게이팅** — `ref_properties`에 `active_bands_nm`(예 `460,495`) 추가, 피팅 윈도우가 밴드와 안 겹치면 해당 가스 컬럼을 0으로 | ✅ 작동. 실제 교정으로 426-440nm→O4 비활성, 432-480nm→활성 확인 |
-| **Shift 드리프트 락 해제** — `last_valid_shift`를 OK일 때만 갱신하던 걸 항상 갱신. `step_limit`(0.5px/scan)이 폭주 방지 | ✅ 타당. ±0.49999 영구 고착 해소 |
-| **pre-calibrate 그리드** — shift 3포인트(0.5px) → 11포인트(0.1px) | ✅ (커밋 제목 "coarser"는 오기, 실제론 finer) |
-| **Ref generator 견고화** — 좁은/무효 커널이면 직접 샘플링 fallback (kernel-sum=0 회피) | ✅ |
-
-### ⚠️ 발견한 미결 이슈 — O4 보고값 (결정 보류)
-- 게이팅된 가스 컬럼을 0으로 만들면 설계행렬이 특이(cond≈4e16)가 되고, `lsq_linear`가 O4 계수를 **0이 아닌 임의값(테스트에서 0.1)** 으로 반환.
-- 2.4e29 발산은 확실히 막고(크래시는 `np.linalg.pinv`로 방지됨, worker.py:424), 타 가스(NO2/CHOCHO/H2O)는 보호됨(비트 동일). 하지만 O4 칸에 깨끗한 0 대신 무의미한 값이 찍힘.
-- **제안 패치 (worker.py:435 `return` 직전)**:
-  ```python
-  c_gas = c_opt[0:num_gases].copy()
-  for i, name in enumerate(self.engine.gas_list):
-      if not gas_active[name]:
-          c_gas[i] = 0.0   # 게이팅된 가스는 깨끗한 0으로 보고
-  # 그리고 반환 시 c_opt[0:num_gases] 대신 c_gas 사용
-  ```
-- **사용자 결정**: "GUI로 실제 피팅부터 보고 결정" → 아직 실측 O4 값 확인 못 함 (다음 세션에서 진행).
-
----
-
-## 3. 이번 세션 후반부 — GUI 실데이터 테스트 중 발견·수정한 버그
-
-### (a) FWHM 로더 크래시 — 수정 완료 (`6a00399`)
-- 증상: Reference Generator에서 "could not convert string to float: 'AVERAGE'".
-- 원인: `gui/ui_dialogs_ref.py::load_fwhm_profile`이 FWHM 파일 끝의 요약 행(`AVERAGE 0.7775 0.3302`)까지 데이터로 읽음 → `ils_sigmas.astype(float)` 실패. (PR#6 무관한 기존 버그)
-- 수정: `pd.to_numeric(errors='coerce')` 후 NaN 행 제거 + 3컬럼 포맷 처리.
-- 트리거 파일 예: `D:\CAESAR cold\FWHM_Analysis_20260523_cold.txt`
-
-### (b) HITRAN 생성 실패 — 수정 완료 (`7b49bdd`)
-- 증상: H2O 생성 시 "cannot connect to http://hitran.org".
-- 원인: `generate_hitran_gas`가 매번 `hapi.fetch()`로 다운로드 시도. hitran.org 홈은 200이지만 hapi API 엔드포인트가 불안정. 게다가 `db_begin('hitran_data')`가 상대경로라 기존 캐시(`C:\LGH\hitran_data`)를 못 봄.
-- 수정: db_begin을 리포 루트 절대경로로 고정 + 테이블이 이미 `hapi.LOCAL_TABLE_CACHE`에 있으면 fetch 생략.
-- **캐시 위치**: `<repo>/hitran_data/H2O_Lines.data`(7.4MB)+`.header`를 `C:\LGH\hitran_data`에서 복사해 둠. `.gitignore`에 `hitran_data/` 등록(깃에 안 올라감). **다른 컴퓨터에선 이 폴더가 없으므로**, 인터넷이 되면 자동 다운로드되거나, H2O는 hitran_data 폴더에 캐시를 복사해 두면 됨.
-
----
-
-## 4. ★ 미해결 — 진행 중인 버그: 핏 레인지가 Run 시 멋대로 바뀜
+## 2. ★ 오늘 고친 것 — 알파 추출 버그 (`gui/worker.py` `AlphaExportWorker`)
 
 ### 증상
-사용자가 픽셀 min/max를 설정하고 Run을 누르면 범위가 바뀜.
-끊긴 결과 파일 헤더: `Fit Range: Pixel 600-848 (430.0-441.9nm)`.
+Stage 4로 만든 알파(`*_alpha_trace.dat`)를 DOAS 피팅하면 잔차/신호 **96%** → 분자(NO2/CHOCHO/O4/H2O) 농도 추출 불가.
 
-### 정적 분석으로 확인한 것
-- 파장 캘리브레이션 파일은 전부 2048점 → px848은 클램프 아님(실제 사용값).
-- `start_analysis`(Run 핸들러)는 `txt_min`/`txt_max`를 **직접 안 바꿈** (worker에 값만 전달).
-- 결과 파일명/헤더의 nm 범위는 **save 시점**의 `txt_min`/`txt_max`를 nm로 변환한 값 (app_window.py:2345-2361).
-- 600-848 = 430-441.9nm는 `set_range_from_nm`(target±window, 예 436±6nm) 또는 모니터 ROI 드래그가 만드는 값과 일치.
+### 진단 여정 (며칠치 압축 — 같은 실수 반복 방지용)
+1. 처음엔 "알파 OK, SNR 한계"로 오판 → **틀림**
+2. "파장 정렬 어긋남" 의심 → 부분적
+3. "측정에 분자신호 없음" 의심 → **틀림** (박사님 알파엔 신호 있음)
+4. **진짜 원인 확정**: `AlphaExportWorker`가 I0(ZA 기준 스펙트럼)를 **개별 단일 ZA 스캔**으로 PCHIP 보간해 만듦. 단일 스캔 noise(~1%)가 clean-air 흡수신호(~1%)에 그대로 실려 알파가 망가짐. 평균해도 고정패턴이라 안 사라짐.
 
-### 유력 가설 (미확정)
-Run 시 `start_analysis`가 **모니터 탭으로 자동 전환**(app_window.py:2195 `self.main_tabs.setCurrentIndex(2)`)함.
-이때 그동안 숨어있던 모니터의 `pg.LinearRegionItem`(ROI)이 처음 렌더되며 `sigRegionChangeFinished`가 발화 →
-`on_select_span_pg`(ui_dialogs_ref.py:1487) → `roi_selected.emit` →
-`apply_roi_from_graph`(app_window.py:1976) → `txt_min/max.setText`로 덮어쓰기.
-(연결: app_window.py:387 `self.monitor.roi_selected.connect(self.apply_roi_from_graph)`)
-즉 예전에 ROI를 ~430-442nm로 드래그해뒀다면, Run 시 그 값이 사용자가 직접 입력한 값을 덮어씀.
+### 수정
+- 한 injection의 **모든 ZA/He 스캔을 블록평균**(`_block_average`)해서 깨끗한 I0/R 생성.
+  (박사님 MATLAB `Zs_*.m`/`Alpha_*.m` 의 blockfinder 평균과 동일 접근)
+- 덤: `self.channel` 미정의로 재실행 시 크래시하던 것도 `channel=1` 인자로 수정.
 
-### 다음 세션이 할 일 (진단 로그 이미 심어둠)
-`app_window.py`에 임시 `[RANGE-DEBUG]` print를 4곳에 심어 둠 (커밋 `WIP: range-debug`):
-- `update_range`, `apply_roi_from_graph`, `set_range_from_nm`, `_refresh_setup_status`의 클램프, `start_analysis` 시작점.
-1. GUI 실행(`py -3 main.py`) → 데이터·레퍼런스·파장 로드.
-2. 픽셀 min/max 직접 입력(예 536, 827) → Run.
-3. 콘솔/출력파일의 `[RANGE-DEBUG]` 순서 확인. 만약
-   ```
-   [RANGE-DEBUG] === start_analysis READ pixel_min=536 pixel_max=827 ...
-   [RANGE-DEBUG] apply_roi_from_graph(monitor ROI) -> 600,848  running=True
-   ```
-   이렇게 찍히면 **ROI 자동 덮어쓰기가 범인** 확정.
-4. 확정 시 수정안: `apply_roi_from_graph`/`update_range`에서 `self._analysis_running`(이미 플래그 추가됨)이 True면 return하여 분석 중 덮어쓰기 차단. 또는 탭 전환 전 `self.region.blockSignals(True)` 처리.
-5. **근본 원인 확정 후 `[RANGE-DEBUG]` print들 전부 제거할 것** (grep `RANGE-DEBUG`).
+### 검증 (3단계, 모두 통과)
+1. ZA 평균 개수↑ → 잔차↓ (68개=10.5%, 3개=493%) → I0 노이즈가 원인
+2. 개별 ZA(66.9%) vs 블록평균(10.6%) 시뮬레이션
+3. **패치된 워커를 실제 실행** → 알파 재생성 → 피팅 잔차 **10.6%** (end-to-end)
 
 ---
 
-## 5. 환경 / 로컬 데이터 메모 (이 컴퓨터 기준)
+## 3. 현재 품질 — 냉정한 평가
 
-- Python 실행: PowerShell에서 `py -3` (Bash의 `python`은 PATH에 없음, exit 127).
-- 콘솔 한글/특수문자 깨지면 `$env:PYTHONIOENCODING="utf-8"`.
-- GUI 실행: `py -3 main.py` (PyQt6 창).
-- 로컬 데이터(이 컴퓨터에만 있음, 깃에 없음):
-  - `D:\CAESAR cold\` — Cold 측정·교정·레퍼런스 (`2026-05\*.dat` 98MB Araon mega-matrix, `Calib_*_Poly2.txt` 2048점, `Ref_*_Dynamic-ILS-Applied(...).dat`)
-  - `D:\CAESAR hot\` — Hot (roi1/roi2)
-  - `C:\LGH\` — 작업 폴더, `hitran_data\`(HITRAN 캐시), `Absorption cross-section\`, 결과 .dat 등
-- raw .dat 구조: col1=센티초(centiseconds, UTC초 아님), 타임스탬프는 파일 mtime, flag 500=ZA / 510=He. (자세히는 `tools/r_trend_monitor.py` 상단 docstring)
+| 알파 | 잔차/신호 | NO2 검출한계 | 비고 |
+|---|---|---|---|
+| 수정 전 | 96% | — | 사용 불가 |
+| **수정 후 (지금)** | **10.6%** | **~1 ppb** | 실용 수준, 분산 99% 설명 |
+| 박사님 DOASIS / Washenfelder(gold) | ~1% | ~0.04–0.2 ppb | 논문급 |
+
+- dark-free 피팅 최적화(O4·윈도우·poly·shift/squeeze) 다 짜내도 한계 ≈ **8%**.
+- 잔차는 **랜덤 노이즈 아님, 고정구조** (3618스캔 평균인데도 박사님 60스캔보다 나쁨).
+- 깨끗한 해양대기(NO2<1ppb)엔 아직 부족, ppb급/오염이벤트엔 충분.
 
 ---
 
-## 6. 재개 순서 (다음 세션)
-1. `git checkout claude/great-bardeen-s28sN && git pull`
-2. 4번(핏 레인지 버그) 진단 로그로 원인 확정 → 수정 → RANGE-DEBUG print 제거.
-3. 2번 O4 보고값: GUI에서 426-440nm 피팅 돌려 O4 칸 실측값 확인 → 무의미하면 제안 패치 적용.
-4. PR #6 정리 후 DRAFT 해제 / main 머지 검토.
-5. (별개 백로그) `#1 전체 60개 파일 R 시계열 계산` — `tools/r_trend_monitor.py`.
+## 4. ★ 1%(논문급)로 가려면 — 해야 할 일 (우선순위)
+
+> **냉정한 결론: dark 한 가지로는 1% 보장 못 함.** 8-10% 잔차는 여러 고정요인의 합:
+
+| 요인 | 해결책 | 비고 |
+|---|---|---|
+| ① 구조적 dark (CCD 픽셀패턴) | **dark 프레임 측정** (셔터 닫고 1장, 같은 적분시간) | 재사용 가능. **상수 dark는 효과 없음**(검증함, 1000~2000 무관). 픽셀별 구조가 필요 |
+| ② 레퍼런스 lineshape 불일치 | **2026 장비에서 측정한 레퍼런스** 사용 | 박사님은 측정 레퍼런스 씀(`no2_meas_spectrum_blue_*.dat`). 현재 CAESAR는 생성(literature+ILS) 레퍼런스 |
+| ③ 캘리브레이션/분산 불일치 | 알파 추출 캘리브 ↔ 레퍼런스 생성 캘리브 **일치** | 피팅에서 +18px shift가 보임 → 둘이 다른 calib일 가능성 |
+| ④ 피팅 품질 | DOASIS급 피팅 (또는 CAESAR AlphaFitWorker 정밀화) | |
+
+- **박사님이 같은 장비로 RMS 3e-9(=1%) 실제 달성** → 1%는 이 장비로 가능한 사실. 단 위 ①~④ 전체 패키지 필요.
+- **다음에 dark 프레임이 생기면**: `AlphaExportWorker(dark_spectrum=...)`에 넣어 재추출 → 피팅 → ①의 실제 기여 측정. 그때 "3%냐 1%냐"가 데이터로 나옴.
+
+---
+
+## 5. 핵심 자원 / 데이터 위치 (이 PC = kh548 로컬, 드라이브 문자 바뀔 수 있음)
+
+- **raw 측정**: `D:\CAESAR cold\2026-05\2026-05-17~19-*.dat` (Araon mega-matrix, ~94MB, flag: 1=ambient, 500-503=ZA, 510-513=He). `.mat` 변환본도 같이 있음.
+- **테스트 워크플로 폴더**: `C:\Doasis work\test\` (Stage 1~5: `1.Wavelength cal`, `2.Reference gen\cold`, `4.alpha`, ...)
+- **박사님 DOASIS 워크스페이스(gold standard)**: `D:\doasis\`
+  - `ref_spectra\` — **측정 레퍼런스**(`no2_meas_spectrum_blue_240511.dat` 등) + 문헌 XC들
+  - `fit_scenario\*.fs` — 박사님 피팅 설정(윈도우 px 1370-1600, poly 4-5, shift/squeeze link)
+  - `fit\v25~v28\corrected\alpha_250703_ch1_60s_corrected.dat` — 박사님 **피팅 결과 테이블**(RMS~3e-9 확인 가능)
+- **박사님 MATLAB 파이프라인**: `D:\CAESAR cold\2026-05\*.m`
+  - `Rs2_*.m`(R/반사율), `Zs_*.m`(ZA 블록평균→I0), `Alpha_*.m`(알파 공식, dark 차감, 60s co-add), `Step2_*.m`(드라이버)
+  - 알파 공식: `α = RL·[(1-R)/d + α_Ray_ZA]·(I_ZA/I_amb − 1) − (α_Ray_sample − α_Ray_ZA)` (CAESAR와 동일)
+- **dark 파일**: 이 PC엔 **없음**. 박사님은 `dark_250703.mat`(필드 드라이브 `D:\FieldData_Araon_2025\...`, 현재 미연결) 사용. flag=0 스캔은 dark 아님(일반 측정).
+
+---
+
+## 6. 남은 작업 / 정리 항목
+
+1. **(정리) RANGE-DEBUG 로그 제거** — `gui/app_window.py`에 진단용 `print("[RANGE-DEBUG]...")` 5곳이 아직 남아있음. 핏레인지 버그 원인 확정되면 제거.
+2. **(미해결) 핏레인지가 Run 시 바뀌는 버그** — 가설: Run 시 모니터 탭 전환(app_window 2195 근처)에서 ROI region 신호가 `apply_roi_from_graph`로 txt_min/max 덮어씀. RANGE-DEBUG 로그로 재현 확인 필요.
+3. **(품질) 1% 도전** — 4번 표대로 dark 프레임 + 측정 레퍼런스 확보 후.
+4. **(백로그) #1 전체 60개 파일 R 시계열 계산** — `tools/r_trend_monitor.py`.
+
+---
+
+## 7. 재개 순서 (다음 세션, 금요일 이후)
+
+1. `git pull origin main` (또는 clone)
+2. 알파 fix 동작 확인하려면: `python main.py` → Stage 4(알파 추출, raw=`D:\CAESAR cold\2026-05\`) → Stage 5(피팅) → 잔차 ~10% 확인
+3. 1% 원하면 4번 표 진행 (dark 프레임이 최우선·필요조건)
+4. (선택) 2번 핏레인지 버그 마무리 + RANGE-DEBUG 로그 제거
