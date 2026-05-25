@@ -360,8 +360,8 @@ class _RTrendWorker(QThread):
             rtm.WAVE_CAL_COLD = cfg.get("wl_cold",  "")
             rtm.WAVE_CAL_HOT  = cfg.get("wl_hot",   "")
             rtm.OUTPUT_DIR    = cfg.get("out_dir",  ".")
-            rtm.COLD_FILES    = None
-            rtm.HOT_FILES     = None
+            rtm.COLD_FILES    = cfg.get("cold_files", None)  # None → 폴더 전체 스캔
+            rtm.HOT_FILES     = cfg.get("hot_files",  None)
             rtm.SHOW_PLOT     = False
 
             # stdout 캡처 → log 시그널
@@ -403,6 +403,8 @@ class RTrendMonitorDialog(QDialog):
         self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열")
         self.resize(1150, 720)
         self._worker = None
+        self._cold_files_list: list = []   # 파일 직접 선택 시 채워짐
+        self._hot_files_list:  list = []
         self._init_ui()
 
     def _pick_dir(self, line_edit):
@@ -424,14 +426,54 @@ class RTrendMonitorDialog(QDialog):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        def row_dir(label, attr):
+        def row_data(label, dir_attr, files_attr, hint_attr):
+            """폴더 선택 또는 개별 파일 다중 선택을 지원하는 입력 행."""
             le = QLineEdit()
-            btn = QPushButton("…"); btn.setFixedWidth(32)
-            btn.clicked.connect(lambda: self._pick_dir(le))
-            h = QHBoxLayout(); h.addWidget(le); h.addWidget(btn)
+            le.setPlaceholderText("폴더 경로 또는 파일 N개 선택됨")
+
+            btn_dir = QPushButton("📂 폴더")
+            btn_dir.setFixedWidth(70)
+            btn_fil = QPushButton("📄 파일")
+            btn_fil.setFixedWidth(70)
+
+            hint = QLabel()
+            hint.setStyleSheet("color: #777; font-size: 10px;")
+            setattr(self, hint_attr, hint)
+
+            def pick_dir():
+                d = QFileDialog.getExistingDirectory(self, "폴더 선택")
+                if d:
+                    le.setText(d)
+                    setattr(self, files_attr, [])
+                    hint.setText("")
+
+            def pick_files():
+                files, _ = QFileDialog.getOpenFileNames(
+                    self, "파일 선택 (복수 가능)", "",
+                    "DAT 파일 (*.dat);;모든 파일 (*)")
+                if files:
+                    le.setText("")
+                    setattr(self, files_attr, files)
+                    hint.setText(f"  {len(files)}개 파일 선택됨: "
+                                 f"{', '.join(os.path.basename(f) for f in files[:3])}"
+                                 + (" …" if len(files) > 3 else ""))
+
+            btn_dir.clicked.connect(pick_dir)
+            btn_fil.clicked.connect(pick_files)
+
+            h = QHBoxLayout()
+            h.addWidget(le)
+            h.addWidget(btn_dir)
+            h.addWidget(btn_fil)
             w = QWidget(); w.setLayout(h)
-            form.addRow(label, w)
-            setattr(self, attr, le)
+
+            v = QVBoxLayout(); v.setContentsMargins(0, 0, 0, 2)
+            v.addWidget(w)
+            v.addWidget(hint)
+            wv = QWidget(); wv.setLayout(v)
+
+            form.addRow(label, wv)
+            setattr(self, dir_attr, le)
 
         def row_file(label, attr):
             le = QLineEdit()
@@ -442,8 +484,17 @@ class RTrendMonitorDialog(QDialog):
             form.addRow(label, w)
             setattr(self, attr, le)
 
-        row_dir("Cold 데이터 폴더:",      "_le_cold_dir")
-        row_dir("Hot 데이터 폴더:",       "_le_hot_dir")
+        def row_dir(label, attr):
+            le = QLineEdit()
+            btn = QPushButton("…"); btn.setFixedWidth(32)
+            btn.clicked.connect(lambda: self._pick_dir(le))
+            h = QHBoxLayout(); h.addWidget(le); h.addWidget(btn)
+            w = QWidget(); w.setLayout(h)
+            form.addRow(label, w)
+            setattr(self, attr, le)
+
+        row_data("Cold 데이터:",     "_le_cold_dir", "_cold_files_list", "_hint_cold")
+        row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot")
         row_file("Cold 파장 보정 파일:",  "_le_wl_cold")
         row_file("Hot 파장 보정 파일:",   "_le_wl_hot")
         row_dir("결과 저장 폴더:",        "_le_out_dir")
@@ -482,16 +533,27 @@ class RTrendMonitorDialog(QDialog):
         main.addWidget(splitter, stretch=1)
 
     def _run(self):
-        cfg = {
-            "cold_dir": self._le_cold_dir.text().strip(),
-            "hot_dir":  self._le_hot_dir.text().strip(),
-            "wl_cold":  self._le_wl_cold.text().strip(),
-            "wl_hot":   self._le_wl_hot.text().strip(),
-            "out_dir":  self._le_out_dir.text().strip() or ".",
-        }
-        if not cfg["cold_dir"] and not cfg["hot_dir"]:
-            QMessageBox.warning(self, "입력 오류", "Cold 또는 Hot 데이터 폴더를 지정해주세요.")
+        cold_dir   = self._le_cold_dir.text().strip()
+        hot_dir    = self._le_hot_dir.text().strip()
+        cold_files = self._cold_files_list or None   # 파일 직접 선택 시 사용
+        hot_files  = self._hot_files_list  or None
+
+        has_cold = bool(cold_dir) or bool(cold_files)
+        has_hot  = bool(hot_dir)  or bool(hot_files)
+        if not has_cold and not has_hot:
+            QMessageBox.warning(self, "입력 오류",
+                                "Cold 또는 Hot 데이터의 폴더나 파일을 지정해주세요.")
             return
+
+        cfg = {
+            "cold_dir":   cold_dir,
+            "hot_dir":    hot_dir,
+            "cold_files": cold_files,
+            "hot_files":  hot_files,
+            "wl_cold":    self._le_wl_cold.text().strip(),
+            "wl_hot":     self._le_wl_hot.text().strip(),
+            "out_dir":    self._le_out_dir.text().strip() or ".",
+        }
 
         self._log.clear()
         self._pw.clear()
