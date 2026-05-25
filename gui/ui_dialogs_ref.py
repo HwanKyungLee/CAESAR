@@ -514,8 +514,10 @@ class ReferenceGeneratorDialog(QDialog):
             return
 
         # hitran.org가 HTTPS 전용으로 전환됨 → hapi 기본값 http:// 는 연결 거부됨.
-        # GLOBAL_HOST를 https로 강제 지정해야 fetch가 동작한다.
+        # 실제 fetch URL은 VARIABLES['GLOBAL_HOST']를 쓰므로 이것까지 https로 바꿔야 한다.
+        # (모듈 GLOBAL_HOST는 에러 메시지 표시용일 뿐)
         try:
+            hapi.VARIABLES['GLOBAL_HOST'] = "https://hitran.org"
             hapi.GLOBAL_HOST = "https://hitran.org"
         except Exception:
             pass
