@@ -988,11 +988,13 @@ class AlphaExportWorker(QThread):
                  flag_za, flag_he, flag_amb,
                  rl_factor, cavity_len,
                  output_dir,
-                 dark_spectrum=None):   # 1-D float array (full 2048 px), or None
+                 dark_spectrum=None,    # 1-D float array (full 2048 px), or None
+                 channel=1):            # spectrometer channel number (default 1)
         super().__init__()
         self.file_list   = file_list
         self.pixel_min   = pixel_min
         self.pixel_max   = pixel_max
+        self.channel     = channel
         self.wave_nm     = np.asarray(wave_nm, dtype=float)
         self.flag_za     = flag_za
         self.flag_he     = flag_he
@@ -1262,13 +1264,15 @@ class AlphaFitWorker(QThread):
     status_msg  = pyqtSignal(str)
     finished    = pyqtSignal(str)
 
-    def __init__(self, alpha_files, engine, poly_deg, output_dir, pixel_min=0):
+    def __init__(self, alpha_files, engine, poly_deg, output_dir,
+                 pixel_min=0, pixel_max=None):
         """
         alpha_files : list of str — alpha_trace.dat 경로 목록
         engine      : UniversalEngine 인스턴스 (레퍼런스 & 파장 포함)
         poly_deg    : int — Chebyshev 다항식 차수 (baseline)
         output_dir  : str — 결과 저장 디렉터리
-        pixel_min   : int — 피팅 윈도우 시작 픽셀 (레퍼런스 슬라이싱에 사용)
+        pixel_min   : int — 피팅 윈도우 시작 픽셀
+        pixel_max   : int — 피팅 윈도우 끝 픽셀 (None이면 전체 파장 축 사용)
         """
         super().__init__()
         self.alpha_files = alpha_files
@@ -1276,6 +1280,7 @@ class AlphaFitWorker(QThread):
         self.poly_deg    = poly_deg
         self.output_dir  = output_dir
         self.pixel_min   = pixel_min
+        self.pixel_max   = pixel_max
         self.is_running  = True
 
     def stop(self):
@@ -1296,7 +1301,10 @@ class AlphaFitWorker(QThread):
             self.finished.emit("ERROR: 엔진에 파장 보정(X-축)이 로드되지 않았습니다. "
                                "먼저 Load X-Axis (nm)를 실행하세요.")
             return
-        wave_nm  = np.asarray(engine._wave_axis, dtype=float)
+        full_wave = np.asarray(engine._wave_axis, dtype=float)
+        px_min = self.pixel_min
+        px_max = self.pixel_max if self.pixel_max is not None else len(full_wave)
+        wave_nm  = full_wave[px_min:px_max]
         n_pix    = len(wave_nm)
         gas_list = engine.gas_list
         n_gas    = len(gas_list)

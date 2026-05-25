@@ -703,77 +703,70 @@ class CAESARAnalyzer(QMainWindow):
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
 
-        # Specialized / one-off tools (collapsible, hidden by default)
-        self._spec_tools_visible = False
-        self._btn_toggle_spec = QPushButton("▶  Specialized Tools (alpha export, R-curve offline)")
-        self._btn_toggle_spec.setStyleSheet(
-            "text-align: left; color: #757575; background: #FAFAFA; "
-            "border: 1px solid #E0E0E0; padding: 3px 8px;")
-        control_layout.addWidget(self._btn_toggle_spec)
+        # Group 2: 2단계 분석 (Raw → Alpha → 피팅)
+        grp_alpha_two = QGroupBox("2. 2단계 분석  (Raw → Alpha → 피팅)")
+        lay_alpha_two = QVBoxLayout()
 
-        self._spec_tools_container = QWidget()
-        self._spec_tools_container.setVisible(False)
-        lay_spec = QVBoxLayout(self._spec_tools_container)
-        lay_spec.setContentsMargins(0, 0, 0, 0)
+        lbl_alpha_desc = QLabel(
+            "측정 파일에서 먼저 α 스펙트럼을 추출(1단계)한 뒤,\n"
+            "저장된 α 파일을 불러와 DOAS 피팅을 수행(2단계)합니다.")
+        lbl_alpha_desc.setStyleSheet("color: #546E7A; font-size: 11px; padding: 2px 0;")
+        lay_alpha_two.addWidget(lbl_alpha_desc)
 
-        grp_spec = QGroupBox("🔧 Specialized Tools")
-        grp_spec.setStyleSheet("QGroupBox { color: #757575; }")
-        lay_spec_inner = QVBoxLayout()
+        btn_step1 = QPushButton("▶  1단계: Raw → Alpha 파일 생성")
+        btn_step1.clicked.connect(self.export_alpha_files)
+        btn_step1.setStyleSheet(
+            "background-color: #E3F2FD; font-weight: bold; "
+            "padding: 6px; border: 1px solid #90CAF9;")
+        btn_step1.setToolTip(
+            "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm⁻¹) 계산\n"
+            "→ 지정 폴더에 {소스파일명}_alpha_trace.dat 저장.\n"
+            "먼저 '측정 파일 로드'와 '파장 캘리브레이션 로드'를 완료하세요.")
+        lay_alpha_two.addWidget(btn_step1)
 
-        btn_r_gen = QPushButton("📊 R-Curve Generator (offline .mat / separate files)")
-        btn_r_gen.clicked.connect(self.open_r_generator)
-        btn_r_gen.setStyleSheet("background-color: #e8f5e9;")
-        btn_r_gen.setToolTip(
-            "별도 He/ZA 파일(또는 .mat)에서 R-Curve를 계산합니다.\n"
-            "Araon 측정 파일처럼 He/ZA가 내장된 경우에는 불필요합니다.\n"
-            "(R은 RUN 중 자동 추출되거나 R Trend Monitor로 배치 계산됩니다.)")
-
-        btn_alpha_export = QPushButton("📁 Alpha 내보내기 (피팅 없이 α 파일 생성)")
-        btn_alpha_export.clicked.connect(self.export_alpha_files)
-        btn_alpha_export.setToolTip(
-            "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm⁻¹) 계산 → .dat 저장\n"
-            "DOAS 피팅 없이 alpha만 추출 — 박사님 alpha_trace 비교용 1회성 도구")
-
-        btn_alpha_fit = QPushButton("📊 Alpha 피팅 (저장된 α 파일로 DOAS 피팅)")
-        btn_alpha_fit.clicked.connect(self.run_alpha_fit)
-        btn_alpha_fit.setToolTip(
-            "Alpha 내보내기로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
-            "DOAS 피팅만 수행 → *_fit.tsv 결과 저장")
-
-        # Alpha intermediate save (kept here so start_analysis() can read it)
+        # Alpha save dir (also used by main RUN → save_alpha checkbox)
         lay_alpha_save = QHBoxLayout()
-        self.chk_save_alpha = QCheckBox("α 스펙트럼 중간 저장")
+        self.chk_save_alpha = QCheckBox("RUN 중 α 저장 (직접 분석 병행)")
         self.chk_save_alpha.setToolTip(
-            "BBCEAS 광학 깊이 계산 후 각 스캔의 α 스펙트럼을 파일로 저장합니다.\n"
+            "메인 RUN 버튼으로 직접 분석할 때도 각 스캔의 α 스펙트럼을\n"
+            "파일로 함께 저장합니다. 2단계 분석과 독립적으로 동작합니다.\n"
             "파일명: {원본파일명}_alpha.dat  단위: cm⁻¹")
-        self.lbl_alpha_dir = QLabel("(폴더 미설정)")
-        self.lbl_alpha_dir.setStyleSheet("color: gray;")
+        self.lbl_alpha_dir = QLabel("(저장 폴더 미설정)")
+        self.lbl_alpha_dir.setStyleSheet("color: gray; font-size: 11px;")
         btn_alpha_dir = QPushButton("폴더")
         btn_alpha_dir.setFixedWidth(50)
         btn_alpha_dir.clicked.connect(self.browse_alpha_save_dir)
         lay_alpha_save.addWidget(self.chk_save_alpha)
         lay_alpha_save.addWidget(self.lbl_alpha_dir, 1)
         lay_alpha_save.addWidget(btn_alpha_dir)
+        lay_alpha_two.addLayout(lay_alpha_save)
 
-        lay_spec_inner.addWidget(btn_r_gen)
-        lay_spec_inner.addWidget(btn_alpha_export)
-        lay_spec_inner.addWidget(btn_alpha_fit)
-        lay_spec_inner.addLayout(lay_alpha_save)
-        grp_spec.setLayout(lay_spec_inner)
-        lay_spec.addWidget(grp_spec)
-        control_layout.addWidget(self._spec_tools_container)
+        btn_step2 = QPushButton("▶  2단계: Alpha 파일 → 피팅")
+        btn_step2.clicked.connect(self.run_alpha_fit)
+        btn_step2.setStyleSheet(
+            "background-color: #E8F5E9; font-weight: bold; "
+            "padding: 6px; border: 1px solid #A5D6A7;")
+        btn_step2.setToolTip(
+            "1단계로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
+            "DOAS 피팅 수행 → *_fit.tsv 결과 저장.\n"
+            "먼저 '레퍼런스 Lock'과 '파장 캘리브레이션 로드'를 완료하세요.")
+        lay_alpha_two.addWidget(btn_step2)
 
-        def _toggle_spec():
-            self._spec_tools_visible = not self._spec_tools_visible
-            self._spec_tools_container.setVisible(self._spec_tools_visible)
-            self._btn_toggle_spec.setText(
-                "▼  Specialized Tools (alpha export, R-curve offline)"
-                if self._spec_tools_visible else
-                "▶  Specialized Tools (alpha export, R-curve offline)")
-        self._btn_toggle_spec.clicked.connect(_toggle_spec)
-        
-        # Group 2: Cavity Setup — only d, RL, Leff (everything else from raw file)
-        grp_physics = QGroupBox("2. Cavity Setup")
+        grp_alpha_two.setLayout(lay_alpha_two)
+        control_layout.addWidget(grp_alpha_two)
+
+        # R-Curve Generator (standalone tool for offline R derivation)
+        btn_r_gen = QPushButton("📊 R-Curve Generator (offline .mat / separate files)")
+        btn_r_gen.clicked.connect(self.open_r_generator)
+        btn_r_gen.setStyleSheet("background-color: #e8f5e9; padding: 4px;")
+        btn_r_gen.setToolTip(
+            "별도 He/ZA 파일(또는 .mat)에서 R-Curve를 계산합니다.\n"
+            "Araon 측정 파일처럼 He/ZA가 내장된 경우에는 불필요합니다.\n"
+            "(R은 RUN 중 자동 추출되거나 R Trend Monitor로 배치 계산됩니다.)")
+        control_layout.addWidget(btn_r_gen)
+
+        # Group 3: Cavity Setup — only d, RL, Leff (everything else from raw file)
+        grp_physics = QGroupBox("3. Cavity Setup")
         lay_physics = QFormLayout()
 
         # Auto-detected channel info (read-only — updated when files are loaded)
@@ -950,7 +943,7 @@ class CAESARAnalyzer(QMainWindow):
         _det_outer = QVBoxLayout(self._det_corr_container)
         _det_outer.setContentsMargins(0, 0, 0, 0)
 
-        grp_det = QGroupBox("2b. Detector Corrections")
+        grp_det = QGroupBox("3b. Detector Corrections")
         lay_det = QFormLayout()
 
         # Dark Current Setup
@@ -1169,6 +1162,7 @@ class CAESARAnalyzer(QMainWindow):
             cavity_len    = self.spin_d_len.value(),
             output_dir    = out_dir,
             dark_spectrum = dark_spectrum,
+            channel       = getattr(self, '_detected_channels', 1),
         )
 
         self._alpha_export_worker.total_ready.connect(
@@ -1218,15 +1212,17 @@ class CAESARAnalyzer(QMainWindow):
         if not output_dir:
             return
 
-        try:
-            poly_deg = int(self.txt_poly.text())
-        except (AttributeError, ValueError):
-            poly_deg = 4
+        poly_deg = self.spin_poly_deg.value()
 
         try:
             pixel_min = int(self.txt_min.text())
         except (AttributeError, ValueError):
             pixel_min = 0
+
+        try:
+            pixel_max = int(self.txt_max.text())
+        except (AttributeError, ValueError):
+            pixel_max = None
 
         self._alpha_fit_worker = AlphaFitWorker(
             alpha_files=alpha_files,
@@ -1234,6 +1230,7 @@ class CAESARAnalyzer(QMainWindow):
             poly_deg=poly_deg,
             output_dir=output_dir,
             pixel_min=pixel_min,
+            pixel_max=pixel_max,
         )
         self._alpha_fit_worker.progress.connect(
             lambda n: self.status.setText(f"📊 Alpha 피팅: {n}행 처리 중...")
