@@ -98,8 +98,25 @@ class CAESARAnalyzer(QMainWindow):
         btn_lock.setStyleSheet("background-color: #e1f5fe; color: #0277bd; font-weight: bold; padding: 5px;")
         lay_ref.addWidget(btn_lock)
         
-        # ILS Convolution — nm (primary) + px (secondary, auto-filled)
-        layout_conv = QHBoxLayout()
+        # ILS Convolution (advanced) — hidden by default.
+        # Not needed when references are pre-convolved by the Reference Generator
+        # (Stage 2). Only useful when loading raw high-resolution cross-sections.
+        self._ils_visible = False
+        self._btn_toggle_ils = QPushButton(
+            "▶  ILS 콘볼루션 (고급 — Stage 2 레퍼런스 사용 시 불필요)")
+        self._btn_toggle_ils.setStyleSheet(
+            "text-align: left; color: #9e9e9e; background: #FAFAFA; "
+            "border: 1px solid #E0E0E0; padding: 3px 8px; font-size: 11px;")
+        self._btn_toggle_ils.setToolTip(
+            "레퍼런스 제너레이터(Stage 2)로 이미 ILS를 적용한 레퍼런스를\n"
+            "사용하는 경우 이 기능은 필요 없습니다 (이중 콘볼루션 위험).\n"
+            "raw 고해상도 크로스섹션을 직접 로드할 때만 사용하세요.")
+        lay_ref.addWidget(self._btn_toggle_ils)
+
+        self._ils_container = QWidget()
+        self._ils_container.setVisible(False)
+        layout_conv = QHBoxLayout(self._ils_container)
+        layout_conv.setContentsMargins(0, 0, 0, 0)
         layout_conv.addWidget(QLabel("ILS:"))
 
         self.spin_fwhm_nm = QDoubleSpinBox()
@@ -139,8 +156,17 @@ class CAESARAnalyzer(QMainWindow):
         self.btn_apply_ils.setStyleSheet("background-color: #e0e0e0; font-weight: bold;")
         self.btn_apply_ils.clicked.connect(self.apply_convolution)
         layout_conv.addWidget(self.btn_apply_ils)
-        lay_ref.addLayout(layout_conv)
-        
+        lay_ref.addWidget(self._ils_container)
+
+        def _toggle_ils():
+            self._ils_visible = not self._ils_visible
+            self._ils_container.setVisible(self._ils_visible)
+            self._btn_toggle_ils.setText(
+                "▼  ILS 콘볼루션 (고급 — Stage 2 레퍼런스 사용 시 불필요)"
+                if self._ils_visible else
+                "▶  ILS 콘볼루션 (고급 — Stage 2 레퍼런스 사용 시 불필요)")
+        self._btn_toggle_ils.clicked.connect(_toggle_ils)
+
         grp_ref.setLayout(lay_ref)
         left_layout.addWidget(grp_ref)
         
@@ -429,11 +455,10 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_st_i0    = QLabel("⚠️   I₀ (Zero-Air): not set (auto from ZA scans)")
         self.lbl_st_r     = QLabel("⚠️   R-Curve: not loaded (auto from He scans)")
         self.lbl_st_refs  = QLabel("❌  References: not locked")
-        self.lbl_st_ils   = QLabel("⚠️   ILS: FWHM=0 (references not convolved)")
         self.lbl_st_range = QLabel("⚠️   Fit range: 0–2047 px (full sensor)")
 
         for lbl in (self.lbl_st_wl, self.lbl_st_i0, self.lbl_st_r,
-                    self.lbl_st_refs, self.lbl_st_ils, self.lbl_st_range):
+                    self.lbl_st_refs, self.lbl_st_range):
             lbl.setStyleSheet("padding: 2px 6px; font-size: 11px;")
             lay_status.addWidget(lbl)
 
@@ -542,22 +567,6 @@ class CAESARAnalyzer(QMainWindow):
         else:
             self.lbl_st_refs.setText("❌  References: not locked  (lock before RUN)")
             self.lbl_st_refs.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
-
-        # ILS
-        fwhm_px = self.spin_fwhm.value()
-        fwhm_nm = self.spin_fwhm_nm.value() if hasattr(self, 'spin_fwhm_nm') else 0.0
-        ils_applied = getattr(self, '_ils_applied', False)
-        if fwhm_px > 0.01 and ils_applied:
-            self.lbl_st_ils.setText(
-                f"✅  ILS applied: FWHM={fwhm_nm:.3f} nm  ({fwhm_px:.2f} px)")
-            self.lbl_st_ils.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
-        elif fwhm_px > 0.01:
-            self.lbl_st_ils.setText(
-                f"⚠️   ILS set but NOT applied: {fwhm_nm:.3f} nm  — press 'Apply ILS'")
-            self.lbl_st_ils.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
-        else:
-            self.lbl_st_ils.setText("⚠️   ILS: FWHM=0  (cross-sections not convolved with ILS)")
-            self.lbl_st_ils.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
 
         # Fit range
         try:
