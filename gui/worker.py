@@ -1334,41 +1334,12 @@ class AlphaFitWorker(QThread):
         os.makedirs(self.output_dir, exist_ok=True)
 
         engine   = self.engine
-        if engine._wave_axis is None:
-            self.finished.emit("ERROR: 엔진에 파장 보정(X-축)이 로드되지 않았습니다. "
-                               "먼저 Load X-Axis (nm)를 실행하세요.")
-            return
-        full_wave = np.asarray(engine._wave_axis, dtype=float)
-        px_min = self.pixel_min
-        px_max = self.pixel_max if self.pixel_max is not None else len(full_wave)
-        wave_nm  = full_wave[px_min:px_max]
-        n_pix    = len(wave_nm)
         gas_list = engine.gas_list
         n_gas    = len(gas_list)
 
-        # ── Chebyshev 기저 (baseline polynomial) ─────────────────────────────
-        x_norm   = 2.0 * (np.arange(n_pix) / max(n_pix - 1, 1)) - 1.0
-        poly_basis = np.column_stack([
-            np.polynomial.chebyshev.chebval(x_norm, np.eye(self.poly_deg + 1)[k])
-            for k in range(self.poly_deg + 1)
-        ])                                          # (n_pix, poly_deg+1)
-
-        # ── 레퍼런스 행렬 구성 ────────────────────────────────────────────────
-        ref_cols = []
-        for name in gas_list:
-            ref_raw = np.asarray(engine.raw_references[name], dtype=float)
-            scale   = engine.scaling_factors[name]
-            if len(ref_raw) > n_pix:
-                # 전체 스펙트럼(2048 px)이면 self.pixel_min 기준으로 fit window 자름
-                ref_raw = ref_raw[self.pixel_min: self.pixel_min + n_pix]
-            ref_cols.append(ref_raw / scale)
-
-        A_ref = np.column_stack(ref_cols)           # (n_pix, n_gas)
-        A     = np.column_stack([A_ref, poly_basis]) # (n_pix, n_gas + poly_deg+1)
-
         # 전체 행 수 추정 (progress bar용)
         total_est = sum(
-            max(0, sum(1 for l in open(f, encoding='utf-8')
+            max(0, sum(1 for l in open(f, encoding='utf-8', errors='replace')
                        if l.strip() and not l.startswith('#') and not l.startswith('row_idx')))
             for f in self.alpha_files
         )
@@ -1381,17 +1352,30 @@ class AlphaFitWorker(QThread):
                 break
 
             fname = os.path.basename(fpath)
-            stem  = fname.replace('_alpha_trace.dat', '')
+            stem  = os.path.splitext(fname)[0].replace('_alpha_trace', '')
             out_path = os.path.join(self.output_dir, f"{stem}_fit.tsv")
 
-            # ── alpha_trace.dat 파싱 ─────────────────────────────────────────
+            # ── 파일 읽기 ────────────────────────────────────────────────────
             try:
-                with open(fpath, 'r', encoding='utf-8') as f:
+                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
                     lines = f.readlines()
             except Exception as e:
                 self.status_msg.emit(f"SKIP {fname}: {e}")
                 continue
 
+            # ── 헤더에서 파장축 추출 (# wavelength_nm: 라인) ────────────────
+            wave_nm_file = None
+            for l in lines:
+                if l.startswith('# wavelength_nm:'):
+                    try:
+                        vals = l.split(':', 1)[1].strip().split('\t')
+                        wave_nm_file = np.array([float(v) for v in vals if v.strip()],
+                                                dtype=float)
+                    except Exception:
+                        pass
+                    break
+
+            # ── 데이터 행 추출 ────────────────────────────────────────────────
             data_lines = [l for l in lines
                           if l.strip() and not l.startswith('#')
                           and not l.startswith('row_idx')]
@@ -1400,53 +1384,104 @@ class AlphaFitWorker(QThread):
                 self.status_msg.emit(f"SKIP {fname}: 데이터 없음")
                 continue
 
+            # ── n_pix: 헤더 파장 수 우선, 없으면 첫 행 컬럼 수로 감지 ────────
+            first_parts = data_lines[0].strip().split('\t')
+            n_cols = len(first_parts)
+
+            if wave_nm_file is not None:
+                n_pix = len(wave_nm_file)
+            elif n_cols > 3:
+                # row_idx / T_C / P_mbar / alpha×n_pix
+                n_pix = n_cols - 3
+                # 파장축 폴백: engine 파장축에서 px_min 기준으로 자름
+                if engine._wave_axis is not None:
+                    full_wave = np.asarray(engine._wave_axis, dtype=float)
+                    px_min = self.pixel_min
+                    wave_nm_file = full_wave[px_min: px_min + n_pix]
+                else:
+                    wave_nm_file = np.arange(n_pix, dtype=float)
+            else:
+                self.status_msg.emit(f"SKIP {fname}: 형식 인식 불가 (컬럼 수={n_cols})")
+                continue
+
+            if n_pix == 0:
+                self.status_msg.emit(f"SKIP {fname}: n_pix=0")
+                continue
+
+            self.status_msg.emit(
+                f"[{fname}] n_pix={n_pix}  wave={wave_nm_file[0]:.2f}–{wave_nm_file[-1]:.2f} nm")
+
+            # ── 레퍼런스 행렬 구성 (파일 파장축으로 interpolation) ────────────
+            ref_cols = []
+            for name in gas_list:
+                if name in engine.interpolators:
+                    ref_interp = engine.interpolators[name](wave_nm_file)
+                else:
+                    # interpolator 없으면 raw_references 픽셀 슬라이스 폴백
+                    ref_raw = np.asarray(engine.raw_references[name], dtype=float)
+                    if len(ref_raw) >= n_pix:
+                        ref_interp = ref_raw[:n_pix]
+                    else:
+                        ref_interp = np.pad(ref_raw, (0, n_pix - len(ref_raw)))
+                scale = engine.scaling_factors.get(name, 1.0)
+                ref_cols.append(ref_interp / scale)
+
+            x_norm = 2.0 * (np.arange(n_pix) / max(n_pix - 1, 1)) - 1.0
+            poly_basis = np.column_stack([
+                np.polynomial.chebyshev.chebval(x_norm, np.eye(self.poly_deg + 1)[k])
+                for k in range(self.poly_deg + 1)
+            ])
+            A_ref = np.column_stack(ref_cols)
+            A     = np.column_stack([A_ref, poly_basis])
+
+            # ── 행별 파싱 & 피팅 ─────────────────────────────────────────────
             result_rows = []
 
             for line in data_lines:
                 if not self.is_running:
                     break
 
-                parts = line.split('\t')
+                parts = line.strip().split('\t')
                 if len(parts) < 3 + n_pix:
+                    self.status_msg.emit(
+                        f"  행 스킵: 컬럼 {len(parts)} < 필요 {3+n_pix} "
+                        f"(파일 n_pix={n_pix}와 행 컬럼 수 불일치)")
                     done += 1
                     self.progress.emit(done)
                     continue
 
                 try:
-                    row_idx = int(parts[0])
+                    row_idx = int(float(parts[0]))
                     T_C     = float(parts[1])
                     P_mbar  = float(parts[2])
                     alpha   = np.array([float(v) for v in parts[3:3 + n_pix]], dtype=float)
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    self.status_msg.emit(f"  행 파싱 오류: {e}")
                     done += 1
                     self.progress.emit(done)
                     continue
 
-                # ── DOAS 피팅 (least-squares) ─────────────────────────────
                 coeffs, _, _, _ = scipy_lstsq(A, alpha)
                 gas_coeffs = coeffs[:n_gas]
 
-                # ── ppb 변환 ─────────────────────────────────────────────
                 n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
                 ppb_vals = {}
                 for gi, name in enumerate(gas_list):
-                    scale = engine.scaling_factors[name]
-                    mult  = engine.multipliers[name]
+                    scale = engine.scaling_factors.get(name, 1.0)
+                    mult  = engine.multipliers.get(name, 1.0)
                     N_cm3 = gas_coeffs[gi] * mult / scale
                     ppb_vals[name] = (N_cm3 / n_air) * 1e9
 
-                # ── Residual RMS ──────────────────────────────────────────
                 fitted = A @ coeffs
-                rms = np.sqrt(np.mean((alpha - fitted) ** 2))
+                rms = float(np.sqrt(np.mean((alpha - fitted) ** 2)))
 
                 result_rows.append((row_idx, T_C, P_mbar, ppb_vals, rms))
-
                 done += 1
                 self.progress.emit(done)
 
-            # ── 결과 저장 ─────────────────────────────────────────────────
+            # ── 결과 저장 ─────────────────────────────────────────────────────
             if not result_rows:
-                self.status_msg.emit(f"SKIP {fname}: 피팅 결과 없음")
+                self.status_msg.emit(f"SKIP {fname}: 피팅된 행 없음")
                 continue
 
             header = 'row_idx\tT_C\tP_mbar\t' + '\t'.join(gas_list) + '\trms_cm-1\n'
@@ -1456,7 +1491,6 @@ class AlphaFitWorker(QThread):
                     vals = '\t'.join(f"{ppb_vals.get(g, 0):.4f}" for g in gas_list)
                     f.write(f"{row_idx}\t{T:.2f}\t{P:.2f}\t{vals}\t{rms:.4e}\n")
 
-            n_rows = len(result_rows)
-            self.status_msg.emit(f"저장: {out_path}  ({n_rows}행, {n_gas}가스)")
+            self.status_msg.emit(f"저장: {out_path}  ({len(result_rows)}행, {n_gas}가스)")
 
         self.finished.emit(self.output_dir)
