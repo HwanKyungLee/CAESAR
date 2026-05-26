@@ -678,8 +678,68 @@ class CAESARAnalyzer(QMainWindow):
         _plot_series(cold_results,    '#2196F3', 'Cold')
         _plot_series(hot_ans_results, '#FF6F00', 'Hot ANs')
         _plot_series(hot_pns_results, '#D32F2F', 'Hot PNs')
-        n = (len(cold_results) if cold_results else 0) + (len(hot_results) if hot_results else 0)
+        n = ((len(cold_results) if cold_results else 0)
+             + (len(hot_ans_results) if hot_ans_results else 0)
+             + (len(hot_pns_results) if hot_pns_results else 0))
         self._daily_rt_pw.setTitle(f"R time series — {n} cycles (Cold/Hot)")
+
+    def _update_setup_rt_charts(self, cold_results, hot_ans_results, hot_pns_results):
+        """Populate the R(t) and Leff(t) plots in the Setup tab Cavity Diagnostics panel."""
+        if not hasattr(self, '_setup_r_trend_pw'):
+            return
+
+        import datetime as _dt
+
+        COLORS = [
+            ('#2196F3', 'Cold'),
+            ('#FF6F00', 'Hot ANs'),
+            ('#D32F2F', 'Hot PNs'),
+        ]
+
+        self._setup_r_trend_pw.clear()
+        self._setup_r_trend_pw.addLegend(offset=(10, 10))
+        self._setup_leff_pw.clear()
+        self._setup_leff_pw.addLegend(offset=(10, 10))
+
+        def _ts(t):
+            if isinstance(t, _dt.datetime):
+                return t.replace(tzinfo=None).timestamp()
+            return float(t)
+
+        for results, (color, label) in zip(
+                [cold_results, hot_ans_results, hot_pns_results], COLORS):
+            if not results:
+                continue
+            pts_r = [(r['timestamp'], r['r_mean'])
+                     for r in results
+                     if r.get('r_mean') is not None and r.get('timestamp') is not None]
+            pts_l = [(r['timestamp'], r['leff_mean'])
+                     for r in results
+                     if r.get('leff_mean') is not None and r.get('timestamp') is not None]
+            if pts_r:
+                ts = [_ts(t) for t, _ in pts_r]
+                rv = [v * 100 for _, v in pts_r]
+                self._setup_r_trend_pw.plot(ts, rv,
+                                            pen=pg.mkPen(color, width=2),
+                                            symbol='o', symbolSize=5,
+                                            name=label)
+            if pts_l:
+                ts = [_ts(t) for t, _ in pts_l]
+                lv = [v for _, v in pts_l]
+                self._setup_leff_pw.plot(ts, lv,
+                                         pen=pg.mkPen(color, width=2),
+                                         symbol='s', symbolSize=5,
+                                         name=label)
+
+        n = ((len(cold_results) if cold_results else 0)
+             + (len(hot_ans_results) if hot_ans_results else 0)
+             + (len(hot_pns_results) if hot_pns_results else 0))
+        self._setup_r_trend_pw.setTitle(f"R 시계열 — {n} cycles")
+        self._setup_leff_pw.setTitle(f"Leff 시계열 — {n} cycles")
+
+        # Auto-switch to the time-series tab
+        if hasattr(self, '_diag_tabs'):
+            self._diag_tabs.setCurrentIndex(1)
 
     def setup_cavity_tab(self):
         """Configure the layout for the Pre-Analysis Cavity Setup tab."""
@@ -1029,39 +1089,68 @@ class CAESARAnalyzer(QMainWindow):
         
         # --- Right Panel: Diagnostic Viewer ---
         viewer_layout = QVBoxLayout()
-        grp_viewer = QGroupBox("Cavity Diagnostic Viewer")
+        grp_viewer = QGroupBox("Cavity Diagnostics")
         lay_v = QVBoxLayout()
-        
-        # 🌟 Dual-Axis pyqtgraph Setup
-        self.plot_diagnostic = pg.PlotWidget(title="Cavity Diagnostics: I0 & Reflectivity (R)")
+        lay_v.setContentsMargins(4, 4, 4, 4)
+
+        self._diag_tabs = QTabWidget()
+
+        # ── Tab 0: I0 & R(λ) spectral viewer ────────────────────────────────
+        tab_spectral = QWidget()
+        lay_spectral = QVBoxLayout(tab_spectral)
+        lay_spectral.setContentsMargins(0, 0, 0, 0)
+
+        self.plot_diagnostic = pg.PlotWidget(title="I0 & R(λ) 스펙트럼")
         self.plot_diagnostic.showGrid(x=True, y=True, alpha=0.3)
         self.plot_diagnostic.setLabel('left', 'Intensity (I0)', color='k')
         self.plot_diagnostic.setLabel('bottom', 'Pixel / Wavelength')
-        
-        # Main plot item (Left Y-axis)
+
         self.p1 = self.plot_diagnostic.plotItem
-        
-        # Secondary plot item (Right Y-axis) for Reflectivity (R)
         self.p2 = pg.ViewBox()
         self.p1.showAxis('right')
         self.p1.scene().addItem(self.p2)
         self.p1.getAxis('right').linkToView(self.p2)
         self.p2.setXLink(self.p1)
         self.p1.getAxis('right').setLabel('Reflectivity (R)', color='b')
-        
-        # Sync ViewBoxes when resizing
+
         def updateViews():
             self.p2.setGeometry(self.p1.vb.sceneBoundingRect())
             self.p2.linkedViewChanged(self.p1.vb, self.p2.XAxis)
-            
+
         updateViews()
         self.p1.vb.sigResized.connect(updateViews)
-        
-        lay_v.addWidget(self.plot_diagnostic)
-        
+
+        lay_spectral.addWidget(self.plot_diagnostic)
+        self._diag_tabs.addTab(tab_spectral, "📊 R(λ) 스펙트럼")
+
+        # ── Tab 1: R(t) + Leff(t) time-series from R Trend Monitor ──────────
+        tab_trend = QWidget()
+        lay_trend = QVBoxLayout(tab_trend)
+        lay_trend.setContentsMargins(0, 0, 0, 0)
+        lay_trend.setSpacing(2)
+
+        _ts_ax_r = pg.DateAxisItem(orientation='bottom')
+        self._setup_r_trend_pw = pg.PlotWidget()
+        self._setup_r_trend_pw.setAxisItems({'bottom': _ts_ax_r})
+        self._setup_r_trend_pw.setLabel('left', 'R (%)')
+        self._setup_r_trend_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._setup_r_trend_pw.setTitle("R 시계열 (R Trend Monitor 실행 후 표시)")
+
+        _ts_ax_l = pg.DateAxisItem(orientation='bottom')
+        self._setup_leff_pw = pg.PlotWidget()
+        self._setup_leff_pw.setAxisItems({'bottom': _ts_ax_l})
+        self._setup_leff_pw.setLabel('left', 'Leff (km)')
+        self._setup_leff_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._setup_leff_pw.setTitle("Leff 시계열")
+
+        lay_trend.addWidget(self._setup_r_trend_pw, stretch=1)
+        lay_trend.addWidget(self._setup_leff_pw, stretch=1)
+        self._diag_tabs.addTab(tab_trend, "📈 R/Leff 시계열")
+
+        lay_v.addWidget(self._diag_tabs)
         grp_viewer.setLayout(lay_v)
         viewer_layout.addWidget(grp_viewer)
-        
+
         main_layout.addLayout(viewer_layout, stretch=2)
 
     def browse_i0_file(self):
@@ -1471,9 +1560,9 @@ class CAESARAnalyzer(QMainWindow):
         """R Trend Monitor: raw .dat 파일 디렉토리를 스캔해 파일별 R 시계열을 계산·저장·플롯."""
         from .ui_dialogs_r import RTrendMonitorDialog
         dialog = RTrendMonitorDialog(self)
-        # Wire R trend results into the Daily Run tab chart
         if hasattr(dialog, 'data_ready'):
             dialog.data_ready.connect(self._update_daily_rt_chart)
+            dialog.data_ready.connect(self._update_setup_rt_charts)
         dialog.exec()
 
     def open_wavelength_calibration(self):
