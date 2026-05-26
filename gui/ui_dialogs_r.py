@@ -389,6 +389,11 @@ class _RTrendWorker(QThread):
             rtm.HOT_FILES     = cfg.get("hot_files",  None)
             rtm.SHOW_PLOT     = False
 
+            # 타임존 선택: "UTC" → rtm._UTC, 그 외 → rtm._KST_TZ
+            _tz_map = {"UTC": rtm._UTC, "KST": rtm._KST_TZ}
+            rtm.COLD_TS_TZ    = _tz_map.get(cfg.get("cold_tz", "UTC"), rtm._UTC)
+            rtm.HOT_TS_TZ     = _tz_map.get(cfg.get("hot_tz",  "KST"), rtm._KST_TZ)
+
             # stdout → log 시그널 실시간 전달
             _live = _LiveStream(self.log.emit)
             old_stdout = _sys.stdout
@@ -452,8 +457,8 @@ class RTrendMonitorDialog(QDialog):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        def row_data(label, dir_attr, files_attr, hint_attr):
-            """폴더 선택 또는 개별 파일 다중 선택을 지원하는 입력 행."""
+        def row_data(label, dir_attr, files_attr, hint_attr, tz_attr, tz_default):
+            """폴더 선택 또는 개별 파일 다중 선택을 지원하는 입력 행 (+ 타임존 선택)."""
             le = QLineEdit()
             le.setPlaceholderText("폴더 경로 또는 파일 N개 선택됨")
 
@@ -461,6 +466,17 @@ class RTrendMonitorDialog(QDialog):
             btn_dir.setFixedWidth(70)
             btn_fil = QPushButton("📄 파일")
             btn_fil.setFixedWidth(70)
+
+            # 타임존 선택: 파일 mtime을 어느 기준으로 읽을지 결정
+            tz_combo = QComboBox()
+            tz_combo.addItems(["KST", "UTC (−9h)"])
+            tz_combo.setCurrentText(tz_default)
+            tz_combo.setFixedWidth(96)
+            tz_combo.setToolTip(
+                "파일 수정시각(mtime)을 읽는 기준 타임존.\n"
+                "KST  : 그대로 한국시간으로 표시\n"
+                "UTC  : UTC로 읽음 → 한국시간보다 9시간 이르게 표시 (Cold DAQ가 UTC 기록 시)")
+            setattr(self, tz_attr, tz_combo)
 
             hint = QLabel()
             hint.setStyleSheet("color: #777; font-size: 10px;")
@@ -491,6 +507,8 @@ class RTrendMonitorDialog(QDialog):
             h.addWidget(le)
             h.addWidget(btn_dir)
             h.addWidget(btn_fil)
+            h.addWidget(QLabel("TZ:"))
+            h.addWidget(tz_combo)
             w = QWidget(); w.setLayout(h)
 
             v = QVBoxLayout(); v.setContentsMargins(0, 0, 0, 2)
@@ -519,8 +537,10 @@ class RTrendMonitorDialog(QDialog):
             form.addRow(label, w)
             setattr(self, attr, le)
 
-        row_data("Cold 데이터:",     "_le_cold_dir", "_cold_files_list", "_hint_cold")
-        row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot")
+        row_data("Cold 데이터:",     "_le_cold_dir", "_cold_files_list", "_hint_cold",
+                 "_tz_cold", "UTC (−9h)")
+        row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot",
+                 "_tz_hot", "KST")
         row_file("Cold 파장 보정 파일:",  "_le_wl_cold")
         row_file("Hot 파장 보정 파일:",   "_le_wl_hot")
         row_dir("결과 저장 폴더:",        "_le_out_dir")
@@ -583,6 +603,10 @@ class RTrendMonitorDialog(QDialog):
                                 "Cold 또는 Hot 데이터의 폴더나 파일을 지정해주세요.")
             return
 
+        # 타임존 선택 → "UTC"/"KST" 문자열 (콤보 라벨에서 추출)
+        cold_tz = "UTC" if self._tz_cold.currentText().startswith("UTC") else "KST"
+        hot_tz  = "UTC" if self._tz_hot.currentText().startswith("UTC")  else "KST"
+
         cfg = {
             "cold_dir":   cold_dir,
             "hot_dir":    hot_dir,
@@ -591,6 +615,8 @@ class RTrendMonitorDialog(QDialog):
             "wl_cold":    self._le_wl_cold.text().strip(),
             "wl_hot":     self._le_wl_hot.text().strip(),
             "out_dir":    self._le_out_dir.text().strip() or ".",
+            "cold_tz":    cold_tz,
+            "hot_tz":     hot_tz,
         }
 
         self._log.clear()
@@ -616,7 +642,11 @@ class RTrendMonitorDialog(QDialog):
             if not results:
                 return
             import numpy as np
-            times  = np.array([r["timestamp"].timestamp() for r in results], dtype=float)
+            # 선택한 타임존의 wall-clock을 그대로 사용 (로그/.dat/PNG와 일치).
+            # tzinfo 제거 후 .timestamp()는 로컬(KST) 기준 epoch → DateAxisItem이
+            # 동일한 wall-clock 숫자로 표시한다. (절대 epoch을 쓰면 tz 선택이 무효화됨)
+            times  = np.array([r["timestamp"].replace(tzinfo=None).timestamp()
+                               for r in results], dtype=float)
             r_pct  = np.array([r["r_mean"] * 100.0         for r in results], dtype=float)
             r_std  = np.array([r["r_std"]  * 100.0         for r in results], dtype=float)
 

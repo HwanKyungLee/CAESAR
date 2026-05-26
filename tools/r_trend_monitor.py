@@ -291,9 +291,10 @@ def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
         ax_r.text(0.5, 0.5, f"{channel_name}\nNo Data", ha="center", va="center", transform=ax_r.transAxes, fontsize=12, color="gray")
         return
 
-    # KST-aware datetime을 naive KST로 변환 → matplotlib이 UTC로 변환하는 것 방지
-    # (timezone-aware datetime을 그대로 넘기면 matplotlib이 UTC로 9시간 당겨서 표시함)
-    times  = [r["timestamp"].astimezone(_KST_TZ).replace(tzinfo=None) for r in results]
+    # 선택한 타임존(ts_tz)의 wall-clock을 그대로 사용 (로그/.dat 출력과 일치).
+    # tzinfo만 제거해 naive로 만들면 matplotlib이 추가 변환 없이 그대로 표시한다.
+    # astimezone()을 쓰면 tz 선택이 무효화되므로 사용하지 않는다.
+    times  = [r["timestamp"].replace(tzinfo=None) for r in results]
     r_mean = np.array([r["r_mean"]  for r in results])
     r_std  = np.array([r["r_std"]   for r in results])
     leff   = np.array([r["leff_mean"] for r in results])
