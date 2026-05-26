@@ -640,10 +640,11 @@ class CAESARAnalyzer(QMainWindow):
             self._daily_r_pw.setTitle(
                 f"R(λ)  median={r_med*100:.4f}%  Leff≈{leff:.0f} cm")
 
-    def _update_daily_rt_chart(self, cold_results, hot_results):
+    def _update_daily_rt_chart(self, cold_results, hot_ans_results, hot_pns_results):
         """Populate the R time-series chart in Daily Run from R Trend Monitor results.
 
         Each result dict has keys: timestamp (datetime), r_mean, r_std, leff_mean, …
+        Three channels: Cold, Hot ANs(roi1), Hot PNs(roi2).
         """
         if not hasattr(self, '_daily_rt_pw'):
             return
@@ -660,11 +661,12 @@ class CAESARAnalyzer(QMainWindow):
                    if r.get('r_mean') is not None and r.get('timestamp') is not None]
             if not pts:
                 return
-            # Convert datetime → Unix epoch float for DateAxisItem
+            # Convert datetime → Unix epoch float for DateAxisItem.
+            # Strip tzinfo first so the chosen-tz wall clock is shown (matches monitor).
             ts = []
             for t, _ in pts:
                 if isinstance(t, _dt.datetime):
-                    ts.append(t.timestamp())
+                    ts.append(t.replace(tzinfo=None).timestamp())
                 else:
                     ts.append(float(t))
             rv = [r * 100 for _, r in pts]
@@ -673,8 +675,9 @@ class CAESARAnalyzer(QMainWindow):
                                    symbol='o', symbolSize=5,
                                    name=label)
 
-        _plot_series(cold_results, '#2196F3', 'Cold')
-        _plot_series(hot_results,  '#FF6F00', 'Hot')
+        _plot_series(cold_results,    '#2196F3', 'Cold')
+        _plot_series(hot_ans_results, '#FF6F00', 'Hot ANs')
+        _plot_series(hot_pns_results, '#D32F2F', 'Hot PNs')
         n = (len(cold_results) if cold_results else 0) + (len(hot_results) if hot_results else 0)
         self._daily_rt_pw.setTitle(f"R time series — {n} cycles (Cold/Hot)")
 
