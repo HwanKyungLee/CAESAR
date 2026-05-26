@@ -639,11 +639,11 @@ class CAESARAnalyzer(QMainWindow):
             self._daily_r_pw.setTitle(
                 f"R(λ)  median={r_med*100:.4f}%  Leff≈{leff:.0f} cm")
 
-    def _update_daily_rt_chart(self, cold_results, hot_ans_results, hot_pns_results):
+    def _update_daily_rt_chart(self, cold_results, hot_pns_results, hot_ans_results):
         """Populate the R time-series chart in Daily Run from R Trend Monitor results.
 
         Each result dict has keys: timestamp (datetime), r_mean, r_std, leff_mean, …
-        Three channels: Cold, Hot ANs(roi1), Hot PNs(roi2).
+        Three channels: Cold, Hot PNs(roi1), Hot ANs(roi2).
         """
         if not hasattr(self, '_daily_rt_pw'):
             return
@@ -675,14 +675,14 @@ class CAESARAnalyzer(QMainWindow):
                                    name=label)
 
         _plot_series(cold_results,    '#2196F3', 'Cold')
-        _plot_series(hot_ans_results, '#FF6F00', 'Hot ANs')
-        _plot_series(hot_pns_results, '#D32F2F', 'Hot PNs')
+        _plot_series(hot_pns_results, '#FF6F00', 'Hot PNs')
+        _plot_series(hot_ans_results, '#D32F2F', 'Hot ANs')
         n = ((len(cold_results) if cold_results else 0)
-             + (len(hot_ans_results) if hot_ans_results else 0)
-             + (len(hot_pns_results) if hot_pns_results else 0))
+             + (len(hot_pns_results) if hot_pns_results else 0)
+             + (len(hot_ans_results) if hot_ans_results else 0))
         self._daily_rt_pw.setTitle(f"R time series — {n} cycles (Cold/Hot)")
 
-    def _update_setup_rt_charts(self, cold_results, hot_ans_results, hot_pns_results):
+    def _update_setup_rt_charts(self, cold_results, hot_pns_results, hot_ans_results):
         """Populate the R(t) and Leff(t) plots in the Setup tab Cavity Diagnostics panel."""
         if not hasattr(self, '_setup_r_trend_pw'):
             return
@@ -691,8 +691,8 @@ class CAESARAnalyzer(QMainWindow):
 
         COLORS = [
             ('#2196F3', 'Cold'),
-            ('#FF6F00', 'Hot ANs'),
-            ('#D32F2F', 'Hot PNs'),
+            ('#FF6F00', 'Hot PNs'),
+            ('#D32F2F', 'Hot ANs'),
         ]
 
         self._setup_r_trend_pw.clear()
@@ -706,7 +706,7 @@ class CAESARAnalyzer(QMainWindow):
             return float(t)
 
         for results, (color, label) in zip(
-                [cold_results, hot_ans_results, hot_pns_results], COLORS):
+                [cold_results, hot_pns_results, hot_ans_results], COLORS):
             if not results:
                 continue
             pts_r = [(r['timestamp'], r['r_mean'])
@@ -731,8 +731,8 @@ class CAESARAnalyzer(QMainWindow):
                                          name=label)
 
         n = ((len(cold_results) if cold_results else 0)
-             + (len(hot_ans_results) if hot_ans_results else 0)
-             + (len(hot_pns_results) if hot_pns_results else 0))
+             + (len(hot_pns_results) if hot_pns_results else 0)
+             + (len(hot_ans_results) if hot_ans_results else 0))
         self._setup_r_trend_pw.setTitle(f"R 시계열 — {n} cycles")
         self._setup_leff_pw.setTitle(f"Leff 시계열 — {n} cycles")
 
@@ -2015,7 +2015,7 @@ class CAESARAnalyzer(QMainWindow):
             ch_names = {1: "CH1", 2: "CH1+CH2", 3: "CH1+CH2+CH3"}
             ch_labels = {
                 1: "1채널  (Cold / single-cavity)",
-                2: "2채널  (Hot:  CH1 ANs 180°C  +  CH2 PNs 300°C)",
+                2: "2채널  (Hot:  CH1 PNs 180°C  +  CH2 ANs 300°C)",
                 3: "3채널  (CH1 + CH2 + CH3)",
             }
             label = ch_labels.get(n, f"{n}채널")

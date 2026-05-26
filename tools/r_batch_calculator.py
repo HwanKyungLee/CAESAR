@@ -21,8 +21,8 @@ PIXEL_MIN = 0
 PIXEL_MAX = None
 
 WAVE_CAL_COLD    = r"D:\CAESAR cold\Calib_20260507_Hg_399-494nm_Poly2.txt"
-WAVE_CAL_HOT_ANS = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
-WAVE_CAL_HOT_PNS = r"D:\CAESAR hot\roi2\Calib_20260403_Hg_400-499nm(roi2).txt"
+WAVE_CAL_HOT_PNS = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"
+WAVE_CAL_HOT_ANS = r"D:\CAESAR hot\roi2\Calib_20260403_Hg_400-499nm(roi2).txt"
 
 OUTPUT_DIR   = r"C:\Users\kh548\OneDrive\바탕 화면\여수 필드 준비"
 FLAG_ZA      = 500   # ZA injecting (안정 측정 구간): 501=set flow, 502=wait before, 500=injecting, 503=wait after
@@ -32,12 +32,12 @@ FILE_PATTERN = "*.dat"
 # ── 스펙트럼 컬럼 범위 (2026-05-18/19 실측 검증) ─────────────────────────────
 #  col 0-4: 메타데이터 (카운터/시각/적분시간/unknown/flag)
 #  CH1 (cols  5-2052): 비활성 (Cold/Hot 모두 신호 없음)
-#  CH2 (cols 2053-4100): Cold + Hot ANs(roi1) 스펙트럼
-#  CH3 (cols 4101-6148): Hot PNs(roi2) 스펙트럼 전용
-SPEC_START_DEFAULT = 2053   # CH2: Cold / Hot ANs
+#  CH2 (cols 2053-4100): Cold + Hot PNs(roi1) 스펙트럼
+#  CH3 (cols 4101-6148): Hot ANs(roi2) 스펙트럼 전용
+SPEC_START_DEFAULT = 2053   # CH2: Cold / Hot PNs
 SPEC_END_DEFAULT   = 4101   # exclusive
-SPEC_START_PNS     = 4101   # CH3: Hot PNs(roi2)
-SPEC_END_PNS       = 6149   # exclusive
+SPEC_START_ANS     = 4101   # CH3: Hot ANs(roi2)
+SPEC_END_ANS       = 6149   # exclusive
 
 # ── HK 컬럼 인덱스 (2026-05-18/19 실측 샘플 검증) ──────────────────────────
 #  Cold 채널 (노트북, 단일 캐비티, 비가열)
@@ -45,13 +45,13 @@ COL_PRESS_COLD = 6160   # 압력: ×0.6895 → ~1010 mbar
 COL_TEMP_COLD  = 6173   # 캐비티 온도: ÷100 → ~24°C
 
 #  Hot 채널 (데스크탑, 이중 캐비티, 캐비티 75°C)
-#  ※ 압력: ANs(6162)/PNs(6164) 두 캐비티 각각의 센서로 추정, 정확한 매핑 확인 필요
-COL_PRESS_HOT_ANS = 6162   # ANs 캐비티 압력: ×0.6895 → ~987 mbar
-COL_PRESS_HOT_PNS = 6164   # PNs 캐비티 압력: ×0.6895 → ~971 mbar  ※ tentative
-COL_TEMP_HOT      = 6155   # 캐비티 온도 (ANs/PNs 공통): ÷100 → ~75°C
+#  ※ 압력: PNs(6162)/ANs(6164) 두 캐비티 각각의 센서로 추정, 정확한 매핑 확인 필요
+COL_PRESS_HOT_PNS = 6162   # PNs 캐비티 압력: ×0.6895 → ~987 mbar
+COL_PRESS_HOT_ANS = 6164   # ANs 캐비티 압력: ×0.6895 → ~971 mbar  ※ tentative
+COL_TEMP_HOT      = 6155   # 캐비티 온도 (PNs/ANs 공통): ÷100 → ~75°C
 # 하위 호환 별칭 — r_trend_monitor.py 등 구버전 코드가 COL_PRESS_HOT를 참조
-COL_PRESS_HOT = COL_PRESS_HOT_ANS
-#  참고: col6154=ANs 오븐(~180°C), col6151=PNs 오븐(~300°C)
+COL_PRESS_HOT = COL_PRESS_HOT_PNS
+#  참고: col6154=PNs 오븐(~180°C), col6151=ANs 오븐(~300°C)
 # ════════════════════════════════════════════════════════════════
 
 
@@ -60,8 +60,8 @@ def _extract_spectrum_and_hk(tokens, col_press=COL_PRESS_COLD, col_temp=COL_TEMP
     """한 행(토큰 리스트)에서 스펙트럼과 압력·온도를 추출한다.
 
     spec_start / spec_end: 추출할 스펙트럼 컬럼 범위 (exclusive end)
-      - CH2 기본값 (2053-4101): Cold + Hot ANs
-      - CH3 PNs   (4101-6149): Hot PNs(roi2) 전용
+      - CH2 기본값 (2053-4101): Cold + Hot PNs
+      - CH3 ANs   (4101-6149): Hot ANs(roi2) 전용
     """
     t_c, p_mbar = 25.0, 1013.25
     n = len(tokens)
@@ -191,7 +191,7 @@ def process_channel(channel_name, directory, wave_cal_path, output_dir,
 
     Parameters
     ----------
-    channel_name  : 출력 표시용 이름 (예: "Cold", "Hot_ANs", "Hot_PNs")
+    channel_name  : 출력 표시용 이름 (예: "Cold", "Hot_PNs", "Hot_ANs")
     directory     : .dat 파일이 있는 폴더
     wave_cal_path : 파장 교정 파일 경로 (None이면 픽셀 인덱스로 폴백)
     output_dir    : R 결과 저장 폴더
@@ -203,9 +203,9 @@ def process_channel(channel_name, directory, wave_cal_path, output_dir,
     # HK 컬럼 자동 선택 (channel_name 기반)
     if col_press is None:
         if "pns" in channel_name.lower():
-            col_press = COL_PRESS_HOT_PNS
-        elif "hot" in channel_name.lower():
             col_press = COL_PRESS_HOT_ANS
+        elif "hot" in channel_name.lower():
+            col_press = COL_PRESS_HOT_PNS
         else:
             col_press = COL_PRESS_COLD
     if col_temp is None:
@@ -271,17 +271,17 @@ def main():
     process_channel("Cold", COLD_DIR, WAVE_CAL_COLD,
                     os.path.join(OUTPUT_DIR, "R_Cold"))
 
-    # Hot ANs(roi1): CH2 스펙트럼 (cols 2053-4100), ANs 압력(col6162)
-    process_channel("Hot_ANs", HOT_DIR, WAVE_CAL_HOT_ANS,
-                    os.path.join(OUTPUT_DIR, "R_Hot_ANs"),
-                    col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
-                    spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT)
-
-    # Hot PNs(roi2): CH3 스펙트럼 (cols 4101-6148), PNs 압력(col6164, tentative)
+    # Hot PNs(roi1): CH2 스펙트럼 (cols 2053-4100), PNs 압력(col6162)
     process_channel("Hot_PNs", HOT_DIR, WAVE_CAL_HOT_PNS,
                     os.path.join(OUTPUT_DIR, "R_Hot_PNs"),
                     col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
-                    spec_start=SPEC_START_PNS, spec_end=SPEC_END_PNS)
+                    spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT)
+
+    # Hot ANs(roi2): CH3 스펙트럼 (cols 4101-6148), ANs 압력(col6164, tentative)
+    process_channel("Hot_ANs", HOT_DIR, WAVE_CAL_HOT_ANS,
+                    os.path.join(OUTPUT_DIR, "R_Hot_ANs"),
+                    col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
+                    spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS)
 
     print("\n모든 작업이 완료되었습니다.")
 

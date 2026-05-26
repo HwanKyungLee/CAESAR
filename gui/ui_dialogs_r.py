@@ -363,7 +363,7 @@ class _RTrendWorker(QThread):
     """백그라운드에서 r_trend_monitor.main()을 실행."""
     log        = pyqtSignal(str)
     finished   = pyqtSignal(str)    # 결과 폴더 경로
-    data_ready = pyqtSignal(object, object, object)  # (cold, hot_ans, hot_pns) — inline plot용
+    data_ready = pyqtSignal(object, object, object)  # (cold, hot_pns, hot_ans) — inline plot용
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -383,18 +383,20 @@ class _RTrendWorker(QThread):
             rtm.COLD_DIR         = cfg.get("cold_dir", "")
             rtm.HOT_DIR          = cfg.get("hot_dir",  "")
             rtm.WAVE_CAL_COLD    = cfg.get("wl_cold",  "")
-            rtm.WAVE_CAL_HOT     = cfg.get("wl_hot",   "")       # ANs(roi1)=CH2
-            rtm.WAVE_CAL_HOT_PNS = cfg.get("wl_hot_pns", "")     # PNs(roi2)=CH3
+            rtm.WAVE_CAL_HOT     = cfg.get("wl_hot",   "")       # PNs(roi1)=CH2
+            rtm.WAVE_CAL_HOT_ANS = cfg.get("wl_hot_ans", "")     # ANs(roi2)=CH3
             rtm.OUTPUT_DIR       = cfg.get("out_dir",  ".")
             rtm.COLD_FILES       = cfg.get("cold_files", None)   # None → 폴더 전체 스캔
-            rtm.HOT_FILES        = cfg.get("hot_files",  None)   # ANs/PNs 공유
+            rtm.HOT_FILES        = cfg.get("hot_files",  None)   # PNs/ANs 공유
             rtm.SHOW_PLOT        = False
+            rtm.CAVITY_LEN       = cfg.get("cavity_len", rtm.CAVITY_LEN)
+            rtm.RL_FACTOR        = cfg.get("rl_factor",  rtm.RL_FACTOR)
 
             # 타임존 선택: "UTC" → rtm._UTC, 그 외 → rtm._KST_TZ
             _tz_map = {"UTC": rtm._UTC, "KST": rtm._KST_TZ}
             rtm.COLD_TS_TZ    = _tz_map.get(cfg.get("cold_tz", "UTC"), rtm._UTC)
             rtm.HOT_TS_TZ     = _tz_map.get(cfg.get("hot_tz",  "KST"), rtm._KST_TZ)
-            rtm.HOT_PNS_TS_TZ = rtm.HOT_TS_TZ   # ANs/PNs 같은 raw 파일 → 동일 tz
+            rtm.HOT_ANS_TS_TZ = rtm.HOT_TS_TZ   # PNs/ANs 같은 raw 파일 → 동일 tz
 
             # stdout → log 시그널 실시간 전달
             _live = _LiveStream(self.log.emit)
@@ -407,7 +409,7 @@ class _RTrendWorker(QThread):
                 _sys.stdout = old_stdout
                 _live.flush()
 
-            # main()이 (cold, hot_ans, hot_pns, out_folder) 튜플을 반환하면
+            # main()이 (cold, hot_pns, hot_ans, out_folder) 튜플을 반환하면
             # data_ready 시그널로 인라인 플롯에 전달한다
             _out_dir = rtm.OUTPUT_DIR
             if _rtm_result and len(_rtm_result) >= 4:
@@ -426,7 +428,7 @@ class RTrendMonitorDialog(QDialog):
     """R Trend Monitor 설정 + 실행 + 로그 표시 + 인라인 시계열 그래프 다이얼로그."""
 
     # Forwarded from the worker so the parent main window can connect to it
-    data_ready = pyqtSignal(object, object, object)   # (cold, hot_ans, hot_pns)
+    data_ready = pyqtSignal(object, object, object)   # (cold, hot_pns, hot_ans)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -439,6 +441,12 @@ class RTrendMonitorDialog(QDialog):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick_elapsed)
         self._init_ui()
+        # Pre-populate cavity params from Cavity Setup tab
+        if parent is not None:
+            if hasattr(parent, 'spin_d_len'):
+                self._spin_cavity_len.setValue(parent.spin_d_len.value())
+            if hasattr(parent, 'spin_rl_factor'):
+                self._spin_rl.setValue(parent.spin_rl_factor.value())
 
     def _pick_dir(self, line_edit):
         d = QFileDialog.getExistingDirectory(self, "폴더 선택")
@@ -544,10 +552,36 @@ class RTrendMonitorDialog(QDialog):
         row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot",
                  "_tz_hot", "KST")
         row_file("Cold 파장 보정 파일:",        "_le_wl_cold")
-        row_file("Hot ANs(roi1) 파장 보정:",   "_le_wl_hot")
-        row_file("Hot PNs(roi2) 파장 보정:",   "_le_wl_hot_pns")
+        row_file("Hot PNs(roi1) 파장 보정:",   "_le_wl_hot")
+        row_file("Hot ANs(roi2) 파장 보정:",   "_le_wl_hot_ans")
         row_dir("결과 저장 폴더:",             "_le_out_dir")
         self._le_out_dir.setText(".")
+
+        # ── 캐비티 파라미터 (Cavity Setup 탭과 연동) ─────────────────
+        from PyQt6.QtWidgets import QDoubleSpinBox as _DSB
+        cavity_row = QHBoxLayout()
+        cavity_row.addWidget(QLabel("Cavity 길이 (cm):"))
+        self._spin_cavity_len = _DSB()
+        self._spin_cavity_len.setRange(1.0, 10000.0)
+        self._spin_cavity_len.setDecimals(2)
+        self._spin_cavity_len.setValue(51.8)
+        self._spin_cavity_len.setFixedWidth(90)
+        cavity_row.addWidget(self._spin_cavity_len)
+        cavity_row.addSpacing(20)
+        cavity_row.addWidget(QLabel("RL Factor:"))
+        self._spin_rl = _DSB()
+        self._spin_rl.setRange(0.001, 1.0)
+        self._spin_rl.setDecimals(4)
+        self._spin_rl.setSingleStep(0.001)
+        self._spin_rl.setValue(1.0)
+        self._spin_rl.setFixedWidth(80)
+        self._spin_rl.setToolTip("퍼지 가스 Return Loss 보정 (1.0 = 보정 없음)\n"
+                                 "Cavity Setup 탭의 값이 자동으로 채워집니다.")
+        cavity_row.addWidget(self._spin_rl)
+        cavity_row.addStretch()
+        cw = QWidget(); cw.setLayout(cavity_row)
+        form.addRow("캐비티 설정:", cw)
+
         main.addLayout(form)
 
         btn_run = QPushButton("▶  계산 시작")
@@ -617,10 +651,12 @@ class RTrendMonitorDialog(QDialog):
             "hot_files":  hot_files,
             "wl_cold":    self._le_wl_cold.text().strip(),
             "wl_hot":     self._le_wl_hot.text().strip(),
-            "wl_hot_pns": self._le_wl_hot_pns.text().strip(),
+            "wl_hot_ans": self._le_wl_hot_ans.text().strip(),
             "out_dir":    self._le_out_dir.text().strip() or ".",
             "cold_tz":    cold_tz,
             "hot_tz":     hot_tz,
+            "cavity_len": self._spin_cavity_len.value(),
+            "rl_factor":  self._spin_rl.value(),
         }
 
         self._log.clear()
@@ -637,8 +673,8 @@ class RTrendMonitorDialog(QDialog):
         self._worker.finished.connect(self._on_done)
         self._worker.start()
 
-    def _on_data_ready(self, cold_results, hot_ans_results, hot_pns_results):
-        """워커가 계산 완료한 R 시계열을 인라인 플롯에 표시한다 (Cold/Hot ANs/Hot PNs)."""
+    def _on_data_ready(self, cold_results, hot_pns_results, hot_ans_results):
+        """워커가 계산 완료한 R 시계열을 인라인 플롯에 표시한다 (Cold/Hot PNs/Hot ANs)."""
         self._pw.clear()
         self._pw.addLegend(offset=(10, 10))
 
@@ -666,13 +702,13 @@ class RTrendMonitorDialog(QDialog):
             self._pw.addItem(err)
 
         _plot_channel(cold_results,    '#2196F3', 'Cold R mean')
-        _plot_channel(hot_ans_results, '#FF6F00', 'Hot ANs(roi1) R mean')
-        _plot_channel(hot_pns_results, '#D32F2F', 'Hot PNs(roi2) R mean')
+        _plot_channel(hot_pns_results, '#FF6F00', 'Hot PNs(roi1) R mean')
+        _plot_channel(hot_ans_results, '#D32F2F', 'Hot ANs(roi2) R mean')
 
         # Y축 범위: 전체 데이터 기준 ±0.05 % 여백
         all_r = ([r["r_mean"] * 100 for r in cold_results] +
-                 [r["r_mean"] * 100 for r in hot_ans_results] +
-                 [r["r_mean"] * 100 for r in hot_pns_results])
+                 [r["r_mean"] * 100 for r in hot_pns_results] +
+                 [r["r_mean"] * 100 for r in hot_ans_results])
         if all_r:
             import numpy as np
             lo = min(all_r) - 0.05

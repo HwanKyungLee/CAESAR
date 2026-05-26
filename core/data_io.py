@@ -140,7 +140,7 @@ class DataIO:
     # Araon Mega-Matrix column layout:
     #   META block  : cols    0 – 2052   (2053 cols, metadata + UTC + flags)
     #   CH1 spectrum: cols 2053 – 4100   (2048 px)
-    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot ROI2/PNs only
+    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot ROI2/ANs only
     #   CH3 spectrum: cols 6149 – 8196   (2048 px)  — 3-channel config only
     #   HK block    : cols (2053 + N×2048) onward
     #
@@ -154,8 +154,8 @@ class DataIO:
         'hot_p':    13,   # Hot inlet pressure  raw count → ×0.6895 = mbar
         'hot_cav_t': 6,   # Heated cavity temperature    → /100 = °C (~75°C)
         'cold_cav_t':24,  # Unheated cavity temperature  → /100 = °C (~24°C)
-        'oven_ans': 5,    # ANs oven setpoint             → /100 = °C (~180°C)
-        'oven_pns': 2,    # PNs oven setpoint             → /100 = °C (~300°C)
+        'oven_pns': 5,    # PNs oven setpoint             → /100 = °C (~180°C)
+        'oven_ans': 2,    # ANs oven setpoint             → /100 = °C (~300°C)
     }
     _P_SCALE = 0.01 * 6894.73326 / 100.0   # raw count → mbar (~0.6895)
     _P_LO, _P_HI = 800.0, 1200.0           # plausible atmospheric pressure range
@@ -216,6 +216,98 @@ class DataIO:
         return count
 
     @staticmethod
+    def _is_alpha_trace_format(filepath) -> bool:
+        """Returns True when the file is a CAESAR Pro alpha_trace.dat (multi-scan TSV)."""
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    if s.startswith('# wavelength_nm:') or s.startswith('row_idx\t'):
+                        return True
+                    if s.startswith('#'):
+                        continue
+                    break
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _count_alpha_trace_data_rows(filepath) -> int:
+        """Count ambient data rows in an alpha_trace.dat file."""
+        count = 0
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    s = line.strip()
+                    if s and not s.startswith('#') and not s.startswith('row_idx'):
+                        count += 1
+        except Exception:
+            pass
+        return max(count, 1)
+
+    @staticmethod
+    def _load_alpha_trace_row(filepath, row_index, pixel_min=0, pixel_max=None):
+        """Load one data row from an alpha_trace.dat file.
+
+        Reads T_C, P_mbar, and alpha values for the given data-row index.
+        Pads the alpha array to 2048 pixels (zeros outside the exported range)
+        so that the caller's pixel_min/pixel_max slicing works correctly.
+
+        Returns (pixel_idx, intensity_raw, state_flag=1, env_t, env_p).
+        """
+        px_start = 0
+        data_rows = []
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    s = line.strip()
+                    if not s or s.startswith('#'):
+                        continue
+                    if s.startswith('row_idx'):
+                        cols = s.split('\t')
+                        for c in cols[3:]:
+                            if c.startswith('px'):
+                                try:
+                                    px_start = int(c[2:])
+                                except ValueError:
+                                    pass
+                                break
+                        continue
+                    data_rows.append(s)
+        except Exception as e:
+            raise RuntimeError(
+                f"HK Data Load Failed ({os.path.basename(filepath)}): {e}")
+
+        if row_index >= len(data_rows):
+            raise RuntimeError(
+                f"HK Data Load Failed ({os.path.basename(filepath)}): "
+                f"row {row_index} not found ({len(data_rows)} data rows)")
+
+        parts = data_rows[row_index].split('\t')
+        try:
+            env_t = float(parts[1])
+            env_p = float(parts[2])
+            alpha_vals = np.array([float(v) for v in parts[3:]], dtype=float)
+        except (ValueError, IndexError) as e:
+            raise RuntimeError(
+                f"HK Data Load Failed ({os.path.basename(filepath)}): parse error: {e}")
+
+        n_alpha = len(alpha_vals)
+        full_alpha = np.zeros(2048, dtype=float)
+        end_px = min(px_start + n_alpha, 2048)
+        full_alpha[px_start:end_px] = alpha_vals[:end_px - px_start]
+
+        p_min = int(pixel_min)
+        p_max = (end_px if pixel_max is None or int(pixel_max) > 2048
+                 else int(pixel_max))
+        intensity_raw = full_alpha[p_min:p_max]
+        pixel_idx = np.arange(p_min, p_max)
+
+        return pixel_idx, intensity_raw, 1, env_t, env_p
+
+    @staticmethod
     def expand_to_scan_list(filepath):
         """
         Expands a file path into a list of (filepath, row_index) tuples.
@@ -226,6 +318,9 @@ class DataIO:
         """
         if DataIO.is_araon_mega_matrix(filepath):
             n = DataIO.count_scan_rows(filepath)
+            return [(filepath, i) for i in range(n)]
+        if DataIO._is_alpha_trace_format(filepath):
+            n = DataIO._count_alpha_trace_data_rows(filepath)
             return [(filepath, i) for i in range(n)]
         return [(filepath, 0)]
 
@@ -318,8 +413,8 @@ class DataIO:
             )
 
     # Araon Mega-Matrix spectrum column offsets
-    # CH1 (ROI1 / ANs / 180°C inlet):  cols 2053–4100  (2048 px)
-    # CH2 (ROI2 / PNs / 300°C inlet):  cols 4101–6148  (2048 px)
+    # CH1 (ROI1 / PNs / 180°C inlet):  cols 2053–4100  (2048 px)
+    # CH2 (ROI2 / ANs / 300°C inlet):  cols 4101–6148  (2048 px)
     # HK block starts at col 6149.
     # Cold files have CH1 only (CH2 block is noise ~500 ADU).
     _CH_OFFSET = {1: (2053, 4101), 2: (4101, 6149)}
@@ -333,14 +428,14 @@ class DataIO:
         The Araon LabVIEW system saves each scan as a single horizontal row with
         6175+ columns (the 'Mega-Matrix' format):
 
-          Column range  2053–4100  →  CH1 spectrum  (ROI1 / ANs / 180°C inlet)
-          Column range  4101–6148  →  CH2 spectrum  (ROI2 / PNs / 300°C inlet)
+          Column range  2053–4100  →  CH1 spectrum  (ROI1 / PNs / 180°C inlet)
+          Column range  4101–6148  →  CH2 spectrum  (ROI2 / ANs / 300°C inlet)
           Column        4          →  state flag  (1=Ambient, 500~503=ZA, 510~513=He)
           HK block      6149+      →  T, P, oven temps, etc.
 
         channel : int, 1 or 2
             Which spectrum to extract.  Default=1 (CH1/ROI1).
-            Use channel=2 for CH2/ROI2 (PNs, hot files only).
+            Use channel=2 for CH2/ROI2 (ANs, hot files only).
 
         row_index selects which row (scan) to read from a multi-scan file.
         Falls back to treating the whole file as a plain 1D spectrum when the
@@ -350,6 +445,12 @@ class DataIO:
           (pixel_idx, intensity_raw, state_flag, env_t, env_p)
         """
         try:
+            # alpha_trace.dat format: early return before _read_row_raw
+            # (comment lines would mislead the Araon vs. 1D branch decision)
+            if DataIO._is_alpha_trace_format(filepath):
+                return DataIO._load_alpha_trace_row(
+                    filepath, row_index, pixel_min, pixel_max)
+
             # Read the target row directly — avoids pandas column-count enforcement
             # which breaks on Araon files that mix 6177-col and 6181-col rows.
             raw_probe = DataIO._read_row_raw(filepath, row_index)
