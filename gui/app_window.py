@@ -522,7 +522,6 @@ class CAESARAnalyzer(QMainWindow):
             try:
                 n = len(wl)
                 if int(self.txt_max.text()) >= n:
-                    print(f"[RANGE-DEBUG] _refresh_setup_status CLAMP txt_max {self.txt_max.text()} -> {n-1} (len(wl)={n})")
                     self.txt_max.setText(str(n - 1))
             except ValueError:
                 pass
@@ -1711,7 +1710,6 @@ class CAESARAnalyzer(QMainWindow):
         start = min(idx_min, idx_max)
         end = max(idx_min, idx_max)
 
-        print(f"[RANGE-DEBUG] set_range_from_nm(nm Apply) target={target} window={window} -> px {start},{end}")
         self.txt_min.setText(str(start))
         self.txt_max.setText(str(end))
         self.status.setText(f"Range Set: {min_nm:.1f}nm ~ {max_nm:.1f}nm (Pixels {start}~{end})")
@@ -2070,13 +2068,15 @@ class CAESARAnalyzer(QMainWindow):
         
     def update_range(self, min_idx, max_idx):
         """Updates the text boxes with the visual selection."""
-        print(f"[RANGE-DEBUG] update_range(RangeSelector) -> {min_idx},{max_idx}  running={getattr(self,'_analysis_running',False)}")
+        if getattr(self, '_analysis_running', False):
+            return
         self.txt_min.setText(str(min_idx))
         self.txt_max.setText(str(max_idx))
 
     def apply_roi_from_graph(self, min_val, max_val):
         """Updates the fitting range directly from the fast monitor ROI selection."""
-        print(f"[RANGE-DEBUG] apply_roi_from_graph(monitor ROI) -> {min_val},{max_val}  running={getattr(self,'_analysis_running',False)}")
+        if getattr(self, '_analysis_running', False):
+            return
         self.txt_min.setText(str(min_val))
         self.txt_max.setText(str(max_val))
         self.status.setText(f"Range Selected: {min_val} ~ {max_val}")
@@ -2106,7 +2106,6 @@ class CAESARAnalyzer(QMainWindow):
         except Exception:
             QMessageBox.warning(self, "Input Error", "Please enter valid integers for Pixel Min/Max.")
             return
-        print(f"[RANGE-DEBUG] === start_analysis READ pixel_min={pixel_min} pixel_max={pixel_max} (before tab switch) ===")
         self._analysis_running = True
         
         self.results = []
