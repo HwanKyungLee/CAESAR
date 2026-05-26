@@ -17,7 +17,7 @@ def leff_km(r):
     omr = 1.0 - trim_mean(r)
     return D_CM / omr * 1e-5 if omr > 0 else float('nan')
 
-channels = {'Cold': 'R_Cold', 'Hot ANs': 'R_Hot_ANs', 'Hot PNs': 'R_Hot_PNs'}
+channels = {'Cold': 'R_Cold', 'Hot PNs': 'R_Hot_PNs', 'Hot ANs': 'R_Hot_ANs'}
 
 for ch, sub in channels.items():
     ch_dir = os.path.join(base, sub)

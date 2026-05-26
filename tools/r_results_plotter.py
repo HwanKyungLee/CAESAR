@@ -1,6 +1,6 @@
 """
 plot_r_results.py
-R 결과 파일 시각화 — 3채널(Cold / Hot_ANs / Hot_PNs) 시계열 + R 스펙트럼
+R 결과 파일 시각화 — 3채널(Cold / Hot_PNs / Hot_ANs) 시계열 + R 스펙트럼
 """
 
 import os
@@ -16,12 +16,12 @@ from matplotlib.gridspec import GridSpec
 BASE_DIR = r"C:\Users\kh548\OneDrive\바탕 화면\여수 필드 준비"
 CHANNELS = {
     "Cold":     os.path.join(BASE_DIR, "R_Cold"),
-    "Hot ANs":  os.path.join(BASE_DIR, "R_Hot_ANs"),
     "Hot PNs":  os.path.join(BASE_DIR, "R_Hot_PNs"),
+    "Hot ANs":  os.path.join(BASE_DIR, "R_Hot_ANs"),
 }
 OUT_DIR = BASE_DIR
 
-COLORS = {"Cold": "#1f77b4", "Hot ANs": "#d62728", "Hot PNs": "#ff7f0e"}
+COLORS = {"Cold": "#1f77b4", "Hot PNs": "#d62728", "Hot ANs": "#ff7f0e"}
 
 # ── 데이터 로더 ───────────────────────────────────────────────────────────────
 
@@ -223,13 +223,13 @@ def make_spectra_figure(all_records):
     plt.close(fig)
 
 
-# ── 3. 채널 비교 그래프 (같은 날짜 파일: ANs vs PNs) ─────────────────────────
+# ── 3. 채널 비교 그래프 (같은 날짜 파일: PNs vs ANs) ─────────────────────────
 
 def make_comparison_figure(all_records):
-    """Hot ANs / Hot PNs 중앙값 스펙트럼 비교 (날짜별)"""
-    ans_recs = all_records.get("Hot ANs", [])
+    """Hot PNs / Hot ANs 중앙값 스펙트럼 비교 (날짜별)"""
     pns_recs = all_records.get("Hot PNs", [])
-    if not ans_recs or not pns_recs:
+    ans_recs = all_records.get("Hot ANs", [])
+    if not pns_recs or not ans_recs:
         return
 
     # 날짜별로 그룹핑
@@ -240,9 +240,9 @@ def make_comparison_figure(all_records):
             d.setdefault(date, []).append((lbl, wave, r))
         return d
 
-    ans_g = group_by_date(ans_recs)
     pns_g = group_by_date(pns_recs)
-    dates = sorted(set(ans_g) & set(pns_g))
+    ans_g = group_by_date(ans_recs)
+    dates = sorted(set(pns_g) & set(ans_g))
 
     n = len(dates)
     if n == 0:
@@ -251,15 +251,15 @@ def make_comparison_figure(all_records):
     cols = min(n, 2)
     rows = (n + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(13, 4.5 * rows), squeeze=False)
-    fig.suptitle("Hot ANs vs Hot PNs — Median R Spectra by Date",
+    fig.suptitle("Hot PNs vs Hot ANs — Median R Spectra by Date",
                  fontsize=13, fontweight="bold")
 
     for idx, date in enumerate(dates):
         ax = axes[idx // cols][idx % cols]
 
         yvals_all = []
-        for ch_name, grp, color in [("Hot ANs", ans_g[date], COLORS["Hot ANs"]),
-                                     ("Hot PNs", pns_g[date], COLORS["Hot PNs"])]:
+        for ch_name, grp, color in [("Hot PNs", pns_g[date], COLORS["Hot PNs"]),
+                                     ("Hot ANs", ans_g[date], COLORS["Hot ANs"])]:
             r_list = [r for _, _, r in grp]
             if not r_list:
                 continue
@@ -295,7 +295,7 @@ def make_comparison_figure(all_records):
         axes[idx // cols][idx % cols].set_visible(False)
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    out_path = os.path.join(OUT_DIR, "R_ANs_vs_PNs.png")
+    out_path = os.path.join(OUT_DIR, "R_PNs_vs_ANs.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"[저장] {out_path}")
     plt.close(fig)

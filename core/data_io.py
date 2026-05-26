@@ -140,7 +140,7 @@ class DataIO:
     # Araon Mega-Matrix column layout:
     #   META block  : cols    0 – 2052   (2053 cols, metadata + UTC + flags)
     #   CH1 spectrum: cols 2053 – 4100   (2048 px)
-    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot ROI2/PNs only
+    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot ROI2/ANs only
     #   CH3 spectrum: cols 6149 – 8196   (2048 px)  — 3-channel config only
     #   HK block    : cols (2053 + N×2048) onward
     #
@@ -154,8 +154,8 @@ class DataIO:
         'hot_p':    13,   # Hot inlet pressure  raw count → ×0.6895 = mbar
         'hot_cav_t': 6,   # Heated cavity temperature    → /100 = °C (~75°C)
         'cold_cav_t':24,  # Unheated cavity temperature  → /100 = °C (~24°C)
-        'oven_ans': 5,    # ANs oven setpoint             → /100 = °C (~180°C)
-        'oven_pns': 2,    # PNs oven setpoint             → /100 = °C (~300°C)
+        'oven_pns': 5,    # PNs oven setpoint             → /100 = °C (~180°C)
+        'oven_ans': 2,    # ANs oven setpoint             → /100 = °C (~300°C)
     }
     _P_SCALE = 0.01 * 6894.73326 / 100.0   # raw count → mbar (~0.6895)
     _P_LO, _P_HI = 800.0, 1200.0           # plausible atmospheric pressure range
@@ -413,8 +413,8 @@ class DataIO:
             )
 
     # Araon Mega-Matrix spectrum column offsets
-    # CH1 (ROI1 / ANs / 180°C inlet):  cols 2053–4100  (2048 px)
-    # CH2 (ROI2 / PNs / 300°C inlet):  cols 4101–6148  (2048 px)
+    # CH1 (ROI1 / PNs / 180°C inlet):  cols 2053–4100  (2048 px)
+    # CH2 (ROI2 / ANs / 300°C inlet):  cols 4101–6148  (2048 px)
     # HK block starts at col 6149.
     # Cold files have CH1 only (CH2 block is noise ~500 ADU).
     _CH_OFFSET = {1: (2053, 4101), 2: (4101, 6149)}
@@ -428,14 +428,14 @@ class DataIO:
         The Araon LabVIEW system saves each scan as a single horizontal row with
         6175+ columns (the 'Mega-Matrix' format):
 
-          Column range  2053–4100  →  CH1 spectrum  (ROI1 / ANs / 180°C inlet)
-          Column range  4101–6148  →  CH2 spectrum  (ROI2 / PNs / 300°C inlet)
+          Column range  2053–4100  →  CH1 spectrum  (ROI1 / PNs / 180°C inlet)
+          Column range  4101–6148  →  CH2 spectrum  (ROI2 / ANs / 300°C inlet)
           Column        4          →  state flag  (1=Ambient, 500~503=ZA, 510~513=He)
           HK block      6149+      →  T, P, oven temps, etc.
 
         channel : int, 1 or 2
             Which spectrum to extract.  Default=1 (CH1/ROI1).
-            Use channel=2 for CH2/ROI2 (PNs, hot files only).
+            Use channel=2 for CH2/ROI2 (ANs, hot files only).
 
         row_index selects which row (scan) to read from a multi-scan file.
         Falls back to treating the whole file as a plain 1D spectrum when the

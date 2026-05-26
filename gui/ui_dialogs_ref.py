@@ -999,7 +999,7 @@ class MonitorWidget(QWidget):
         # ── 행1: R 결과 폴더 ──────────────────────────────────
         row1 = QHBoxLayout()
         self._r_dir_edit = QLineEdit()
-        self._r_dir_edit.setPlaceholderText("R 결과 폴더  (R_Cold / R_Hot_ANs / R_Hot_PNs 포함)")
+        self._r_dir_edit.setPlaceholderText("R 결과 폴더  (R_Cold / R_Hot_PNs / R_Hot_ANs 포함)")
         btn_r = QPushButton("📂"); btn_r.setFixedWidth(30)
         btn_r.clicked.connect(lambda: self._r_pick(self._r_dir_edit))
         row1.addWidget(QLabel("결과 폴더:")); row1.addWidget(self._r_dir_edit, 4); row1.addWidget(btn_r)
@@ -1053,7 +1053,7 @@ class MonitorWidget(QWidget):
 
         # 채널 가시성 체크박스
         self._r_chk = {}
-        for ch, col in [("Cold","#1f77b4"), ("Hot ANs","#d62728"), ("Hot PNs","#ff7f0e")]:
+        for ch, col in [("Cold","#1f77b4"), ("Hot PNs","#d62728"), ("Hot ANs","#ff7f0e")]:
             chk = QCheckBox(ch)
             chk.setChecked(True)
             chk.setStyleSheet(f"color:{col}; font-weight:bold;")
@@ -1093,7 +1093,7 @@ class MonitorWidget(QWidget):
         self._r_p_ts.addLegend(offset=(10, 10))
 
         # 채널별 커브
-        _CH = {"Cold":"#1f77b4", "Hot ANs":"#d62728", "Hot PNs":"#ff7f0e"}
+        _CH = {"Cold":"#1f77b4", "Hot PNs":"#d62728", "Hot ANs":"#ff7f0e"}
         self._r_curves = {}
         self._r_marks  = {}
         for ch, col in _CH.items():
@@ -1314,8 +1314,8 @@ class MonitorWidget(QWidget):
 
         sub = {
             "Cold":    (os.path.join(base, "R_Cold"),    cold_raw),
-            "Hot ANs": (os.path.join(base, "R_Hot_ANs"), hot_raw),
             "Hot PNs": (os.path.join(base, "R_Hot_PNs"), hot_raw),
+            "Hot ANs": (os.path.join(base, "R_Hot_ANs"), hot_raw),
         }
         self._r_data = {}
         total = 0
@@ -1369,7 +1369,7 @@ class MonitorWidget(QWidget):
         self._r_p_ts.enableAutoRange(axis='x')
 
         # 첫 채널 첫 파일 스펙트럼 기본 표시
-        for ch in ["Cold", "Hot ANs", "Hot PNs"]:
+        for ch in ["Cold", "Hot PNs", "Hot ANs"]:
             if self._r_data.get(ch):
                 self._r_sel_ch  = ch
                 self._r_sel_idx = 0

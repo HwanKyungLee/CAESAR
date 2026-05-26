@@ -74,8 +74,8 @@ try:
         read_all_scans, FLAG_ZA, FLAG_HE,
         CAVITY_LEN, RL_FACTOR, PIXEL_MIN, PIXEL_MAX,
         COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT, COL_TEMP_HOT,
-        COL_PRESS_HOT_ANS, COL_PRESS_HOT_PNS,
-        SPEC_START_DEFAULT, SPEC_END_DEFAULT, SPEC_START_PNS, SPEC_END_PNS,
+        COL_PRESS_HOT_PNS, COL_PRESS_HOT_ANS,
+        SPEC_START_DEFAULT, SPEC_END_DEFAULT, SPEC_START_ANS, SPEC_END_ANS,
     )
 except ImportError as e:
     # sys.exit()는 QThread 안에서 SystemExit를 던져 스레드를 비정상 종료시키므로 사용 금지.
@@ -102,10 +102,10 @@ COLD_DIR = r"D:\CAESAR cold\2026-05"
 HOT_DIR  = r"D:\CAESAR hot\2026-05"
 
 # 파장 보정 파일 경로 (정확한 파일명 적용 완료)
-# Hot은 한 raw 파일 안에 ROI 2개(ANs=CH2 / PNs=CH3)가 들어있어 각각 파장보정이 다름.
+# Hot은 한 raw 파일 안에 ROI 2개(PNs=CH2 / ANs=CH3)가 들어있어 각각 파장보정이 다름.
 WAVE_CAL_COLD    = r"D:\CAESAR cold\Calib_20260523_Hg_400-497nm_Poly2_cold.txt"
-WAVE_CAL_HOT     = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"  # ANs(roi1)=CH2
-WAVE_CAL_HOT_PNS = r"D:\CAESAR hot\roi2\Calib_20260403_Hg_400-499nm(roi2).txt"  # PNs(roi2)=CH3
+WAVE_CAL_HOT     = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"  # PNs(roi1)=CH2
+WAVE_CAL_HOT_ANS = r"D:\CAESAR hot\roi2\Calib_20260403_Hg_400-499nm(roi2).txt"  # ANs(roi2)=CH3
 
 OUTPUT_DIR  = r"."
 FILE_PATTERN = "*.dat"
@@ -118,13 +118,13 @@ _UTC      = timezone.utc
 _KST_TZ   = timezone(timedelta(hours=9))
 
 # Cold DAQ는 파일 mtime을 UTC로 기록 → _UTC 사용 (KST로 읽으면 +9시간 오차 발생)
-# Hot DAQ는 KST로 기록 → _KST_TZ 사용 (ANs/PNs 같은 raw 파일이라 동일 tz)
+# Hot DAQ는 KST로 기록 → _KST_TZ 사용 (PNs/ANs 같은 raw 파일이라 동일 tz)
 COLD_TS_TZ   = _UTC
 HOT_TS_TZ    = _KST_TZ
-HOT_PNS_TS_TZ = _KST_TZ
+HOT_ANS_TS_TZ = _KST_TZ
 
 # [방법 1] 전체 처리 시 None 사용
-# Hot ANs/PNs는 같은 raw 파일을 ROI 컬럼만 달리해서 읽으므로 HOT_FILES를 공유한다.
+# Hot PNs/ANs는 같은 raw 파일을 ROI 컬럼만 달리해서 읽으므로 HOT_FILES를 공유한다.
 COLD_FILES = None
 HOT_FILES  = None
 
@@ -362,16 +362,16 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
     if SHOW_PLOT: plt.show()
     plt.close(fig)
 
-def plot_combined(results_cold, results_hot_ans, results_hot_pns, out_path):
-    # 3채널(Cold / Hot ANs / Hot PNs) × (R + 선택적 Leff)
+def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
+    # 3채널(Cold / Hot PNs / Hot ANs) × (R + 선택적 Leff)
     per_ch = 2 if SHOW_LEFF else 1
     n_rows = 3 * per_ch
     fig, axes = plt.subplots(n_rows, 1, figsize=(14, 3.5 * n_rows), sharex=False, squeeze=False)
-    fig.suptitle("CAESAR Pro — Cold / Hot ANs(roi1) / Hot PNs(roi2) Mirror Reflectivity Trend", fontsize=12)
+    fig.suptitle("CAESAR Pro — Cold / Hot PNs(roi1) / Hot ANs(roi2) Mirror Reflectivity Trend", fontsize=12)
     channels = [
         (results_cold,    "Cold",            R_EXPECTED_COLD, "steelblue"),
-        (results_hot_ans, "Hot ANs(roi1)",   R_EXPECTED_HOT,  "darkorange"),
-        (results_hot_pns, "Hot PNs(roi2)",   R_EXPECTED_HOT,  "crimson"),
+        (results_hot_pns, "Hot PNs(roi1)",   R_EXPECTED_HOT,  "darkorange"),
+        (results_hot_ans, "Hot ANs(roi2)",   R_EXPECTED_HOT,  "crimson"),
     ]
     for i, (res, name, r_exp, color) in enumerate(channels):
         ax_r = axes[i * per_ch, 0]
@@ -393,9 +393,9 @@ def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # ── 파장 보정 파일 로드 (Cold / Hot ANs / Hot PNs) ──
-    # Hot은 한 raw 파일 안에 ROI 2개(ANs=CH2 / PNs=CH3)가 있어 파장보정이 각각 다르다.
-    wave_nm_cold = wave_nm_hot_ans = wave_nm_hot_pns = None
+    # ── 파장 보정 파일 로드 (Cold / Hot PNs / Hot ANs) ──
+    # Hot은 한 raw 파일 안에 ROI 2개(PNs=CH2 / ANs=CH3)가 있어 파장보정이 각각 다르다.
+    wave_nm_cold = wave_nm_hot_pns = wave_nm_hot_ans = None
 
     def _load_wave(path, label):
         if not os.path.isfile(path):
@@ -409,8 +409,8 @@ def main():
             return None
 
     wave_nm_cold    = _load_wave(WAVE_CAL_COLD,    "Cold")
-    wave_nm_hot_ans = _load_wave(WAVE_CAL_HOT,     "Hot ANs(roi1)")
-    wave_nm_hot_pns = _load_wave(WAVE_CAL_HOT_PNS, "Hot PNs(roi2)")
+    wave_nm_hot_pns = _load_wave(WAVE_CAL_HOT,     "Hot PNs(roi1)")
+    wave_nm_hot_ans = _load_wave(WAVE_CAL_HOT_ANS, "Hot ANs(roi2)")
 
     has_hot = (HOT_FILES is not None or os.path.isdir(HOT_DIR))
 
@@ -423,48 +423,48 @@ def main():
                                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) \
                    if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
-    # ── Hot ANs(roi1) 채널 (CH2, 컬럼 2053-4100) ──────────────────
-    print(f"\n{bar}\n  Hot ANs(roi1) 채널 처리\n{bar}")
-    results_hot_ans = scan_directory(HOT_DIR, wave_nm_hot_ans, HOT_FILES,
-                                     col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
+    # ── Hot PNs(roi1) 채널 (CH2, 컬럼 2053-4100) ──────────────────
+    print(f"\n{bar}\n  Hot PNs(roi1) 채널 처리\n{bar}")
+    results_hot_pns = scan_directory(HOT_DIR, wave_nm_hot_pns, HOT_FILES,
+                                     col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_TS_TZ,
                                      spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) \
                       if has_hot else []
 
-    # ── Hot PNs(roi2) 채널 (CH3, 컬럼 4101-6148) ──────────────────
-    print(f"\n{bar}\n  Hot PNs(roi2) 채널 처리\n{bar}")
-    results_hot_pns = scan_directory(HOT_DIR, wave_nm_hot_pns, HOT_FILES,
-                                     col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
-                                     ts_tz=HOT_PNS_TS_TZ,
-                                     spec_start=SPEC_START_PNS, spec_end=SPEC_END_PNS) \
+    # ── Hot ANs(roi2) 채널 (CH3, 컬럼 4101-6148) ──────────────────
+    print(f"\n{bar}\n  Hot ANs(roi2) 채널 처리\n{bar}")
+    results_hot_ans = scan_directory(HOT_DIR, wave_nm_hot_ans, HOT_FILES,
+                                     col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
+                                     ts_tz=HOT_ANS_TS_TZ,
+                                     spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS) \
                       if has_hot else []
 
     # ── 출력 폴더 이름 결정 및 저장 ──────────────────────────────────
     range_cold    = make_range_name(results_cold)
-    range_hot_ans = make_range_name(results_hot_ans)
     range_hot_pns = make_range_name(results_hot_pns)
-    all_results = results_cold + results_hot_ans + results_hot_pns
+    range_hot_ans = make_range_name(results_hot_ans)
+    all_results = results_cold + results_hot_pns + results_hot_ans
     folder_name = make_range_name(sorted(all_results, key=lambda x: x["timestamp"])) if all_results else "nodata"
     out_folder = os.path.join(OUTPUT_DIR, folder_name)
     os.makedirs(out_folder, exist_ok=True)
 
     print(f"\n{bar}\n  결과 저장  →  {out_folder}\n{bar}")
     if results_cold:    save_dat(results_cold,    os.path.join(out_folder, f"Cold_{range_cold}.dat"))
-    if results_hot_ans: save_dat(results_hot_ans, os.path.join(out_folder, f"Hot_ANs_{range_hot_ans}.dat"))
     if results_hot_pns: save_dat(results_hot_pns, os.path.join(out_folder, f"Hot_PNs_{range_hot_pns}.dat"))
+    if results_hot_ans: save_dat(results_hot_ans, os.path.join(out_folder, f"Hot_ANs_{range_hot_ans}.dat"))
 
     if HAS_MPL:
         if results_cold:    plot_single_channel(results_cold,    "Cold",        R_EXPECTED_COLD, os.path.join(out_folder, "R_trend_Cold.png"),    "steelblue")
-        if results_hot_ans: plot_single_channel(results_hot_ans, "Hot ANs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_ANs.png"), "darkorange")
-        if results_hot_pns: plot_single_channel(results_hot_pns, "Hot PNs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_PNs.png"), "crimson")
-        if all_results: plot_combined(results_cold, results_hot_ans, results_hot_pns, os.path.join(out_folder, "R_trend_combined.png"))
+        if results_hot_pns: plot_single_channel(results_hot_pns, "Hot PNs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_PNs.png"), "darkorange")
+        if results_hot_ans: plot_single_channel(results_hot_ans, "Hot ANs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_ANs.png"), "crimson")
+        if all_results: plot_combined(results_cold, results_hot_pns, results_hot_ans, os.path.join(out_folder, "R_trend_combined.png"))
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  완료 — 반사율 요약                                            ║")
     print("╠══════════════════════════════════════════════════════════════╣")
     for ch, res, r_exp in [("Cold    ", results_cold, R_EXPECTED_COLD),
-                           ("Hot ANs ", results_hot_ans, R_EXPECTED_HOT),
-                           ("Hot PNs ", results_hot_pns, R_EXPECTED_HOT)]:
+                           ("Hot PNs ", results_hot_pns, R_EXPECTED_HOT),
+                           ("Hot ANs ", results_hot_ans, R_EXPECTED_HOT)]:
         if not res:
             print(f"║  {ch}: 데이터 없음")
             continue
@@ -472,7 +472,7 @@ def main():
         print(f"║  {ch}: 사이클 {len(res)}개  R_mean={np.mean(r_vals):.6f}  경고={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}건")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
-    return results_cold, results_hot_ans, results_hot_pns, out_folder
+    return results_cold, results_hot_pns, results_hot_ans, out_folder
 
 if __name__ == "__main__":
     main()

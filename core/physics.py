@@ -28,7 +28,8 @@ class RayleighPhysics:
     Number density: N = N_Loschmidt × (P/P₀) × (T₀/T)  [molecules cm⁻³]
     α(T,P,λ) = σ(λ) × N(T,P)  [cm⁻¹]
 
-    Note: σ는 N²에 반비례하므로 α = σ × N ∝ N (pressure/temperature에 정상 비례).
+    Note: σ는 STP 분자 밀도 N₀ (Loschmidt 상수) 기준으로 정의되는 분자 고유값.
+          α = σ × N(T,P) 이므로 압력·온도가 증가하면 α도 정비례 증가한다.
     """
     @staticmethod
     def get_alpha_rayleigh(
@@ -38,30 +39,34 @@ class RayleighPhysics:
         gas_type: str = "zero_air",
     ) -> np.ndarray:
         wave_nm = np.asarray(wave_nm, dtype=float)
-        N = 2.68678e19 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
+        # Loschmidt 상수 — STP(0°C, 1013.25 mbar) 분자 밀도. σ 공식 분모에 사용.
+        N0 = 2.6867811e19   # molec/cm³
+        # 현재 조건(P,T)에서의 실제 분자 밀도. α = σ × N(T,P) 변환에 사용.
+        N  = N0 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
         v = 1e7 / wave_nm   # 파수 [cm⁻¹], 단 λ는 nm 단위
 
         if gas_type in ("zero_air", "air"):
             # ── MATLAB 경험식 (주석 보존) ───────────────────────────────────────
             # 출처: Rs2_CAESAR_Cold_Yeosu_2026.m (optimize_ZA_Rayleigh.m 피팅)
             #   σ_ZA = 3.019852e-14 × λ_nm^-3.87465  [cm²/molecule]
-            # ※ MATLAB fun_air의 N 단위 관례에 맞게 피팅된 상수이므로,
-            #   Python의 표준 Loschmidt N (2.688e19 cm⁻³)과 함께 쓰면 α가 ~100배 커짐.
-            #   Python에서는 아래 Sellmeier 공식을 사용한다.
+            # ※ 박사님 fun_air 코드 확인 결과 MATLAB N도 Loschmidt 2.6867811e19 cm⁻³
+            #   기반이며 Python과 N 컨벤션은 동일. 다만 σ 공식이 다르다
+            #   (MATLAB = 경험식, Python = Sellmeier 물리식) → α 결과가 차이날 수 있음.
             # sigma = 3.019852e-14 * wave_nm ** (-3.87465)
             # ────────────────────────────────────────────────────────────────────
 
-            # N₂: Peck & Reeder (1972) Sellmeier
+            # N₂: Peck & Reeder (1972) Sellmeier — Sellmeier 굴절률이 STP 기준이므로
+            # σ 공식의 분모도 STP 분자 밀도 N₀를 써야 σ가 P/T에 무관한 분자 고유값이 된다.
             A_n2, B_n2, C_n2 = 5677.465, 318.81874e12, 14.4e9
             n_n2 = 1.0 + (A_n2 + B_n2 / (C_n2 - v**2)) * 1e-8
             Fk_n2 = 1.034 + 3.17e-12 * v
-            s_n2 = Fk_n2 * (24 * np.pi**3 * v**4 / N**2) * ((n_n2**2 - 1) / (n_n2**2 + 2))**2
+            s_n2 = Fk_n2 * (24 * np.pi**3 * v**4 / N0**2) * ((n_n2**2 - 1) / (n_n2**2 + 2))**2
 
             # O₂: Bates (1984) Sellmeier
             A_o2, B_o2, C_o2 = 20564.8, 2.480899e13, 4.09e9
             n_o2 = 1.0 + (A_o2 + B_o2 / (C_o2 - v**2)) * 1e-8
             Fk_o2 = 1.09 + 1.385e-11 * v**2 + 1.448e-20 * v**4
-            s_o2 = Fk_o2 * (24 * np.pi**3 * v**4 / N**2) * ((n_o2**2 - 1) / (n_o2**2 + 2))**2
+            s_o2 = Fk_o2 * (24 * np.pi**3 * v**4 / N0**2) * ((n_o2**2 - 1) / (n_o2**2 + 2))**2
 
             sigma = 0.79 * s_n2 + 0.21 * s_o2
 
@@ -75,9 +80,9 @@ class RayleighPhysics:
 
             A_he, B_he, C_he = 2283.0, 1.8102e13, 1.5342e10
             n_he = 1.0 + (A_he + B_he / (C_he - v**2)) * 1e-8
-            sigma = (24 * np.pi**3 * v**4 / N**2) * ((n_he**2 - 1) / (n_he**2 + 2))**2
+            sigma = (24 * np.pi**3 * v**4 / N0**2) * ((n_he**2 - 1) / (n_he**2 + 2))**2
 
-        return sigma * N  # α = σ × N(T,P)  [cm⁻¹]
+        return sigma * N  # α = σ × N(T,P)  [cm⁻¹] — α는 압력·온도에 정비례
 
 
 class KalmanTracker:
