@@ -95,8 +95,8 @@ Stage 4로 만든 알파(`*_alpha_trace.dat`)를 DOAS 피팅하면 잔차/신호
 
 ## 6. 남은 작업 / 정리 항목
 
-1. **(정리) RANGE-DEBUG 로그 제거** — `gui/app_window.py`에 진단용 `print("[RANGE-DEBUG]...")` 5곳이 아직 남아있음. 핏레인지 버그 원인 확정되면 제거.
-2. **(미해결) 핏레인지가 Run 시 바뀌는 버그** — 가설: Run 시 모니터 탭 전환(app_window 2195 근처)에서 ROI region 신호가 `apply_roi_from_graph`로 txt_min/max 덮어씀. RANGE-DEBUG 로그로 재현 확인 필요.
+1. ~~**(정리) RANGE-DEBUG 로그 제거**~~ — ✅ 완료 (5곳 모두 제거).
+2. ~~**(미해결) 핏레인지가 Run 시 바뀌는 버그**~~ — ✅ 완료. `apply_roi_from_graph`/`update_range`에 `_analysis_running` 가드 추가 → Run 중에는 모니터 ROI 신호가 txt_min/max를 덮어쓰지 않음.
 3. **(품질) 1% 도전** — 4번 표대로 dark 프레임 + 측정 레퍼런스 확보 후.
 4. **(백로그) #1 전체 60개 파일 R 시계열 계산** — `tools/r_trend_monitor.py`.
 
@@ -107,4 +107,3 @@ Stage 4로 만든 알파(`*_alpha_trace.dat`)를 DOAS 피팅하면 잔차/신호
 1. `git pull origin main` (또는 clone)
 2. 알파 fix 동작 확인하려면: `python main.py` → Stage 4(알파 추출, raw=`D:\CAESAR cold\2026-05\`) → Stage 5(피팅) → 잔차 ~10% 확인
 3. 1% 원하면 4번 표 진행 (dark 프레임이 최우선·필요조건)
-4. (선택) 2번 핏레인지 버그 마무리 + RANGE-DEBUG 로그 제거

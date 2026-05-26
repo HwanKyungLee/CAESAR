@@ -865,11 +865,14 @@ class MonitorWidget(QWidget):
         self.glw_trend = pg.GraphicsLayoutWidget()
         layout.addLayout(self._create_reset_toolbar(target_glw=self.glw_trend))
         
-        self.p_sh = self.glw_trend.addPlot(row=0, col=0, title="Shift Trend")
+        self.p_sh = self.glw_trend.addPlot(row=0, col=0, title="Δ Shift Trend (기준: 첫 스캔)")
         self.p_sq = self.glw_trend.addPlot(row=1, col=0, title="Squeeze Trend")
         self.p_rms = self.glw_trend.addPlot(row=2, col=0, title="RMS Error Trend")
         self.p_rms.setLogMode(y=True)
 
+        self.p_sh.setLabel('left', 'Δ Shift (px)')
+        self.p_sq.setLabel('left', 'Squeeze')
+        self.p_rms.setLabel('left', 'RMS')
         for p in [self.p_sh, self.p_sq, self.p_rms]:
             p.setClipToView(True)
             p.showGrid(x=True, y=True)
@@ -891,7 +894,8 @@ class MonitorWidget(QWidget):
                 'sq':  self.p_sq.plot(pen=pen, symbol='o', symbolSize=4, symbolBrush=col, name=lbl),
                 'rms': self.p_rms.plot(pen=pen, symbol='o', symbolSize=4, symbolBrush=col, name=lbl),
             }
-            self._trend_data[ch] = {'x': [], 'sh': [], 'sq': [], 'rms': []}
+            self._trend_data[ch] = {'x': [], 'sh': [], 'sq': [], 'rms': [],
+                                     'sh_ref': None}   # baseline shift for Δ display
 
         # Legacy single-channel aliases (keep for any external code that reads them)
         self.curve_sh  = self._trend_curves[1]['sh']
@@ -1652,7 +1656,13 @@ class MonitorWidget(QWidget):
 
         td = self._trend_data[ch]
         td['x'].append(idx)
-        td['sh'].append(shift)
+
+        # Δ shift: relative to the first scan's shift per channel so small
+        # drifts are immediately visible instead of a constant offset.
+        if td['sh_ref'] is None:
+            td['sh_ref'] = shift
+        td['sh'].append(shift - td['sh_ref'])
+
         td['sq'].append(squeeze)
         td['rms'].append(rms)
 
@@ -1681,6 +1691,7 @@ class MonitorWidget(QWidget):
         for ch, td in self._trend_data.items():
             for k in ('x', 'sh', 'sq', 'rms'):
                 td[k].clear()
+            td['sh_ref'] = None   # reset baseline so next run starts from 0
             tc = self._trend_curves[ch]
             tc['sh'].setData([], [])
             tc['sq'].setData([], [])
