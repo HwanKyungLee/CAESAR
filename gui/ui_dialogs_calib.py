@@ -933,24 +933,24 @@ class RangeSelectorDialog(QDialog):
         self.main_layout.addLayout(btns_layout)
 
     def _load_araon_spectrum_for_display(self):
-        """Read a representative ZA/ambient spectrum from an Araon mega-matrix file.
+        """Read the brightest spectrum from an Araon mega-matrix file for display.
 
-        Scans up to the first 300 rows and averages up to 5 ZA (flag 500-503) or
-        ambient (flag 1) scans from CH1. Falls back to the first parsable row if
-        no such scan is found.  Returns (pixel_idx, intensity).
+        Scans the first 500 rows and returns the row whose CH1 channel has the
+        highest peak intensity. This is flag-agnostic so the display works
+        regardless of whether ambient scans are flagged 0, 1, or any other value.
+        Returns (pixel_idx, intensity).
         """
         _META  = DataIO._META_COLS   # 2053
         _NPIX  = DataIO._CH_PIXELS   # 2048
         col_start, col_end = _META, _META + _NPIX
 
-        GOOD_FLAGS = {1, 500, 501, 502, 503}
-        spectra = []
-        fallback = None
+        best_spectrum = None
+        best_max      = -np.inf
 
         try:
             with open(self.data_path, 'r', encoding='utf-8', errors='replace') as fh:
                 for i, line in enumerate(fh):
-                    if i > 300:
+                    if i > 500:
                         break
                     tokens = line.strip().split('\t')
                     if len(tokens) < col_end:
@@ -961,36 +961,22 @@ class RangeSelectorDialog(QDialog):
                     except Exception:
                         continue
 
-                    # Require at least 500 finite values above noise floor
                     fin = np.isfinite(raw)
-                    if fin.sum() < 500 or np.nanmax(raw) < 500:
+                    if fin.sum() < 500:
                         continue
 
-                    if fallback is None:
-                        fallback = raw.copy()
-
-                    try:
-                        flag = int(tokens[4])
-                    except Exception:
-                        flag = 0
-
-                    if flag in GOOD_FLAGS:
-                        spectra.append(raw)
-                    if len(spectra) >= 5:
-                        break
+                    row_max = float(np.nanmax(raw))
+                    if row_max > best_max:
+                        best_max      = row_max
+                        best_spectrum = raw.copy()
         except Exception as e:
             raise RuntimeError(f"Cannot read Araon file for vis.select: {e}")
 
-        if spectra:
-            arr = np.nanmean(spectra, axis=0)
-        elif fallback is not None:
-            arr = fallback
-        else:
+        if best_spectrum is None:
             raise RuntimeError("No usable scan found in Araon file")
 
-        # Replace remaining NaN with zero so the plot doesn't have gaps
-        arr = np.where(np.isfinite(arr), arr, 0.0)
-        return np.arange(len(arr)), arr
+        best_spectrum = np.where(np.isfinite(best_spectrum), best_spectrum, 0.0)
+        return np.arange(len(best_spectrum)), best_spectrum
 
     def load_plot(self):
         """Loads selected data, plots it on a nm axis (if calibration available), and activates SpanSelector."""
