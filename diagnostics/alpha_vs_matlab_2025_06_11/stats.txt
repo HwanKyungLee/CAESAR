@@ -1,0 +1,89 @@
+
+======================================================================
+Per-pixel alpha statistics — MATLAB (reference)
+======================================================================
+  px  200  λ= 314.69 nm   mean=-5.819e-04  std=5.407e-03
+  px  500  λ= 345.88 nm   mean=-3.483e-05  std=7.866e-04
+  px 1000  λ= 397.87 nm   mean=+2.047e-06  std=2.077e-04
+  px 1500  λ= 449.85 nm   mean=+1.277e-07  std=1.817e-07
+  px 1800  λ= 481.04 nm   mean=+9.996e-08  std=1.490e-07
+
+======================================================================
+CAESAR variant summary  (all bins, all pixels)
+======================================================================
+
+A: dark=None, σ=Sellmeier
+  n_bins=1379 / 1437   mean(|α|)=1.844e-06   median|α|=4.268e-08
+
+B: dark=1500, σ=Sellmeier
+  n_bins=1379 / 1437   mean(|α|)=9.830e+00   median|α|=2.159e-09
+
+C: dark=None, σ=MATLAB
+  n_bins=1379 / 1437   mean(|α|)=1.907e-06   median|α|=4.409e-08
+
+D: dark=1500, σ=MATLAB
+  n_bins=1379 / 1437   mean(|α|)=1.018e+01   median|α|=2.238e-09
+
+E: ★FLAG SWAP, dark=None
+  n_bins=1379 / 1437   mean(|α|)=2.669e-07   median|α|=4.641e-08
+
+F: ★FLAG SWAP, dark=500
+  n_bins=1379 / 1437   mean(|α|)=2.495e-07   median|α|=5.467e-08
+
+======================================================================
+Residual: CAESAR − MATLAB (after time alignment)
+======================================================================
+
+A: dark=None, σ=Sellmeier
+  aligned bins=1379   global pixel correlation r=+0.0024
+  RMS residual per-pixel (sample):
+    px 200 λ= 314.7  bias=+5.866e-04  RMS=5.477e-03  MATLAB std=5.407e-03
+    px 500 λ= 345.9  bias=+3.251e-05  RMS=7.927e-04  MATLAB std=7.866e-04
+    px1000 λ= 397.9  bias=-2.113e-06  RMS=2.092e-04  MATLAB std=2.077e-04
+    px1500 λ= 449.9  bias=+7.680e-06  RMS=1.551e-05  MATLAB std=1.817e-07
+    px1800 λ= 481.0  bias=+2.329e-08  RMS=2.315e-07  MATLAB std=1.490e-07
+
+B: dark=1500, σ=Sellmeier
+  aligned bins=1379   global pixel correlation r=+0.0003
+  RMS residual per-pixel (sample):
+    px 200 λ= 314.7  bias=+5.866e-04  RMS=5.477e-03  MATLAB std=5.407e-03
+    px 500 λ= 345.9  bias=+3.251e-05  RMS=7.927e-04  MATLAB std=7.866e-04
+    px1000 λ= 397.9  bias=-2.121e-06  RMS=2.092e-04  MATLAB std=2.077e-04
+    px1500 λ= 449.9  bias=-1.151e-07  RMS=2.109e-07  MATLAB std=1.817e-07
+    px1800 λ= 481.0  bias=-9.008e-08  RMS=1.642e-07  MATLAB std=1.490e-07
+
+C: dark=None, σ=MATLAB
+  aligned bins=1379   global pixel correlation r=+0.0024
+  RMS residual per-pixel (sample):
+    px 200 λ= 314.7  bias=+5.866e-04  RMS=5.477e-03  MATLAB std=5.407e-03
+    px 500 λ= 345.9  bias=+3.251e-05  RMS=7.927e-04  MATLAB std=7.866e-04
+    px1000 λ= 397.9  bias=-2.113e-06  RMS=2.092e-04  MATLAB std=2.077e-04
+    px1500 λ= 449.9  bias=+7.945e-06  RMS=1.604e-05  MATLAB std=1.817e-07
+    px1800 λ= 481.0  bias=+2.729e-08  RMS=2.378e-07  MATLAB std=1.490e-07
+
+D: dark=1500, σ=MATLAB
+  aligned bins=1379   global pixel correlation r=+0.0003
+  RMS residual per-pixel (sample):
+    px 200 λ= 314.7  bias=+5.866e-04  RMS=5.477e-03  MATLAB std=5.407e-03
+    px 500 λ= 345.9  bias=+3.251e-05  RMS=7.927e-04  MATLAB std=7.866e-04
+    px1000 λ= 397.9  bias=-2.121e-06  RMS=2.092e-04  MATLAB std=2.077e-04
+    px1500 λ= 449.9  bias=-1.146e-07  RMS=2.105e-07  MATLAB std=1.817e-07
+    px1800 λ= 481.0  bias=-8.971e-08  RMS=1.637e-07  MATLAB std=1.490e-07
+
+E: ★FLAG SWAP, dark=None
+  aligned bins=1379   global pixel correlation r=+0.0010
+  RMS residual per-pixel (sample):
+    px 200 λ= 314.7  bias=+5.867e-04  RMS=5.477e-03  MATLAB std=5.407e-03
+    px 500 λ= 345.9  bias=+3.254e-05  RMS=7.927e-04  MATLAB std=7.866e-04
+    px1000 λ= 397.9  bias=-2.096e-06  RMS=2.092e-04  MATLAB std=2.077e-04
+    px1500 λ= 449.9  bias=+4.795e-07  RMS=1.673e-06  MATLAB std=1.817e-07
+    px1800 λ= 481.0  bias=-3.223e-08  RMS=1.807e-07  MATLAB std=1.490e-07
+
+F: ★FLAG SWAP, dark=500
+  aligned bins=1379   global pixel correlation r=+0.0007
+  RMS residual per-pixel (sample):
+    px 200 λ= 314.7  bias=+5.867e-04  RMS=5.477e-03  MATLAB std=5.407e-03
+    px 500 λ= 345.9  bias=+3.255e-05  RMS=7.927e-04  MATLAB std=7.866e-04
+    px1000 λ= 397.9  bias=-2.088e-06  RMS=2.092e-04  MATLAB std=2.077e-04
+    px1500 λ= 449.9  bias=+4.845e-07  RMS=1.687e-06  MATLAB std=1.817e-07
+    px1800 λ= 481.0  bias=-3.006e-08  RMS=1.806e-07  MATLAB std=1.490e-07

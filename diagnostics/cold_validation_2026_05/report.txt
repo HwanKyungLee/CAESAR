@@ -1,0 +1,31 @@
+======================================================================
+CAESAR Pro Alpha Validation — 2026-05-17 cold setup
+======================================================================
+Wavelength range: 400.30 ~ 496.75 nm  (2048 px)
+
+-- Mean spectra ---------------------------------------------
+  He  (flag 510, strict): peak 64326  @ λ=460.2 nm
+  ZA  (flag 500, strict): peak 53327  @ λ=460.1 nm
+  contrast (He-ZA)/He: 17.1 %
+  Ambient mean peak: 49353
+  Ambient min (dark proxy): 348
+
+-- R calibration --------------------------------------------
+  ZA blocks: 16
+  He blocks: 6
+  R-cal candidates passed threshold: 16
+  best_omr_d mean: 7.558e-06 cm⁻¹
+  → Leff ≈ 1.32 km
+  → if d=100cm: (1-R) ≈ 0.0008  → R ≈ 0.9992
+
+-- Alpha statistics -----------------------------------------
+  total bins: 959    nonempty: 953
+  mean(|α|) across all bins×pixels: 1.095e-07 cm⁻¹
+  median|α|:                       8.760e-08
+
+  Per-pixel mean α (sample λ):
+    λ= 410.0 nm  mean=+3.426e-09  std=1.667e-07
+    λ= 430.0 nm  mean=+9.345e-08  std=9.512e-08
+    λ= 450.0 nm  mean=+1.131e-07  std=7.858e-08
+    λ= 470.0 nm  mean=+8.588e-08  std=5.739e-08
+    λ= 490.0 nm  mean=+2.380e-08  std=8.273e-08
