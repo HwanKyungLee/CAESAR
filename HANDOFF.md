@@ -1,11 +1,79 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-05-26**  (이전 내용은 git history 참조)
+> 최종 업데이트: **2026-05-27** (이번 세션 — 이전 2026-05-26 노트는 §B 이하 유지)
 
 ---
 
-## 0. 한 줄 요약
+## 0. 이번 세션 (2026-05-27) 한 줄 요약
+
+**CAESAR Pro의 알파+DOAS 파이프라인이 정상 작동함을 cold setup 데이터로 end-to-end 검증 완료.**
+2025-06-11 데이터의 알파 이슈는 코드 결함이 아니라 그 데이터셋의 He/ZA contrast 0.35% 문제로 판명. 부수적으로 발견한 두 가지 코드 개선사항은 PR 브랜치에 푸시 완료.
+
+---
+
+## A. 이번 세션 작업 (2026-05-27)
+
+### A1. 검증 작업 ★
+
+- **2025-06-11 ch1 데이터** (`raw(ex)/2025-06/2025-06-11-*.dat`, 24 files)로 박사님 MATLAB
+  알파(`C:\Doasis_Work\LGH\아라온호 데이터분석\alpha_trace\ch1_20250611_000000\`,
+  1399 bins × 2048 px)와 비교 시도 → **r ≈ 0** (의미있는 일치 없음).
+  - 원인: 그 데이터의 He/ZA I_peak 차이가 0.35% (45929 vs 45767)밖에 안 됨 → R-cal이
+    노이즈에 묻힘. 박사님 MATLAB 알파도 UV 영역(300-400 nm)에선 garbage임.
+  - 산출물: `diagnostics/alpha_vs_matlab_2025_06_11/FINDINGS.md` + scripts + plots/
+- **2026-05-17 ch1 cold setup** (`F:\CAESAR cold\2026-05\2026-05-17-*.dat`, 16 files)로
+  재검증 → **He/ZA contrast 17.1%**, R-cal 16/16 ZA blocks 통과, **Leff = 1.32 km**,
+  알파 mean\|α\| = 1.1e-7 cm⁻¹, NO2 differential structure 명확히 보임.
+  - DOAS 피팅 결과: **NO2 median 0.64 ppb, RMS 3e-8 cm⁻¹**, bin 800-950에 NO2 plume(5-6 ppb) 캡처.
+  - 산출물: `diagnostics/cold_validation_2026_05/` (scripts + docs) +
+    `D:\GHL\CAESAR_Pro_validation_2026_05\` (.npz 데이터 + plots, git에 안 들어감)
+
+### A2. ★ 코드 개선 PR (별도 브랜치)
+
+**브랜치: `claude/strict-flags-and-rcal-threshold`** (push 완료)
+**PR 생성 URL**: https://github.com/HwanKyungLee/CEASER/pull/new/claude/strict-flags-and-rcal-threshold
+
+두 가지 수정:
+1. **ZA/He flag 기본값 strict화** (`gui/app_window.py`):
+   "500,501,502,503"/"510,511,512,513" → "500"/"510". 501-503/511-513은 setflow/wait
+   전환구간이라 cavity 미충전 — I0/R-cal에 들어가면 오염시킴. (Tooltip 의도와도 일치)
+2. **R-cal threshold configurable** (`gui/worker.py:1166` `AlphaExportWorker`):
+   하드코딩 0.90/1e-5 → 생성자 인자 `r_cal_valid_min`, `r_cal_omr_max`. 기본값 유지 →
+   high-finesse cavity (R>0.999)은 동작 변화 없음. Low-finesse 셋업엔 docstring에서
+   `0.50 / 1e-3` 권장. GUI 노출은 follow-up PR로.
+
+### A3. 미완 / 다음 세션 할 일
+
+이 브랜치(`claude/handoff-cold-validation`)에 모든 작업물 + 다음 단계 정보 정리됨.
+
+**우선순위 1 — 위 PR 머지** (간단한 코드 변경 2건, 검증 통과)
+
+**우선순위 2 — 2026-05-18/19 일부 파일 추가 검증**
+- He 사이클은 매 3파일마다 (사이클: He → ZA → 샘플 ×N → He → ZA → ...). 중간 ZA 샘플링
+  구간은 직전 He block의 R로 PCHIP 보간 사용 — 현재 코드는 median 단일값으로 사용 중,
+  나중에 nearest-He-block 옵션 추가 고려.
+- 권장 cluster (각 일자 He block 3개 이상):
+  - 05-18: 001-008 (8 files; He = 002·005·008)
+  - 05-19: 001-007 (7 files; He = 001·004·007)
+- 실행: `diagnostics/cold_validation_2026_05/run_alpha.py`의 `RAW_GLOB` 만 바꿔 재실행.
+
+**우선순위 3 — DOAS v2 비교 검증**
+- `doas_fit_v2.py` 작성됨 (shift/squeeze nonlinear + NO2 link + Robust/Kalman 옵션)
+  but 아직 실행 결과 확인 안 함. v1과 RMS·NO2 변화 비교 필요.
+- 표준 셋팅: NO2 shift ±5 px, squeeze ±0.01, CHOCHO/H2O/O4 → NO2에 link, 윈도우 430-480 nm,
+  Chebyshev poly deg=5.
+
+**우선순위 4 — CAESAR Pro 추가 기능**
+- Dark 자동 추정 (LED 밖 픽셀 평균 ~350 ADU). HANDOFF의 "1000~2000" 가정은 cold setup엔 ✗.
+- nearest-He-block R-cal 옵션 (현재는 median across all blocks)
+- GUI에 R-cal threshold field 노출 (PR follow-up)
+
+---
+
+## B. 이전 세션 (2026-05-26) 노트 — 이력 보존
+
+### 0. 한 줄 요약 (이전)
 
 **오늘의 성과: Stage 4 알파 추출의 핵심 버그를 찾아 고쳤다.**
 DOAS 피팅 잔차가 **96% → 10.6%** 로 개선됨 (못 쓰던 상태 → ~1ppb NO2 검출 가능한 실용 수준).

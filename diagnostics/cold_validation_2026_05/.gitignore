@@ -1,0 +1,4 @@
+*.npz
+*.npy
+plots/
+run.log

@@ -1,0 +1,12 @@
+DOAS fit - 2026-05-17 cold
+Fit window: 425.0-490.0 nm  (1396 px)
+Polynomial degree: 5
+N bins fitted: 953
+
+Per-gas stats:
+     NO2: mean=+1.0762e+00  med=+6.3543e-01  std=1.3447e+00  (ppb)
+  CHOCHO: mean=-1.8413e+00  med=-1.4708e+00  std=1.4594e+00  (ppb)
+      O4: mean=-1.1836e+37  med=-1.1807e+37  std=8.6179e+36  (molec²/cm⁵)
+     H2O: mean=-7.7175e-13  med=-6.2321e-13  std=1.3703e-12  (ppb)
+
+RMS: mean=3.004e-08  med=2.913e-08 cm⁻¹
