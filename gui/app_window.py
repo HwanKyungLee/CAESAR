@@ -938,23 +938,28 @@ class CAESARAnalyzer(QMainWindow):
         lay_ov.addRow("R (Reflectivity):", lay_r)
 
         # Measurement State Flags — CAESAR Araon 2025: ZA=500~503 / He=510~513 / Ambient=1
+        # ※ 500/510만 pure injecting 상태 (cavity가 ZA/He로 완전히 채워진 시점).
+        #   501-503/511-513은 setflow/wait 전환구간 — cavity 미충전이라 I0 평균에 넣으면 오염됨.
+        #   이 필드에 적힌 값들만 ZA/He로 평균되고, 나머지는 silently drop (ambient에도 안 들어감).
         lay_flags = QHBoxLayout()
-        self.txt_flag_za = QLineEdit("500, 501, 502, 503")
+        self.txt_flag_za = QLineEdit("500")
         self.txt_flag_za.setFixedWidth(int(130 * self._s))
         self.txt_flag_za.setToolTip(
-            "Zero-Air 플래그 번호 (쉼표로 여러 값 가능)\n"
-            "CAESAR Araon 2025: 500=injecting(실측), 501=setflow, 502=wait before, 503=wait after\n"
-            "I₀는 500만 사용, 나머지는 ambient 제외용"
+            "Zero-Air I₀로 평균에 들어갈 flag 번호 (쉼표로 여러 값)\n"
+            "CAESAR Araon: 500=injecting(pure), 501=setflow, 502/503=wait\n"
+            "★ 기본값 500 (strict) — 501-503은 cavity 미충전이라 I0 오염시킴.\n"
+            "  예전 데이터 호환 필요시 \"500,501,502,503\"으로 수동 입력 가능."
         )
         lay_flags.addWidget(QLabel("ZA:"))
         lay_flags.addWidget(self.txt_flag_za)
         lay_flags.addSpacing(8)
-        self.txt_flag_he = QLineEdit("510, 511, 512, 513")
+        self.txt_flag_he = QLineEdit("510")
         self.txt_flag_he.setFixedWidth(int(130 * self._s))
         self.txt_flag_he.setToolTip(
-            "Helium 플래그 번호 (쉼표로 여러 값 가능)\n"
-            "CAESAR Araon 2025: 510=injecting(실측), 511=setflow, 512=wait before, 513=wait after\n"
-            "R-cal은 510만 사용, 나머지는 ambient 제외용"
+            "Helium R-cal에 들어갈 flag 번호 (쉼표로 여러 값)\n"
+            "CAESAR Araon: 510=injecting(pure), 511=setflow, 512/513=wait\n"
+            "★ 기본값 510 (strict) — 511-513은 cavity 미충전이라 R-cal 오염시킴.\n"
+            "  예전 데이터 호환 필요시 \"510,511,512,513\"으로 수동 입력 가능."
         )
         lay_flags.addWidget(QLabel("He:"))
         lay_flags.addWidget(self.txt_flag_he)
