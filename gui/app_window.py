@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTableWidget, QTableWidgetItem, QMessageBox,
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog,
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox,
-                             QCheckBox, QFormLayout, QMenu)
+                             QCheckBox, QFormLayout, QMenu, QRadioButton)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 
@@ -1146,11 +1146,246 @@ class CAESARAnalyzer(QMainWindow):
         lay_trend.addWidget(self._setup_leff_pw, stretch=1)
         self._diag_tabs.addTab(tab_trend, "📈 R/Leff 시계열")
 
+        # ── Tab 2: FWHM Best-Match (validate sweep refs against measured α) ──
+        from matplotlib.figure import Figure as _FwhmFigure
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FwhmCanvas
+
+        tab_fwhm = QWidget()
+        lay_fwhm = QVBoxLayout(tab_fwhm)
+        lay_fwhm.setContentsMargins(4, 4, 4, 4)
+        lay_fwhm.setSpacing(4)
+
+        ctl = QGroupBox("Sweep folder + α source")
+        ctl_lay = QFormLayout(ctl)
+
+        self._fwhm_sweep_folder = None
+        self._fwhm_alpha_file_path = None
+        self._fwhm_best_ref_path = None
+        self._fwhm_last_scores = None
+
+        btn_pick_folder = QPushButton("📁 Sweep Folder…")
+        btn_pick_folder.clicked.connect(self._fwhm_pick_sweep_folder)
+        self.lbl_fwhm_folder = QLabel("Not selected")
+        self.lbl_fwhm_folder.setStyleSheet("color: #d32f2f;")
+        row_f = QHBoxLayout()
+        row_f.addWidget(btn_pick_folder)
+        row_f.addWidget(self.lbl_fwhm_folder, stretch=1)
+        ctl_lay.addRow("Folder:", row_f)
+
+        self.rb_fwhm_alpha_engine = QRadioButton("Engine α (auto — latest *_alpha_trace.dat)")
+        self.rb_fwhm_alpha_file   = QRadioButton("Load from file")
+        self.rb_fwhm_alpha_engine.setChecked(True)
+        row_a1 = QHBoxLayout()
+        row_a1.addWidget(self.rb_fwhm_alpha_engine)
+        row_a1.addWidget(self.rb_fwhm_alpha_file)
+        ctl_lay.addRow("α source:", row_a1)
+
+        btn_pick_alpha = QPushButton("📂 Pick α file…")
+        btn_pick_alpha.clicked.connect(self._fwhm_pick_alpha_file)
+        self.lbl_fwhm_alpha = QLabel("(auto from alpha_save_dir)")
+        self.lbl_fwhm_alpha.setStyleSheet("color: #555;")
+        row_a2 = QHBoxLayout()
+        row_a2.addWidget(btn_pick_alpha)
+        row_a2.addWidget(self.lbl_fwhm_alpha, stretch=1)
+        ctl_lay.addRow("α file:", row_a2)
+
+        row_btn = QHBoxLayout()
+        self.btn_fwhm_run = QPushButton("🌀 Run Validation")
+        self.btn_fwhm_run.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold;")
+        self.btn_fwhm_run.clicked.connect(self._fwhm_run_validation)
+        self.btn_fwhm_set_active = QPushButton("✅ Set best as active NO2 ref")
+        self.btn_fwhm_set_active.setEnabled(False)
+        self.btn_fwhm_set_active.clicked.connect(self._fwhm_set_active_ref)
+        row_btn.addWidget(self.btn_fwhm_run)
+        row_btn.addWidget(self.btn_fwhm_set_active)
+        ctl_lay.addRow(row_btn)
+
+        self.lbl_fwhm_best = QLabel("")
+        self.lbl_fwhm_best.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_fwhm_best.setWordWrap(True)
+        ctl_lay.addRow(self.lbl_fwhm_best)
+
+        lay_fwhm.addWidget(ctl)
+
+        self._fwhm_fig    = _FwhmFigure(figsize=(5, 3), tight_layout=True)
+        self._fwhm_ax     = self._fwhm_fig.add_subplot(111)
+        self._fwhm_canvas = _FwhmCanvas(self._fwhm_fig)
+        lay_fwhm.addWidget(self._fwhm_canvas, stretch=1)
+
+        self._diag_tabs.addTab(tab_fwhm, "🎯 FWHM Best-Match")
+
         lay_v.addWidget(self._diag_tabs)
         grp_viewer.setLayout(lay_v)
         viewer_layout.addWidget(grp_viewer)
 
         main_layout.addLayout(viewer_layout, stretch=2)
+
+    # ── FWHM Best-Match (Setup tab Tab 2) ──────────────────────────────
+    def _fwhm_pick_sweep_folder(self):
+        d = QFileDialog.getExistingDirectory(self, "Choose FWHM sweep folder")
+        if not d:
+            return
+        self._fwhm_sweep_folder = d
+        import glob
+        n = len(glob.glob(os.path.join(d, "Ref_*_FWHM*nm.dat")))
+        self.lbl_fwhm_folder.setText(f"✅ {d}  ({n} sweep refs)")
+        self.lbl_fwhm_folder.setStyleSheet("color: #2E7D32; font-weight: bold;")
+
+    def _fwhm_pick_alpha_file(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "Pick α file", "",
+            "Data Files (*.dat *.txt *.csv);;All Files (*)"
+        )
+        if not f:
+            return
+        self._fwhm_alpha_file_path = f
+        self.rb_fwhm_alpha_file.setChecked(True)
+        self.lbl_fwhm_alpha.setText(f"✅ {os.path.basename(f)}")
+        self.lbl_fwhm_alpha.setStyleSheet("color: #2E7D32; font-weight: bold;")
+
+    def _fwhm_auto_find_latest_alpha(self):
+        """Find newest *_alpha_trace.dat in self.alpha_save_dir (if set)."""
+        import glob
+        base = getattr(self, "alpha_save_dir", None)
+        if not base or not os.path.isdir(base):
+            return None
+        cands = glob.glob(os.path.join(base, "*_alpha_trace.dat"))
+        if not cands:
+            return None
+        cands.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return cands[0]
+
+    def _fwhm_load_alpha(self, path):
+        """Return (wavelength_nm, alpha) arrays. Falls back to single-column file."""
+        df = pd.read_csv(path, sep=r'\s+', header=None, comment='#', engine='python')
+        if df.shape[1] >= 2:
+            wl  = pd.to_numeric(df.iloc[:, 0], errors='coerce').to_numpy()
+            val = pd.to_numeric(df.iloc[:, 1], errors='coerce').to_numpy()
+        else:
+            val = pd.to_numeric(df.iloc[:, 0], errors='coerce').to_numpy()
+            wl  = np.arange(len(val), dtype=float)
+        ok = np.isfinite(wl) & np.isfinite(val)
+        if ok.sum() < 50:
+            raise ValueError("Too few valid (wavelength, alpha) rows.")
+        return wl[ok], val[ok]
+
+    def _fwhm_parse_fwhm_from_name(self, fname):
+        import re
+        m = re.search(r"FWHM([0-9.]+)nm", fname)
+        return float(m.group(1)) if m else None
+
+    def _fwhm_run_validation(self):
+        import glob
+        from scipy.interpolate import interp1d
+
+        if not self._fwhm_sweep_folder:
+            QMessageBox.warning(self, "FWHM Best-Match", "Pick a sweep folder first.")
+            return
+
+        ref_files = sorted(glob.glob(
+            os.path.join(self._fwhm_sweep_folder, "Ref_*_FWHM*nm.dat")
+        ))
+        if not ref_files:
+            QMessageBox.warning(self, "FWHM Best-Match",
+                "No Ref_*_FWHM*nm.dat files found in the selected folder.")
+            return
+
+        if self.rb_fwhm_alpha_file.isChecked():
+            alpha_path = self._fwhm_alpha_file_path
+            if not alpha_path:
+                QMessageBox.warning(self, "FWHM Best-Match",
+                    "α source = file, but no file picked.")
+                return
+        else:
+            alpha_path = self._fwhm_auto_find_latest_alpha()
+            if not alpha_path:
+                QMessageBox.warning(self, "FWHM Best-Match",
+                    "No *_alpha_trace.dat found in alpha_save_dir.\n"
+                    "Run alpha export first, or pick a file manually.")
+                return
+
+        try:
+            wl_a, a = self._fwhm_load_alpha(alpha_path)
+        except Exception as e:
+            QMessageBox.critical(self, "FWHM Best-Match", f"α load failed:\n{e}")
+            return
+
+        # Each ref file is one column of cross-section values on the ref's
+        # native wavelength grid. We need a wavelength axis for the ref. We
+        # interpolate α onto ref pixel index here only as a fallback; the
+        # preferred path is when ref length == len(wl_a) (target grid match).
+        scores = {}
+        for fpath in ref_files:
+            fname = os.path.basename(fpath)
+            fv = self._fwhm_parse_fwhm_from_name(fname)
+            if fv is None:
+                continue
+            try:
+                ref_vals = np.loadtxt(fpath, comments="#")
+            except Exception:
+                continue
+            ref_vals = np.asarray(ref_vals).flatten()
+            # Align by length: assume ref was generated on the same target
+            # wavelength grid as the α file (both come from the calibration).
+            n = min(len(ref_vals), len(a))
+            if n < 50:
+                continue
+            r_fit = ref_vals[:n]
+            a_fit = a[:n]
+            wl_fit = wl_a[:n]
+            # Normalized polynomial basis to avoid ill-conditioning
+            wn = (wl_fit - wl_fit.mean()) / max(1e-9, wl_fit.std())
+            A = np.column_stack([r_fit, np.ones_like(wn), wn, wn**2, wn**3])
+            coef, *_ = np.linalg.lstsq(A, a_fit, rcond=None)
+            resid = a_fit - A @ coef
+            scores[fv] = (float(np.sqrt(np.mean(resid**2))), fpath)
+
+        if not scores:
+            QMessageBox.warning(self, "FWHM Best-Match",
+                "Could not score any ref file (length mismatch with α?).")
+            return
+
+        best_fv = min(scores, key=lambda k: scores[k][0])
+        best_rms, best_path = scores[best_fv]
+        self._fwhm_best_ref_path = best_path
+        self._fwhm_last_scores   = scores
+
+        # Plot
+        self._fwhm_ax.clear()
+        fvs  = np.array(sorted(scores.keys()))
+        rms  = np.array([scores[v][0] for v in fvs])
+        self._fwhm_ax.plot(fvs, rms, 'o-', color='#6a1b9a')
+        self._fwhm_ax.axvline(best_fv, color='red', ls='--',
+                              label=f"best = {best_fv:.3f} nm")
+        self._fwhm_ax.set_xlabel("FWHM (nm)")
+        self._fwhm_ax.set_ylabel("RMS residual")
+        self._fwhm_ax.set_title(f"FWHM Best-Match — α: {os.path.basename(alpha_path)}")
+        self._fwhm_ax.legend()
+        self._fwhm_canvas.draw()
+
+        self.lbl_fwhm_best.setText(
+            f"🏆 Best FWHM = {best_fv:.3f} nm  (RMS = {best_rms:.3e})\n"
+            f"   → {os.path.basename(best_path)}"
+        )
+        self.btn_fwhm_set_active.setEnabled(True)
+
+    def _fwhm_set_active_ref(self):
+        if not self._fwhm_best_ref_path:
+            QMessageBox.warning(self, "FWHM Best-Match", "Run validation first.")
+            return
+        try:
+            ok, msg = self.engine.add_reference("NO2", self._fwhm_best_ref_path)
+            if ok:
+                QMessageBox.information(
+                    self, "FWHM Best-Match",
+                    f"Registered as NO2 reference:\n{os.path.basename(self._fwhm_best_ref_path)}"
+                )
+            else:
+                QMessageBox.warning(self, "FWHM Best-Match",
+                                    f"Engine refused the reference:\n{msg}")
+        except Exception as e:
+            QMessageBox.critical(self, "FWHM Best-Match",
+                                 f"Failed to register reference:\n{e}")
 
     def browse_i0_file(self):
         """Browse and set the I0 (Zero-air) measurement file."""

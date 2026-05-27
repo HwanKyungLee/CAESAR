@@ -474,8 +474,9 @@ class ReferenceGeneratorDialog(QDialog):
         self.btn_save.setMinimumHeight(int(40 * self._s))
         right_layout.addWidget(self.btn_save)
 
-        # --- 5. FWHM Sweep & Auto-Best (uniform Gaussian) ---
-        grp_sweep = QGroupBox("5. FWHM Sweep (uniform Gaussian, multi-reference)")
+        # --- 5. FWHM Sweep (uniform Gaussian) — generation only ---
+        # Validation/auto-best moved to Setup tab → 🎯 FWHM Best-Match
+        grp_sweep = QGroupBox("5. FWHM Sweep (uniform Gaussian) — generate references")
         lay_sweep = QVBoxLayout()
 
         lay_sweep_params = QHBoxLayout()
@@ -511,32 +512,21 @@ class ReferenceGeneratorDialog(QDialog):
         lay_sweep_out.addWidget(self.lbl_sweep_outdir, stretch=1)
         lay_sweep.addLayout(lay_sweep_out)
 
-        lay_sweep_alpha = QHBoxLayout()
-        self.btn_sweep_alpha = QPushButton("📂 Load Measured α (auto-best, optional)")
-        self.btn_sweep_alpha.clicked.connect(self._pick_sweep_alpha)
-        lay_sweep_alpha.addWidget(self.btn_sweep_alpha)
-        self.lbl_sweep_alpha = QLabel("Status: Not Loaded")
-        self.lbl_sweep_alpha.setStyleSheet("color: #888;")
-        lay_sweep_alpha.addWidget(self.lbl_sweep_alpha, stretch=1)
-        lay_sweep.addLayout(lay_sweep_alpha)
-
         self.btn_run_sweep = QPushButton("🌀 Run FWHM Sweep")
         self.btn_run_sweep.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold;")
         self.btn_run_sweep.clicked.connect(self.run_fwhm_sweep)
         self.btn_run_sweep.setMinimumHeight(int(40 * self._s))
         lay_sweep.addWidget(self.btn_run_sweep)
 
-        self.lbl_sweep_best = QLabel("")
-        self.lbl_sweep_best.setStyleSheet("color: #2E7D32; font-weight: bold;")
-        self.lbl_sweep_best.setWordWrap(True)
-        lay_sweep.addWidget(self.lbl_sweep_best)
+        _hint = QLabel("After sweep finishes, validate in Setup tab → 🎯 FWHM Best-Match")
+        _hint.setStyleSheet("color: #555; font-style: italic;")
+        _hint.setWordWrap(True)
+        lay_sweep.addWidget(_hint)
 
         grp_sweep.setLayout(lay_sweep)
         right_layout.addWidget(grp_sweep)
 
         self._sweep_outdir = None
-        self._sweep_alpha_wave = None
-        self._sweep_alpha_data = None
 
         right_layout.addStretch(1)
         layout.addLayout(right_layout, stretch=1)
@@ -688,9 +678,21 @@ class ReferenceGeneratorDialog(QDialog):
             self.ils_pixels = px_num[valid].to_numpy()
             self.ils_sigmas = sg_num[valid].to_numpy()
 
-            self.lbl_fwhm_info.setText(f"✅ Loaded: {len(self.ils_pixels)} Sigma points")
+            # Auto-fill Section 5 Center FWHM with mean FWHM derived from this profile
+            mean_sigma_nm = float(np.nanmean(self.ils_sigmas))
+            mean_fwhm_nm  = mean_sigma_nm * 2.35482
+            auto_msg = ""
+            if hasattr(self, 'spin_sweep_center') and 0.01 <= mean_fwhm_nm <= 10.0:
+                self.spin_sweep_center.setValue(round(mean_fwhm_nm, 3))
+                auto_msg = f"\nSection 5 Center FWHM auto-set to {mean_fwhm_nm:.3f} nm."
+
+            self.lbl_fwhm_info.setText(
+                f"✅ Loaded: {len(self.ils_pixels)} Sigma points "
+                f"(mean FWHM ≈ {mean_fwhm_nm:.3f} nm)"
+            )
             self.lbl_fwhm_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
-            QMessageBox.information(self, "Success", "FWHM Profile loaded successfully.")
+            QMessageBox.information(self, "Success",
+                                    f"FWHM Profile loaded successfully.{auto_msg}")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load FWHM profile:\n{e}")
@@ -838,35 +840,11 @@ class ReferenceGeneratorDialog(QDialog):
         self.lbl_sweep_outdir.setText(f"✅ {dirpath}")
         self.lbl_sweep_outdir.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
-    def _pick_sweep_alpha(self):
-        """Load measured α(λ) (2 columns: wavelength_nm, alpha) for auto-best FWHM."""
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Open Measured Alpha Spectrum", "",
-            "Data Files (*.dat *.txt *.csv)"
-        )
-        if not filename:
-            return
-        try:
-            df = pd.read_csv(filename, sep=r'\s+', header=None, comment='#',
-                             engine='python')
-            wl  = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
-            val = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
-            ok  = np.isfinite(wl) & np.isfinite(val)
-            if ok.sum() < 50:
-                raise ValueError("Too few valid (wavelength, alpha) rows.")
-            self._sweep_alpha_wave = wl[ok]
-            self._sweep_alpha_data = val[ok]
-            self.lbl_sweep_alpha.setText(
-                f"✅ {os.path.basename(filename)} ({ok.sum()} pts)"
-            )
-            self.lbl_sweep_alpha.setStyleSheet("color: #2E7D32; font-weight: bold;")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load α spectrum:\n{e}")
-
     def run_fwhm_sweep(self):
-        """Generate references at FWHM = center ± n·step. If a measured α
-        spectrum was loaded, also report the FWHM giving the lowest residual
-        in a single-reference + cubic-polynomial fit (the auto-best FWHM)."""
+        """Generate references at FWHM = center ± n·step (uniform Gaussian).
+        Saves N files Ref_{gas}_FWHM{fv:.3f}nm.dat to the output folder.
+        Validation (RMS vs measured α → best FWHM) is performed in
+        Setup tab → 🎯 FWHM Best-Match."""
         if self.raw_wave is None or self.target_wavelengths is None:
             QMessageBox.warning(self, "Warning",
                 "Raw reference and target wavelength are required.")
@@ -890,7 +868,7 @@ class ReferenceGeneratorDialog(QDialog):
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             os.makedirs(self._sweep_outdir, exist_ok=True)
-            results = {}    # {fwhm: convolved array on target_wavelengths}
+            results = {}
 
             mask = (self.raw_wave >= self.target_wavelengths.min() - 10.0) & \
                    (self.raw_wave <= self.target_wavelengths.max() + 10.0)
@@ -909,82 +887,39 @@ class ReferenceGeneratorDialog(QDialog):
                 np.savetxt(os.path.join(self._sweep_outdir, fname),
                            conv, fmt="%.8e", header=header)
 
-            # ── Auto-best FWHM: residual of α ≈ c·ref + a0 + a1·λ + a2·λ² + a3·λ³ ──
-            best_msg = ""
-            best_fwhm = None
-            if self._sweep_alpha_wave is not None and self._sweep_alpha_data is not None:
-                # Interpolate measured α onto the target wavelength grid
-                tw = self.target_wavelengths
-                f_a = interp1d(self._sweep_alpha_wave, self._sweep_alpha_data,
-                               kind="linear", bounds_error=False, fill_value=np.nan)
-                alpha_on_target = f_a(tw)
-                fit_mask = np.isfinite(alpha_on_target)
-                if fit_mask.sum() < 50:
-                    best_msg = "Auto-best skipped: α overlap with target grid too small."
-                else:
-                    wl_fit = tw[fit_mask]
-                    a_fit  = alpha_on_target[fit_mask]
-                    # Polynomial basis on normalized λ to avoid ill-conditioning
-                    wn = (wl_fit - wl_fit.mean()) / max(1e-9, wl_fit.std())
-                    poly_cols = np.column_stack([np.ones_like(wn), wn, wn**2, wn**3])
-
-                    scores = {}
-                    for fv, conv in results.items():
-                        A = np.column_stack([conv[fit_mask], poly_cols])
-                        coef, *_ = np.linalg.lstsq(A, a_fit, rcond=None)
-                        resid = a_fit - A @ coef
-                        scores[fv] = float(np.sqrt(np.mean(resid**2)))
-
-                    best_fwhm = min(scores, key=scores.get)
-                    best_rms  = scores[best_fwhm]
-                    best_msg = (f"🏆 Auto-best FWHM = {best_fwhm:.3f} nm "
-                                f"(RMS residual = {best_rms:.3e})")
-
-                    # Bottom panel: RMS vs FWHM
-                    ax_bottom = self.fig.axes[1]
-                    ax_bottom.clear()
-                    fv_arr  = np.array(sorted(scores.keys()))
-                    rms_arr = np.array([scores[v] for v in fv_arr])
-                    ax_bottom.plot(fv_arr, rms_arr, 'o-', color='#6a1b9a')
-                    ax_bottom.axvline(best_fwhm, color='red', ls='--',
-                                      label=f"best={best_fwhm:.3f} nm")
-                    ax_bottom.set_xlabel("FWHM (nm)")
-                    ax_bottom.set_ylabel("RMS residual")
-                    ax_bottom.set_title("Auto-Best FWHM Detection")
-                    ax_bottom.legend()
-
-            # Top panel: overlay all swept references, highlight best
+            # Overlay all swept references on the top panel
             ax_top = self.fig.axes[0]
             ax_top.clear()
             cmap = plt.get_cmap('viridis')
             for i, fv in enumerate(fwhm_list):
                 color = cmap(i / max(1, len(fwhm_list) - 1))
-                is_best = (best_fwhm is not None and abs(fv - best_fwhm) < 1e-6)
                 ax_top.plot(self.target_wavelengths, results[fv],
-                            color='red' if is_best else color,
-                            lw=2.0 if is_best else 0.8,
-                            alpha=1.0 if is_best else 0.6,
-                            label=f"FWHM={fv:.3f}nm" + (" ★" if is_best else ""))
+                            color=color, lw=0.8, alpha=0.7,
+                            label=f"FWHM={fv:.3f}nm")
             ax_top.set_xlabel("Wavelength (nm)")
             ax_top.set_ylabel("Cross Section")
             ax_top.set_title(f"FWHM Sweep — {self.gas_name} ({len(fwhm_list)} versions)")
             ax_top.legend(fontsize=7, ncol=2)
 
+            # Clear bottom panel + hint that validation moved to Setup tab
+            ax_bottom = self.fig.axes[1]
+            ax_bottom.clear()
+            ax_bottom.text(0.5, 0.5,
+                           "Validation moved to:\nSetup tab → 🎯 FWHM Best-Match",
+                           ha="center", va="center", transform=ax_bottom.transAxes,
+                           fontsize=11, color="#555", style="italic")
+            ax_bottom.set_xticks([]); ax_bottom.set_yticks([])
+
             self.canvas.draw()
 
-            summary = (f"Saved {len(fwhm_list)} reference files to:\n"
-                       f"{self._sweep_outdir}\n\n"
-                       f"FWHM range: {fwhm_list[0]:.3f} ~ {fwhm_list[-1]:.3f} nm "
-                       f"(step {step})")
-            if best_msg:
-                summary += f"\n\n{best_msg}"
-                self.lbl_sweep_best.setText(best_msg)
-            else:
-                self.lbl_sweep_best.setText(
-                    "Tip: Load a measured α spectrum above to auto-detect the best FWHM."
-                )
-                self.lbl_sweep_best.setStyleSheet("color: #888;")
-            QMessageBox.information(self, "FWHM Sweep Complete", summary)
+            QMessageBox.information(
+                self, "FWHM Sweep Complete",
+                f"Saved {len(fwhm_list)} reference files to:\n"
+                f"{self._sweep_outdir}\n\n"
+                f"FWHM range: {fwhm_list[0]:.3f} ~ {fwhm_list[-1]:.3f} nm "
+                f"(step {step})\n\n"
+                f"Next: Setup tab → 🎯 FWHM Best-Match → point to this folder + α."
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"FWHM sweep failed:\n{e}")
         finally:
