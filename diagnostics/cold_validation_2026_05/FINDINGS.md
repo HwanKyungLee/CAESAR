@@ -119,10 +119,20 @@ CAESAR Pro `AlphaFitWorker` 로직(`gui/worker.py:1291`) standalone 재현.
 
 ### 멀티데이 핵심 발견
 
-1. **Cavity 일자간 변동 큼** — Leff 평균값 기준 24배 차이.
-   But omr_d shape plot(15번) 보면 **05-19 cavity center(440-475nm)는 사실 05-18 수준**.
-   가장자리(430, 485 nm) 노이즈 spike 때문에 mean omr_d 부풀려진 거.
-   → "Leff = 1/mean(omr_d)" 는 misleading. **median이나 LED-active 영역만 평균**이 더 정확.
+1. **Cavity 일자간 변동 큼 (보고된 Leff는 misleading!)**.
+   `1/mean(omr_d) × 1e-5`의 mean이 LED 밖 가장자리 노이즈 spike에 부풀려짐.
+   진짜 cavity 성능은 LED-active (440-475 nm)에서만 평균해야 함:
+
+   | | 05-17 | 05-18 | 05-19 |
+   |---|---|---|---|
+   | Leff (full mean, **잘못된 보고값**) | 1.32 km | 6.76 km | **0.28 km** ❌ |
+   | Leff (DOAS window 430-480) | 5.83 km | 10.26 km | 4.24 km |
+   | **Leff (LED center 440-475, 진짜)** | **8.77 km** | **11.94 km** | **10.77 km** ✓ |
+   | Leff (full median, robust) | 2.99 km | 8.06 km | 2.90 km |
+
+   → **3일 모두 cavity 9-12 km 수준으로 비슷**. 05-19도 멀쩡함.
+   → CAESAR Pro `worker.py:1175`의 Leff 보고 로직 (`1.0/np.mean(best_omr_d)*1e-5`)도
+   같은 문제 — median 또는 LED-active mean으로 바꿔야 함 (후속 PR 거리).
 
 2. **05-18은 박사님 1% 잔차 근접** — RMS 8.1e-9 (v1) / 5.2e-9 (v2) cm⁻¹.
    mean\|α\| 4.2e-8 대비 RMS 비율 = **12-19%**, HANDOFF 2026-05-26의 10.6% 목표 달성.
