@@ -432,7 +432,20 @@ class AnalysisWorker(QThread):
         except Exception:
             perr_lin = np.zeros_like(c_opt)
             
-        return opt_shifts, opt_squeezes, c_opt[ 0 : num_gases ], c_opt[ num_gases : -1 ], c_opt[ -1 ], best_ep, perr_lin[ 0 : num_gases ]
+        # ── Band-gating cleanup ────────────────────────────────────────────
+        # Gases whose absorption bands are inactive in the current fit window
+        # had their ref column zeroed in the design matrix. The corresponding
+        # free coefficient is meaningless — lsq_linear may have returned any
+        # value (cond≈4e16 in tests). Clamp them to 0 explicitly so the result
+        # file reports a clean zero instead of arbitrary noise (e.g. 0.1).
+        c_gas  = c_opt[ 0 : num_gases ].copy()
+        c_perr = perr_lin[ 0 : num_gases ].copy()
+        for i, name in enumerate(self.engine.gas_list):
+            if not gas_active[ name ]:
+                c_gas[ i ]  = 0.0
+                c_perr[ i ] = 0.0
+
+        return opt_shifts, opt_squeezes, c_gas, c_opt[ num_gases : -1 ], c_opt[ -1 ], best_ep, c_perr
     
     # ==========================================
     # 🌟 Main Orchestrator
