@@ -1,0 +1,30 @@
+==========================================================================================
+Multi-day comparison: 2026-05-17 / 05-18 / 05-19 cold setup
+==========================================================================================
+
+                              05-17          05-18          05-19
+           ZA blocks             16              8              7
+           He blocks              6              3              3
+         R-cal omr_d      7.558e-06      1.480e-06      3.610e-05
+           Leff (km)           1.32           6.76           0.28
+          Alpha bins            953            439            413
+  mean|alpha| (cm-1)      1.095e-07      4.190e-08      7.806e-07
+
+-- DOAS v1 (simple lstsq, no shift/sq) ---
+    NO2 median (ppb)         +0.635         +0.157         +1.149
+      NO2 mean (ppb)         +1.076         +0.411         +2.228
+       CHOCHO median         -1.471         -0.121         +0.657
+          RMS median      2.913e-08      8.127e-09      1.849e-07
+
+-- DOAS v2 (NO2 shift/sq, others LINKED, narrow win 430-480) ---
+    NO2 median (ppb)         +1.039         +0.080         +0.264
+      NO2 mean (ppb)         +1.626         +0.330         +0.004
+       CHOCHO median         -0.905         -0.079         -0.324
+          RMS median      1.242e-08      5.187e-09      5.816e-08
+      shift med (px)         +0.000         +0.000         +0.000
+         squeeze med       1.000000       1.000000       1.000000
+
+-- v2 vs v1 RMS improvement ---
+  05-17: v1=2.91e-08  v2=1.24e-08  ratio v1/v2 = 2.35x
+  05-18: v1=8.13e-09  v2=5.19e-09  ratio v1/v2 = 1.57x
+  05-19: v1=1.85e-07  v2=5.82e-08  ratio v1/v2 = 3.18x

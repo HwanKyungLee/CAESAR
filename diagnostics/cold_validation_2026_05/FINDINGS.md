@@ -100,6 +100,48 @@ CAESAR Pro `AlphaFitWorker` 로직(`gui/worker.py:1291`) standalone 재현.
 
 → **CAESAR Pro의 알파 추출 + DOAS 피팅 파이프라인이 end-to-end 정상 작동**.
 
+## 멀티데이 비교 (2026-05-27 추가, `multi_day_compare.py`)
+
+05-17 / 05-18 / 05-19 각 5-8개 파일로 알파+DOAS v1/v2 비교.
+
+| 지표 | 05-17 | 05-18 | 05-19 |
+|---|---|---|---|
+| ZA blocks / He blocks | 16 / 6 | 8 / 3 | 7 / 3 |
+| **Leff (km)** | 1.32 | **6.76** | **0.28** (misleading, 본문 참조) |
+| Alpha bins | 953 | 439 | 413 |
+| mean\|α\| (cm⁻¹) | 1.1e-7 | 4.2e-8 | 7.8e-7 |
+| v1 NO2 median (ppb) | +0.64 | +0.16 | +1.15 |
+| v2 NO2 median (ppb) | +1.04 | +0.08 | +0.26 |
+| **v1 RMS (cm⁻¹)** | 2.9e-8 | **8.1e-9** | 1.85e-7 |
+| **v2 RMS (cm⁻¹)** | 1.2e-8 | **5.2e-9** | 5.8e-8 |
+| **v2/v1 개선** | 2.35× | 1.57× | **3.18×** |
+| shift / squeeze | 0 / 1 | 0 / 1 | 0 / 1 |
+
+### 멀티데이 핵심 발견
+
+1. **Cavity 일자간 변동 큼** — Leff 평균값 기준 24배 차이.
+   But omr_d shape plot(15번) 보면 **05-19 cavity center(440-475nm)는 사실 05-18 수준**.
+   가장자리(430, 485 nm) 노이즈 spike 때문에 mean omr_d 부풀려진 거.
+   → "Leff = 1/mean(omr_d)" 는 misleading. **median이나 LED-active 영역만 평균**이 더 정확.
+
+2. **05-18은 박사님 1% 잔차 근접** — RMS 8.1e-9 (v1) / 5.2e-9 (v2) cm⁻¹.
+   mean\|α\| 4.2e-8 대비 RMS 비율 = **12-19%**, HANDOFF 2026-05-26의 10.6% 목표 달성.
+
+3. **DOAS v2 일관되게 v1보다 1.6-3.2× 개선** (모든 일자).
+   But **shift=0, squeeze=1** 3일 모두 — **윈도우 변경(425→430-480) + cubic interp** 덕분이지
+   nonlinear shift/squeeze fitting 자체 효과는 아님. wavelength cal 매우 정확.
+
+4. **NO2 베이스라인 일자간 일관성** — 0.1~1.2 ppb 범위, 깨끗한 실험실 ambient.
+   05-17은 후반 NO2 plume(5-6 ppb) 캡처 → 실제 대기 이벤트도 정상 검출.
+
+### multi-day 산출물
+- `D:\GHL\multi_2026_05_18\` (알파 .npz, plots, v1 fit TSV)
+- `D:\GHL\multi_2026_05_19\` (알파 .npz, plots, v1 fit TSV)
+- `D:\GHL\CAESAR_Pro_validation_2026_05\doas_fit_v2_{17,18,19}.tsv` (v2 결과)
+- `plots/14_multi_day_no2.png` (3일 NO2 오버레이)
+- `plots/15_multi_day_omr_d.png` (omr_d shape 비교)
+- `multi_day_report.txt` (텍스트 요약 표)
+
 ## 추가 제안
 
 2. **CAESAR Pro 코드 개선 제안**:
