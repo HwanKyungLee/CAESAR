@@ -43,31 +43,48 @@
    high-finesse cavity (R>0.999)은 동작 변화 없음. Low-finesse 셋업엔 docstring에서
    `0.50 / 1e-3` 권장. GUI 노출은 follow-up PR로.
 
-### A3. 미완 / 다음 세션 할 일
+### A3. 다음 세션 할 일 (2026-05-27 최종 업데이트)
 
-이 브랜치(`claude/handoff-cold-validation`)에 모든 작업물 + 다음 단계 정보 정리됨.
+**완료된 항목** ✅
+- [x] PR 머지: `claude/strict-flags-and-rcal-threshold` → main (commit `d982b62`)
+- [x] 05-17/18/19 멀티데이 알파 검증 (각 5-8 파일, `diagnostics/cold_validation_2026_05/multi_day_report.txt`)
+- [x] DOAS v1 vs v2 비교 (v2가 1.6-3.2x RMS 개선; shift=0/sq=1, 윈도우 변경 효과)
+- [x] Leff misleading 발견·정정 (full mean ≠ real cavity; LED-center 사용해야)
 
-**우선순위 1 — 위 PR 머지** (간단한 코드 변경 2건, 검증 통과)
+**남은 우선순위** (TODO)
 
-**우선순위 2 — 2026-05-18/19 일부 파일 추가 검증**
-- He 사이클은 매 3파일마다 (사이클: He → ZA → 샘플 ×N → He → ZA → ...). 중간 ZA 샘플링
-  구간은 직전 He block의 R로 PCHIP 보간 사용 — 현재 코드는 median 단일값으로 사용 중,
-  나중에 nearest-He-block 옵션 추가 고려.
-- 권장 cluster (각 일자 He block 3개 이상):
-  - 05-18: 001-008 (8 files; He = 002·005·008)
-  - 05-19: 001-007 (7 files; He = 001·004·007)
-- 실행: `diagnostics/cold_validation_2026_05/run_alpha.py`의 `RAW_GLOB` 만 바꿔 재실행.
+**P1 — `worker.py:1175` Leff 보고 로직 fix**
+- 현재 `1.0/np.mean(best_omr_d)*1e-5` → LED 밖 가장자리 spike에 부풀려짐
+- 05-19에선 0.28 km 보고했지만 실제 LED-center mean으론 10.77 km
+- 수정: `np.mean(best_omr_d[led_mask])` 또는 `np.median(best_omr_d)` 사용
+- 간단한 PR, 별도 브랜치 권장
 
-**우선순위 3 — DOAS v2 비교 검증**
-- `doas_fit_v2.py` 작성됨 (shift/squeeze nonlinear + NO2 link + Robust/Kalman 옵션)
-  but 아직 실행 결과 확인 안 함. v1과 RMS·NO2 변화 비교 필요.
-- 표준 셋팅: NO2 shift ±5 px, squeeze ±0.01, CHOCHO/H2O/O4 → NO2에 link, 윈도우 430-480 nm,
-  Chebyshev poly deg=5.
+**P2 — GUI 알파 검증 (사용자 직접 작업)**
+- main 머지됨 → strict flag 기본값으로 GUI 동작
+- 사용자가 `python main.py` → Stage 4 (Alpha Export, cavity=51.8cm CH1) → Stage 5 (DOAS)
+- GUI 결과와 내 검증 결과(`D:\GHL\multi_2026_05_*/alpha_caesar.npz`) 픽셀별 일치 확인 필요
+- 불일치 시: GUI에 들어간 cavity_len, dark 파라미터 점검
 
-**우선순위 4 — CAESAR Pro 추가 기능**
-- Dark 자동 추정 (LED 밖 픽셀 평균 ~350 ADU). HANDOFF의 "1000~2000" 가정은 cold setup엔 ✗.
-- nearest-He-block R-cal 옵션 (현재는 median across all blocks)
-- GUI에 R-cal threshold field 노출 (PR follow-up)
+**P3 — shift/squeeze 옵티마이저 동작 확인**
+- `doas_fit_v2.py`는 3일 모두 shift=0, squeeze=1 반환
+- 가능성 (a) 진짜 wavelength cal이 정확해서 0 옵티멈, (b) L-BFGS-B가 flat region에 갇힘
+- 확인 방법: 초기값 perturb (shift=±2 px), `scipy.optimize.differential_evolution` 시도
+- 만약 (b)이면 nonlinear 부분 다시 디자인
+
+**P4 — `worker.py` R-cal 알고리즘 개선**
+- 현재 `best_omr_d = median across all candidates` (단일 시간 상수)
+- 박사님 MATLAB은 `alpha_cavity_fit` 시간보간 (PCHIP) 사용
+- He 사이클 매 3파일 → ZA 사이 구간은 직전 He block과 PCHIP으로 R 보간하는 게 정확
+- 옵션화: `r_cal_mode='median' | 'pchip'`
+
+**P5 — 1% 잔차 도전 (HANDOFF.md §4 표 참조)**
+- Dark frame 측정 (셔터 닫고 측정) — `AlphaExportWorker(dark_spectrum=...)` 인자 이미 있음
+- 측정 ref 사용 (박사님 `no2_meas_spectrum_blue_240511.dat` 같은)
+- 05-18 cold v2 RMS 5.2e-9 / mean\|α\| 4.2e-8 = 12% 잔차 → 추가 개선 여지
+
+**P6 — Hot setup (Yeosu 2026) 동일 검증**
+- `campaigns/yeosu_2026/` 데이터로 같은 멀티데이 절차
+- CH2 (PNs)도 확인 — strict flag 변경이 회귀 안 일으키는지 검증
 
 ---
 
