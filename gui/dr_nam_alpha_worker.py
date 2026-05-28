@@ -43,6 +43,7 @@ import datetime as _dt
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 import scipy.io as sio
 from scipy.interpolate import PchipInterpolator
 
@@ -85,12 +86,22 @@ CH_FIT_WINDOWS_NM_HOT = {
     3: (437.0, 472.0),
 }
 
-# ── Hot raw .dat column mapping (from r_batch_calculator.py) ─────────
-# ch1 (PNs) and ch2 (ANs) in 박사님's numbering correspond to our
-# Hot PNs / Hot ANs split. ch3 is unused for Hot.
+# ── Hot raw .dat column mapping ──────────────────────────────────────
+# Verified empirically on 2026-05-28 against 박사님 ch1_1700 raw counts in
+# alpha\avg_60s\2026-05-20_avg_60s.mat (=[46278, 46019, 45875, ...]).
+# The brute-force search found a perfect 5-row match at raw col 3002 → so
+# 박사님 ch1[1700] = raw col 3002, hence ch1 base = col 1302.
+#
+# r_batch_calculator.py's earlier guess (2053..4101) was for a different
+# CAESAR variant — it does NOT match the Hot Yeosu 2026 .dat layout.
+#
+# ch2 base = ch1_end (3350) on the assumption that both channels are
+# contiguous 2048-px blocks (the second high-signal CCD block 4724..5561
+# falls inside this range, consistent with that assumption). The exact
+# value awaits ch2_1700 verification (issue #23 follow-up).
 HOT_CH_SPEC_COLS = {                 # (start, end_exclusive) in raw .dat columns
-    1: (2053, 4101),
-    2: (4101, 6149),
+    1: (1302, 3350),                 # 박사님 ch1 (PNs), verified via px-1700 row match
+    2: (3350, 5398),                 # 박사님 ch2 (ANs), tentative — needs ch2_1700 cross-check
 }
 HOT_CH_PRESS_COL = {1: 6162, 2: 6164}
 HOT_TEMP_COL     = 6155              # cell temperature, /100 → °C
@@ -151,6 +162,9 @@ class DrNamAlphaWorker(QThread):
         Use 박사님 ``std_t`` from the daily _avg_60s.mat (if available) as
         the canonical bin grid for 1:1 pixel comparison. If False, build
         the grid ourselves from raw .dat min/max DOY.
+    max_files : int | None, default None
+        Limit how many raw .dat files are read (set 1 for a fast
+        single-file sanity test).  None = read all files for the date.
 
     Signals
     -------
@@ -181,6 +195,7 @@ class DrNamAlphaWorker(QThread):
         rl_per_channel: Optional[dict] = None,
         use_260526_quirks: bool = False,
         std_t_from_drnam: bool = True,
+        max_files: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.raw_dir         = raw_dir
@@ -194,6 +209,7 @@ class DrNamAlphaWorker(QThread):
         self.use_hj_za_rayleigh = bool(use_hj_za_rayleigh)
         self.use_260526_quirks  = bool(use_260526_quirks)
         self.std_t_from_drnam   = bool(std_t_from_drnam)
+        self.max_files          = max_files
 
         # Wave / dark normalised to per-channel dicts
         if isinstance(wave_nm, dict):
@@ -270,8 +286,13 @@ class DrNamAlphaWorker(QThread):
             std_t = self._build_std_t_from_rs_zs(rs["doy_R"], zs["doy_z"])
 
         # 3. Load raw .dat data for the date
-        self._emit_status("Reading raw .dat scans (ch1, ch2, HK, doy_per_row)…")
-        raw = self._load_raw_dat_full(date_dashed)
+        if self.max_files is not None:
+            self._emit_status(
+                f"Reading raw .dat scans (LIMITED to first {self.max_files} files)…"
+            )
+        else:
+            self._emit_status("Reading raw .dat scans (ch1, ch2, HK, doy_per_row)…")
+        raw = self._load_raw_dat_full(date_dashed, max_files=self.max_files)
 
         # 4. For each channel, time-interpolate R / Z / ρ_za onto std_t, bin
         #    raw I per std_t, and apply the Alpha.m formula.
@@ -372,105 +393,125 @@ class DrNamAlphaWorker(QThread):
         return np.arange(lo, hi, self.avgsec / 86400.0)
 
     # ── Raw .dat loader (ch1, ch2 spectra + HK + per-row DOY) ────────
-    def _load_raw_dat_full(self, date_dashed: str) -> dict:
-        """Read every raw .dat for the date and stack ch1/ch2 spectra and HK
-        into arrays.  Returns:
+    def _load_raw_dat_full(self, date_dashed: str,
+                           max_files: Optional[int] = None) -> dict:
+        """Read raw .dat for the date and stack ch1/ch2 spectra and HK.
+        Uses pandas C-engine + usecols for ~20-30× speedup vs line-by-line.
 
+        Returns:
             doy_per_row     (N,)         fractional day-of-year per scan
             flag            (N,)         scan flag (col 4)
             ch1_full        (N, 2048)    raw ch1 spectrum (intensity counts)
             ch2_full        (N, 2048)    raw ch2 spectrum
-            tempcell1       (N,)         raw temp count for ch1 cell
-            tempcell2       (N,)         raw temp count for ch2 cell
-            presscell1      (N,)         raw press count for ch1 cell
-            presscell2      (N,)         raw press count for ch2 cell
-            presscell3      (N,)         raw press count for ch3 cell (for 260526)
+            tempcell{1,2}   (N,)         raw temp count
+            presscell{1,2,3}(N,)         raw press counts (3 needed for 260526)
 
         DOY conversion: file mtime → date + (col1 centiseconds offset).
-        col1 wraps every ~10.9 min so we monotonise by accumulating the
-        biggest negative jump as a wrap forward.
+        col1 wraps every ~10.9 min so we monotonise by detecting drops > 3600
+        centisec and adding one cycle (~14.4 min) per wrap.
         """
         if self.system != "hot":
             raise NotImplementedError("Only Hot column mapping wired up (Phase 2 for Cold).")
 
         files = sorted(glob.glob(os.path.join(self.raw_dir, f"{date_dashed}-*.dat")))
+        if max_files is not None:
+            files = files[: int(max_files)]
         if not files:
             raise FileNotFoundError(
                 f"No raw .dat matching {date_dashed}-*.dat in {self.raw_dir}"
             )
 
-        ch1_chunks, ch2_chunks = [], []
-        doy_chunks, flag_chunks = [], []
-        t1_chunks, t2_chunks = [], []
-        p1_chunks, p2_chunks, p3_chunks = [], [], []
-
         s1, e1 = HOT_CH_SPEC_COLS[1]
         s2, e2 = HOT_CH_SPEC_COLS[2]
-        c_p1, c_p2, c_p3 = HOT_CH_PRESS_COL[1], HOT_CH_PRESS_COL[2], HOT_CH_PRESS_COL.get(3, 6166)
-        c_t = HOT_TEMP_COL
+        c_p1   = HOT_CH_PRESS_COL[1]
+        c_p2   = HOT_CH_PRESS_COL[2]
+        c_p3   = HOT_CH_PRESS_COL.get(3, 6166)
+        c_t    = HOT_TEMP_COL
         c_flag = HOT_FLAG_COL
 
+        spec1_cols = list(range(s1, e1))   # 2048 cols
+        spec2_cols = list(range(s2, e2))
+        hk_cols    = [1, c_flag, c_t, c_p1, c_p2, c_p3]
+        usecols    = sorted(set(hk_cols + spec1_cols + spec2_cols))
+
+        chunks = []
         for fp in files:
-            mtime = _dt.datetime.fromtimestamp(os.path.getmtime(fp))
-            # Use floor-to-the-hour mtime as the file's start time (DAQ writes
-            # ~1 h files; mtime is the close time so we subtract ~1 h to start).
-            file_start_dt = mtime - _dt.timedelta(hours=1)
+            self._emit_status(f"  read {os.path.basename(fp)} (pandas C-engine)…")
+            try:
+                mtime = _dt.datetime.fromtimestamp(os.path.getmtime(fp))
+                file_start_dt = mtime - _dt.timedelta(hours=1)
 
-            with open(fp, "r", encoding="utf-8", errors="replace") as fh:
-                prev_centi = None
-                cycle_offset = 0.0   # accumulated centiseconds across wraps
-                for line in fh:
-                    tok = line.rstrip("\n").split("\t")
-                    if len(tok) < 6175:
-                        continue
-                    try:
-                        flg = int(tok[c_flag])
-                        centi_raw = float(tok[1])
-                    except (ValueError, IndexError):
-                        continue
-                    if not (0.0 < centi_raw < 86400.0):
-                        continue
-                    if prev_centi is not None and centi_raw < prev_centi - 3600:
-                        # wrap-around → assume one cycle (~14.4 min) advance
-                        cycle_offset += 14.4 * 60.0 * 100.0
-                    prev_centi = centi_raw
-                    centi_abs = centi_raw + cycle_offset
-                    row_dt = file_start_dt + _dt.timedelta(seconds=centi_abs / 100.0)
+                df = pd.read_csv(
+                    fp,
+                    sep="\t", header=None, engine="c",
+                    usecols=usecols,
+                    dtype=np.float64,
+                    on_bad_lines="skip",
+                    na_values=["", "nan", "NaN"],
+                    low_memory=False,
+                )
+            except Exception as exc:
+                self._emit_status(f"    skip ({exc!r})")
+                continue
+            if df.empty:
+                continue
 
-                    try:
-                        raw_vals = np.fromiter(
-                            (float(t) if t.strip() else np.nan for t in tok),
-                            dtype=float,
-                            count=len(tok),
-                        )
-                    except Exception:
-                        continue
-                    if raw_vals.size < max(e2, c_p3) + 1:
-                        continue
+            # Filter rows: 0 < centi < 86400 and finite
+            centi = df[1].to_numpy()
+            mask = np.isfinite(centi) & (centi > 0.0) & (centi < 86400.0)
+            if not mask.any():
+                continue
+            df = df.loc[mask].reset_index(drop=True)
+            centi = df[1].to_numpy()
 
-                    ch1_chunks.append(raw_vals[s1:e1])
-                    ch2_chunks.append(raw_vals[s2:e2])
-                    doy_chunks.append(_datetime_to_doy(row_dt))
-                    flag_chunks.append(flg)
-                    t1_chunks.append(raw_vals[c_t])
-                    t2_chunks.append(raw_vals[c_t])   # Hot uses one temp probe
-                    p1_chunks.append(raw_vals[c_p1])
-                    p2_chunks.append(raw_vals[c_p2])
-                    p3_chunks.append(raw_vals[c_p3])
+            # Monotonise across col1 wrap-around (one cycle ≈ 14.4 min @ 100 Hz)
+            diffs = np.diff(centi)
+            wrap_step = 14.4 * 60.0 * 100.0   # centisec
+            cum_wrap = np.zeros_like(centi)
+            cur = 0.0
+            for i in range(1, centi.size):
+                if diffs[i - 1] < -3600.0:
+                    cur += wrap_step
+                cum_wrap[i] = cur
+            centi_abs = centi + cum_wrap
+            secs = centi_abs / 100.0
 
-        if not ch1_chunks:
-            raise RuntimeError(f"No usable scans parsed from {len(files)} files for {date_dashed}.")
+            # Vectorised DOY: start_dt → DOY base + seconds since start_of_year
+            year = file_start_dt.year
+            start_of_year = _dt.datetime(year, 1, 1)
+            base_sec = (file_start_dt - start_of_year).total_seconds()
+            doy = (base_sec + secs) / 86400.0 + 1.0
+
+            # Slice spectra (pandas keeps column labels = original col indices)
+            ch1 = df.loc[:, spec1_cols].to_numpy(dtype=np.float64)
+            ch2 = df.loc[:, spec2_cols].to_numpy(dtype=np.float64)
+            flag_arr = df[c_flag].to_numpy(dtype=np.int32)
+            t1_arr = df[c_t].to_numpy()
+            t2_arr = df[c_t].to_numpy()   # Hot uses one temp probe
+            p1_arr = df[c_p1].to_numpy()
+            p2_arr = df[c_p2].to_numpy()
+            p3_arr = df[c_p3].to_numpy()
+
+            chunks.append({
+                "doy": doy,   "flag": flag_arr,
+                "ch1": ch1,   "ch2": ch2,
+                "t1": t1_arr, "t2": t2_arr,
+                "p1": p1_arr, "p2": p2_arr, "p3": p3_arr,
+            })
+
+        if not chunks:
+            raise RuntimeError(f"No usable scans for {date_dashed}.")
 
         return {
-            "doy_per_row": np.array(doy_chunks, dtype=float),
-            "flag":        np.array(flag_chunks, dtype=int),
-            "ch1_full":    np.vstack(ch1_chunks),
-            "ch2_full":    np.vstack(ch2_chunks),
-            "tempcell1":   np.array(t1_chunks, dtype=float),
-            "tempcell2":   np.array(t2_chunks, dtype=float),
-            "presscell1":  np.array(p1_chunks, dtype=float),
-            "presscell2":  np.array(p2_chunks, dtype=float),
-            "presscell3":  np.array(p3_chunks, dtype=float),
+            "doy_per_row": np.concatenate([c["doy"]  for c in chunks]),
+            "flag":        np.concatenate([c["flag"] for c in chunks]),
+            "ch1_full":    np.vstack([c["ch1"] for c in chunks]),
+            "ch2_full":    np.vstack([c["ch2"] for c in chunks]),
+            "tempcell1":   np.concatenate([c["t1"] for c in chunks]),
+            "tempcell2":   np.concatenate([c["t2"] for c in chunks]),
+            "presscell1":  np.concatenate([c["p1"] for c in chunks]),
+            "presscell2":  np.concatenate([c["p2"] for c in chunks]),
+            "presscell3":  np.concatenate([c["p3"] for c in chunks]),
         }
 
     # ── ZA Rayleigh σ (Alpha.m:136,138) ──────────────────────────────
