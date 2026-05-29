@@ -87,21 +87,37 @@ CH_FIT_WINDOWS_NM_HOT = {
 }
 
 # ── Hot raw .dat column mapping ──────────────────────────────────────
-# Verified empirically on 2026-05-28 against 박사님 ch1_1700 raw counts in
-# alpha\avg_60s\2026-05-20_avg_60s.mat (=[46278, 46019, 45875, ...]).
-# The brute-force search found a perfect 5-row match at raw col 3002 → so
-# 박사님 ch1[1700] = raw col 3002, hence ch1 base = col 1302.
+# 박사님's read_data_CAESAR_Araon_2025_3ch.m (verified via screenshot
+# 2026-05-29) defines the channel slices as:
 #
-# r_batch_calculator.py's earlier guess (2053..4101) was for a different
-# CAESAR variant — it does NOT match the Hot Yeosu 2026 .dat layout.
+#     ch1 = mm(:, 2048+6 : 2048+2048+5)         % MATLAB cols 2054..4101
+#     ch2 = mm(:, 2048+2048+6 : 2048+2048+2048+5)
+#     ch3 = mm(:, 6 : 2048+5)
 #
-# ch2 base = ch1_end (3350) on the assumption that both channels are
-# contiguous 2048-px blocks (the second high-signal CCD block 4724..5561
-# falls inside this range, consistent with that assumption). The exact
-# value awaits ch2_1700 verification (issue #23 follow-up).
+# In 0-based Python:
+#     ch1 → cols 2053..4100   (== r_batch_calculator's SPEC_START_DEFAULT)
+#     ch2 → cols 4101..6148   (== SPEC_START_ANS .. SPEC_END_ANS)
+#     ch3 → cols 5..2052
+#
+# Earlier (commit d544a72, 2026-05-28) we briefly used (1302, 3350) under
+# the wrong assumption that 박사님's variable `ch1_1700` referred to pixel
+# index 1700 of ch1. Alpha_CAESAR_Hot_Yeosu_2026.m line 212 is actually:
+#     ch1_1700 = [ch1_1700; ch1(:, 950)];
+# — the name "1700" is a legacy label and the data is pixel 950
+# (1-based MATLAB) = pixel 949 (0-based Python). With ch1 base = col 2053
+# and pixel 949, the brute-force hit at raw col 3002 still lines up:
+# 2053 + 949 = 3002. So r_batch_calculator's original mapping was right
+# all along and this commit restores it.
+#
+# Channel-to-cavity mapping on the Hot system:
+#     ch1 (cols 2053..4100) → PNs cavity (NO2 absorption band 430-465 nm)
+#     ch2 (cols 4101..6148) → ANs cavity (435-470 nm)
+#     ch3 (cols 5..2052)    → unused on Hot
+# The "NO2 / UV / PNs" comments in 박사님's read_data describe the
+# Cold-system meaning of the same columns and must not be applied here.
 HOT_CH_SPEC_COLS = {                 # (start, end_exclusive) in raw .dat columns
-    1: (1302, 3350),                 # 박사님 ch1 (PNs), verified via px-1700 row match
-    2: (3350, 5398),                 # 박사님 ch2 (ANs), tentative — needs ch2_1700 cross-check
+    1: (2053, 4101),                 # 박사님 ch1 = PNs cavity on Hot
+    2: (4101, 6149),                 # 박사님 ch2 = ANs cavity on Hot
 }
 HOT_CH_PRESS_COL = {1: 6162, 2: 6164}
 HOT_TEMP_COL     = 6155              # cell temperature, /100 → °C
