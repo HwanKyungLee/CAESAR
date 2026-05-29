@@ -113,6 +113,20 @@ R_EXPECTED_COLD = 0.9990
 R_EXPECTED_HOT  = 0.9990
 R_WARN_DELTA = 0.0005
 
+# ── Channel R-fit wavelength windows ─────────────────────────────────
+# 박사님 Rs2_*.m line 123-138 — only the wavelength range where the
+# mirror absorption is well-sampled is used for the R statistics. The
+# rest of the CCD has too much edge noise / out-of-band signal.
+#
+#   Cold ch1 (NO2 cell)  : 435..480 nm   (Rs2_Cold.m line 124)
+#   Hot  ch1 (PNs cell)  : 430..465 nm   (Rs2_Hot.m line 124)
+#   Hot  ch2 (ANs cell)  : 435..470 nm   (Rs2_Hot.m line 129)
+CH_FIT_WINDOW_NM = {
+    "cold":    (435.0, 480.0),
+    "hot_pns": (430.0, 465.0),
+    "hot_ans": (435.0, 470.0),
+}
+
 # 타임존 상수 (설정에서 참조하므로 여기서 먼저 정의)
 _UTC      = timezone.utc
 _KST_TZ   = timezone(timedelta(hours=9))
@@ -166,7 +180,8 @@ def _parse_timestamp(filepath: str) -> datetime:
 def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                    ts_tz=None,
-                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) -> list[dict]:
+                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                   fit_window_nm: tuple | None = None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 **타임스탬프 순**으로 반환한다.
 
     수정 내역
@@ -237,17 +252,35 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 last_he = he
 
             leff_arr = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
+
+            # ── R-fit wavelength window (박사님 Rs2.m line 123-138) ──
+            # Restrict the R statistics to the channel-specific band
+            # where the cavity transmission is well-characterised; CCD
+            # edges and out-of-band pixels otherwise pull the mean up
+            # toward 1.0 and inflate the noise.
+            if fit_window_nm is not None:
+                w_mask = (wave_out >= float(fit_window_nm[0])) & \
+                         (wave_out <= float(fit_window_nm[1]))
+                if w_mask.sum() < 50:
+                    print(f"  [{fname}] ⚠️ fit_window 내 픽셀 부족 ({w_mask.sum()}), 전 픽셀 사용")
+                    r_fit, leff_fit = r_curve, leff_arr
+                else:
+                    r_fit, leff_fit = r_curve[w_mask], leff_arr[w_mask]
+            else:
+                r_fit, leff_fit = r_curve, leff_arr
+
             res = {
                 "timestamp":  ts,   # 위에서 이미 파싱한 값 재사용
                 "filename":   fname,
-                "r_mean":     float(np.mean(r_curve)),
-                "r_std":      float(np.std(r_curve)),
-                "r_min":      float(np.min(r_curve)),
-                "r_max":      float(np.max(r_curve)),
-                "leff_mean":  float(np.nanmean(leff_arr)),
+                "r_mean":     float(np.mean(r_fit)),
+                "r_std":      float(np.std(r_fit)),
+                "r_min":      float(np.min(r_fit)),
+                "r_max":      float(np.max(r_fit)),
+                "leff_mean":  float(np.nanmean(leff_fit)),
                 "valid_frac": rc.valid_fraction,
                 "n_za":       len(za),
                 "n_he":       len(candidate_he),
+                "fit_window_nm": fit_window_nm,
             }
             results.append(res)
             tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
@@ -283,6 +316,16 @@ def save_dat(results: list[dict], out_path: str) -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# CAESAR Pro — Mirror Reflectivity Trend\n")
         fh.write(f"# cavity={CAVITY_LEN} cm  RL={RL_FACTOR}  ZA_flag={FLAG_ZA}  He_flag={FLAG_HE}\n")
+        # Record the R-fit wavelength window used for each row's statistics
+        _winset = {r.get("fit_window_nm") for r in results}
+        _winset.discard(None)
+        if len(_winset) == 1:
+            _w = _winset.pop()
+            fh.write(f"# R_fit_window_nm={_w[0]:.1f}-{_w[1]:.1f}\n")
+        elif _winset:
+            fh.write(f"# R_fit_window_nm=mixed: {sorted(_winset)}\n")
+        else:
+            fh.write(f"# R_fit_window_nm=none (full CCD pixels)\n")
         fh.write("timestamp(KST)\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
         for r in results:
             fh.write(
@@ -420,23 +463,26 @@ def main():
     results_cold = scan_directory(COLD_DIR, wave_nm_cold, COLD_FILES,
                                   col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                                   ts_tz=COLD_TS_TZ,
-                                  spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) \
+                                  spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                                  fit_window_nm=CH_FIT_WINDOW_NM["cold"]) \
                    if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
     # ── Hot PNs(roi1) 채널 (CH2, 컬럼 2053-4100) ──────────────────
-    print(f"\n{bar}\n  Hot PNs(roi1) 채널 처리\n{bar}")
+    print(f"\n{bar}\n  Hot PNs(roi1) 채널 처리  fit window: {CH_FIT_WINDOW_NM['hot_pns']} nm\n{bar}")
     results_hot_pns = scan_directory(HOT_DIR, wave_nm_hot_pns, HOT_FILES,
                                      col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_TS_TZ,
-                                     spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) \
+                                     spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                                     fit_window_nm=CH_FIT_WINDOW_NM["hot_pns"]) \
                       if has_hot else []
 
     # ── Hot ANs(roi2) 채널 (CH3, 컬럼 4101-6148) ──────────────────
-    print(f"\n{bar}\n  Hot ANs(roi2) 채널 처리\n{bar}")
+    print(f"\n{bar}\n  Hot ANs(roi2) 채널 처리  fit window: {CH_FIT_WINDOW_NM['hot_ans']} nm\n{bar}")
     results_hot_ans = scan_directory(HOT_DIR, wave_nm_hot_ans, HOT_FILES,
                                      col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_ANS_TS_TZ,
-                                     spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS) \
+                                     spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS,
+                                     fit_window_nm=CH_FIT_WINDOW_NM["hot_ans"]) \
                       if has_hot else []
 
     # ── 출력 폴더 이름 결정 및 저장 ──────────────────────────────────
