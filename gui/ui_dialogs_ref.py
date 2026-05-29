@@ -639,11 +639,17 @@ class ReferenceGeneratorDialog(QDialog):
             return
 
         # hitran.org가 HTTPS 전용으로 전환됨 → hapi 기본값 http:// 는 연결 거부됨.
-        # 실제 fetch URL은 VARIABLES['GLOBAL_HOST']를 쓰므로 이것까지 https로 바꿔야 한다.
-        # (모듈 GLOBAL_HOST는 에러 메시지 표시용일 뿐)
+        # 실제 fetch URL은 VARIABLES['GLOBAL_HOST']를 쓰는데, hapi/__init__.py 가
+        # `from .hapi import *` 로 module-level GLOBAL_HOST 의 *copy* 를 패키지
+        # namespace 에 만들어 두기 때문에, hapi.GLOBAL_HOST 만 바꿔서는 함수 안의
+        # GLOBAL_HOST (URLError 에러 메시지에 박히는 그 변수) 가 그대로 http:// 로
+        # 남는다. 안쪽 hapi.hapi 모듈까지 직접 패치해야 한다.
         try:
             hapi.VARIABLES['GLOBAL_HOST'] = "https://hitran.org"
             hapi.GLOBAL_HOST = "https://hitran.org"
+            import hapi.hapi as _hapi_inner
+            _hapi_inner.GLOBAL_HOST = "https://hitran.org"
+            _hapi_inner.VARIABLES['GLOBAL_HOST'] = "https://hitran.org"
         except Exception:
             pass
 

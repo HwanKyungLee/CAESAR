@@ -1355,8 +1355,20 @@ class CAESARAnalyzer(QMainWindow):
             wl_fit = wl_a[:n]
             # Normalized polynomial basis to avoid ill-conditioning
             wn = (wl_fit - wl_fit.mean()) / max(1e-9, wl_fit.std())
-            A = np.column_stack([r_fit, np.ones_like(wn), wn, wn**2, wn**3])
-            coef, *_ = np.linalg.lstsq(A, a_fit, rcond=None)
+            # ── Numerical conditioning ───────────────────────────────────
+            # Raw cross-sections are O(1e-19) while the polynomial basis is
+            # O(1). With lstsq's default rcond the ref column's singular
+            # value (~1e-18) falls below the truncation threshold and the
+            # column is silently dropped → c_ref ≈ 0 and residual_RMS is
+            # constant across every FWHM (verified on Dr.Nam's α + our
+            # sweep, May 2026). Two complementary fixes:
+            #   · rescale the ref column to std=1 (caller can recover the
+            #     real concentration via coef[0] / ref_scale if needed)
+            #   · pass rcond=1e-30 to suppress any further truncation
+            ref_scale = max(float(np.std(r_fit)), 1e-30)
+            r_norm = (r_fit - float(np.mean(r_fit))) / ref_scale
+            A = np.column_stack([r_norm, np.ones_like(wn), wn, wn**2, wn**3])
+            coef, *_ = np.linalg.lstsq(A, a_fit, rcond=1e-30)
             resid = a_fit - A @ coef
             scores[fv] = (float(np.sqrt(np.mean(resid**2))), fpath)
 
@@ -1394,15 +1406,22 @@ class CAESARAnalyzer(QMainWindow):
             QMessageBox.warning(self, "FWHM Best-Match", "Run validation first.")
             return
         try:
-            ok, msg = self.engine.add_reference("NO2", self._fwhm_best_ref_path)
-            if ok:
-                QMessageBox.information(
-                    self, "FWHM Best-Match",
-                    f"Registered as NO2 reference:\n{os.path.basename(self._fwhm_best_ref_path)}"
-                )
-            else:
-                QMessageBox.warning(self, "FWHM Best-Match",
-                                    f"Engine refused the reference:\n{msg}")
+            # Mirror the Reference-Generator save path: register the file with
+            # both the engine *and* the visible reference table on the left.
+            try:
+                self.add_ref_row(name="NO2", path=self._fwhm_best_ref_path)
+            except Exception:
+                # Fallback path: engine-only registration (no table row).
+                ok, msg = self.engine.add_reference("NO2", self._fwhm_best_ref_path)
+                if not ok:
+                    QMessageBox.warning(self, "FWHM Best-Match",
+                                        f"Engine refused the reference:\n{msg}")
+                    return
+            QMessageBox.information(
+                self, "FWHM Best-Match",
+                f"Registered NO2 reference (engine + table):\n"
+                f"{os.path.basename(self._fwhm_best_ref_path)}"
+            )
         except Exception as e:
             QMessageBox.critical(self, "FWHM Best-Match",
                                  f"Failed to register reference:\n{e}")
