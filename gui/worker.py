@@ -1002,7 +1002,17 @@ class AlphaExportWorker(QThread):
                  rl_factor, cavity_len,
                  output_dir,
                  dark_spectrum=None,    # 1-D float array (full 2048 px), or None
-                 channel=1):            # spectrometer channel (1=CH1/ROI1)
+                 channel=1,             # spectrometer channel (1=CH1/ROI1)
+                 r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
+                 r_cal_omr_max=1e-5):   # block-mean omr_d 상한 — 이보다 크면 reject
+        """
+        r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
+          기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
+          low/mid-finesse cavity (R~0.93-0.99, omr_d ~ 1e-5 ~ 1e-4)에선 둘 다 완화 필요:
+            - r_cal_valid_min=0.50, r_cal_omr_max=1e-3 정도.
+          이 값들이 너무 빡빡하면 R-cal candidate 없어 "no valid R-cal" 에러 나거나
+          가장자리 노이즈만 채택되어 alpha 결과가 망가짐.
+        """
         super().__init__()
         self.channel     = channel
         self.file_list   = file_list
@@ -1015,6 +1025,8 @@ class AlphaExportWorker(QThread):
         self.rl_factor   = rl_factor
         self.cavity_len  = cavity_len
         self.output_dir  = output_dir
+        self.r_cal_valid_min = float(r_cal_valid_min)
+        self.r_cal_omr_max   = float(r_cal_omr_max)
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -1176,7 +1188,8 @@ class AlphaExportWorker(QThread):
                 with np.errstate(divide='ignore', invalid='ignore'):
                     omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
                 valid = np.isfinite(omr_d) & (omr_d > 0)
-                if valid.mean() >= 0.90 and np.nanmean(omr_d[valid]) < 1e-5:
+                if (valid.mean() >= self.r_cal_valid_min
+                        and np.nanmean(omr_d[valid]) < self.r_cal_omr_max):
                     x = np.arange(n_pix)
                     omr_d_clean = np.interp(x, x[valid], omr_d[valid])
                     calib_candidates.append(omr_d_clean)

@@ -1,11 +1,96 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-05-26**  (이전 내용은 git history 참조)
+> 최종 업데이트: **2026-05-27** (이번 세션 — 이전 2026-05-26 노트는 §B 이하 유지)
 
 ---
 
-## 0. 한 줄 요약
+## 0. 이번 세션 (2026-05-27) 한 줄 요약
+
+**CAESAR Pro의 알파+DOAS 파이프라인이 정상 작동함을 cold setup 데이터로 end-to-end 검증 완료.**
+2025-06-11 데이터의 알파 이슈는 코드 결함이 아니라 그 데이터셋의 He/ZA contrast 0.35% 문제로 판명. 부수적으로 발견한 두 가지 코드 개선사항은 PR 브랜치에 푸시 완료.
+
+---
+
+## A. 이번 세션 작업 (2026-05-27)
+
+### A1. 검증 작업 ★
+
+- **2025-06-11 ch1 데이터** (`raw(ex)/2025-06/2025-06-11-*.dat`, 24 files)로 박사님 MATLAB
+  알파(`C:\Doasis_Work\LGH\아라온호 데이터분석\alpha_trace\ch1_20250611_000000\`,
+  1399 bins × 2048 px)와 비교 시도 → **r ≈ 0** (의미있는 일치 없음).
+  - 원인: 그 데이터의 He/ZA I_peak 차이가 0.35% (45929 vs 45767)밖에 안 됨 → R-cal이
+    노이즈에 묻힘. 박사님 MATLAB 알파도 UV 영역(300-400 nm)에선 garbage임.
+  - 산출물: `diagnostics/alpha_vs_matlab_2025_06_11/FINDINGS.md` + scripts + plots/
+- **2026-05-17 ch1 cold setup** (`F:\CAESAR cold\2026-05\2026-05-17-*.dat`, 16 files)로
+  재검증 → **He/ZA contrast 17.1%**, R-cal 16/16 ZA blocks 통과, **Leff = 1.32 km**,
+  알파 mean\|α\| = 1.1e-7 cm⁻¹, NO2 differential structure 명확히 보임.
+  - DOAS 피팅 결과: **NO2 median 0.64 ppb, RMS 3e-8 cm⁻¹**, bin 800-950에 NO2 plume(5-6 ppb) 캡처.
+  - 산출물: `diagnostics/cold_validation_2026_05/` (scripts + docs) +
+    `D:\GHL\CAESAR_Pro_validation_2026_05\` (.npz 데이터 + plots, git에 안 들어감)
+
+### A2. ★ 코드 개선 PR (별도 브랜치)
+
+**브랜치: `claude/strict-flags-and-rcal-threshold`** (push 완료)
+**PR 생성 URL**: https://github.com/HwanKyungLee/CEASER/pull/new/claude/strict-flags-and-rcal-threshold
+
+두 가지 수정:
+1. **ZA/He flag 기본값 strict화** (`gui/app_window.py`):
+   "500,501,502,503"/"510,511,512,513" → "500"/"510". 501-503/511-513은 setflow/wait
+   전환구간이라 cavity 미충전 — I0/R-cal에 들어가면 오염시킴. (Tooltip 의도와도 일치)
+2. **R-cal threshold configurable** (`gui/worker.py:1166` `AlphaExportWorker`):
+   하드코딩 0.90/1e-5 → 생성자 인자 `r_cal_valid_min`, `r_cal_omr_max`. 기본값 유지 →
+   high-finesse cavity (R>0.999)은 동작 변화 없음. Low-finesse 셋업엔 docstring에서
+   `0.50 / 1e-3` 권장. GUI 노출은 follow-up PR로.
+
+### A3. 다음 세션 할 일 (2026-05-27 최종 업데이트)
+
+**완료된 항목** ✅
+- [x] PR 머지: `claude/strict-flags-and-rcal-threshold` → main (commit `d982b62`)
+- [x] 05-17/18/19 멀티데이 알파 검증 (각 5-8 파일, `diagnostics/cold_validation_2026_05/multi_day_report.txt`)
+- [x] DOAS v1 vs v2 비교 (v2가 1.6-3.2x RMS 개선; shift=0/sq=1, 윈도우 변경 효과)
+- [x] Leff misleading 발견·정정 (full mean ≠ real cavity; LED-center 사용해야)
+
+**남은 우선순위** (TODO)
+
+**P1 — `worker.py:1175` Leff 보고 로직 fix**
+- 현재 `1.0/np.mean(best_omr_d)*1e-5` → LED 밖 가장자리 spike에 부풀려짐
+- 05-19에선 0.28 km 보고했지만 실제 LED-center mean으론 10.77 km
+- 수정: `np.mean(best_omr_d[led_mask])` 또는 `np.median(best_omr_d)` 사용
+- 간단한 PR, 별도 브랜치 권장
+
+**P2 — GUI 알파 검증 (사용자 직접 작업)**
+- main 머지됨 → strict flag 기본값으로 GUI 동작
+- 사용자가 `python main.py` → Stage 4 (Alpha Export, cavity=51.8cm CH1) → Stage 5 (DOAS)
+- GUI 결과와 내 검증 결과(`D:\GHL\multi_2026_05_*/alpha_caesar.npz`) 픽셀별 일치 확인 필요
+- 불일치 시: GUI에 들어간 cavity_len, dark 파라미터 점검
+
+**P3 — shift/squeeze 옵티마이저 동작 확인**
+- `doas_fit_v2.py`는 3일 모두 shift=0, squeeze=1 반환
+- 가능성 (a) 진짜 wavelength cal이 정확해서 0 옵티멈, (b) L-BFGS-B가 flat region에 갇힘
+- 확인 방법: 초기값 perturb (shift=±2 px), `scipy.optimize.differential_evolution` 시도
+- 만약 (b)이면 nonlinear 부분 다시 디자인
+
+**P4 — `worker.py` R-cal 알고리즘 개선**
+- 현재 `best_omr_d = median across all candidates` (단일 시간 상수)
+- 박사님 MATLAB은 `alpha_cavity_fit` 시간보간 (PCHIP) 사용
+- He 사이클 매 3파일 → ZA 사이 구간은 직전 He block과 PCHIP으로 R 보간하는 게 정확
+- 옵션화: `r_cal_mode='median' | 'pchip'`
+
+**P5 — 1% 잔차 도전 (HANDOFF.md §4 표 참조)**
+- Dark frame 측정 (셔터 닫고 측정) — `AlphaExportWorker(dark_spectrum=...)` 인자 이미 있음
+- 측정 ref 사용 (박사님 `no2_meas_spectrum_blue_240511.dat` 같은)
+- 05-18 cold v2 RMS 5.2e-9 / mean\|α\| 4.2e-8 = 12% 잔차 → 추가 개선 여지
+
+**P6 — Hot setup (Yeosu 2026) 동일 검증**
+- `campaigns/yeosu_2026/` 데이터로 같은 멀티데이 절차
+- CH2 (PNs)도 확인 — strict flag 변경이 회귀 안 일으키는지 검증
+
+---
+
+## B. 이전 세션 (2026-05-26) 노트 — 이력 보존
+
+### 0. 한 줄 요약 (이전)
 
 **오늘의 성과: Stage 4 알파 추출의 핵심 버그를 찾아 고쳤다.**
 DOAS 피팅 잔차가 **96% → 10.6%** 로 개선됨 (못 쓰던 상태 → ~1ppb NO2 검출 가능한 실용 수준).

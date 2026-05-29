@@ -475,6 +475,7 @@ def plot_r_curves_per_channel(results, channel_name, color, out_path):
     plt.close(fig)
 
 
+
 def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
     # 3채널(Cold / Hot PNs / Hot ANs) × (R + 선택적 Leff)
     per_ch = 2 if SHOW_LEFF else 1
