@@ -269,6 +269,14 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             else:
                 r_fit, leff_fit = r_curve, leff_arr
 
+            # Store the (wave, R) curve actually used for the statistics
+            # so plot_r_curves() can overlay every scan and draw the mean
+            # spectrum per channel (박사님 Rs2.m line 144 style).
+            if fit_window_nm is not None and w_mask.sum() >= 50:
+                wave_in_window = np.asarray(wave_out)[w_mask]
+            else:
+                wave_in_window = np.asarray(wave_out)
+
             res = {
                 "timestamp":  ts,   # 위에서 이미 파싱한 값 재사용
                 "filename":   fname,
@@ -281,6 +289,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 "n_za":       len(za),
                 "n_he":       len(candidate_he),
                 "fit_window_nm": fit_window_nm,
+                "wave_nm":    wave_in_window,
+                "r_curve":    np.asarray(r_fit, dtype=float),
             }
             results.append(res)
             tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
@@ -405,6 +415,66 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
     if SHOW_PLOT: plt.show()
     plt.close(fig)
 
+def plot_r_curves_per_channel(results, channel_name, color, out_path):
+    """Plot every scan's R(λ) curve plus the mean spectrum for one channel.
+
+    Mirrors 박사님 Rs2.m line 144 (``plot(wv, R1, '.', wv, Rr1, 'g')``):
+    each scan's R(λ) is drawn at low opacity so day-to-day stability is
+    visible, with the mean and ±1σ band overlaid.  When a fit window
+    was active the corresponding wavelength range is shaded.
+    """
+    if not results:
+        print(f"  [R(λ)] {channel_name}: no data")
+        return
+
+    waves = [r["wave_nm"] for r in results if "wave_nm" in r and r["wave_nm"] is not None]
+    curves = [r["r_curve"] for r in results if "r_curve" in r and r["r_curve"] is not None]
+    if not waves or not curves:
+        print(f"  [R(λ)] {channel_name}: no r_curve data collected")
+        return
+
+    # Trim every scan to the shortest length so we can stack into a 2-D array
+    n_min = min(len(w) for w in waves)
+    waves   = [w[:n_min] for w in waves]
+    curves  = [c[:n_min] for c in curves]
+    wave_common = np.asarray(waves[0], dtype=float)
+    r_stack     = np.asarray(curves, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    # Per-scan overlay (alpha blending)
+    for r in r_stack:
+        ax.plot(wave_common, r, color=color, alpha=0.07, lw=0.6)
+
+    # Mean + ±1σ
+    r_mean = np.mean(r_stack, axis=0)
+    r_std  = np.std(r_stack, axis=0)
+    ax.fill_between(wave_common, r_mean - r_std, r_mean + r_std,
+                    color=color, alpha=0.25, label="±1σ across scans")
+    ax.plot(wave_common, r_mean, color=color, lw=1.8, label="mean R(λ)")
+
+    # Highlight fit window when one was used consistently
+    fws = {r.get("fit_window_nm") for r in results}
+    fws.discard(None)
+    if len(fws) == 1:
+        fw = fws.pop()
+        ax.axvspan(fw[0], fw[1], alpha=0.06, color="green",
+                   label=f"fit window {fw[0]:.0f}-{fw[1]:.0f} nm")
+
+    ax.set_xlabel("Wavelength (nm)")
+    ax.set_ylabel("Reflectivity R(λ)")
+    ax.set_title(f"CAESAR Pro — {channel_name} R(λ) ({len(r_stack)} scans)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="lower right", fontsize=9)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    print(f"  [PNG] {out_path}")
+    if SHOW_PLOT: plt.show()
+    plt.close(fig)
+
+
 def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
     # 3채널(Cold / Hot PNs / Hot ANs) × (R + 선택적 Leff)
     per_ch = 2 if SHOW_LEFF else 1
@@ -504,6 +574,11 @@ def main():
         if results_hot_pns: plot_single_channel(results_hot_pns, "Hot PNs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_PNs.png"), "darkorange")
         if results_hot_ans: plot_single_channel(results_hot_ans, "Hot ANs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_ANs.png"), "crimson")
         if all_results: plot_combined(results_cold, results_hot_pns, results_hot_ans, os.path.join(out_folder, "R_trend_combined.png"))
+
+        # R(λ) per-scan overlay + mean spectrum (박사님 Rs2.m line 144 style)
+        if results_cold:    plot_r_curves_per_channel(results_cold,    "Cold",        "steelblue",  os.path.join(out_folder, "R_curve_Cold.png"))
+        if results_hot_pns: plot_r_curves_per_channel(results_hot_pns, "Hot PNs(roi1)", "darkorange", os.path.join(out_folder, "R_curve_Hot_PNs.png"))
+        if results_hot_ans: plot_r_curves_per_channel(results_hot_ans, "Hot ANs(roi2)", "crimson",    os.path.join(out_folder, "R_curve_Hot_ANs.png"))
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  완료 — 반사율 요약                                            ║")
