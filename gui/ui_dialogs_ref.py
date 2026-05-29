@@ -404,11 +404,30 @@ class ReferenceGeneratorDialog(QDialog):
         lay_hitran = QHBoxLayout()
         lay_hitran.addWidget(QLabel("T(K):"))
         self.spin_temp = QDoubleSpinBox(); self.spin_temp.setRange(200.0, 400.0); self.spin_temp.setValue(293.0)
+        self.spin_temp.setToolTip("HITRAN cross-section temperature in K.\n"
+                                   "Auto-filled from main window's fallback T (°C + 273.15) when this dialog opens.")
         lay_hitran.addWidget(self.spin_temp)
         lay_hitran.addWidget(QLabel("P(atm):"))
         self.spin_press = QDoubleSpinBox(); self.spin_press.setRange(0.1, 2.0); self.spin_press.setValue(1.0)
+        self.spin_press.setToolTip("HITRAN pressure in atm.\n"
+                                    "Auto-filled from main window's fallback P (mbar / 1013.25) when this dialog opens.")
         lay_hitran.addWidget(self.spin_press)
         lay_raw.addLayout(lay_hitran)
+
+        # Auto-sync HITRAN T/P from main window's fallback fields (one-shot at
+        # dialog construction; user can override afterwards).
+        _parent = self.parent()
+        if _parent is not None:
+            if hasattr(_parent, "spin_temp"):
+                try:
+                    self.spin_temp.setValue(float(_parent.spin_temp.value()) + 273.15)
+                except Exception:
+                    pass
+            if hasattr(_parent, "spin_pres"):
+                try:
+                    self.spin_press.setValue(float(_parent.spin_pres.value()) / 1013.25)
+                except Exception:
+                    pass
 
         lay_hitran_action = QHBoxLayout()
         self.combo_hitran_gas = QComboBox()
@@ -434,6 +453,14 @@ class ReferenceGeneratorDialog(QDialog):
         # --- 2. Target Instrument Wavelength ---
         grp_wave = QGroupBox("2. Target Instrument Wavelength")
         lay_wave = QVBoxLayout()
+
+        # One-shot auto-pickup: grabs Calib + FWHM from the same campaign
+        # wv_cal folder (remembers it across sessions via QSettings).
+        self.btn_auto_pickup = QPushButton("🤖 Auto-pickup Calib + FWHM from campaign wv_cal folder")
+        self.btn_auto_pickup.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
+        self.btn_auto_pickup.clicked.connect(self._auto_pickup_calib_fwhm)
+        lay_wave.addWidget(self.btn_auto_pickup)
+
         self.btn_load_wave = QPushButton("📂 Load Wavelength Calibration (.txt)")
         self.btn_load_wave.clicked.connect(self.load_target_wavelength)
         status_text = 'Loaded from Main' if self.target_wavelengths is not None else 'Not Loaded'
@@ -473,37 +500,135 @@ class ReferenceGeneratorDialog(QDialog):
         self.btn_save.setEnabled(False)
         self.btn_save.setMinimumHeight(int(40 * self._s))
         right_layout.addWidget(self.btn_save)
-        
+
+        # --- 5. FWHM Sweep (uniform Gaussian) — generation only ---
+        # Validation/auto-best moved to Setup tab → 🎯 FWHM Best-Match
+        grp_sweep = QGroupBox("5. FWHM Sweep (uniform Gaussian) — generate references")
+        lay_sweep = QVBoxLayout()
+
+        lay_sweep_params = QHBoxLayout()
+        lay_sweep_params.addWidget(QLabel("Center FWHM (nm):"))
+        self.spin_sweep_center = QDoubleSpinBox()
+        self.spin_sweep_center.setRange(0.01, 10.0)
+        self.spin_sweep_center.setDecimals(3)
+        self.spin_sweep_center.setSingleStep(0.01)
+        self.spin_sweep_center.setValue(0.50)
+        lay_sweep_params.addWidget(self.spin_sweep_center)
+
+        lay_sweep_params.addWidget(QLabel("Step:"))
+        self.spin_sweep_step = QDoubleSpinBox()
+        self.spin_sweep_step.setRange(0.001, 1.0)
+        self.spin_sweep_step.setDecimals(3)
+        self.spin_sweep_step.setSingleStep(0.01)
+        self.spin_sweep_step.setValue(0.02)
+        lay_sweep_params.addWidget(self.spin_sweep_step)
+
+        lay_sweep_params.addWidget(QLabel("± steps:"))
+        self.spin_sweep_n = QSpinBox()
+        self.spin_sweep_n.setRange(1, 30)
+        self.spin_sweep_n.setValue(5)
+        lay_sweep_params.addWidget(self.spin_sweep_n)
+        lay_sweep.addLayout(lay_sweep_params)
+
+        lay_sweep_out = QHBoxLayout()
+        self.btn_sweep_outdir = QPushButton("📁 Output Folder…")
+        self.btn_sweep_outdir.clicked.connect(self._pick_sweep_outdir)
+        lay_sweep_out.addWidget(self.btn_sweep_outdir)
+        self.lbl_sweep_outdir = QLabel("Status: Not Selected")
+        self.lbl_sweep_outdir.setStyleSheet("color: #d32f2f;")
+        lay_sweep_out.addWidget(self.lbl_sweep_outdir, stretch=1)
+        lay_sweep.addLayout(lay_sweep_out)
+
+        self.btn_run_sweep = QPushButton("🌀 Run FWHM Sweep")
+        self.btn_run_sweep.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold;")
+        self.btn_run_sweep.clicked.connect(self.run_fwhm_sweep)
+        self.btn_run_sweep.setMinimumHeight(int(40 * self._s))
+        lay_sweep.addWidget(self.btn_run_sweep)
+
+        _hint = QLabel("After sweep finishes, validate in Setup tab → 🎯 FWHM Best-Match")
+        _hint.setStyleSheet("color: #555; font-style: italic;")
+        _hint.setWordWrap(True)
+        lay_sweep.addWidget(_hint)
+
+        grp_sweep.setLayout(lay_sweep)
+        right_layout.addWidget(grp_sweep)
+
+        self._sweep_outdir = None
+
         right_layout.addStretch(1)
         layout.addLayout(right_layout, stretch=1)
 
     # ---------------------------------------------------------
     # Data Loading Methods
     # ---------------------------------------------------------
+    # Known literature FWHM values per (gas, author) for popular cross-section
+    # files. Values are nm. Sources cited in comments.
+    _KNOWN_LIT_FWHM = [
+        # (gas substring, author/db substring, FWHM_nm, source)
+        ("no2",    "vandaele",      0.01156, "Vandaele 2002 (FTS)"),
+        ("chocho", "volkamer",      0.003,   "Volkamer 2005"),
+        ("o4",     "thalman",       0.07,    "Thalman & Volkamer 2013"),
+        ("o4",     "volkamer",      0.07,    "Thalman & Volkamer 2013"),
+        ("o4",     "greenblatt",    0.5,     "Greenblatt 1990"),
+        ("hcho",   "meller",        0.025,   "Meller & Moortgat 2000"),
+        ("hono",   "stutz",         0.5,     "Stutz et al."),
+        ("io",     "spietz",        0.5,     "Spietz 2005"),
+        ("h2o",    "hitran",        0.0,     "HITRAN line list"),
+        ("hitran", "",              0.0,     "HITRAN line list"),
+    ]
+
+    @classmethod
+    def _guess_lit_fwhm(cls, filename: str):
+        """Best-guess literature FWHM (nm) from a raw cross-section filename.
+
+        Returns (fwhm_nm, source_label) or (None, reason)."""
+        import re
+        fname = os.path.basename(filename).lower()
+        # 1. Known (gas, author) catalogue
+        for gas_key, author_key, fwhm, src in cls._KNOWN_LIT_FWHM:
+            if gas_key in fname and (author_key == "" or author_key in fname):
+                return fwhm, src
+        # 2. Wavelength grid embedded in filename, e.g. "(0.001nm)"
+        m = re.search(r"\(\s*([0-9]*\.?[0-9]+)\s*nm\s*\)", fname)
+        if m:
+            grid = float(m.group(1))
+            # lit FWHM ~ grid is a conservative starting point; user can tweak
+            return grid, f"derived from filename grid {grid:g} nm"
+        return None, "no match"
+
     def load_raw_reference(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Open Raw Ref", "", "Data Files (*.txt *.csv *.dat)")
         if not filename: return
         try:
             wave_nm_ref, intensity_raw = DataIO.load_reference(filename)
-            
+
             if wave_nm_ref is None:
                 raise ValueError("No Wavelength data found in the reference file.")
-                
+
             self.raw_wave = wave_nm_ref
             self.raw_data = intensity_raw
-            
+
             base_name = os.path.basename(filename)
-            
+
             self.gas_name = base_name.split('_')[ 0 ]
-            
-            self.lbl_raw_info.setText(f"Loaded: {base_name} (Gas: {self.gas_name})")
-            
+
+            # Auto-fill Lit FWHM from filename if we recognise the cross-section
+            lit_msg = ""
+            lit_fwhm, src = self._guess_lit_fwhm(filename)
+            if lit_fwhm is not None:
+                self.spin_lit_fwhm.setValue(round(lit_fwhm, 5))
+                lit_msg = f"   |   Lit FWHM auto-set to {lit_fwhm:g} nm ({src})"
+
+            self.lbl_raw_info.setText(
+                f"Loaded: {base_name} (Gas: {self.gas_name}){lit_msg}"
+            )
+
             self.ax[ 0 ].clear()
             self.ax[ 0 ].plot(self.raw_wave, self.raw_data, 'k-', alpha=0.5, label='Raw Data')
             self.ax[ 0 ].legend()
             self.canvas.draw()
-            
-        except Exception as e: 
+
+        except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load Raw file:\n{e}")
 
     def generate_hitran_gas(self):
@@ -514,11 +639,17 @@ class ReferenceGeneratorDialog(QDialog):
             return
 
         # hitran.org가 HTTPS 전용으로 전환됨 → hapi 기본값 http:// 는 연결 거부됨.
-        # 실제 fetch URL은 VARIABLES['GLOBAL_HOST']를 쓰므로 이것까지 https로 바꿔야 한다.
-        # (모듈 GLOBAL_HOST는 에러 메시지 표시용일 뿐)
+        # 실제 fetch URL은 VARIABLES['GLOBAL_HOST']를 쓰는데, hapi/__init__.py 가
+        # `from .hapi import *` 로 module-level GLOBAL_HOST 의 *copy* 를 패키지
+        # namespace 에 만들어 두기 때문에, hapi.GLOBAL_HOST 만 바꿔서는 함수 안의
+        # GLOBAL_HOST (URLError 에러 메시지에 박히는 그 변수) 가 그대로 http:// 로
+        # 남는다. 안쪽 hapi.hapi 모듈까지 직접 패치해야 한다.
         try:
             hapi.VARIABLES['GLOBAL_HOST'] = "https://hitran.org"
             hapi.GLOBAL_HOST = "https://hitran.org"
+            import hapi.hapi as _hapi_inner
+            _hapi_inner.GLOBAL_HOST = "https://hitran.org"
+            _hapi_inner.VARIABLES['GLOBAL_HOST'] = "https://hitran.org"
         except Exception:
             pass
 
@@ -559,8 +690,13 @@ class ReferenceGeneratorDialog(QDialog):
             self.raw_wave = wave_nm[sort_idx]
             self.raw_data = coef[sort_idx]
             
-            self.gas_name = f"{gas_name}-HITRAN" 
-            self.lbl_raw_info.setText(f"HITRAN {gas_name} Generated")
+            self.gas_name = f"{gas_name}-HITRAN"
+            # HITRAN cross-sections are computed from a line list ⇒ effectively
+            # delta-function broadening; literature FWHM is 0.
+            self.spin_lit_fwhm.setValue(0.0)
+            self.lbl_raw_info.setText(
+                f"HITRAN {gas_name} Generated   |   Lit FWHM auto-set to 0 (line list)"
+            )
             
             self.ax[0].clear()
             self.ax[0].plot(self.raw_wave, self.raw_data, 'b-', label=f'HITRAN {gas_name}')
@@ -571,16 +707,113 @@ class ReferenceGeneratorDialog(QDialog):
         finally: 
             QApplication.restoreOverrideCursor()
 
-    def load_target_wavelength(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Open Wavelength", "", "Text Files (*.txt *.csv)")
-        if not filename: return
-        df = pd.read_csv(filename, header=None)
+    def load_target_wavelength(self, path: str = None):
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Open Wavelength", "", "Text Files (*.txt *.csv)")
+        if not path:
+            return
+        df = pd.read_csv(path, header=None)
         self.target_wavelengths = pd.to_numeric(df.iloc[:, 0], errors='coerce').dropna().values
-        self.lbl_wave_info.setText(f"Loaded: {os.path.basename(filename)}")
+        self.lbl_wave_info.setText(
+            f"✅ Loaded: {os.path.basename(path)} ({len(self.target_wavelengths)} px)"
+        )
+        self.lbl_wave_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
-    def load_fwhm_profile(self):
-        """Loads the FWHM & Sigma profile generated from the calibration tool."""
-        filename, _ = QFileDialog.getOpenFileName(self, "Open FWHM Profile", "", "Text Files (*.txt *.csv)")
+    def _auto_pickup_calib_fwhm(self):
+        """Pick one campaign wv_cal folder, then load Calib_*.txt and
+        FWHM_Analysis_*.txt automatically. Remembers the folder per
+        ROI across sessions via QSettings.
+
+        Expected layout::
+
+            <wv_cal_root>/
+                roi1/  Calib_*.txt  FWHM_Analysis_*.txt
+                roi2/  Calib_*.txt  FWHM_Analysis_*.txt
+
+        Or a flat folder with both files directly inside.
+        """
+        import glob
+        from PyQt6.QtCore import QSettings
+        from PyQt6.QtWidgets import QInputDialog
+
+        settings = QSettings("DoasisLab", "CAESARPro")
+        last_root = settings.value("ref_gen/wv_cal_root", "", str)
+
+        root = QFileDialog.getExistingDirectory(
+            self,
+            "Choose campaign wv_cal folder (e.g. ..\\CAESAR_Hot\\wv_cal)",
+            last_root or "",
+        )
+        if not root:
+            return
+        settings.setValue("ref_gen/wv_cal_root", root)
+
+        # Detect ROI subfolders (case-insensitive)
+        try:
+            entries = os.listdir(root)
+        except Exception as exc:
+            QMessageBox.critical(self, "Auto-pickup", f"Cannot read folder:\n{exc}")
+            return
+        rois = sorted([d for d in entries
+                       if os.path.isdir(os.path.join(root, d))
+                       and d.lower().startswith("roi")])
+
+        if not rois:
+            target_dir = root
+            roi_label  = "(flat)"
+        elif len(rois) == 1:
+            target_dir = os.path.join(root, rois[0])
+            roi_label  = rois[0]
+        else:
+            chosen, ok = QInputDialog.getItem(
+                self, "Choose ROI",
+                f"{len(rois)} ROI subfolders found:",
+                rois, 0, False,
+            )
+            if not ok:
+                return
+            target_dir = os.path.join(root, chosen)
+            roi_label  = chosen
+
+        calib_hits = glob.glob(os.path.join(target_dir, "Calib_*.txt"))
+        fwhm_hits  = glob.glob(os.path.join(target_dir, "FWHM_Analysis_*.txt"))
+
+        messages = [f"ROI: {roi_label}", f"Folder: {target_dir}", ""]
+
+        if calib_hits:
+            # Pick the newest by mtime
+            calib_path = max(calib_hits, key=os.path.getmtime)
+            try:
+                self.load_target_wavelength(path=calib_path)
+                messages.append(f"✅ Calib: {os.path.basename(calib_path)}")
+            except Exception as exc:
+                messages.append(f"❌ Calib load failed: {exc}")
+        else:
+            messages.append(f"⚠️ No Calib_*.txt found")
+
+        if fwhm_hits:
+            fwhm_path = max(fwhm_hits, key=os.path.getmtime)
+            try:
+                self.load_fwhm_profile(path=fwhm_path)
+                messages.append(f"✅ FWHM: {os.path.basename(fwhm_path)}")
+            except Exception as exc:
+                messages.append(f"❌ FWHM load failed: {exc}")
+        else:
+            messages.append(f"⚠️ No FWHM_Analysis_*.txt found")
+
+        QMessageBox.information(self, "Auto-pickup result", "\n".join(messages))
+
+    def load_fwhm_profile(self, path: str = None):
+        """Loads the FWHM & Sigma profile generated from the calibration tool.
+
+        When ``path`` is None, prompts the user via QFileDialog. When called
+        programmatically (e.g. from ``_auto_pickup_calib_fwhm``) the caller
+        passes the resolved path directly.
+        """
+        if path is None:
+            filename, _ = QFileDialog.getOpenFileName(self, "Open FWHM Profile", "", "Text Files (*.txt *.csv)")
+        else:
+            filename = path
         if not filename: return
         
         try:
@@ -624,9 +857,21 @@ class ReferenceGeneratorDialog(QDialog):
             self.ils_pixels = px_num[valid].to_numpy()
             self.ils_sigmas = sg_num[valid].to_numpy()
 
-            self.lbl_fwhm_info.setText(f"✅ Loaded: {len(self.ils_pixels)} Sigma points")
+            # Auto-fill Section 5 Center FWHM with mean FWHM derived from this profile
+            mean_sigma_nm = float(np.nanmean(self.ils_sigmas))
+            mean_fwhm_nm  = mean_sigma_nm * 2.35482
+            auto_msg = ""
+            if hasattr(self, 'spin_sweep_center') and 0.01 <= mean_fwhm_nm <= 10.0:
+                self.spin_sweep_center.setValue(round(mean_fwhm_nm, 3))
+                auto_msg = f"\nSection 5 Center FWHM auto-set to {mean_fwhm_nm:.3f} nm."
+
+            self.lbl_fwhm_info.setText(
+                f"✅ Loaded: {len(self.ils_pixels)} Sigma points "
+                f"(mean FWHM ≈ {mean_fwhm_nm:.3f} nm)"
+            )
             self.lbl_fwhm_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
-            QMessageBox.information(self, "Success", "FWHM Profile loaded successfully.")
+            QMessageBox.information(self, "Success",
+                                    f"FWHM Profile loaded successfully.{auto_msg}")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load FWHM profile:\n{e}")
@@ -737,6 +982,125 @@ class ReferenceGeneratorDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Dynamic Convolution Failed:\n{e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    # ---------------------------------------------------------
+    # FWHM Sweep (uniform Gaussian) — Dr. Nam ILS tuning workflow
+    # ---------------------------------------------------------
+    @staticmethod
+    def _convolve_uniform_gaussian(raw_wave, raw_data, target_wl, fwhm_nm, lit_fwhm_nm=0.0):
+        """Uniform Gaussian ILS — single FWHM across the full wavelength axis.
+        Mirrors calibration/ils_sigma_sweep.convolve_uniform_gaussian.
+        """
+        sigma_inst = fwhm_nm / 2.35482
+        sigma_lit  = lit_fwhm_nm / 2.35482
+        added_var  = max(1e-20, sigma_inst**2 - sigma_lit**2)
+        sigma_eff  = np.sqrt(added_var)
+
+        hr_step = 0.002
+        hr_wave = np.arange(target_wl.min() - 5.0, target_wl.max() + 5.0, hr_step)
+        f_raw   = interp1d(raw_wave, raw_data, kind="linear",
+                           bounds_error=False, fill_value=0.0)
+        hr_data = f_raw(hr_wave)
+
+        result = np.zeros(len(target_wl))
+        for i, w in enumerate(target_wl):
+            kernel = (1.0 / (sigma_eff * np.sqrt(2 * np.pi))) * \
+                     np.exp(-0.5 * ((hr_wave - w) / sigma_eff) ** 2)
+            result[i] = float(np.dot(hr_data, kernel) * hr_step)
+        return result
+
+    def _pick_sweep_outdir(self):
+        dirpath = QFileDialog.getExistingDirectory(self, "Choose FWHM Sweep Output Folder")
+        if not dirpath:
+            return
+        self._sweep_outdir = dirpath
+        self.lbl_sweep_outdir.setText(f"✅ {dirpath}")
+        self.lbl_sweep_outdir.setStyleSheet("color: #2E7D32; font-weight: bold;")
+
+    def run_fwhm_sweep(self):
+        """Generate references at FWHM = center ± n·step (uniform Gaussian).
+        Saves N files Ref_{gas}_FWHM{fv:.3f}nm.dat to the output folder.
+        Validation (RMS vs measured α → best FWHM) is performed in
+        Setup tab → 🎯 FWHM Best-Match."""
+        if self.raw_wave is None or self.target_wavelengths is None:
+            QMessageBox.warning(self, "Warning",
+                "Raw reference and target wavelength are required.")
+            return
+        if not self._sweep_outdir:
+            QMessageBox.warning(self, "Warning", "Choose an output folder first.")
+            return
+
+        center = float(self.spin_sweep_center.value())
+        step   = float(self.spin_sweep_step.value())
+        n      = int(self.spin_sweep_n.value())
+        lit_fw = float(self.spin_lit_fwhm.value())
+
+        fwhm_list = sorted({round(center + step * k, 4)
+                            for k in range(-n, n + 1)
+                            if round(center + step * k, 4) > 0})
+        if not fwhm_list:
+            QMessageBox.warning(self, "Warning", "Empty FWHM list.")
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            os.makedirs(self._sweep_outdir, exist_ok=True)
+            results = {}
+
+            mask = (self.raw_wave >= self.target_wavelengths.min() - 10.0) & \
+                   (self.raw_wave <= self.target_wavelengths.max() + 10.0)
+            if not np.any(mask):
+                raise ValueError("Raw reference does not overlap target wavelength range.")
+            rw_m, rd_m = self.raw_wave[mask], self.raw_data[mask]
+
+            for fv in fwhm_list:
+                conv = self._convolve_uniform_gaussian(
+                    rw_m, rd_m, self.target_wavelengths, fv, lit_fw
+                )
+                results[fv] = conv
+                fname = f"Ref_{self.gas_name}_FWHM{fv:.3f}nm.dat"
+                header = (f"Gas={self.gas_name}  FWHM={fv:.3f}nm  "
+                          f"Lit_FWHM={lit_fw}nm  Generated by CAESAR Pro sweep")
+                np.savetxt(os.path.join(self._sweep_outdir, fname),
+                           conv, fmt="%.8e", header=header)
+
+            # Overlay all swept references on the top panel
+            ax_top = self.fig.axes[0]
+            ax_top.clear()
+            cmap = plt.get_cmap('viridis')
+            for i, fv in enumerate(fwhm_list):
+                color = cmap(i / max(1, len(fwhm_list) - 1))
+                ax_top.plot(self.target_wavelengths, results[fv],
+                            color=color, lw=0.8, alpha=0.7,
+                            label=f"FWHM={fv:.3f}nm")
+            ax_top.set_xlabel("Wavelength (nm)")
+            ax_top.set_ylabel("Cross Section")
+            ax_top.set_title(f"FWHM Sweep — {self.gas_name} ({len(fwhm_list)} versions)")
+            ax_top.legend(fontsize=7, ncol=2)
+
+            # Clear bottom panel + hint that validation moved to Setup tab
+            ax_bottom = self.fig.axes[1]
+            ax_bottom.clear()
+            ax_bottom.text(0.5, 0.5,
+                           "Validation moved to:\nSetup tab → 🎯 FWHM Best-Match",
+                           ha="center", va="center", transform=ax_bottom.transAxes,
+                           fontsize=11, color="#555", style="italic")
+            ax_bottom.set_xticks([]); ax_bottom.set_yticks([])
+
+            self.canvas.draw()
+
+            QMessageBox.information(
+                self, "FWHM Sweep Complete",
+                f"Saved {len(fwhm_list)} reference files to:\n"
+                f"{self._sweep_outdir}\n\n"
+                f"FWHM range: {fwhm_list[0]:.3f} ~ {fwhm_list[-1]:.3f} nm "
+                f"(step {step})\n\n"
+                f"Next: Setup tab → 🎯 FWHM Best-Match → point to this folder + α."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"FWHM sweep failed:\n{e}")
         finally:
             QApplication.restoreOverrideCursor()
 

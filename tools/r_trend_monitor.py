@@ -113,6 +113,20 @@ R_EXPECTED_COLD = 0.9990
 R_EXPECTED_HOT  = 0.9990
 R_WARN_DELTA = 0.0005
 
+# ── Channel R-fit wavelength windows ─────────────────────────────────
+# 박사님 Rs2_*.m line 123-138 — only the wavelength range where the
+# mirror absorption is well-sampled is used for the R statistics. The
+# rest of the CCD has too much edge noise / out-of-band signal.
+#
+#   Cold ch1 (NO2 cell)  : 435..480 nm   (Rs2_Cold.m line 124)
+#   Hot  ch1 (PNs cell)  : 430..465 nm   (Rs2_Hot.m line 124)
+#   Hot  ch2 (ANs cell)  : 435..470 nm   (Rs2_Hot.m line 129)
+CH_FIT_WINDOW_NM = {
+    "cold":    (435.0, 480.0),
+    "hot_pns": (430.0, 465.0),
+    "hot_ans": (435.0, 470.0),
+}
+
 # 타임존 상수 (설정에서 참조하므로 여기서 먼저 정의)
 _UTC      = timezone.utc
 _KST_TZ   = timezone(timedelta(hours=9))
@@ -166,7 +180,8 @@ def _parse_timestamp(filepath: str) -> datetime:
 def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                    ts_tz=None,
-                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) -> list[dict]:
+                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                   fit_window_nm: tuple | None = None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 **타임스탬프 순**으로 반환한다.
 
     수정 내역
@@ -237,17 +252,45 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 last_he = he
 
             leff_arr = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
+
+            # ── R-fit wavelength window (박사님 Rs2.m line 123-138) ──
+            # Restrict the R statistics to the channel-specific band
+            # where the cavity transmission is well-characterised; CCD
+            # edges and out-of-band pixels otherwise pull the mean up
+            # toward 1.0 and inflate the noise.
+            if fit_window_nm is not None:
+                w_mask = (wave_out >= float(fit_window_nm[0])) & \
+                         (wave_out <= float(fit_window_nm[1]))
+                if w_mask.sum() < 50:
+                    print(f"  [{fname}] ⚠️ fit_window 내 픽셀 부족 ({w_mask.sum()}), 전 픽셀 사용")
+                    r_fit, leff_fit = r_curve, leff_arr
+                else:
+                    r_fit, leff_fit = r_curve[w_mask], leff_arr[w_mask]
+            else:
+                r_fit, leff_fit = r_curve, leff_arr
+
+            # Store the (wave, R) curve actually used for the statistics
+            # so plot_r_curves() can overlay every scan and draw the mean
+            # spectrum per channel (박사님 Rs2.m line 144 style).
+            if fit_window_nm is not None and w_mask.sum() >= 50:
+                wave_in_window = np.asarray(wave_out)[w_mask]
+            else:
+                wave_in_window = np.asarray(wave_out)
+
             res = {
                 "timestamp":  ts,   # 위에서 이미 파싱한 값 재사용
                 "filename":   fname,
-                "r_mean":     float(np.mean(r_curve)),
-                "r_std":      float(np.std(r_curve)),
-                "r_min":      float(np.min(r_curve)),
-                "r_max":      float(np.max(r_curve)),
-                "leff_mean":  float(np.nanmean(leff_arr)),
+                "r_mean":     float(np.mean(r_fit)),
+                "r_std":      float(np.std(r_fit)),
+                "r_min":      float(np.min(r_fit)),
+                "r_max":      float(np.max(r_fit)),
+                "leff_mean":  float(np.nanmean(leff_fit)),
                 "valid_frac": rc.valid_fraction,
                 "n_za":       len(za),
                 "n_he":       len(candidate_he),
+                "fit_window_nm": fit_window_nm,
+                "wave_nm":    wave_in_window,
+                "r_curve":    np.asarray(r_fit, dtype=float),
             }
             results.append(res)
             tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
@@ -283,6 +326,16 @@ def save_dat(results: list[dict], out_path: str) -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# CAESAR Pro — Mirror Reflectivity Trend\n")
         fh.write(f"# cavity={CAVITY_LEN} cm  RL={RL_FACTOR}  ZA_flag={FLAG_ZA}  He_flag={FLAG_HE}\n")
+        # Record the R-fit wavelength window used for each row's statistics
+        _winset = {r.get("fit_window_nm") for r in results}
+        _winset.discard(None)
+        if len(_winset) == 1:
+            _w = _winset.pop()
+            fh.write(f"# R_fit_window_nm={_w[0]:.1f}-{_w[1]:.1f}\n")
+        elif _winset:
+            fh.write(f"# R_fit_window_nm=mixed: {sorted(_winset)}\n")
+        else:
+            fh.write(f"# R_fit_window_nm=none (full CCD pixels)\n")
         fh.write("timestamp(KST)\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
         for r in results:
             fh.write(
@@ -362,6 +415,67 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
     if SHOW_PLOT: plt.show()
     plt.close(fig)
 
+def plot_r_curves_per_channel(results, channel_name, color, out_path):
+    """Plot every scan's R(λ) curve plus the mean spectrum for one channel.
+
+    Mirrors 박사님 Rs2.m line 144 (``plot(wv, R1, '.', wv, Rr1, 'g')``):
+    each scan's R(λ) is drawn at low opacity so day-to-day stability is
+    visible, with the mean and ±1σ band overlaid.  When a fit window
+    was active the corresponding wavelength range is shaded.
+    """
+    if not results:
+        print(f"  [R(λ)] {channel_name}: no data")
+        return
+
+    waves = [r["wave_nm"] for r in results if "wave_nm" in r and r["wave_nm"] is not None]
+    curves = [r["r_curve"] for r in results if "r_curve" in r and r["r_curve"] is not None]
+    if not waves or not curves:
+        print(f"  [R(λ)] {channel_name}: no r_curve data collected")
+        return
+
+    # Trim every scan to the shortest length so we can stack into a 2-D array
+    n_min = min(len(w) for w in waves)
+    waves   = [w[:n_min] for w in waves]
+    curves  = [c[:n_min] for c in curves]
+    wave_common = np.asarray(waves[0], dtype=float)
+    r_stack     = np.asarray(curves, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    # Per-scan overlay (alpha blending)
+    for r in r_stack:
+        ax.plot(wave_common, r, color=color, alpha=0.07, lw=0.6)
+
+    # Mean + ±1σ
+    r_mean = np.mean(r_stack, axis=0)
+    r_std  = np.std(r_stack, axis=0)
+    ax.fill_between(wave_common, r_mean - r_std, r_mean + r_std,
+                    color=color, alpha=0.25, label="±1σ across scans")
+    ax.plot(wave_common, r_mean, color=color, lw=1.8, label="mean R(λ)")
+
+    # Highlight fit window when one was used consistently
+    fws = {r.get("fit_window_nm") for r in results}
+    fws.discard(None)
+    if len(fws) == 1:
+        fw = fws.pop()
+        ax.axvspan(fw[0], fw[1], alpha=0.06, color="green",
+                   label=f"fit window {fw[0]:.0f}-{fw[1]:.0f} nm")
+
+    ax.set_xlabel("Wavelength (nm)")
+    ax.set_ylabel("Reflectivity R(λ)")
+    ax.set_title(f"CAESAR Pro — {channel_name} R(λ) ({len(r_stack)} scans)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="lower right", fontsize=9)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    print(f"  [PNG] {out_path}")
+    if SHOW_PLOT: plt.show()
+    plt.close(fig)
+
+
+
 def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
     # 3채널(Cold / Hot PNs / Hot ANs) × (R + 선택적 Leff)
     per_ch = 2 if SHOW_LEFF else 1
@@ -420,23 +534,26 @@ def main():
     results_cold = scan_directory(COLD_DIR, wave_nm_cold, COLD_FILES,
                                   col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                                   ts_tz=COLD_TS_TZ,
-                                  spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) \
+                                  spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                                  fit_window_nm=CH_FIT_WINDOW_NM["cold"]) \
                    if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
     # ── Hot PNs(roi1) 채널 (CH2, 컬럼 2053-4100) ──────────────────
-    print(f"\n{bar}\n  Hot PNs(roi1) 채널 처리\n{bar}")
+    print(f"\n{bar}\n  Hot PNs(roi1) 채널 처리  fit window: {CH_FIT_WINDOW_NM['hot_pns']} nm\n{bar}")
     results_hot_pns = scan_directory(HOT_DIR, wave_nm_hot_pns, HOT_FILES,
                                      col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_TS_TZ,
-                                     spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT) \
+                                     spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                                     fit_window_nm=CH_FIT_WINDOW_NM["hot_pns"]) \
                       if has_hot else []
 
     # ── Hot ANs(roi2) 채널 (CH3, 컬럼 4101-6148) ──────────────────
-    print(f"\n{bar}\n  Hot ANs(roi2) 채널 처리\n{bar}")
+    print(f"\n{bar}\n  Hot ANs(roi2) 채널 처리  fit window: {CH_FIT_WINDOW_NM['hot_ans']} nm\n{bar}")
     results_hot_ans = scan_directory(HOT_DIR, wave_nm_hot_ans, HOT_FILES,
                                      col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_ANS_TS_TZ,
-                                     spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS) \
+                                     spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS,
+                                     fit_window_nm=CH_FIT_WINDOW_NM["hot_ans"]) \
                       if has_hot else []
 
     # ── 출력 폴더 이름 결정 및 저장 ──────────────────────────────────
@@ -458,6 +575,11 @@ def main():
         if results_hot_pns: plot_single_channel(results_hot_pns, "Hot PNs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_PNs.png"), "darkorange")
         if results_hot_ans: plot_single_channel(results_hot_ans, "Hot ANs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_ANs.png"), "crimson")
         if all_results: plot_combined(results_cold, results_hot_pns, results_hot_ans, os.path.join(out_folder, "R_trend_combined.png"))
+
+        # R(λ) per-scan overlay + mean spectrum (박사님 Rs2.m line 144 style)
+        if results_cold:    plot_r_curves_per_channel(results_cold,    "Cold",        "steelblue",  os.path.join(out_folder, "R_curve_Cold.png"))
+        if results_hot_pns: plot_r_curves_per_channel(results_hot_pns, "Hot PNs(roi1)", "darkorange", os.path.join(out_folder, "R_curve_Hot_PNs.png"))
+        if results_hot_ans: plot_r_curves_per_channel(results_hot_ans, "Hot ANs(roi2)", "crimson",    os.path.join(out_folder, "R_curve_Hot_ANs.png"))
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  완료 — 반사율 요약                                            ║")
