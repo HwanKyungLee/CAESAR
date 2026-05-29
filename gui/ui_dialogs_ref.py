@@ -404,11 +404,30 @@ class ReferenceGeneratorDialog(QDialog):
         lay_hitran = QHBoxLayout()
         lay_hitran.addWidget(QLabel("T(K):"))
         self.spin_temp = QDoubleSpinBox(); self.spin_temp.setRange(200.0, 400.0); self.spin_temp.setValue(293.0)
+        self.spin_temp.setToolTip("HITRAN cross-section temperature in K.\n"
+                                   "Auto-filled from main window's fallback T (°C + 273.15) when this dialog opens.")
         lay_hitran.addWidget(self.spin_temp)
         lay_hitran.addWidget(QLabel("P(atm):"))
         self.spin_press = QDoubleSpinBox(); self.spin_press.setRange(0.1, 2.0); self.spin_press.setValue(1.0)
+        self.spin_press.setToolTip("HITRAN pressure in atm.\n"
+                                    "Auto-filled from main window's fallback P (mbar / 1013.25) when this dialog opens.")
         lay_hitran.addWidget(self.spin_press)
         lay_raw.addLayout(lay_hitran)
+
+        # Auto-sync HITRAN T/P from main window's fallback fields (one-shot at
+        # dialog construction; user can override afterwards).
+        _parent = self.parent()
+        if _parent is not None:
+            if hasattr(_parent, "spin_temp"):
+                try:
+                    self.spin_temp.setValue(float(_parent.spin_temp.value()) + 273.15)
+                except Exception:
+                    pass
+            if hasattr(_parent, "spin_pres"):
+                try:
+                    self.spin_press.setValue(float(_parent.spin_pres.value()) / 1013.25)
+                except Exception:
+                    pass
 
         lay_hitran_action = QHBoxLayout()
         self.combo_hitran_gas = QComboBox()
@@ -434,6 +453,14 @@ class ReferenceGeneratorDialog(QDialog):
         # --- 2. Target Instrument Wavelength ---
         grp_wave = QGroupBox("2. Target Instrument Wavelength")
         lay_wave = QVBoxLayout()
+
+        # One-shot auto-pickup: grabs Calib + FWHM from the same campaign
+        # wv_cal folder (remembers it across sessions via QSettings).
+        self.btn_auto_pickup = QPushButton("🤖 Auto-pickup Calib + FWHM from campaign wv_cal folder")
+        self.btn_auto_pickup.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
+        self.btn_auto_pickup.clicked.connect(self._auto_pickup_calib_fwhm)
+        lay_wave.addWidget(self.btn_auto_pickup)
+
         self.btn_load_wave = QPushButton("📂 Load Wavelength Calibration (.txt)")
         self.btn_load_wave.clicked.connect(self.load_target_wavelength)
         status_text = 'Loaded from Main' if self.target_wavelengths is not None else 'Not Loaded'
@@ -534,30 +561,74 @@ class ReferenceGeneratorDialog(QDialog):
     # ---------------------------------------------------------
     # Data Loading Methods
     # ---------------------------------------------------------
+    # Known literature FWHM values per (gas, author) for popular cross-section
+    # files. Values are nm. Sources cited in comments.
+    _KNOWN_LIT_FWHM = [
+        # (gas substring, author/db substring, FWHM_nm, source)
+        ("no2",    "vandaele",      0.01156, "Vandaele 2002 (FTS)"),
+        ("chocho", "volkamer",      0.003,   "Volkamer 2005"),
+        ("o4",     "thalman",       0.07,    "Thalman & Volkamer 2013"),
+        ("o4",     "volkamer",      0.07,    "Thalman & Volkamer 2013"),
+        ("o4",     "greenblatt",    0.5,     "Greenblatt 1990"),
+        ("hcho",   "meller",        0.025,   "Meller & Moortgat 2000"),
+        ("hono",   "stutz",         0.5,     "Stutz et al."),
+        ("io",     "spietz",        0.5,     "Spietz 2005"),
+        ("h2o",    "hitran",        0.0,     "HITRAN line list"),
+        ("hitran", "",              0.0,     "HITRAN line list"),
+    ]
+
+    @classmethod
+    def _guess_lit_fwhm(cls, filename: str):
+        """Best-guess literature FWHM (nm) from a raw cross-section filename.
+
+        Returns (fwhm_nm, source_label) or (None, reason)."""
+        import re
+        fname = os.path.basename(filename).lower()
+        # 1. Known (gas, author) catalogue
+        for gas_key, author_key, fwhm, src in cls._KNOWN_LIT_FWHM:
+            if gas_key in fname and (author_key == "" or author_key in fname):
+                return fwhm, src
+        # 2. Wavelength grid embedded in filename, e.g. "(0.001nm)"
+        m = re.search(r"\(\s*([0-9]*\.?[0-9]+)\s*nm\s*\)", fname)
+        if m:
+            grid = float(m.group(1))
+            # lit FWHM ~ grid is a conservative starting point; user can tweak
+            return grid, f"derived from filename grid {grid:g} nm"
+        return None, "no match"
+
     def load_raw_reference(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Open Raw Ref", "", "Data Files (*.txt *.csv *.dat)")
         if not filename: return
         try:
             wave_nm_ref, intensity_raw = DataIO.load_reference(filename)
-            
+
             if wave_nm_ref is None:
                 raise ValueError("No Wavelength data found in the reference file.")
-                
+
             self.raw_wave = wave_nm_ref
             self.raw_data = intensity_raw
-            
+
             base_name = os.path.basename(filename)
-            
+
             self.gas_name = base_name.split('_')[ 0 ]
-            
-            self.lbl_raw_info.setText(f"Loaded: {base_name} (Gas: {self.gas_name})")
-            
+
+            # Auto-fill Lit FWHM from filename if we recognise the cross-section
+            lit_msg = ""
+            lit_fwhm, src = self._guess_lit_fwhm(filename)
+            if lit_fwhm is not None:
+                self.spin_lit_fwhm.setValue(round(lit_fwhm, 5))
+                lit_msg = f"   |   Lit FWHM auto-set to {lit_fwhm:g} nm ({src})"
+
+            self.lbl_raw_info.setText(
+                f"Loaded: {base_name} (Gas: {self.gas_name}){lit_msg}"
+            )
+
             self.ax[ 0 ].clear()
             self.ax[ 0 ].plot(self.raw_wave, self.raw_data, 'k-', alpha=0.5, label='Raw Data')
             self.ax[ 0 ].legend()
             self.canvas.draw()
-            
-        except Exception as e: 
+
+        except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load Raw file:\n{e}")
 
     def generate_hitran_gas(self):
@@ -613,8 +684,13 @@ class ReferenceGeneratorDialog(QDialog):
             self.raw_wave = wave_nm[sort_idx]
             self.raw_data = coef[sort_idx]
             
-            self.gas_name = f"{gas_name}-HITRAN" 
-            self.lbl_raw_info.setText(f"HITRAN {gas_name} Generated")
+            self.gas_name = f"{gas_name}-HITRAN"
+            # HITRAN cross-sections are computed from a line list ⇒ effectively
+            # delta-function broadening; literature FWHM is 0.
+            self.spin_lit_fwhm.setValue(0.0)
+            self.lbl_raw_info.setText(
+                f"HITRAN {gas_name} Generated   |   Lit FWHM auto-set to 0 (line list)"
+            )
             
             self.ax[0].clear()
             self.ax[0].plot(self.raw_wave, self.raw_data, 'b-', label=f'HITRAN {gas_name}')
@@ -625,16 +701,113 @@ class ReferenceGeneratorDialog(QDialog):
         finally: 
             QApplication.restoreOverrideCursor()
 
-    def load_target_wavelength(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Open Wavelength", "", "Text Files (*.txt *.csv)")
-        if not filename: return
-        df = pd.read_csv(filename, header=None)
+    def load_target_wavelength(self, path: str = None):
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "Open Wavelength", "", "Text Files (*.txt *.csv)")
+        if not path:
+            return
+        df = pd.read_csv(path, header=None)
         self.target_wavelengths = pd.to_numeric(df.iloc[:, 0], errors='coerce').dropna().values
-        self.lbl_wave_info.setText(f"Loaded: {os.path.basename(filename)}")
+        self.lbl_wave_info.setText(
+            f"✅ Loaded: {os.path.basename(path)} ({len(self.target_wavelengths)} px)"
+        )
+        self.lbl_wave_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
-    def load_fwhm_profile(self):
-        """Loads the FWHM & Sigma profile generated from the calibration tool."""
-        filename, _ = QFileDialog.getOpenFileName(self, "Open FWHM Profile", "", "Text Files (*.txt *.csv)")
+    def _auto_pickup_calib_fwhm(self):
+        """Pick one campaign wv_cal folder, then load Calib_*.txt and
+        FWHM_Analysis_*.txt automatically. Remembers the folder per
+        ROI across sessions via QSettings.
+
+        Expected layout::
+
+            <wv_cal_root>/
+                roi1/  Calib_*.txt  FWHM_Analysis_*.txt
+                roi2/  Calib_*.txt  FWHM_Analysis_*.txt
+
+        Or a flat folder with both files directly inside.
+        """
+        import glob
+        from PyQt6.QtCore import QSettings
+        from PyQt6.QtWidgets import QInputDialog
+
+        settings = QSettings("DoasisLab", "CAESARPro")
+        last_root = settings.value("ref_gen/wv_cal_root", "", str)
+
+        root = QFileDialog.getExistingDirectory(
+            self,
+            "Choose campaign wv_cal folder (e.g. ..\\CAESAR_Hot\\wv_cal)",
+            last_root or "",
+        )
+        if not root:
+            return
+        settings.setValue("ref_gen/wv_cal_root", root)
+
+        # Detect ROI subfolders (case-insensitive)
+        try:
+            entries = os.listdir(root)
+        except Exception as exc:
+            QMessageBox.critical(self, "Auto-pickup", f"Cannot read folder:\n{exc}")
+            return
+        rois = sorted([d for d in entries
+                       if os.path.isdir(os.path.join(root, d))
+                       and d.lower().startswith("roi")])
+
+        if not rois:
+            target_dir = root
+            roi_label  = "(flat)"
+        elif len(rois) == 1:
+            target_dir = os.path.join(root, rois[0])
+            roi_label  = rois[0]
+        else:
+            chosen, ok = QInputDialog.getItem(
+                self, "Choose ROI",
+                f"{len(rois)} ROI subfolders found:",
+                rois, 0, False,
+            )
+            if not ok:
+                return
+            target_dir = os.path.join(root, chosen)
+            roi_label  = chosen
+
+        calib_hits = glob.glob(os.path.join(target_dir, "Calib_*.txt"))
+        fwhm_hits  = glob.glob(os.path.join(target_dir, "FWHM_Analysis_*.txt"))
+
+        messages = [f"ROI: {roi_label}", f"Folder: {target_dir}", ""]
+
+        if calib_hits:
+            # Pick the newest by mtime
+            calib_path = max(calib_hits, key=os.path.getmtime)
+            try:
+                self.load_target_wavelength(path=calib_path)
+                messages.append(f"✅ Calib: {os.path.basename(calib_path)}")
+            except Exception as exc:
+                messages.append(f"❌ Calib load failed: {exc}")
+        else:
+            messages.append(f"⚠️ No Calib_*.txt found")
+
+        if fwhm_hits:
+            fwhm_path = max(fwhm_hits, key=os.path.getmtime)
+            try:
+                self.load_fwhm_profile(path=fwhm_path)
+                messages.append(f"✅ FWHM: {os.path.basename(fwhm_path)}")
+            except Exception as exc:
+                messages.append(f"❌ FWHM load failed: {exc}")
+        else:
+            messages.append(f"⚠️ No FWHM_Analysis_*.txt found")
+
+        QMessageBox.information(self, "Auto-pickup result", "\n".join(messages))
+
+    def load_fwhm_profile(self, path: str = None):
+        """Loads the FWHM & Sigma profile generated from the calibration tool.
+
+        When ``path`` is None, prompts the user via QFileDialog. When called
+        programmatically (e.g. from ``_auto_pickup_calib_fwhm``) the caller
+        passes the resolved path directly.
+        """
+        if path is None:
+            filename, _ = QFileDialog.getOpenFileName(self, "Open FWHM Profile", "", "Text Files (*.txt *.csv)")
+        else:
+            filename = path
         if not filename: return
         
         try:

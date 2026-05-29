@@ -1256,17 +1256,37 @@ class CAESARAnalyzer(QMainWindow):
         return cands[0]
 
     def _fwhm_load_alpha(self, path):
-        """Return (wavelength_nm, alpha) arrays. Falls back to single-column file."""
+        """Return (wavelength_nm, alpha) arrays.
+
+        Two file formats are supported:
+
+        1. ``wavelength_nm  alpha``  two-column text (our generator output).
+        2. Single column = α only — 박사님 format (one α value per line,
+           blank-line separated, no wavelength axis). In this case the
+           wavelength axis is taken from the main calibration
+           (``self.wavelengths``) so the polynomial baseline fit uses
+           real nm, not pixel indices.
+        """
         df = pd.read_csv(path, sep=r'\s+', header=None, comment='#', engine='python')
         if df.shape[1] >= 2:
             wl  = pd.to_numeric(df.iloc[:, 0], errors='coerce').to_numpy()
             val = pd.to_numeric(df.iloc[:, 1], errors='coerce').to_numpy()
         else:
+            # Strip blank-line NaNs before assigning a wavelength axis
             val = pd.to_numeric(df.iloc[:, 0], errors='coerce').to_numpy()
-            wl  = np.arange(len(val), dtype=float)
+            val = val[np.isfinite(val)]
+            if hasattr(self, 'wavelengths') and self.wavelengths is not None:
+                wl_full = np.asarray(self.wavelengths, dtype=float).flatten()
+                n = min(len(wl_full), len(val))
+                wl  = wl_full[:n]
+                val = val[:n]
+            else:
+                wl = np.arange(len(val), dtype=float)
         ok = np.isfinite(wl) & np.isfinite(val)
         if ok.sum() < 50:
-            raise ValueError("Too few valid (wavelength, alpha) rows.")
+            raise ValueError("Too few valid (wavelength, alpha) rows. "
+                             "If this is 박사님 single-column α format, load "
+                             "the wavelength calibration in the main window first.")
         return wl[ok], val[ok]
 
     def _fwhm_parse_fwhm_from_name(self, fname):
