@@ -96,16 +96,26 @@ def file_range(directory: str, date: str, start: int, end: int) -> list:
     ]
 
 # ════════════════════════════════════════════════════════════════
-#  사용자 설정 
+#  사용자 설정
 # ════════════════════════════════════════════════════════════════
-COLD_DIR = r"D:\CAESAR cold\2026-05"
-HOT_DIR  = r"D:\CAESAR hot\2026-05"
+# Paths and wavelength calibration files are imported from
+# r_batch_calculator, which auto-discovers them across the locations they've
+# lived in throughout the campaign (D:\, C:\Doasis_Work\raw,alpha_by_nam\, ...).
+# Override these module-level constants if you need a one-off run on
+# different files.
+from r_batch_calculator import (   # noqa: E402  (kept here for visibility)
+    COLD_DIR  as _DEFAULT_COLD_DIR,
+    HOT_DIR   as _DEFAULT_HOT_DIR,
+    WAVE_CAL_COLD     as _DEFAULT_WAVE_CAL_COLD,
+    WAVE_CAL_HOT_PNS  as _DEFAULT_WAVE_CAL_HOT_PNS,
+    WAVE_CAL_HOT_ANS  as _DEFAULT_WAVE_CAL_HOT_ANS,
+)
 
-# 파장 보정 파일 경로 (정확한 파일명 적용 완료)
-# Hot은 한 raw 파일 안에 ROI 2개(PNs=CH2 / ANs=CH3)가 들어있어 각각 파장보정이 다름.
-WAVE_CAL_COLD    = r"D:\CAESAR cold\Calib_20260523_Hg_400-497nm_Poly2_cold.txt"
-WAVE_CAL_HOT     = r"D:\CAESAR hot\roi1\Calib_20260403_Hg_400-499nm(roi1).txt"  # PNs(roi1)=CH2
-WAVE_CAL_HOT_ANS = r"D:\CAESAR hot\roi2\Calib_20260403_Hg_400-499nm(roi2).txt"  # ANs(roi2)=CH3
+COLD_DIR = _DEFAULT_COLD_DIR
+HOT_DIR  = _DEFAULT_HOT_DIR
+WAVE_CAL_COLD    = _DEFAULT_WAVE_CAL_COLD
+WAVE_CAL_HOT     = _DEFAULT_WAVE_CAL_HOT_PNS    # PNs(roi1)=CH2
+WAVE_CAL_HOT_ANS = _DEFAULT_WAVE_CAL_HOT_ANS    # ANs(roi2)=CH3
 
 OUTPUT_DIR  = r"."
 FILE_PATTERN = "*.dat"
@@ -211,7 +221,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     for fp in files:
         fname = os.path.basename(fp)
         za, he = read_all_scans(fp, col_press, col_temp,
-                                spec_start, spec_end, return_ts=False)
+                                spec_start, spec_end)
 
         # ── 타임스탬프: 파일 mtime만 사용 ────────────────────────────────────
         # ※ col1은 센티초(centiseconds) 단위 → UTC 초로 오해하면 날짜가 수백 일 틀림.
@@ -237,8 +247,23 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             rc = ReflectanceCalculator(cavity_len=CAVITY_LEN, rl_factor=RL_FACTOR)
             for sp, t, p in za:            rc.add_za_spectrum(sp, t, p)
             for sp, t, p in candidate_he: rc.add_he_spectrum(sp, t, p)
-            # quality threshold 완화: 실측 valid_fraction ~44 % 는 정상이므로 0.30으로 설정
-            wave_out, r_curve, omr_d = rc.calculate(wave_nm, min_valid_fraction=0.30)
+            # ── Channel-specific R-fit ROI ────────────────────────────
+            # Previously the channel-specific window (CH_FIT_WINDOW_NM)
+            # was only used for *plotting* the statistics; the
+            # ReflectanceCalculator itself was called without ROI so it
+            # always used its 430-470 nm default. That biased the 5th-
+            # order polynomial fit toward the Hot-PNs window even for
+            # Cold and Hot ANs channels. Pass the channel window through
+            # explicitly when fit_window_nm is supplied.
+            calc_kwargs: dict = {"min_valid_fraction": 0.30}
+            if fit_window_nm is not None:
+                calc_kwargs["roi_min"] = float(fit_window_nm[0])
+                calc_kwargs["roi_max"] = float(fit_window_nm[1])
+            # reflectance_calc.calculate() returns 4-tuple as of this refactor
+            wave_out, r_curve_raw, r_curve_fit, omr_d = rc.calculate(
+                wave_nm, **calc_kwargs
+            )
+            r_curve = r_curve_fit   # downstream code expects a single curve
 
             # valid=0%는 ratio≈1 (He/ZA 신호 동일) → omr_d=0 → R=1.0 dummy
             # 이 파일은 결과에 포함하지 않고 last_he도 갱신하지 않는다
@@ -277,6 +302,9 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             else:
                 wave_in_window = np.asarray(wave_out)
 
+            # Full-wavelength arrays kept alongside the ROI-clipped
+            # statistics. The GUI plots the full curves and shades the
+            # ROI as a band, so we need both.
             res = {
                 "timestamp":  ts,   # 위에서 이미 파싱한 값 재사용
                 "filename":   fname,
@@ -289,8 +317,14 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 "n_za":       len(za),
                 "n_he":       len(candidate_he),
                 "fit_window_nm": fit_window_nm,
+                # ROI-clipped (used for headline statistics + per-channel mean curve)
                 "wave_nm":    wave_in_window,
                 "r_curve":    np.asarray(r_fit, dtype=float),
+                # Full-wavelength curves (raw + 5th-order poly fit), for per-file R(λ) plot
+                "wave_nm_full":   np.asarray(wave_out,     dtype=float),
+                "r_curve_raw":    np.asarray(r_curve_raw,  dtype=float),
+                "r_curve_fit":    np.asarray(r_curve_fit,  dtype=float),
+                "omr_d":          np.asarray(omr_d,        dtype=float),
             }
             results.append(res)
             tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
@@ -320,6 +354,42 @@ def make_range_name(results: list[dict]) -> str:
     last  = _stem_digits(results[-1]["filename"])
     if first == last: return first
     return f"{first}_{last}"
+
+def save_r_curves_per_file(results: list[dict], channel_subdir: str,
+                            out_folder: str) -> int:
+    """Persist per-file R(λ) curves so the GUI can plot any single scan.
+
+    Writes to ``{out_folder}/{channel_subdir}/{YYYY-MM-DD}/{basename}_R.dat``
+    matching the path layout expected by ``ui_dialogs_r.py``'s
+    ``_on_table_row_selected``.
+
+    Each file contains: ``wavelength_nm, R_raw, R_fitted, omr_d_cm-1, Leff_km``
+    across the *full* CCD wavelength range — the ROI is recorded as a
+    header comment so the GUI can shade it as a band.
+    """
+    from r_batch_calculator import save_r_dat   # local import to avoid cycles
+
+    n_saved = 0
+    for r in results:
+        wave = r.get("wave_nm_full")
+        r_raw = r.get("r_curve_raw")
+        r_fit = r.get("r_curve_fit")
+        omr_d = r.get("omr_d")
+        if any(v is None for v in (wave, r_raw, r_fit, omr_d)):
+            continue
+        fname = r["filename"]
+        # Date prefix from filename (e.g. 2026-05-19-007.dat → 2026-05-19)
+        file_date = "-".join(os.path.splitext(fname)[0].split("-")[:3])
+        base = os.path.splitext(fname)[0]
+        out_path = os.path.join(out_folder, channel_subdir, file_date,
+                                f"{base}_R.dat")
+        save_r_dat(out_path, wave, r_raw, r_fit, omr_d,
+                   fname=fname, n_za=r.get("n_za", 0), n_he=r.get("n_he", 0))
+        n_saved += 1
+    if n_saved:
+        print(f"  [R(λ) curves] {channel_subdir}: {n_saved}개 파일 저장")
+    return n_saved
+
 
 def save_dat(results: list[dict], out_path: str) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
@@ -569,6 +639,12 @@ def main():
     if results_cold:    save_dat(results_cold,    os.path.join(out_folder, f"Cold_{range_cold}.dat"))
     if results_hot_pns: save_dat(results_hot_pns, os.path.join(out_folder, f"Hot_PNs_{range_hot_pns}.dat"))
     if results_hot_ans: save_dat(results_hot_ans, os.path.join(out_folder, f"Hot_ANs_{range_hot_ans}.dat"))
+
+    # Per-file R(λ) curves (raw points + 5-th order poly fit) for the GUI's
+    # per-scan plot. Path layout matches ui_dialogs_r.py expectations.
+    if results_cold:    save_r_curves_per_file(results_cold,    "R_Cold",    out_folder)
+    if results_hot_pns: save_r_curves_per_file(results_hot_pns, "R_Hot_PNs", out_folder)
+    if results_hot_ans: save_r_curves_per_file(results_hot_ans, "R_Hot_ANs", out_folder)
 
     if HAS_MPL:
         if results_cold:    plot_single_channel(results_cold,    "Cold",        R_EXPECTED_COLD, os.path.join(out_folder, "R_trend_Cold.png"),    "steelblue")

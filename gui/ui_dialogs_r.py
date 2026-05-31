@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
                              QCheckBox, QGridLayout, QInputDialog, QRadioButton, QButtonGroup,
-                             QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
+                             QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout, QTextEdit)
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
 
@@ -335,9 +335,10 @@ class R_GeneratorDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate R(λ):\n{e}")
 
-# PostProcessDialog: functionality superseded by save() in app_window.py.
-# Retained here as a stub so that any external scripts importing this class
-# do not break with an ImportError.
+# =============================================================================
+# R Trend Monitor Components (UI + Worker)
+# =============================================================================
+
 class _LiveStream:
     """sys.stdout 대체 — write() 호출마다 log 시그널로 실시간 전달."""
     def __init__(self, emit_fn):
@@ -363,42 +364,43 @@ class _RTrendWorker(QThread):
     """백그라운드에서 r_trend_monitor.main()을 실행."""
     log        = pyqtSignal(str)
     finished   = pyqtSignal(str)    # 결과 폴더 경로
-    data_ready = pyqtSignal(object, object, object)  # (cold, hot_pns, hot_ans) — inline plot용
+    # 시계열 데이터와 테이블 정보 전송용 시그널 확장
+    data_ready = pyqtSignal(object, object, object, object)
 
     def __init__(self, cfg: dict):
         super().__init__()
         self.cfg = cfg
 
     def run(self):
-        import io as _io
         try:
             import sys as _sys, os as _os
             _tools_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
             if _tools_dir not in _sys.path:
                 _sys.path.insert(0, _tools_dir)
-            import r_trend_monitor as rtm
+            
+            # 정적 분석기(Pylance) 가짜 경고 무시
+            import r_trend_monitor as rtm # type: ignore
             cfg = self.cfg
 
             # 사용자 설정 오버라이드
             rtm.COLD_DIR         = cfg.get("cold_dir", "")
             rtm.HOT_DIR          = cfg.get("hot_dir",  "")
             rtm.WAVE_CAL_COLD    = cfg.get("wl_cold",  "")
-            rtm.WAVE_CAL_HOT     = cfg.get("wl_hot",   "")       # PNs(roi1)=CH2
-            rtm.WAVE_CAL_HOT_ANS = cfg.get("wl_hot_ans", "")     # ANs(roi2)=CH3
+            rtm.WAVE_CAL_HOT     = cfg.get("wl_hot",   "")      # PNs(roi1)=CH2
+            rtm.WAVE_CAL_HOT_ANS = cfg.get("wl_hot_ans", "")    # ANs(roi2)=CH3
             rtm.OUTPUT_DIR       = cfg.get("out_dir",  ".")
-            rtm.COLD_FILES       = cfg.get("cold_files", None)   # None → 폴더 전체 스캔
-            rtm.HOT_FILES        = cfg.get("hot_files",  None)   # PNs/ANs 공유
+            rtm.COLD_FILES       = cfg.get("cold_files", None)  
+            rtm.HOT_FILES        = cfg.get("hot_files",  None)  
             rtm.SHOW_PLOT        = False
             rtm.CAVITY_LEN       = cfg.get("cavity_len", rtm.CAVITY_LEN)
             rtm.RL_FACTOR        = cfg.get("rl_factor",  rtm.RL_FACTOR)
 
-            # 타임존 선택: "UTC" → rtm._UTC, 그 외 → rtm._KST_TZ
             _tz_map = {"UTC": rtm._UTC, "KST": rtm._KST_TZ}
             rtm.COLD_TS_TZ    = _tz_map.get(cfg.get("cold_tz", "UTC"), rtm._UTC)
             rtm.HOT_TS_TZ     = _tz_map.get(cfg.get("hot_tz",  "KST"), rtm._KST_TZ)
-            rtm.HOT_ANS_TS_TZ = rtm.HOT_TS_TZ   # PNs/ANs 같은 raw 파일 → 동일 tz
+            rtm.HOT_ANS_TS_TZ = rtm.HOT_TS_TZ   
 
-            # stdout → log 시그널 실시간 전달
+            # stdout 리다이렉트
             _live = _LiveStream(self.log.emit)
             old_stdout = _sys.stdout
             _sys.stdout = _live
@@ -409,11 +411,9 @@ class _RTrendWorker(QThread):
                 _sys.stdout = old_stdout
                 _live.flush()
 
-            # main()이 (cold, hot_pns, hot_ans, out_folder) 튜플을 반환하면
-            # data_ready 시그널로 인라인 플롯에 전달한다
             _out_dir = rtm.OUTPUT_DIR
             if _rtm_result and len(_rtm_result) >= 4:
-                self.data_ready.emit(_rtm_result[0], _rtm_result[1], _rtm_result[2])
+                self.data_ready.emit(_rtm_result[0], _rtm_result[1], _rtm_result[2], _rtm_result[3])
                 _out_dir = _rtm_result[3] or _out_dir
 
             self.finished.emit(_out_dir)
@@ -425,23 +425,23 @@ class _RTrendWorker(QThread):
 
 
 class RTrendMonitorDialog(QDialog):
-    """R Trend Monitor 설정 + 실행 + 로그 표시 + 인라인 시계열 그래프 다이얼로그."""
+    """R Trend Monitor 설정 + 실행 + 로그 표시 + 테이블/스펙트럼 플롯 다이얼로그."""
 
-    # Forwarded from the worker so the parent main window can connect to it
-    data_ready = pyqtSignal(object, object, object)   # (cold, hot_pns, hot_ans)
+    data_ready = pyqtSignal(object, object, object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열")
-        self.resize(1150, 720)
+        self.setWindowTitle("R Trend Monitor — 거울 반사율 시계열 & 파장 분석")
+        self.resize(1300, 850) # 해상도 약간 확장
         self._worker = None
         self._cold_files_list: list = []
         self._hot_files_list:  list = []
         self._t_start = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick_elapsed)
+        self._all_results = [] # 테이블 클릭용 데이터 저장소
+        
         self._init_ui()
-        # Pre-populate cavity params from Cavity Setup tab
         if parent is not None:
             if hasattr(parent, 'spin_d_len'):
                 self._spin_cavity_len.setValue(parent.spin_d_len.value())
@@ -450,44 +450,32 @@ class RTrendMonitorDialog(QDialog):
 
     def _pick_dir(self, line_edit):
         d = QFileDialog.getExistingDirectory(self, "폴더 선택")
-        if d:
-            line_edit.setText(d)
+        if d: line_edit.setText(d)
 
     def _pick_file(self, line_edit):
         f, _ = QFileDialog.getOpenFileName(
             self, "파일 선택", "", "텍스트 파일 (*.txt *.dat *.csv);;모든 파일 (*)")
-        if f:
-            line_edit.setText(f)
+        if f: line_edit.setText(f)
 
     def _init_ui(self):
-        from PyQt6.QtWidgets import QTextEdit, QSplitter
         main = QVBoxLayout(self)
 
-        # ── 상단: 입력 폼 ──────────────────────────────────────────
+        # ── 1. 상단: 입력 폼 ──
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         def row_data(label, dir_attr, files_attr, hint_attr, tz_attr, tz_default):
-            """폴더 선택 또는 개별 파일 다중 선택을 지원하는 입력 행 (+ 타임존 선택)."""
             le = QLineEdit()
             le.setPlaceholderText("폴더 경로 또는 파일 N개 선택됨")
-
             btn_dir = QPushButton("📂 폴더")
             btn_dir.setFixedWidth(70)
             btn_fil = QPushButton("📄 파일")
             btn_fil.setFixedWidth(70)
-
-            # 타임존 선택: 파일 mtime을 어느 기준으로 읽을지 결정
             tz_combo = QComboBox()
             tz_combo.addItems(["KST", "UTC (−9h)"])
             tz_combo.setCurrentText(tz_default)
             tz_combo.setFixedWidth(96)
-            tz_combo.setToolTip(
-                "파일 수정시각(mtime)을 읽는 기준 타임존.\n"
-                "KST  : 그대로 한국시간으로 표시\n"
-                "UTC  : UTC로 읽음 → 한국시간보다 9시간 이르게 표시 (Cold DAQ가 UTC 기록 시)")
             setattr(self, tz_attr, tz_combo)
-
             hint = QLabel()
             hint.setStyleSheet("color: #777; font-size: 10px;")
             setattr(self, hint_attr, hint)
@@ -500,32 +488,22 @@ class RTrendMonitorDialog(QDialog):
                     hint.setText("")
 
             def pick_files():
-                files, _ = QFileDialog.getOpenFileNames(
-                    self, "파일 선택 (복수 가능)", "",
-                    "DAT 파일 (*.dat);;모든 파일 (*)")
+                files, _ = QFileDialog.getOpenFileNames(self, "파일 선택 (복수 가능)", "", "DAT 파일 (*.dat);;모든 파일 (*)")
                 if files:
                     le.setText("")
                     setattr(self, files_attr, files)
-                    hint.setText(f"  {len(files)}개 파일 선택됨: "
-                                 f"{', '.join(os.path.basename(f) for f in files[:3])}"
-                                 + (" …" if len(files) > 3 else ""))
+                    hint.setText(f"  {len(files)}개 파일 선택됨: {', '.join(os.path.basename(f) for f in files[:3])}...")
 
             btn_dir.clicked.connect(pick_dir)
             btn_fil.clicked.connect(pick_files)
 
             h = QHBoxLayout()
-            h.addWidget(le)
-            h.addWidget(btn_dir)
-            h.addWidget(btn_fil)
-            h.addWidget(QLabel("TZ:"))
-            h.addWidget(tz_combo)
+            h.addWidget(le); h.addWidget(btn_dir); h.addWidget(btn_fil)
+            h.addWidget(QLabel("TZ:")); h.addWidget(tz_combo)
             w = QWidget(); w.setLayout(h)
-
             v = QVBoxLayout(); v.setContentsMargins(0, 0, 0, 2)
-            v.addWidget(w)
-            v.addWidget(hint)
+            v.addWidget(w); v.addWidget(hint)
             wv = QWidget(); wv.setLayout(v)
-
             form.addRow(label, wv)
             setattr(self, dir_attr, le)
 
@@ -547,102 +525,94 @@ class RTrendMonitorDialog(QDialog):
             form.addRow(label, w)
             setattr(self, attr, le)
 
-        row_data("Cold 데이터:",     "_le_cold_dir", "_cold_files_list", "_hint_cold",
-                 "_tz_cold", "UTC (−9h)")
-        row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot",
-                 "_tz_hot", "KST")
+        row_data("Cold 데이터:",     "_le_cold_dir", "_cold_files_list", "_hint_cold", "_tz_cold", "UTC (−9h)")
+        row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot", "_tz_hot", "KST")
         row_file("Cold 파장 보정 파일:",        "_le_wl_cold")
         row_file("Hot PNs(roi1) 파장 보정:",   "_le_wl_hot")
         row_file("Hot ANs(roi2) 파장 보정:",   "_le_wl_hot_ans")
         row_dir("결과 저장 폴더:",             "_le_out_dir")
         self._le_out_dir.setText(".")
 
-        # ── 캐비티 파라미터 (Cavity Setup 탭과 연동) ─────────────────
+        # 캐비티 파라미터
         from PyQt6.QtWidgets import QDoubleSpinBox as _DSB
         cavity_row = QHBoxLayout()
         cavity_row.addWidget(QLabel("Cavity 길이 (cm):"))
-        self._spin_cavity_len = _DSB()
-        self._spin_cavity_len.setRange(1.0, 10000.0)
-        self._spin_cavity_len.setDecimals(2)
-        self._spin_cavity_len.setValue(51.8)
-        self._spin_cavity_len.setFixedWidth(90)
-        cavity_row.addWidget(self._spin_cavity_len)
-        cavity_row.addSpacing(20)
+        self._spin_cavity_len = _DSB(); self._spin_cavity_len.setRange(1.0, 10000.0); self._spin_cavity_len.setDecimals(2); self._spin_cavity_len.setValue(51.8); self._spin_cavity_len.setFixedWidth(90)
+        cavity_row.addWidget(self._spin_cavity_len); cavity_row.addSpacing(20)
         cavity_row.addWidget(QLabel("RL Factor:"))
-        self._spin_rl = _DSB()
-        self._spin_rl.setRange(0.001, 1.0)
-        self._spin_rl.setDecimals(4)
-        self._spin_rl.setSingleStep(0.001)
-        self._spin_rl.setValue(1.0)
-        self._spin_rl.setFixedWidth(80)
-        self._spin_rl.setToolTip("퍼지 가스 Return Loss 보정 (1.0 = 보정 없음)\n"
-                                 "Cavity Setup 탭의 값이 자동으로 채워집니다.")
-        cavity_row.addWidget(self._spin_rl)
-        cavity_row.addStretch()
+        self._spin_rl = _DSB(); self._spin_rl.setRange(0.001, 1.0); self._spin_rl.setDecimals(4); self._spin_rl.setSingleStep(0.001); self._spin_rl.setValue(1.0); self._spin_rl.setFixedWidth(80)
+        cavity_row.addWidget(self._spin_rl); cavity_row.addStretch()
         cw = QWidget(); cw.setLayout(cavity_row)
         form.addRow("캐비티 설정:", cw)
 
         main.addLayout(form)
 
         btn_run = QPushButton("▶  계산 시작")
-        btn_run.setStyleSheet(
-            "background-color: #4CAF50; color: white; font-weight: bold; height: 36px;")
+        btn_run.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; height: 36px;")
         btn_run.clicked.connect(self._run)
         main.addWidget(btn_run)
         self._btn_run = btn_run
 
-        # ── 진행 상태 표시 ──────────────────────────────────────────
+        # 진행 표시줄
         prog_row = QHBoxLayout()
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 0)   # indeterminate (애니메이션)
-        self._progress.setFixedHeight(16)
-        self._progress.setVisible(False)
-        self._lbl_elapsed = QLabel("")
-        self._lbl_elapsed.setStyleSheet("color: #555; font-size: 11px; min-width: 80px;")
-        prog_row.addWidget(self._progress, stretch=1)
-        prog_row.addWidget(self._lbl_elapsed)
+        self._progress = QProgressBar(); self._progress.setRange(0, 0); self._progress.setFixedHeight(16); self._progress.setVisible(False)
+        self._lbl_elapsed = QLabel(""); self._lbl_elapsed.setStyleSheet("color: #555; font-size: 11px; min-width: 80px;")
+        prog_row.addWidget(self._progress, stretch=1); prog_row.addWidget(self._lbl_elapsed)
         main.addLayout(prog_row)
 
-        # ── 하단: 로그(왼쪽) + 시계열 플롯(오른쪽) ────────────────────
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # ── 2. 중단 및 하단: 스플리터 레이아웃 ──
+        # Top Splitter: [로그(좌)] | [테이블(우)]
+        # Bottom Splitter: [시계열 플롯(좌)] | [스펙트럼 플롯(우)]
+        # Main Splitter: Top / Bottom 분리
+        
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # 2-1. 상단 스플리터 (로그 & 테이블)
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._log = QTextEdit(); self._log.setReadOnly(True); self._log.setFontFamily("Consolas"); self._log.setFontPointSize(9)
+        top_splitter.addWidget(self._log)
+        
+        self.tableWidget = QTableWidget(0, 4)
+        self.tableWidget.setHorizontalHeaderLabels(["시간(KST)", "파일명", "채널", "R_mean (%)"])
+        self.tableWidget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tableWidget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tableWidget.itemSelectionChanged.connect(self._on_table_row_selected)
+        top_splitter.addWidget(self.tableWidget)
+        top_splitter.setSizes([400, 600])
 
-        self._log = QTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setFontFamily("Consolas")
-        self._log.setFontPointSize(9)
-        self._log.setMinimumWidth(340)
-        splitter.addWidget(self._log)
-
-        # pyqtgraph R 시계열 위젯 (DateAxisItem 으로 실제 시각 표시)
+        # 2-2. 하단 스플리터 (시계열 & 스펙트럼 플롯)
+        bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # 시계열
         _date_axis = pg.DateAxisItem(orientation='bottom')
-        self._pw = pg.PlotWidget(axisItems={'bottom': _date_axis},
-                                 title="R 시계열 (Cold / Hot)")
-        self._pw.setBackground('w')
-        self._pw.showGrid(x=True, y=True, alpha=0.3)
-        self._pw.setLabel('left', 'R mean (%)')
-        self._pw.setLabel('bottom', 'Time (KST)')
-        self._pw.addLegend(offset=(10, 10))
-        splitter.addWidget(self._pw)
-        splitter.setSizes([380, 720])
+        self._pw = pg.PlotWidget(axisItems={'bottom': _date_axis}, title="R 시계열 (Cold/Hot)")
+        self._pw.setBackground('w'); self._pw.showGrid(x=True, y=True, alpha=0.3)
+        self._pw.setLabel('left', 'R mean (%)'); self._pw.setLabel('bottom', 'Time (KST)')
+        bottom_splitter.addWidget(self._pw)
 
-        main.addWidget(splitter, stretch=1)
+        # 파장별 스펙트럼 (신규)
+        self._spectrum_pw = pg.PlotWidget(title="파장별 R(λ) 곡선")
+        self._spectrum_pw.setBackground('w'); self._spectrum_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._spectrum_pw.setLabel('left', 'Reflectance R'); self._spectrum_pw.setLabel('bottom', 'Wavelength (nm)')
+        self._spectrum_pw.addLegend()
+        bottom_splitter.addWidget(self._spectrum_pw)
+        bottom_splitter.setSizes([600, 400])
+
+        main_splitter.addWidget(top_splitter)
+        main_splitter.addWidget(bottom_splitter)
+        main_splitter.setSizes([300, 500])
+
+        main.addWidget(main_splitter, stretch=1)
 
     def _run(self):
         cold_dir   = self._le_cold_dir.text().strip()
         hot_dir    = self._le_hot_dir.text().strip()
-        cold_files = self._cold_files_list or None   # 파일 직접 선택 시 사용
+        cold_files = self._cold_files_list or None  
         hot_files  = self._hot_files_list  or None
 
-        has_cold = bool(cold_dir) or bool(cold_files)
-        has_hot  = bool(hot_dir)  or bool(hot_files)
-        if not has_cold and not has_hot:
-            QMessageBox.warning(self, "입력 오류",
-                                "Cold 또는 Hot 데이터의 폴더나 파일을 지정해주세요.")
+        if not (cold_dir or cold_files) and not (hot_dir or hot_files):
+            QMessageBox.warning(self, "입력 오류", "Cold 또는 Hot 데이터의 폴더나 파일을 지정해주세요.")
             return
-
-        # 타임존 선택 → "UTC"/"KST" 문자열 (콤보 라벨에서 추출)
-        cold_tz = "UTC" if self._tz_cold.currentText().startswith("UTC") else "KST"
-        hot_tz  = "UTC" if self._tz_hot.currentText().startswith("UTC")  else "KST"
 
         cfg = {
             "cold_dir":   cold_dir,
@@ -653,93 +623,153 @@ class RTrendMonitorDialog(QDialog):
             "wl_hot":     self._le_wl_hot.text().strip(),
             "wl_hot_ans": self._le_wl_hot_ans.text().strip(),
             "out_dir":    self._le_out_dir.text().strip() or ".",
-            "cold_tz":    cold_tz,
-            "hot_tz":     hot_tz,
+            "cold_tz":    "UTC" if self._tz_cold.currentText().startswith("UTC") else "KST",
+            "hot_tz":     "UTC" if self._tz_hot.currentText().startswith("UTC")  else "KST",
             "cavity_len": self._spin_cavity_len.value(),
             "rl_factor":  self._spin_rl.value(),
         }
 
-        self._log.clear()
-        self._pw.clear()
+        self._log.clear(); self._pw.clear(); self._spectrum_pw.clear()
+        self.tableWidget.setRowCount(0); self._all_results.clear()
         self._btn_run.setEnabled(False)
         self._progress.setVisible(True)
-        self._t_start = time.time()
-        self._timer.start(1000)
+        self._t_start = time.time(); self._timer.start(1000)
         self._lbl_elapsed.setText("경과: 00:00")
+        
         self._worker = _RTrendWorker(cfg)
         self._worker.log.connect(self._log.append)
         self._worker.data_ready.connect(self._on_data_ready)
-        self._worker.data_ready.connect(self.data_ready)   # forward to dialog signal
         self._worker.finished.connect(self._on_done)
         self._worker.start()
 
-    def _on_data_ready(self, cold_results, hot_pns_results, hot_ans_results):
-        """워커가 계산 완료한 R 시계열을 인라인 플롯에 표시한다 (Cold/Hot PNs/Hot ANs)."""
+    def _on_data_ready(self, cold_results, hot_pns_results, hot_ans_results, out_dir):
+        """연산된 결과를 바탕으로 1) 시계열 그리기, 2) 테이블 채우기를 수행합니다."""
         self._pw.clear()
         self._pw.addLegend(offset=(10, 10))
+        self._all_results.clear()
+        self.tableWidget.setRowCount(0)
 
-        def _plot_channel(results, color_hex, name):
-            if not results:
-                return
-            import numpy as np
-            # 선택한 타임존의 wall-clock을 그대로 사용 (로그/.dat/PNG와 일치).
-            # tzinfo 제거 후 .timestamp()는 로컬(KST) 기준 epoch → DateAxisItem이
-            # 동일한 wall-clock 숫자로 표시한다. (절대 epoch을 쓰면 tz 선택이 무효화됨)
-            times  = np.array([r["timestamp"].replace(tzinfo=None).timestamp()
-                               for r in results], dtype=float)
-            r_pct  = np.array([r["r_mean"] * 100.0         for r in results], dtype=float)
-            r_std  = np.array([r["r_std"]  * 100.0         for r in results], dtype=float)
+        def _plot_and_fill_table(results, color_hex, name, ch_key):
+            if not results: return
+            
+            # 시계열 플롯
+            times  = np.array([r["timestamp"].replace(tzinfo=None).timestamp() for r in results], dtype=float)
+            r_pct  = np.array([r["r_mean"] * 100.0 for r in results], dtype=float)
+            r_std  = np.array([r["r_std"]  * 100.0 for r in results], dtype=float)
 
             pen  = pg.mkPen(color=color_hex, width=2)
             brsh = pg.mkBrush(color_hex)
-            self._pw.plot(times, r_pct, pen=pen, symbol='o',
-                          symbolSize=7, symbolBrush=brsh, name=name)
-
-            # ±1σ 음영 (ErrorBarItem)
-            err = pg.ErrorBarItem(x=times, y=r_pct,
-                                  top=r_std, bottom=r_std,
-                                  beam=0, pen=pg.mkPen(color_hex, width=1, style=Qt.PenStyle.DotLine))
+            self._pw.plot(times, r_pct, pen=pen, symbol='o', symbolSize=7, symbolBrush=brsh, name=name)
+            err = pg.ErrorBarItem(x=times, y=r_pct, top=r_std, bottom=r_std, beam=0, pen=pg.mkPen(color_hex, width=1, style=Qt.PenStyle.DotLine))
             self._pw.addItem(err)
 
-        _plot_channel(cold_results,    '#2196F3', 'Cold R mean')
-        _plot_channel(hot_pns_results, '#FF6F00', 'Hot PNs(roi1) R mean')
-        _plot_channel(hot_ans_results, '#D32F2F', 'Hot ANs(roi2) R mean')
+            # 테이블 채우기 및 로컬 데이터 저장 (dat 파일 경로 유추)
+            for r in results:
+                row_idx = self.tableWidget.rowCount()
+                self.tableWidget.insertRow(row_idx)
+                
+                t_str = r["timestamp"].strftime('%Y-%m-%d %H:%M')
+                fname = r["filename"]
+                r_val = r["r_mean"] * 100.0
+                
+                self.tableWidget.setItem(row_idx, 0, QTableWidgetItem(t_str))
+                self.tableWidget.setItem(row_idx, 1, QTableWidgetItem(fname))
+                self.tableWidget.setItem(row_idx, 2, QTableWidgetItem(name))
+                self.tableWidget.setItem(row_idx, 3, QTableWidgetItem(f"{r_val:.4f}"))
+                
+                # 원본 dat 파일 이름 추론 로직 (저장된 규칙)
+                file_date = "-".join(fname.split("-")[:3])
+                base_fname = os.path.splitext(fname)[0]
+                # 채널별 저장 폴더 매핑
+                ch_subdir = {
+                    "cold":    "R_Cold",
+                    "hot_pns": "R_Hot_PNs",
+                    "hot_ans": "R_Hot_ANs",
+                }.get(ch_key, "R_Cold")
+                dat_path = os.path.join(out_dir, ch_subdir, file_date, f"{base_fname}_R.dat")
 
-        # Y축 범위: 전체 데이터 기준 ±0.05 % 여백
+                # 만약 지정된 경로가 없으면 루트 폴더(out_dir/file_date)도 확인
+                if not os.path.exists(dat_path):
+                    dat_path = os.path.join(out_dir, file_date, f"{base_fname}_R.dat")
+
+                self._all_results.append({
+                    "channel": ch_key,
+                    "color": color_hex,
+                    "dat_path": dat_path,
+                    "roi": r.get("fit_window_nm", (400, 500))
+                })
+
+        _plot_and_fill_table(cold_results,    '#2196F3', 'Cold', 'cold')
+        _plot_and_fill_table(hot_pns_results, '#FF6F00', 'Hot PNs', 'hot_pns')
+        _plot_and_fill_table(hot_ans_results, '#D32F2F', 'Hot ANs', 'hot_ans')
+
+        # Y축 자동 조정
         all_r = ([r["r_mean"] * 100 for r in cold_results] +
                  [r["r_mean"] * 100 for r in hot_pns_results] +
                  [r["r_mean"] * 100 for r in hot_ans_results])
         if all_r:
-            import numpy as np
-            lo = min(all_r) - 0.05
-            hi = max(all_r) + 0.05
-            self._pw.setYRange(lo, hi, padding=0)
+            self._pw.setYRange(min(all_r) - 0.05, max(all_r) + 0.05, padding=0)
+
+    def _on_table_row_selected(self):
+        """테이블 행 클릭 시 해당 파일의 _R.dat를 읽어 스펙트럼 플롯에 렌더링"""
+        sel = self.tableWidget.selectedItems()
+        if not sel: return
+        
+        row = sel[0].row()
+        if row >= len(self._all_results): return
+        
+        info = self._all_results[row]
+        dat_path = info["dat_path"]
+        
+        self._spectrum_pw.clear()
+        
+        if not os.path.exists(dat_path):
+            self._spectrum_pw.setTitle(f"데이터 파일 없음: {os.path.basename(dat_path)}")
+            return
+            
+        try:
+            # 3번째 줄부터 데이터 시작 (skiprows=2)
+            data = np.loadtxt(dat_path, skiprows=2)
+            wave = data[:, 0]
+            r_raw = data[:, 1]
+            r_fit = data[:, 2]
+            
+            roi_min, roi_max = info["roi"]
+            color = info["color"]
+
+            self._spectrum_pw.setTitle(f"R(λ) - {os.path.basename(dat_path)}")
+            
+            # 원본 데이터 (흐릿한 점)
+            self._spectrum_pw.plot(wave, r_raw, pen=None, symbol='o', symbolSize=3, symbolBrush=(150,150,150,150), name="Raw Data")
+            # 피팅 데이터 (선명한 선)
+            self._spectrum_pw.plot(wave, r_fit, pen=pg.mkPen(color, width=2.5), name="5th Poly Fit")
+            
+            # ROI 영역 표시
+            lr = pg.LinearRegionItem([roi_min, roi_max], movable=False, brush=(0,255,0,20))
+            self._spectrum_pw.addItem(lr)
+            
+        except Exception as e:
+            self._spectrum_pw.setTitle(f"플롯 실패: {e}")
 
     def _tick_elapsed(self):
         if self._t_start is not None:
-            elapsed = int(time.time() - self._t_start)
-            m, s = divmod(elapsed, 60)
+            m, s = divmod(int(time.time() - self._t_start), 60)
             self._lbl_elapsed.setText(f"경과: {m:02d}:{s:02d}")
 
     def _on_done(self, out_dir: str):
-        self._timer.stop()
-        self._progress.setVisible(False)
-        elapsed = int(time.time() - self._t_start) if self._t_start else 0
-        m, s = divmod(elapsed, 60)
+        self._timer.stop(); self._progress.setVisible(False)
+        m, s = divmod(int(time.time() - self._t_start) if self._t_start else 0, 60)
         self._lbl_elapsed.setText(f"완료 ({m:02d}:{s:02d})")
-        self._t_start = None
-        self._btn_run.setEnabled(True)
+        self._t_start = None; self._btn_run.setEnabled(True)
+        
         if out_dir:
             self._log.append(f"\n✅ 완료 → 결과 폴더: {out_dir}")
-            QMessageBox.information(self, "완료", f"R Trend Monitor 완료!\n결과 폴더:\n{out_dir}")
         else:
             self._log.append("\n❌ 오류 발생 — 위 로그를 확인하세요.")
 
     def closeEvent(self, event):
-        """다이얼로그 닫힐 때 백그라운드 스레드가 살아있으면 안전하게 종료 대기."""
         if self._worker is not None and self._worker.isRunning():
-            self._worker.quit()   # event loop 종료 요청
-            if not self._worker.wait(3000):   # 3초 대기 후 강제 terminate
-                self._worker.terminate()
-                self._worker.wait()
+            self._worker.quit()
+            if not self._worker.wait(3000):
+                self._worker.terminate(); self._worker.wait()
         super().closeEvent(event)
