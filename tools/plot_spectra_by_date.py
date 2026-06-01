@@ -1,20 +1,24 @@
-"""Plot raw spectra for a given date, grouped by flag (ZA / He / Sampling).
+"""Plot raw spectra trend across dates, grouped by flag (ZA / He / Sampling).
 
 Usage
 -----
-python tools/plot_spectra_by_date.py --date 20260521 20260522 --raw_dir D:\path\to\raw\2026-05
+python tools/plot_spectra_by_date.py --date 20260521 20260601 --raw_dir D:\\path\\to\\CAESAR_Cold
     [--system hot|cold]
     [--channel PNs|ANs|NO2]          # default: primary channel for system
-    [--wave_csv path\to\wave.csv]    # optional: 2048-row file, one nm per line
-    [--out_dir .]                    # where to write the PNG(s)
+    [--wave_csv path\\to\\wave.csv]    # optional: 2048-row file, one nm per line
+    [--out_dir .]                    # where to write the PNG
     [--flags ZA He sampling]         # which flags to include (default: all three)
-    [--max_per_flag 200]             # max spectra overlaid per flag (0 = all)
+    [--max_per_flag 200]             # max spectra averaged per date+flag (0 = all)
 
-Output
-------
-One PNG per date, each with three panels (ZA / He / Sampling), showing all raw
-spectra overlaid in semi-transparent colour plus the mean in solid.
-Vertical lines mark detected peaks on the mean spectrum.
+Notes
+-----
+* --raw_dir is searched RECURSIVELY, so you can point it at a parent folder
+  containing month subfolders (e.g. 2026-05, 2026-06) and pass dates from
+  either month.
+* Output is a SINGLE PNG with three panels (ZA / He / Sampling). In each panel,
+  the MEAN spectrum of each date is overlaid in a time-ordered colour
+  (early=blue → late=red) so you can see the day-to-day trend. Peaks are marked
+  on the overall mean.
 """
 from __future__ import annotations
 import argparse, os, sys
@@ -22,6 +26,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import Normalize
 from scipy.signal import find_peaks
 
 _REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -52,7 +58,17 @@ def load_wave(csv_path: str | None, n_pixels: int = 2048) -> np.ndarray:
     return np.arange(n_pixels, dtype=float)
 
 
-def detect_peaks(mean_sp: np.ndarray, wave: np.ndarray) -> np.ndarray:
+def find_files(raw_dir: str, prefix: str) -> list[str]:
+    """Recursively find *.dat files whose basename starts with *prefix*."""
+    hits = []
+    for root, _dirs, names in os.walk(raw_dir):
+        for n in names:
+            if n.startswith(prefix) and n.endswith(".dat"):
+                hits.append(os.path.join(root, n))
+    return sorted(hits)
+
+
+def detect_peaks(mean_sp: np.ndarray) -> np.ndarray:
     height_thr = np.percentile(mean_sp, 70)
     pks, _ = find_peaks(mean_sp, height=height_thr,
                         prominence=np.ptp(mean_sp) * 0.02,
@@ -60,97 +76,58 @@ def detect_peaks(mean_sp: np.ndarray, wave: np.ndarray) -> np.ndarray:
     return pks
 
 
-def plot_flag_panel(ax, spectra: list[np.ndarray], wave: np.ndarray,
-                   flag_label: str, color: str) -> None:
-    if not spectra:
-        ax.text(0.5, 0.5, f"No {flag_label} rows found",
-                ha="center", va="center", transform=ax.transAxes, fontsize=11)
-        ax.set_title(flag_label)
-        return
-
-    arr = np.stack(spectra)
-    mean_sp = arr.mean(axis=0)
-
-    for sp in arr:
-        ax.plot(wave, sp, color=color, lw=0.4, alpha=max(0.05, min(0.3, 5 / len(arr))))
-
-    ax.plot(wave, mean_sp, color="black", lw=1.6, label=f"mean (n={len(arr)})")
-
-    pks = detect_peaks(mean_sp, wave)
-    if pks.size:
-        ax.vlines(wave[pks], mean_sp[pks] * 0.98, mean_sp[pks] * 1.02,
-                  colors="red", lw=1.2, label=f"{len(pks)} peaks")
-        for pk in pks:
-            ax.annotate(f"{wave[pk]:.1f}", xy=(wave[pk], mean_sp[pk]),
-                        xytext=(0, 6), textcoords="offset points",
-                        ha="center", fontsize=7, color="red")
-
-    ax.set_xlabel("Wavelength (nm)" if wave[0] > 1 else "Pixel")
-    ax.set_ylabel("Counts")
-    ax.set_title(f"{flag_label}  (n={len(arr)})")
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.25)
-
-
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Plot raw spectra by flag (one PNG per date)")
+    ap = argparse.ArgumentParser(description="Plot raw-spectra trend across dates by flag")
     ap.add_argument("--date", required=True, nargs="+",
-                    help="YYYYMMDD (여러 날짜 가능) e.g. 20260521 20260522")
-    ap.add_argument("--raw_dir",      required=True, help="Folder containing *.dat files")
+                    help="YYYYMMDD (여러 날짜 가능) e.g. 20260521 20260601")
+    ap.add_argument("--raw_dir",      required=True, help="Folder (searched recursively) with *.dat files")
     ap.add_argument("--system",       default="hot", choices=["hot", "cold"])
     ap.add_argument("--channel",      default=None,  help="PNs | ANs | NO2  (auto if omitted)")
     ap.add_argument("--wave_csv",     default=None,  help="CSV with 2048 wavelengths in nm")
-    ap.add_argument("--out_dir",      default=".",   help="Output directory for PNG(s)")
+    ap.add_argument("--out_dir",      default=".",   help="Output directory for PNG")
     ap.add_argument("--flags",        nargs="+",
                     default=["ZA", "He", "sampling"],
                     help="Flags to include: ZA He sampling")
     ap.add_argument("--max_per_flag", type=int, default=200,
-                    help="Max spectra per flag (0=all)")
+                    help="Max spectra averaged per date+flag (0=all)")
     args = ap.parse_args()
 
-    flag_map    = {"ZA": FLAG_ZA, "He": FLAG_HE, "sampling": FLAG_AMBIENT}
+    flag_map     = {"ZA": FLAG_ZA, "He": FLAG_HE, "sampling": FLAG_AMBIENT}
     target_flags = {flag_map[f] for f in args.flags if f in flag_map}
     flag_labels  = {FLAG_ZA: "ZA (500)", FLAG_HE: "He (510)", FLAG_AMBIENT: "Sampling (1)"}
-    flag_colors  = {FLAG_ZA: "steelblue", FLAG_HE: "darkorange", FLAG_AMBIENT: "seagreen"}
 
     CH_PIXELS = 2048
     if args.system == "hot":
-        default_ch, default_slice = "PNs", SPEC_PRIMARY
+        default_ch = "PNs"
         ch_options = {"PNs": SPEC_PRIMARY, "ANs": SPEC_SECONDARY}
     else:
-        default_ch, default_slice = "NO2", SPEC_PRIMARY
+        default_ch = "NO2"
         ch_options = {"NO2": SPEC_PRIMARY}
 
     ch_name    = args.channel or default_ch
-    spec_slice = ch_options.get(ch_name, default_slice)
+    spec_slice = ch_options.get(ch_name, SPEC_PRIMARY)
     wave       = load_wave(args.wave_csv, CH_PIXELS)
+    x_label    = "Wavelength (nm)" if args.wave_csv else "Pixel index"
 
+    dates = sorted(args.date)
     print(f"System : {args.system}  Channel: {ch_name}  Spectrum cols: {spec_slice}")
     print(f"Flags  : {[flag_labels[f] for f in sorted(target_flags)]}")
     print(f"Wave   : {'from CSV' if args.wave_csv else 'pixel index'}")
-    print(f"Dates  : {args.date}")
+    print(f"Dates  : {dates}  (raw_dir searched recursively)")
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    date_means: dict[int, dict[str, np.ndarray]] = {f: {} for f in target_flags}
+    date_counts: dict[int, dict[str, int]] = {f: {} for f in target_flags}
 
-    for date_str in args.date:
-        print(f"\n{'='*50}")
-        print(f"Date: {date_str}")
-
-        buckets: dict[int, list[np.ndarray]] = {f: [] for f in target_flags}
+    for date_str in dates:
         y, m, d = date_str[:4], date_str[4:6], date_str[6:8]
         prefix  = f"{y}-{m}-{d}"
-
-        files = sorted(
-            f for f in os.listdir(args.raw_dir)
-            if f.startswith(prefix) and f.endswith(".dat")
-        )
+        files   = find_files(args.raw_dir, prefix)
         if not files:
-            print(f"No .dat files found for {prefix} in {args.raw_dir} — skip")
+            print(f"  {prefix}: no .dat files — skip")
             continue
-        print(f"Found {len(files)} file(s) — reading...")
 
-        for fi, fname in enumerate(files, 1):
-            path   = os.path.join(args.raw_dir, fname)
+        buckets: dict[int, list[np.ndarray]] = {f: [] for f in target_flags}
+        for path in files:
             parser = RawParser(path, system=args.system)
             ch_key = next(
                 (c for c, b in parser.layout.spec_blocks.items() if b == spec_slice), None
@@ -166,44 +143,66 @@ def main() -> None:
                 b = buckets[row.flag]
                 if args.max_per_flag == 0 or len(b) < args.max_per_flag:
                     b.append(sp.copy())
-            if fi % 10 == 0 or fi == len(files):
-                counts = {flag_labels[f]: len(buckets[f]) for f in sorted(target_flags)}
-                print(f"  [{fi}/{len(files)}]  {counts}")
 
-        ordered  = [f for f in [FLAG_ZA, FLAG_HE, FLAG_AMBIENT] if f in target_flags]
-        n_panels = len(ordered)
-        fig, axes = plt.subplots(n_panels, 1, figsize=(14, 4.5 * n_panels), squeeze=False)
-        fig.suptitle(
-            f"Raw spectra by flag — {args.system.upper()} / {ch_name} / {prefix}\n"
-            f"({'Wavelength (nm)' if args.wave_csv else 'Pixel index'})",
-            fontsize=13,
-        )
+        for flag in target_flags:
+            n = len(buckets[flag])
+            date_counts[flag][date_str] = n
+            if n:
+                date_means[flag][date_str] = np.stack(buckets[flag]).mean(axis=0)
+        counts = {flag_labels[f]: date_counts[f][date_str] for f in sorted(target_flags)}
+        print(f"  {prefix}: {len(files)} file(s)  {counts}")
 
-        for ax, flag in zip(axes[:, 0], ordered):
-            plot_flag_panel(ax, buckets[flag], wave, flag_labels[flag], flag_colors[flag])
+    ordered  = [f for f in [FLAG_ZA, FLAG_HE, FLAG_AMBIENT] if f in target_flags]
+    n_panels = len(ordered)
+    fig, axes = plt.subplots(n_panels, 1, figsize=(15, 4.8 * n_panels), squeeze=False)
 
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
-        out_path = os.path.join(args.out_dir, f"spectra_{args.system}_{ch_name}_{date_str}.png")
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Saved → {out_path}")
+    norm = Normalize(vmin=0, vmax=max(1, len(dates) - 1))
+    cmap = cm.get_cmap("turbo")
 
-        print("  --- Peak summary (mean spectrum) ---")
-        for flag in ordered:
-            sp_list = buckets[flag]
-            if not sp_list:
-                print(f"    {flag_labels[flag]}: no data")
+    for ax, flag in zip(axes[:, 0], ordered):
+        means = date_means[flag]
+        if not means:
+            ax.text(0.5, 0.5, f"No {flag_labels[flag]} data",
+                    ha="center", va="center", transform=ax.transAxes, fontsize=11)
+            ax.set_title(flag_labels[flag])
+            continue
+
+        for di, date_str in enumerate(dates):
+            sp = means.get(date_str)
+            if sp is None:
                 continue
-            mean_sp = np.stack(sp_list).mean(axis=0)
-            pks = detect_peaks(mean_sp, wave)
-            if pks.size:
-                peak_info = "  ".join(
-                    f"{wave[p]:.1f}({'nm' if args.wave_csv else 'px'})={mean_sp[p]:.0f}"
-                    for p in pks
-                )
-                print(f"    {flag_labels[flag]} ({len(sp_list)} spectra): {peak_info}")
-            else:
-                print(f"    {flag_labels[flag]} ({len(sp_list)} spectra): no prominent peaks")
+            ax.plot(wave, sp, color=cmap(norm(di)), lw=1.1, alpha=0.85,
+                    label=f"{date_str} (n={date_counts[flag][date_str]})")
+
+        overall = np.stack(list(means.values())).mean(axis=0)
+        pks = detect_peaks(overall)
+        if pks.size:
+            for pk in pks:
+                ax.axvline(wave[pk], color="gray", lw=0.6, ls=":", alpha=0.5)
+                ax.annotate(f"{wave[pk]:.1f}", xy=(wave[pk], overall[pk]),
+                            xytext=(0, 6), textcoords="offset points",
+                            ha="center", fontsize=6.5, color="dimgray")
+
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Counts")
+        ax.set_title(f"{flag_labels[flag]} — mean spectrum per date "
+                     f"({len([1 for v in means.values()])} dates)")
+        ax.legend(fontsize=7, ncol=2, loc="best")
+        ax.grid(True, alpha=0.25)
+
+    fig.suptitle(
+        f"Spectra trend by flag — {args.system.upper()} / {ch_name} / "
+        f"{dates[0]}–{dates[-1]}  ({x_label})",
+        fontsize=13,
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    tag = f"{dates[0]}_{dates[-1]}" if len(dates) > 1 else dates[0]
+    out_path = os.path.join(args.out_dir, f"spectra_trend_{args.system}_{ch_name}_{tag}.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\nSaved → {out_path}")
 
 
 if __name__ == "__main__":
