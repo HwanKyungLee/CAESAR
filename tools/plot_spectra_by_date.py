@@ -1,34 +1,35 @@
-"""Plot the PEAK-value time series per flag (ZA / He / Sampling) across dates.
+"""Plot the PEAK-value trend per flag (ZA / He / Sampling) across dates.
 
-What it does
-------------
-For every measurement row in the selected dates it records the spectrum's
-peak intensity (max counts) and the row timestamp, then plots peak-vs-time
-so you can see how each cavity readout drifts over the campaign:
+Aggregation (built for spotting outliers)
+-----------------------------------------
+Plotting every raw row is unreadable (a He/ZA cycle holds hundreds of rows;
+sampling has hundreds of thousands). Instead each panel is aggregated into
+groups, and for every group we draw:
 
-  * ZA   (flag 500) — one point per zero-air measurement row
-  * He   (flag 510) — one point per helium measurement row
-  * Sampling (flag 1) — every ambient row, plotted as it was logged
+  * average  → dot
+  * min/max  → faint lines (so a single out-of-range value in a group makes
+               the max line spike up or the min line dip down — easy to spot)
 
-This is a TREND view (x = time), not an averaged-spectrum overlay.
+Grouping per flag:
+  * ZA   (flag 500) — per measurement cycle (consecutive rows; ≈1/hour)
+  * He   (flag 510) — per measurement cycle (≈1/3 hours)
+  * Sampling (flag 1) — per time bin (default 1 minute)
 
 Usage
 -----
 python tools/plot_spectra_by_date.py --date 20260529 20260530 20260601 \\
        --raw_dir D:\\Yeosu_2026\\CAESAR_Cold
-    [--channel PNs|ANs|NO2]   # which spectrum block (default: primary)
-    [--out_dir .]             # where to write the PNG
-    [--flags ZA He sampling]  # which flags to include (default: all three)
-    [--stride 1]              # subsample rows (e.g. 10 = every 10th) for speed
-    [--peak_pixel_lo 0 --peak_pixel_hi 2048]  # restrict peak search window
+    [--channel PNs|ANs|NO2]      # spectrum block (default: primary)
+    [--out_dir .]
+    [--flags ZA He sampling]
+    [--event_gap_min 5]          # gap (min) that starts a new ZA/He cycle
+    [--sampling_bin_min 1]       # time-bin width (min) for sampling
+    [--peak_pixel_lo 0 --peak_pixel_hi 2048]
 
 Notes
 -----
-* --raw_dir is searched RECURSIVELY, so a parent folder with month subfolders
-  (2026-05, 2026-06) works with dates from either month.
-* Timestamp = filename date (UTC) + col1 seconds-since-midnight → KST,
-  matching DataIO.parse_row_timestamp. Falls back to file mtime if col1 is
-  out of range.
+* --raw_dir is searched RECURSIVELY (month subfolders 2026-05, 2026-06 OK).
+* Timestamp = filename date (UTC) + col1 seconds → KST.
 """
 from __future__ import annotations
 import argparse, os, re, sys
@@ -55,7 +56,6 @@ _DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 
 
 def find_files(raw_dir: str, prefix: str) -> list[str]:
-    """Recursively find *.dat files whose basename starts with *prefix*."""
     hits = []
     for root, _dirs, names in os.walk(raw_dir):
         for n in names:
@@ -64,19 +64,57 @@ def find_files(raw_dir: str, prefix: str) -> list[str]:
     return sorted(hits)
 
 
-def row_timestamp(fname: str, col1_sec: float, mtime: datetime,
-                  row_idx: int) -> datetime:
-    """filename date (UTC) + col1 seconds → KST. Falls back to mtime estimate."""
+def row_timestamp(fname, col1_sec, mtime, row_idx):
     m = _DATE_RE.search(os.path.basename(fname))
     if m and np.isfinite(col1_sec) and 0.0 <= col1_sec < 86400.0:
         base = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=UTC)
         return (base + timedelta(seconds=col1_sec)).astimezone(KST)
-    # fallback: file mtime + row spacing (~0.97 s/row)
     return mtime + timedelta(seconds=row_idx * 0.97)
 
 
+def _stats(seg: np.ndarray):
+    return float(np.nanmean(seg)), float(np.nanmin(seg)), float(np.nanmax(seg))
+
+
+def group_events(ts: np.ndarray, pk: np.ndarray, gap_min: float):
+    """Group time-sorted points into cycles split by gaps > gap_min minutes.
+    Returns (times, mean, vmin, vmax) — one entry per cycle."""
+    if len(ts) == 0:
+        return (np.array([]),) * 4
+    order = np.argsort(ts); ts, pk = ts[order], pk[order]
+    gap = timedelta(minutes=gap_min)
+    T, A, LO, HI = [], [], [], []
+    start = 0
+    for i in range(1, len(ts)):
+        if ts[i] - ts[i - 1] > gap:
+            a, lo, hi = _stats(pk[start:i])
+            T.append(ts[start] + (ts[i - 1] - ts[start]) / 2)
+            A.append(a); LO.append(lo); HI.append(hi)
+            start = i
+    a, lo, hi = _stats(pk[start:])
+    T.append(ts[start] + (ts[-1] - ts[start]) / 2)
+    A.append(a); LO.append(lo); HI.append(hi)
+    return np.array(T), np.array(A), np.array(LO), np.array(HI)
+
+
+def bin_series(ts: np.ndarray, pk: np.ndarray, bin_min: float):
+    """Time-bin continuous data. Returns (times, mean, vmin, vmax) per bin."""
+    if len(ts) == 0:
+        return (np.array([]),) * 4
+    order = np.argsort(ts); ts, pk = ts[order], pk[order]
+    t0 = ts[0]; width = timedelta(minutes=bin_min)
+    keys = np.array([int((t - t0) / width) for t in ts])
+    T, A, LO, HI = [], [], [], []
+    for k in np.unique(keys):
+        seg = pk[keys == k]
+        a, lo, hi = _stats(seg)
+        T.append(t0 + width * (int(k) + 0.5))
+        A.append(a); LO.append(lo); HI.append(hi)
+    return np.array(T), np.array(A), np.array(LO), np.array(HI)
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Peak-value time series per flag across dates")
+    ap = argparse.ArgumentParser(description="Peak-value trend per flag (avg dot + min/max lines)")
     ap.add_argument("--date", required=True, nargs="+",
                     help="YYYYMMDD (여러 날짜 가능) e.g. 20260529 20260601")
     ap.add_argument("--raw_dir",  required=True, help="Folder (searched recursively) with *.dat files")
@@ -84,12 +122,12 @@ def main() -> None:
     ap.add_argument("--out_dir",  default=".",   help="Output directory for PNG")
     ap.add_argument("--flags",    nargs="+", default=["ZA", "He", "sampling"],
                     help="Flags to include: ZA He sampling")
-    ap.add_argument("--stride",   type=int, default=1,
-                    help="Subsample rows: plot every Nth matching row (default 1 = all)")
-    ap.add_argument("--peak_pixel_lo", type=int, default=0,
-                    help="Lower pixel bound for the peak search window")
-    ap.add_argument("--peak_pixel_hi", type=int, default=2048,
-                    help="Upper pixel bound for the peak search window")
+    ap.add_argument("--event_gap_min", type=float, default=5.0,
+                    help="Gap in minutes that starts a new ZA/He cycle")
+    ap.add_argument("--sampling_bin_min", type=float, default=1.0,
+                    help="Time-bin width (minutes) for the sampling trend")
+    ap.add_argument("--peak_pixel_lo", type=int, default=0)
+    ap.add_argument("--peak_pixel_hi", type=int, default=2048)
     args = ap.parse_args()
 
     flag_map     = {"ZA": FLAG_ZA, "He": FLAG_HE, "sampling": FLAG_AMBIENT}
@@ -97,19 +135,17 @@ def main() -> None:
     flag_labels  = {FLAG_ZA: "ZA (500)", FLAG_HE: "He (510)", FLAG_AMBIENT: "Sampling (1)"}
     flag_colors  = {FLAG_ZA: "steelblue", FLAG_HE: "darkorange", FLAG_AMBIENT: "seagreen"}
 
-    # spectrum block — primary by default; ANs only meaningful on hot files
     ch_block = SPEC_SECONDARY if (args.channel or "").upper() == "ANS" else SPEC_PRIMARY
     ch_label = (args.channel or "primary")
     p_lo, p_hi = max(0, args.peak_pixel_lo), min(2048, args.peak_pixel_hi)
 
     dates = sorted(args.date)
-    print(f"Channel block: {ch_block} ({ch_label})")
+    print(f"Channel block: {ch_block} ({ch_label})   peak window px {p_lo}..{p_hi}")
     print(f"Flags  : {[flag_labels[f] for f in sorted(target_flags)]}")
-    print(f"Peak window: pixels {p_lo}..{p_hi}   stride={args.stride}")
-    print(f"Dates  : {dates}  (raw_dir searched recursively)")
+    print(f"Dates  : {dates}  (recursive)")
 
-    # series[flag] = (list[datetime], list[float peak])
-    series: dict[int, tuple[list, list]] = {f: ([], []) for f in target_flags}
+    raw_ts: dict[int, list] = {f: [] for f in target_flags}
+    raw_pk: dict[int, list] = {f: [] for f in target_flags}
 
     for date_str in dates:
         y, m, d = date_str[:4], date_str[4:6], date_str[6:8]
@@ -118,9 +154,7 @@ def main() -> None:
         if not files:
             print(f"  {prefix}: no .dat files — skip")
             continue
-
-        n_added = {f: 0 for f in target_flags}
-        seen    = {f: 0 for f in target_flags}
+        n0 = {f: len(raw_ts[f]) for f in target_flags}
         for path in files:
             parser = RawParser(path)
             ch_key = next(
@@ -132,51 +166,50 @@ def main() -> None:
             for row, specs in parser.iter_rows_with_spectra(channels=(ch_key,)):
                 if row.flag not in target_flags:
                     continue
-                s = seen[row.flag]
-                seen[row.flag] = s + 1
-                if args.stride > 1 and (s % args.stride != 0):
-                    continue
                 sp = specs.get(ch_key)
                 if sp is None or sp.size == 0:
                     continue
-                peak = float(np.nanmax(sp[p_lo:p_hi]))
-                ts = row_timestamp(path, row.time_centisec, mtime, row.row_idx)
-                series[row.flag][0].append(ts)
-                series[row.flag][1].append(peak)
-                n_added[row.flag] += 1
-        counts = {flag_labels[f]: n_added[f] for f in sorted(target_flags)}
-        print(f"  {prefix}: {len(files)} file(s)  added {counts}")
+                raw_pk[row.flag].append(float(np.nanmax(sp[p_lo:p_hi])))
+                raw_ts[row.flag].append(
+                    row_timestamp(path, row.time_centisec, mtime, row.row_idx))
+        added = {flag_labels[f]: len(raw_ts[f]) - n0[f] for f in sorted(target_flags)}
+        print(f"  {prefix}: {len(files)} file(s)  rows {added}")
 
-    # ── plot: one panel per flag, x = time, y = peak counts ──────────────────
-    ordered  = [f for f in [FLAG_ZA, FLAG_HE, FLAG_AMBIENT] if f in target_flags]
-    n_panels = len(ordered)
-    fig, axes = plt.subplots(n_panels, 1, figsize=(15, 4.2 * n_panels),
+    ordered = [f for f in [FLAG_ZA, FLAG_HE, FLAG_AMBIENT] if f in target_flags]
+    fig, axes = plt.subplots(len(ordered), 1, figsize=(15, 4.0 * len(ordered)),
                              squeeze=False, sharex=True)
 
     for ax, flag in zip(axes[:, 0], ordered):
-        ts_list, pk_list = series[flag]
-        if not ts_list:
+        ts = np.array(raw_ts[flag]); pk = np.array(raw_pk[flag])
+        if ts.size == 0:
             ax.text(0.5, 0.5, f"No {flag_labels[flag]} data",
                     ha="center", va="center", transform=ax.transAxes, fontsize=11)
-            ax.set_title(flag_labels[flag])
-            continue
-        # sort by time
-        order = np.argsort(ts_list)
-        ts_arr = np.array(ts_list)[order]
-        pk_arr = np.array(pk_list)[order]
-        ax.plot(ts_arr, pk_arr, "-", color=flag_colors[flag], lw=0.6, alpha=0.5)
-        ax.plot(ts_arr, pk_arr, ".", color=flag_colors[flag], ms=3, alpha=0.8)
+            ax.set_title(flag_labels[flag]); continue
+
+        if flag == FLAG_AMBIENT:
+            T, A, LO, HI = bin_series(ts, pk, args.sampling_bin_min)
+            sub = f"{len(T)} bins of {args.sampling_bin_min:g} min  ({ts.size} rows)"
+        else:
+            T, A, LO, HI = group_events(ts, pk, args.event_gap_min)
+            sub = f"{len(T)} cycles  ({ts.size} rows)"
+
+        c = flag_colors[flag]
+        # min / max as faint lines
+        ax.plot(T, HI, "-", color=c, lw=0.8, alpha=0.35, label="max")
+        ax.plot(T, LO, "-", color=c, lw=0.8, alpha=0.35, label="min")
+        # average as dots (+ thin connecting line for readability)
+        ax.plot(T, A, "-", color=c, lw=0.5, alpha=0.5)
+        ax.plot(T, A, ".", color=c, ms=4, alpha=0.95, label="average")
         ax.set_ylabel("Peak counts")
-        ax.set_title(f"{flag_labels[flag]} — peak value over time  (n={len(ts_arr)})")
+        ax.set_title(f"{flag_labels[flag]} — {sub}")
+        ax.legend(fontsize=8, loc="best")
         ax.grid(True, alpha=0.25)
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
 
     axes[-1, 0].set_xlabel("Time (KST)")
-    fig.suptitle(
-        f"Peak-value trend by flag — {ch_label} / {dates[0]}–{dates[-1]}",
-        fontsize=13,
-    )
+    fig.suptitle(f"Peak-value trend by flag — {ch_label} / {dates[0]}–{dates[-1]}",
+                 fontsize=13)
     fig.autofmt_xdate()
     fig.tight_layout(rect=[0, 0, 1, 0.97])
 
