@@ -4,6 +4,20 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 
+# Column-layout constants live in raw_parser — the single source of truth.
+# DataIO shares the scalar/block constants from there so the two parsers can
+# never drift apart on basic geometry. (HK relative offsets stay local — see
+# the _HK_REL note below for why.)
+from .raw_parser import (
+    META_COLS as _RP_META_COLS,
+    CH_PIXELS as _RP_CH_PIXELS,
+    P_SCALE as _RP_P_SCALE,
+    P_VALID_LO as _RP_P_LO,
+    P_VALID_HI as _RP_P_HI,
+    SPEC_PRIMARY as _RP_SPEC_PRIMARY,
+    SPEC_SECONDARY as _RP_SPEC_SECONDARY,
+)
+
 
 def ui_scale() -> float:
     """Return a UI scale factor relative to 1080p reference height.
@@ -145,10 +159,18 @@ class DataIO:
     #   HK block    : cols (2053 + N×2048) onward
     #
     # HK offsets *relative* to hk_start (so they work for any channel count):
-    _META_COLS = 2053
-    _CH_PIXELS = 2048
+    _META_COLS = _RP_META_COLS   # 2053 — shared with raw_parser
+    _CH_PIXELS = _RP_CH_PIXELS   # 2048 — shared with raw_parser
     _SIG_THRESHOLD = 5000.0     # ADU — below this = noise / inactive channel
-    # Relative HK column offsets (verified from 2-channel hot file 2026-05-18):
+    # Relative HK column offsets (verified from 2-channel hot file 2026-05-18).
+    # NOTE: these are offsets from DataIO's *dynamic* hk_start
+    # (= META_COLS + n_active_channels × CH_PIXELS), which for 2-ch hot files
+    # equals raw_parser.HK_START (6149). They therefore resolve to the same
+    # absolute columns as raw_parser.HotHKMap / ColdHKMap for hot files
+    # (hot_p→6162=P_PNs, oven_pns→6154, etc.). They are intentionally NOT
+    # replaced by the raw_parser maps because DataIO's hk_start is computed
+    # from the active-channel count, so changing the offset scheme here could
+    # shift cold-file HK reads — out of scope for a constants-only merge.
     _HK_REL = {
         'cold_p':   11,   # Cold inlet pressure raw count → ×0.6895 = mbar
         'hot_p':    13,   # Hot inlet pressure  raw count → ×0.6895 = mbar
@@ -157,8 +179,8 @@ class DataIO:
         'oven_pns': 5,    # PNs oven setpoint             → /100 = °C (~180°C)
         'oven_ans': 2,    # ANs oven setpoint             → /100 = °C (~300°C)
     }
-    _P_SCALE = 0.01 * 6894.73326 / 100.0   # raw count → mbar (~0.6895)
-    _P_LO, _P_HI = 800.0, 1200.0           # plausible atmospheric pressure range
+    _P_SCALE = _RP_P_SCALE                 # raw count → mbar (~0.6895), shared
+    _P_LO, _P_HI = _RP_P_LO, _RP_P_HI      # plausible atmospheric pressure range, shared
 
     @staticmethod
     def _detect_n_channels_from_row(raw: np.ndarray) -> int:
@@ -417,7 +439,8 @@ class DataIO:
     # CH2 (ROI2 / ANs / 300°C inlet):  cols 4101–6148  (2048 px)
     # HK block starts at col 6149.
     # Cold files have CH1 only (CH2 block is noise ~500 ADU).
-    _CH_OFFSET = {1: (2053, 4101), 2: (4101, 6149)}
+    # Blocks shared with raw_parser (SPEC_PRIMARY / SPEC_SECONDARY).
+    _CH_OFFSET = {1: _RP_SPEC_PRIMARY, 2: _RP_SPEC_SECONDARY}
 
     @staticmethod
     def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None,
