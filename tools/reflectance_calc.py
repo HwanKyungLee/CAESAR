@@ -1,42 +1,39 @@
 from __future__ import annotations
 
+import os
+import sys
+
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Rayleigh Scattering Physics
+# Rayleigh Scattering Physics  →  단일 출처(single source of truth) = core/physics.py
 # ─────────────────────────────────────────────────────────────────────────────
-
-class RayleighPhysics:
-    """
-    Rayleigh scattering extinction α(λ) [cm⁻¹].
-    매트랩 최적화 로직 적용 완료 (Thalman 2014 이론식 -> CAESAR 장비 최적화 식)
-    """
-    @staticmethod
-    def get_alpha_rayleigh(
-        wave_nm: np.ndarray,
-        temp_c: float,
-        press_mbar: float,
-        gas_type: str = "zero_air", 
-    ) -> np.ndarray:
-        wave_nm = np.asarray(wave_nm, dtype=float)
-        # 입자 밀도 계산 (Number Density)
-        n_density = 2.68678e19 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
-        lambda_um = wave_nm / 1000.0
-        
-        if gas_type == "zero_air":
-            # 🌟 [MATLAB 로직 이식] 박사님이 fminsearch로 찾으신 최적의 산란 단면적 공식
-            # sigma = 3.019852e-14 * (lambda ^ -3.87465)
-            sigma = 3.019852e-14 * (wave_nm ** -3.87465)
-            return sigma * n_density
-            
-        elif gas_type == "helium":
-            # He 이론식 (변동 없음)
-            n_minus_1 = 1e-8 * (348.933 + 4.02 / lambda_um**2)
-            sigma = (24 * np.pi**3 / (n_density**2 * lambda_um**4 * 1e-16)) * n_minus_1**2
-            return sigma * n_density
-            
-        else:
-            raise ValueError(f"Unknown gas type: {gas_type}")
+# 이 파일에는 원래 RayleighPhysics 사본이 따로 들어 있었고, 그 사본은 박사님
+# MATLAB *경험식*(fminsearch 피팅)을 그대로 이식한 것이었다:
+#     σ_ZA = 3.019852e-14 · λ_nm^-3.87465                         [cm²/molec]
+#     σ_He = 자작식  1e-8·(348.933 + 4.02/λ_um²) → n-1 기반
+#
+# ── 왜 원래(경험식)는 안 됐나 ────────────────────────────────────────────────
+# 그 계수들을 Python에서 λ[nm]로 그대로 평가하면 스케일/단위가 맞지 않아
+#     α_ZA 가 물리값(Sellmeier) 대비 ~168배 과대,
+#     α_He 가 ~35배 과소        (게다가 ZA는 nm, He는 µm를 섞어 씀 → air/He 비가
+#                                 실제 ~68 대신 ~400,000 으로 깨짐)
+# 로 나온다. omr_d = (1−R)/d 는 ZA 항에 지배되므로 α_ZA 가 168배 커지면
+# (1−R) 도 ~100배 부풀어 → R≈0.990 (정상 0.9999), Leff≈50 m (정상 ~9 km) 로
+# 완전히 틀어진다. (2026-05-20 실측 파일로 재현·검증 완료: 정본으로 바꾸면
+#  R 0.990→0.99994, Leff 0.05→~9 km.)
+#
+# ── 왜 이식(Sellmeier 정본)을 쓰나 ───────────────────────────────────────────
+# core/physics.py 는 이미 위 경험식을 버리고 분산식(Sellmeier)으로 교체돼 있다:
+#     N₂ = Peck & Reeder(1972), O₂ = Bates(1984), He = Cuthbertson(1936),
+#     King 보정 포함, σ 는 STP Loschmidt N₀ 기준으로 정의 → α = σ·N(T,P).
+# GUI(gui/worker.py)·진단 코드는 전부 core/physics 를 import 해 이미 정상이었고,
+# 오직 이 tools 사본만 동기화가 안 돼 r_batch_calculator·r_trend_monitor 경로가
+# 틀렸다. 사본을 삭제하고 정본을 import 해 *중복 자체*(드리프트의 원인)를 없앤다.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from core.physics import RayleighPhysics  # noqa: E402,F401  (re-export for callers)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reflectance Calculator (Engine)
