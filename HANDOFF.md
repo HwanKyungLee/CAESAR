@@ -184,6 +184,11 @@ Stage 4로 만든 알파(`*_alpha_trace.dat`)를 DOAS 피팅하면 잔차/신호
 2. ~~**(미해결) 핏레인지가 Run 시 바뀌는 버그**~~ — ✅ 완료. `apply_roi_from_graph`/`update_range`에 `_analysis_running` 가드 추가 → Run 중에는 모니터 ROI 신호가 txt_min/max를 덮어쓰지 않음.
 3. **(품질) 1% 도전** — 4번 표대로 dark 프레임 + 측정 레퍼런스 확보 후.
 4. **(백로그) #1 전체 60개 파일 R 시계열 계산** — `tools/r_trend_monitor.py`.
+5. **(완료) He/ZA 인덱싱 검증 intensity 시계열** — 남 우희 박사님 요청. R 그림 생성 시
+   `Intensity_index_{Cold,Hot_PNs,Hot_ANs}.png`도 함께 출력. ambient(flag=1)는 옅은
+   배경, ZA(500)·He(510)는 **검정** 마커(ZA=빈 원, He=채운 삼각형)로 강조해 인덱싱이
+   제대로 잡혔는지 + ZA/He가 amb보다 높은지 + ZA 주입 ~1시간 cadence를 눈으로 더블체크.
+   `collect_intensity_by_flag()` + `plot_intensity_timeseries()` (`SHOW_INTENSITY_INDEX`로 토글).
 
 ---
 

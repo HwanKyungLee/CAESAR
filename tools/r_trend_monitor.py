@@ -83,6 +83,19 @@ except ImportError as e:
     # 로그에 표시하고 finished("")를 emit한다.
     raise ImportError(f"필수 모듈을 찾을 수 없습니다: {e}") from e
 
+# core/ 는 저장소 루트에 있다. r_batch_calculator import 시 루트가 sys.path에 추가되지만
+# 방어적으로 한 번 더 보장한다 (intensity-index 진단에서 flag 상수가 필요).
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from core.raw_parser import (   # noqa: E402
+    FLAG_AMBIENT as RP_FLAG_AMBIENT,   # = 1   (대기 sampling)
+    FLAG_ZA      as RP_FLAG_ZA,        # = 500 (Zero Air)
+    FLAG_HE      as RP_FLAG_HE,        # = 510 (Helium)
+    COL_FLAG,                          # = 4   (state flag 컬럼)
+    COL_TIME_LO, COL_TIME_HI,          # = 0, 1 (bytepack 타임스탬프)
+)
+
 # ════════════════════════════════════════════════════════════════
 #  유틸리티 함수 (반드시 설정보다 위에 있어야 합니다)
 # ════════════════════════════════════════════════════════════════
@@ -159,6 +172,13 @@ HOT_FILES  = None
 SHOW_LEFF  = True
 SHOW_PLOT  = False
 PLOT_DPI   = 150
+
+# ── He/ZA 인덱싱 검증용 intensity 시계열 진단 (남 우희 박사님 요청) ──────────
+# R 그림을 낼 때 함께 그려서, ZA/He flag 인덱싱이 제대로 잡혔는지(=평소 amb보다
+# 높은 신호로 또렷이 구분되는지)와 ZA가 1시간에 한 번씩 주입되는지 눈으로
+# 더블체크한다. ambient(flag=1)는 옅은 배경, ZA/He는 검정 마커로 강조한다.
+SHOW_INTENSITY_INDEX = True
+INTENSITY_AMBIENT_STRIDE = 10    # ambient는 N행마다 1점만 (가독성·속도). ZA/He는 전부.
 # ════════════════════════════════════════════════════════════════
 
 _DATE_RE  = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
@@ -187,6 +207,20 @@ def _parse_timestamp(filepath: str) -> datetime:
     except OSError:
         return datetime.now(tz=_KST_TZ)
 
+def _resolve_files(directory: str, file_list=None) -> list[str]:
+    """scan_directory와 intensity 진단이 **동일한** 파일 목록을 쓰도록 일원화.
+
+    file_list가 주어지면 그 중 실재하는 파일만, 아니면 directory(없으면 하위
+    폴더까지 재귀) 안의 *.dat 를 파일명 순으로 반환한다.
+    """
+    if file_list is not None:
+        return sorted(str(f) for f in file_list if os.path.isfile(str(f)))
+    files = sorted(glob.glob(os.path.join(directory, FILE_PATTERN)))
+    if not files:
+        files = sorted(glob.glob(os.path.join(directory, "**", FILE_PATTERN), recursive=True))
+    return files
+
+
 def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                    ts_tz=None,
@@ -201,12 +235,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     * 보정 실패 파일에서 He 스캔이 나와도 last_he를 오염시키지 않음.
     * quality_ok 기준을 실측 valid_fraction(~44 %)에 맞게 0.30으로 완화.
     """
-    if file_list is not None:
-        files = sorted(str(f) for f in file_list if os.path.isfile(str(f)))
-    else:
-        files = sorted(glob.glob(os.path.join(directory, FILE_PATTERN)))
-        if not files:
-            files = sorted(glob.glob(os.path.join(directory, "**", FILE_PATTERN), recursive=True))
+    files = _resolve_files(directory, file_list)
 
     if not files:
         print(f"  .dat 파일 없음: {directory}")
@@ -546,6 +575,163 @@ def plot_r_curves_per_channel(results, channel_name, color, out_path):
 
 
 
+# ════════════════════════════════════════════════════════════════
+#  He/ZA 인덱싱 검증용 intensity 시계열 (남 우희 박사님 요청)
+# ════════════════════════════════════════════════════════════════
+def _bytepack_sec(c0, c1) -> float:
+    """col0(low16)·col1(high16)를 LabVIEW bytepack 초로 변환.
+
+    절대 오프셋은 부정확할 수 있으나 행 간 상대 간격(~0.97초/행)은 신뢰할 수
+    있어, 파일 mtime에 마지막 행을 앵커링해 각 행의 시각을 추정하는 데 쓴다.
+    (plot_spectra_by_date.py와 동일한 접근)
+    """
+    try:
+        return ((int(float(c0)) << 16) | int(float(c1))) / 100.0
+    except (ValueError, TypeError):
+        return float("nan")
+
+
+def collect_intensity_by_flag(files: list[str], spec_start: int, spec_end: int,
+                              ts_tz, peak_lo: int = 0, peak_hi: int = 2048,
+                              ambient_stride: int = INTENSITY_AMBIENT_STRIDE
+                              ) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """파일들에서 ambient/ZA/He 행별 peak intensity를 시각과 함께 수집한다.
+
+    반환: ``{flag: (times, peaks)}`` (flag ∈ {1, 500, 510}).
+    times 는 각 파일 mtime(ts_tz 적용)에 마지막 행 bytepack을 앵커링해 추정한
+    naive datetime (R-trend 플롯 x축과 동일한 tz 규약).
+
+    성능
+    ----
+    R 계산용 scan_directory 와 별개의 2차 패스이지만, ambient 행은 매
+    ``ambient_stride`` 번째만 스펙트럼을 파싱(앞 5컬럼만 부분 split해 flag/시각을
+    먼저 확인)하므로 대부분의 행은 저비용으로 건너뛴다. ZA/He 행은 전부 읽어
+    주입 블록(1시간 1회 ZA, 3시간 1회 He)이 또렷이 보이게 한다.
+    """
+    flags_want = (RP_FLAG_AMBIENT, RP_FLAG_ZA, RP_FLAG_HE)
+    out_ts: dict[int, list] = {f: [] for f in flags_want}
+    out_pk: dict[int, list] = {f: [] for f in flags_want}
+    lo = spec_start + max(0, peak_lo)
+    hi = min(spec_end, spec_start + peak_hi)
+    stride = max(1, int(ambient_stride))
+
+    for fp in files:
+        if not os.path.isfile(fp):
+            continue
+        mt = datetime.fromtimestamp(os.path.getmtime(fp), tz=ts_tz)
+        rows: list[tuple[int, float, float]] = []   # (flag, bytepack_sec, peak)
+        amb_count = 0
+        last_bp = float("nan")
+        with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                sep = "\t" if "\t" in s else None
+                # 앞 5컬럼만 우선 분리 → flag/시각 확인 (건너뛸 행은 전체 split 회피)
+                head = s.split(sep, 5) if sep else s.split(None, 5)
+                if len(head) <= COL_FLAG:
+                    continue
+                try:
+                    flag = int(float(head[COL_FLAG]))
+                except ValueError:
+                    continue
+                bp = _bytepack_sec(head[COL_TIME_LO], head[COL_TIME_HI])
+                if bp == bp:                 # NaN 이 아니면 (NaN != NaN)
+                    last_bp = bp
+                if flag not in flags_want:
+                    continue
+                if flag == RP_FLAG_AMBIENT:
+                    amb_count += 1
+                    if amb_count % stride:
+                        continue
+                toks = s.split(sep) if sep else s.split()
+                if len(toks) <= hi:
+                    continue
+                try:
+                    vals = np.array(toks[lo:hi], dtype=float)
+                except ValueError:
+                    vals = np.fromiter(
+                        (_safe_peak(t) for t in toks[lo:hi]),
+                        dtype=float, count=hi - lo,
+                    )
+                vals = vals[np.isfinite(vals)]
+                if vals.size == 0:
+                    continue
+                rows.append((flag, bp, float(np.max(vals))))
+
+        for flag, bp, pk in rows:
+            if bp != bp or last_bp != last_bp:
+                t = mt.replace(tzinfo=None)
+            else:
+                t = (mt - timedelta(seconds=(last_bp - bp))).replace(tzinfo=None)
+            out_ts[flag].append(t)
+            out_pk[flag].append(pk)
+
+    return {f: (np.array(out_ts[f]), np.array(out_pk[f])) for f in flags_want}
+
+
+def _safe_peak(tok: str) -> float:
+    try:
+        return float(tok)
+    except (ValueError, TypeError):
+        return float("nan")
+
+
+def plot_intensity_timeseries(intensity: dict, channel_name: str, out_path: str):
+    """ZA/He 인덱싱 검증용 intensity 시계열.
+
+    ambient(flag=1)는 옅은 회색 배경, ZA(500)·He(510)는 **검정** 마커로 강조해
+    (ZA=빈 원, He=채운 삼각형) 인덱싱이 제대로 잡혔는지 + ZA/He 신호가 평소
+    대기보다 높은지 + ZA 주입이 1시간 간격인지 눈으로 더블체크한다.
+    """
+    amb_t, amb_p = intensity.get(RP_FLAG_AMBIENT, (np.array([]), np.array([])))
+    za_t,  za_p  = intensity.get(RP_FLAG_ZA,      (np.array([]), np.array([])))
+    he_t,  he_p  = intensity.get(RP_FLAG_HE,      (np.array([]), np.array([])))
+
+    if amb_t.size == 0 and za_t.size == 0 and he_t.size == 0:
+        print(f"  [Intensity] {channel_name}: 데이터 없음 — 스킵")
+        return
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+
+    if amb_t.size:
+        ax.scatter(amb_t, amb_p, s=6, c="0.70", marker=".", alpha=0.35,
+                   zorder=1, label=f"amb (sampling, {amb_t.size} rows)")
+    if za_t.size:
+        ax.scatter(za_t, za_p, s=30, facecolors="none", edgecolors="black",
+                   marker="o", linewidths=0.9, alpha=0.9, zorder=3,
+                   label=f"ZA (500, {za_t.size} rows)")
+    if he_t.size:
+        ax.scatter(he_t, he_p, s=34, c="black", marker="^", alpha=0.9,
+                   zorder=4, label=f"He (510, {he_t.size} rows)")
+
+    # amb 중앙값 참조선 — ZA/He가 그 위로 또렷이 떠야 인덱싱·신호가 정상
+    if amb_p.size:
+        amb_med = float(np.nanmedian(amb_p))
+        ax.axhline(amb_med, color="seagreen", linestyle="--", linewidth=0.8,
+                   alpha=0.6, label=f"amb median = {amb_med:,.0f}")
+
+    ax.set_ylabel("Peak intensity (counts)")
+    ax.set_xlabel("Date / Time (KST)")
+    ax.set_title(
+        f"CAESAR Pro - {channel_name} Intensity time series\n"
+        "He/ZA indexing check (ZA/He should sit above amb; ZA injected ~1/hour)"
+    )
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, loc="best")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d\n%H:%M"))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.setp(ax.xaxis.get_majorticklabels(), fontsize=7)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    print(f"  [PNG] {out_path}")
+    if SHOW_PLOT: plt.show()
+    plt.close(fig)
+
+
 def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
     # 3채널(Cold / Hot PNs / Hot ANs) × (R + 선택적 Leff)
     per_ch = 2 if SHOW_LEFF else 1
@@ -656,6 +842,27 @@ def main():
         if results_cold:    plot_r_curves_per_channel(results_cold,    "Cold",        "steelblue",  os.path.join(out_folder, "R_curve_Cold.png"))
         if results_hot_pns: plot_r_curves_per_channel(results_hot_pns, "Hot PNs(roi1)", "darkorange", os.path.join(out_folder, "R_curve_Hot_PNs.png"))
         if results_hot_ans: plot_r_curves_per_channel(results_hot_ans, "Hot ANs(roi2)", "crimson",    os.path.join(out_folder, "R_curve_Hot_ANs.png"))
+
+        # ── He/ZA 인덱싱 검증용 intensity 시계열 (남 우희 박사님 요청) ──────
+        # R 그림과 같은 파일을 다시 읽어 ambient/ZA/He peak intensity를 시간순으로
+        # 그린다. ZA/He가 amb 위로 또렷이 떠야 인덱싱이 정상이고, ZA 점이 ~1시간
+        # 간격으로 묶여 보여야 주입 cadence가 정상이다.
+        if SHOW_INTENSITY_INDEX:
+            print(f"\n{bar}\n  intensity 시계열 (He/ZA 인덱싱 체크)\n{bar}")
+            ch_specs = [
+                ("Cold",          COLD_DIR, COLD_FILES, SPEC_START_DEFAULT, SPEC_END_DEFAULT, COLD_TS_TZ,
+                 "Intensity_index_Cold.png"),
+                ("Hot PNs(roi1)", HOT_DIR,  HOT_FILES,  SPEC_START_DEFAULT, SPEC_END_DEFAULT, HOT_TS_TZ,
+                 "Intensity_index_Hot_PNs.png"),
+                ("Hot ANs(roi2)", HOT_DIR,  HOT_FILES,  SPEC_START_ANS,     SPEC_END_ANS,     HOT_ANS_TS_TZ,
+                 "Intensity_index_Hot_ANs.png"),
+            ]
+            for name, ddir, dfiles, sp_s, sp_e, tz, png in ch_specs:
+                files = _resolve_files(ddir, dfiles)
+                if not files:
+                    continue
+                intensity = collect_intensity_by_flag(files, sp_s, sp_e, ts_tz=tz)
+                plot_intensity_timeseries(intensity, name, os.path.join(out_folder, png))
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  완료 — 반사율 요약                                            ║")
