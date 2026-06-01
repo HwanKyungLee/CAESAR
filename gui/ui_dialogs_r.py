@@ -710,6 +710,12 @@ class RTrendMonitorDialog(QDialog):
         if all_r:
             self._pw.setYRange(min(all_r) - 0.05, max(all_r) + 0.05, padding=0)
 
+        # 부모 윈도우로 결과 전달 — 이게 없으면 워커 데이터가 이 다이얼로그
+        # 내부 플롯에만 들어가고, app_window 가 연결한 Setup 탭 R/Leff 시계열
+        # (_update_setup_rt_charts)·Daily Run 차트(_update_daily_rt_chart)는
+        # 빈 채로 남는다. 다이얼로그의 data_ready 를 여기서 다시 emit 한다.
+        self.data_ready.emit(cold_results, hot_pns_results, hot_ans_results, out_dir)
+
     def _on_table_row_selected(self):
         """테이블 행 클릭 시 해당 파일의 _R.dat를 읽어 스펙트럼 플롯에 렌더링"""
         sel = self.tableWidget.selectedItems()

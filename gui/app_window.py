@@ -682,63 +682,142 @@ class CAESARAnalyzer(QMainWindow):
              + (len(hot_ans_results) if hot_ans_results else 0))
         self._daily_rt_pw.setTitle(f"R time series — {n} cycles (Cold/Hot)")
 
-    def _update_setup_rt_charts(self, cold_results, hot_pns_results, hot_ans_results):
-        """Populate the R(t) and Leff(t) plots in the Setup tab Cavity Diagnostics panel."""
+    def _update_setup_rt_charts(self, cold_results, hot_pns_results, hot_ans_results, out_dir=None):
+        """Populate the R(t)/Leff(t) plots in the Setup tab Cavity Diagnostics panel.
+
+        시계열 점을 클릭하면 그 파일의 _R.dat 를 읽어 'R(λ) 스펙트럼' 탭에
+        파장별 R 곡선을 그린다(A형). 클릭→파일 매핑을 위해 채널별 결과 리스트와
+        out_dir 을 _setup_rt_click_map 에 저장한다.
+        """
         if not hasattr(self, '_setup_r_trend_pw'):
             return
 
         import datetime as _dt
 
         COLORS = [
-            ('#2196F3', 'Cold'),
-            ('#FF6F00', 'Hot PNs'),
-            ('#D32F2F', 'Hot ANs'),
+            ('#2196F3', 'Cold',    'cold'),
+            ('#FF6F00', 'Hot PNs', 'hot_pns'),
+            ('#D32F2F', 'Hot ANs', 'hot_ans'),
         ]
 
         self._setup_r_trend_pw.clear()
         self._setup_r_trend_pw.addLegend(offset=(10, 10))
         self._setup_leff_pw.clear()
         self._setup_leff_pw.addLegend(offset=(10, 10))
+        # id(PlotDataItem) -> {results, ch_key, color, out_dir}  (점 클릭 매핑용)
+        self._setup_rt_click_map = {}
 
         def _ts(t):
             if isinstance(t, _dt.datetime):
                 return t.replace(tzinfo=None).timestamp()
             return float(t)
 
-        for results, (color, label) in zip(
+        def _register_clickable(pdi, kept, ch_key, color):
+            self._setup_rt_click_map[id(pdi)] = {
+                "results": kept, "ch_key": ch_key,
+                "color": color, "out_dir": out_dir,
+            }
+            try:
+                pdi.sigPointsClicked.connect(self._on_setup_rt_point_clicked)
+            except Exception:
+                pass
+
+        for results, (color, label, ch_key) in zip(
                 [cold_results, hot_pns_results, hot_ans_results], COLORS):
             if not results:
                 continue
-            pts_r = [(r['timestamp'], r['r_mean'])
-                     for r in results
-                     if r.get('r_mean') is not None and r.get('timestamp') is not None]
-            pts_l = [(r['timestamp'], r['leff_mean'])
-                     for r in results
-                     if r.get('leff_mean') is not None and r.get('timestamp') is not None]
-            if pts_r:
-                ts = [_ts(t) for t, _ in pts_r]
-                rv = [v * 100 for _, v in pts_r]
-                self._setup_r_trend_pw.plot(ts, rv,
-                                            pen=pg.mkPen(color, width=2),
-                                            symbol='o', symbolSize=5,
-                                            name=label)
-            if pts_l:
-                ts = [_ts(t) for t, _ in pts_l]
-                lv = [v for _, v in pts_l]
-                self._setup_leff_pw.plot(ts, lv,
-                                         pen=pg.mkPen(color, width=2),
-                                         symbol='s', symbolSize=5,
-                                         name=label)
+            # 클릭 인덱스가 결과와 1:1로 맞도록, 플롯에 쓰는 것과 동일한 필터 리스트 사용
+            kept_r = [r for r in results
+                      if r.get('r_mean') is not None and r.get('timestamp') is not None]
+            kept_l = [r for r in results
+                      if r.get('leff_mean') is not None and r.get('timestamp') is not None]
+            if kept_r:
+                ts = [_ts(r['timestamp']) for r in kept_r]
+                rv = [r['r_mean'] * 100 for r in kept_r]
+                pdi = self._setup_r_trend_pw.plot(ts, rv,
+                                                  pen=pg.mkPen(color, width=2),
+                                                  symbol='o', symbolSize=6,
+                                                  name=label)
+                _register_clickable(pdi, kept_r, ch_key, color)
+            if kept_l:
+                ts = [_ts(r['timestamp']) for r in kept_l]
+                lv = [r['leff_mean'] for r in kept_l]
+                pdi_l = self._setup_leff_pw.plot(ts, lv,
+                                                 pen=pg.mkPen(color, width=2),
+                                                 symbol='s', symbolSize=6,
+                                                 name=label)
+                _register_clickable(pdi_l, kept_l, ch_key, color)
 
         n = ((len(cold_results) if cold_results else 0)
              + (len(hot_pns_results) if hot_pns_results else 0)
              + (len(hot_ans_results) if hot_ans_results else 0))
-        self._setup_r_trend_pw.setTitle(f"R 시계열 — {n} cycles")
+        self._setup_r_trend_pw.setTitle(f"R 시계열 — {n} cycles  (점 클릭 → R(λ) 스펙트럼 탭)")
         self._setup_leff_pw.setTitle(f"Leff 시계열 — {n} cycles")
 
         # Auto-switch to the time-series tab
         if hasattr(self, '_diag_tabs'):
             self._diag_tabs.setCurrentIndex(1)
+
+    def _on_setup_rt_point_clicked(self, plot_item, points, *args):
+        """시계열 점 클릭 → 해당 파일의 _R.dat 를 읽어 R(λ) 스펙트럼 탭에 표시."""
+        rec = getattr(self, '_setup_rt_click_map', {}).get(id(plot_item))
+        if not rec or not points:
+            return
+        try:
+            idx = points[0].index()
+        except Exception:
+            return
+        results = rec["results"]
+        if idx is None or idx < 0 or idx >= len(results):
+            return
+        r = results[idx]
+        fname = r.get("filename", "")
+        out_dir = rec.get("out_dir") or "."
+        file_date = "-".join(fname.split("-")[:3])
+        base = os.path.splitext(fname)[0]
+        ch_subdir = {"cold": "R_Cold", "hot_pns": "R_Hot_PNs",
+                     "hot_ans": "R_Hot_ANs"}.get(rec["ch_key"], "R_Cold")
+        dat_path = os.path.join(out_dir, ch_subdir, file_date, f"{base}_R.dat")
+        if not os.path.exists(dat_path):
+            dat_path = os.path.join(out_dir, file_date, f"{base}_R.dat")
+        roi = r.get("fit_window_nm", (400, 500))
+        self._show_setup_r_spectrum(dat_path, roi, rec["color"])
+
+    def _show_setup_r_spectrum(self, dat_path, roi, color):
+        """R(λ) 스펙트럼 탭(plot_diagnostic)에 _R.dat 의 raw R 점 + 5차 피팅 선을 그림."""
+        if not hasattr(self, 'plot_diagnostic'):
+            return
+        self.p1.clear()
+        try:
+            self.p2.clear()
+        except Exception:
+            pass
+        # 스펙트럼 탭으로 전환
+        if hasattr(self, '_diag_tabs'):
+            self._diag_tabs.setCurrentIndex(0)
+        if not os.path.exists(dat_path):
+            self.plot_diagnostic.setTitle(f"데이터 파일 없음: {os.path.basename(dat_path)}")
+            return
+        try:
+            data = np.loadtxt(dat_path, skiprows=2)
+            wave, r_raw, r_fit = data[:, 0], data[:, 1], data[:, 2]
+            self.p1.plot(wave, r_raw, pen=None, symbol='o', symbolSize=3,
+                         symbolBrush=(150, 150, 150, 150))
+            self.p1.plot(wave, r_fit, pen=pg.mkPen(color, width=2.5))
+            try:
+                roi_min, roi_max = roi
+                self.p1.addItem(pg.LinearRegionItem(
+                    [roi_min, roi_max], movable=False, brush=(0, 255, 0, 20)))
+            except Exception:
+                pass
+            self.plot_diagnostic.setLabel('left', 'Reflectance R', color='b')
+            self.plot_diagnostic.setLabel('bottom', 'Wavelength (nm)')
+            self.plot_diagnostic.setTitle(f"R(λ) — {os.path.basename(dat_path)}")
+            fin = np.isfinite(r_fit)
+            if fin.any():
+                self.p1.vb.setYRange(float(np.nanmin(r_fit[fin])), 1.0, padding=0.1)
+        except Exception as e:
+            self.plot_diagnostic.setTitle(f"플롯 실패: {e}")
 
     def setup_cavity_tab(self):
         """Configure the layout for the Pre-Analysis Cavity Setup tab."""
