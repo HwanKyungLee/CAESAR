@@ -31,6 +31,8 @@ Notes
 * --raw_dir is searched RECURSIVELY (month subfolders 2026-05, 2026-06 OK).
 * Timestamp = encoded bytepack relative timing anchored to the file mtime
   (last row = mtime; others placed by their true bytepack spacing).
+* Timestamps are stored as naive datetimes (KST, tzinfo stripped) so
+  matplotlib displays them correctly without UTC conversion.
 """
 from __future__ import annotations
 import argparse, os, re, sys
@@ -76,10 +78,11 @@ def row_timestamp(mtime: datetime, bp_sec: float, bp_last: float) -> datetime:
         t(row) = mtime - (bp_last - bp_sec)
     Each file is anchored independently, so pauses between files don't smear.
     Falls back to mtime if the bytepack value is missing.
+    tzinfo is stripped so matplotlib plots as KST without UTC conversion.
     """
     if np.isnan(bp_sec) or np.isnan(bp_last):
-        return mtime
-    return mtime - timedelta(seconds=(bp_last - bp_sec))
+        return mtime.replace(tzinfo=None)
+    return (mtime - timedelta(seconds=(bp_last - bp_sec))).replace(tzinfo=None)
 
 
 def _stats(seg: np.ndarray):
