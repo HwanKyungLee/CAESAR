@@ -90,7 +90,9 @@ timestamp in centiseconds since the start of the year:
 
 The 2026 ``ref_sec`` per 박사님 MATLAB code is **3 723 840 000**. For
 practical use the file mtime is usually a good enough start-of-file
-timestamp; we expose both.
+timestamp; we expose both. NOTE: the absolute ``ref_sec`` offset has been
+seen to be wrong by hours on 2026 Yeosu files, but the *relative* row-to-row
+bytepack spacing is reliable (~0.97 s/row) — see ``ParsedRow.bytepack_sec``.
 """
 from __future__ import annotations
 
@@ -102,9 +104,9 @@ from typing import Iterator
 
 import numpy as np
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 # Constants — single source of truth
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 
 META_COLS = 2053            # 0..2052 inclusive
 CH_PIXELS = 2048            # 2048 pixels per spectral channel
@@ -168,9 +170,9 @@ def _is_sentinel(v: float) -> bool:
     return (not np.isfinite(v)) or (v in SENTINEL_RAW)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 # HK column maps — explicit name → (absolute col, scale, units, kind)
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 
 # kind: "temp" → ÷100 = °C, "press" → ×0.6895 = mbar, "raw" → use as-is
 HotHKMap: dict[str, tuple[int, float, str, str]] = {
@@ -196,21 +198,37 @@ ColdHKMap: dict[str, tuple[int, float, str, str]] = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 # Public dataclasses
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class ParsedRow:
     """One parsed row from a raw .dat file."""
     row_idx: int
-    time_centisec: float          # raw col1 (centiseconds within scan cycle, resets per cycle)
+    time_centisec: float          # raw col1 (high 16 bits of the LabVIEW bytepack)
+    time_lo: float                # raw col0 (low 16 bits of the LabVIEW bytepack)
     exposure: float
     temp_ccd_C: float
     flag: int
     hk: dict[str, float]          # name → value in physical units (°C, mbar, ...)
     # Spectrum slices are not stored on the row by default to save memory.
     # Call .spectrum(...) on the parser to get them on demand.
+
+    @property
+    def bytepack_sec(self) -> float:
+        """LabVIEW bytepack ((col0<<16)|col1)/100 → seconds (this-year scale).
+
+        Returns NaN if either half is missing. The *absolute* offset depends
+        on LABVIEW_REF_SEC_2026 (which can be wrong), but the *relative*
+        spacing between rows is reliable (~0.97 s/row), so this is ideal for
+        anchoring a file's rows to its mtime:
+            t(row) = mtime - (bytepack_sec[last] - bytepack_sec[row])
+        """
+        import math
+        if math.isnan(self.time_lo) or math.isnan(self.time_centisec):
+            return float("nan")
+        return ((int(self.time_lo) << 16) | int(self.time_centisec)) / 100.0
 
 
 @dataclass
@@ -224,9 +242,9 @@ class FileLayout:
     mtime: datetime               # file mtime in KST
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 # Parser
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 
 class RawParser:
     """Streaming parser for CAESAR Araon Mega-Matrix .dat files.
@@ -246,7 +264,7 @@ class RawParser:
         self.path = path
         self.layout = self._detect_layout(path)
 
-    # ── Layout detection ─────────────────────────────────────────────────────
+    # ── Layout detection ────────────────────────────────────────────────────────
     @staticmethod
     def _detect_layout(path: str) -> FileLayout:
         """Read first non-empty data row to determine ncols, then classify."""
@@ -299,6 +317,7 @@ class RawParser:
             row = ParsedRow(
                 row_idx=i,
                 time_centisec=self._safe_float(toks[COL_TIME_HI]),
+                time_lo=self._safe_float(toks[COL_TIME_LO]),
                 exposure=self._safe_float(toks[COL_EXPOSURE]),
                 temp_ccd_C=self._safe_float(toks[COL_TEMP_CCD]) / 100.0,
                 flag=flag,
@@ -368,6 +387,7 @@ class RawParser:
             row = ParsedRow(
                 row_idx=i,
                 time_centisec=self._safe_float(toks[COL_TIME_HI]),
+                time_lo=self._safe_float(toks[COL_TIME_LO]),
                 exposure=self._safe_float(toks[COL_EXPOSURE]),
                 temp_ccd_C=self._safe_float(toks[COL_TEMP_CCD]) / 100.0,
                 flag=flag,
@@ -382,7 +402,7 @@ class RawParser:
             }
             yield row, specs
 
-    # ── Grouping helpers ─────────────────────────────────────────────────────
+    # ── Grouping helpers ──────────────────────────────────────────────────────
     def collect_spectra_by_flag(
         self,
         flags: set[int],
@@ -403,7 +423,9 @@ class RawParser:
         """Decode the LabVIEW timestamp from cols 0-1 into a KST datetime.
 
         Returns ``None`` if the bytepack value is not plausible (e.g. file
-        uses a different time encoding).
+        uses a different time encoding). NOTE: the *absolute* result can be
+        off by hours on 2026 Yeosu files (ref_sec mismatch). For plotting,
+        prefer anchoring ``ParsedRow.bytepack_sec`` to the file mtime.
         """
         # We need col0 (low 16 bits) and col1 (high 16 bits) — but
         # iter_rows() didn't keep col0. Re-read just that row's first two
@@ -432,7 +454,7 @@ class RawParser:
         """
         return self.layout.mtime + timedelta(seconds=row.row_idx * row_period_sec)
 
-    # ── Utility ──────────────────────────────────────────────────────────────
+    # ── Utility ────────────────────────────────────────────────────────────
     @staticmethod
     def _safe_float(s: str) -> float:
         try:

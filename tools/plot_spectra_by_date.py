@@ -29,7 +29,8 @@ python tools/plot_spectra_by_date.py --date 20260529 20260530 20260601 \\
 Notes
 -----
 * --raw_dir is searched RECURSIVELY (month subfolders 2026-05, 2026-06 OK).
-* Timestamp = file mtime (close time) anchored backward at 0.97 s/row.
+* Timestamp = encoded bytepack relative timing anchored to the file mtime
+  (last row = mtime; others placed by their true bytepack spacing).
 """
 from __future__ import annotations
 import argparse, os, re, sys
@@ -64,14 +65,21 @@ def find_files(raw_dir: str, prefix: str) -> list[str]:
     return sorted(hits)
 
 
-def row_timestamp(mtime: datetime, row_idx: int, n_rows: int) -> datetime:
-    """Timestamp via mtime (= file-close time) anchored backward.
+def row_timestamp(mtime: datetime, bp_sec: float, bp_last: float) -> datetime:
+    """Timestamp = bytepack relative timing anchored to the file's mtime.
 
-    mtime is the moment the file was last written.  Rows were written
-    sequentially at ~0.97 s/row, so row 0 started ≈ n_rows*0.97 s before
-    mtime and row i is at mtime - (n_rows - 1 - i)*0.97 s.
+    The encoded bytepack ((col0<<16)|col1)/100 gives reliable *relative*
+    row spacing (true per-row timing, including exposure differences between
+    ZA/He/sampling), but its absolute offset is unreliable. So we anchor the
+    last row to mtime (file-close time) and place every other row by its
+    bytepack distance from the last:
+        t(row) = mtime - (bp_last - bp_sec)
+    Each file is anchored independently, so pauses between files don't smear.
+    Falls back to mtime if the bytepack value is missing.
     """
-    return mtime - timedelta(seconds=(n_rows - 1 - row_idx) * 0.97)
+    if np.isnan(bp_sec) or np.isnan(bp_last):
+        return mtime
+    return mtime - timedelta(seconds=(bp_last - bp_sec))
 
 
 def _stats(seg: np.ndarray):
@@ -165,9 +173,11 @@ def main() -> None:
             if ch_key is None:
                 continue
             mtime = parser.layout.mtime
-            # Collect all rows first so we know n_rows for timestamp back-calc
+            # Collect all rows first so the LAST bytepack value anchors the file
             file_rows = list(parser.iter_rows_with_spectra(channels=(ch_key,)))
-            n_rows = len(file_rows)
+            bp_last = next(
+                (r.bytepack_sec for r, _ in reversed(file_rows)
+                 if not np.isnan(r.bytepack_sec)), float("nan"))
             for row, specs in file_rows:
                 if row.flag not in target_flags:
                     continue
@@ -175,7 +185,7 @@ def main() -> None:
                 if sp is None or sp.size == 0:
                     continue
                 raw_pk[row.flag].append(float(np.nanmax(sp[p_lo:p_hi])))
-                raw_ts[row.flag].append(row_timestamp(mtime, row.row_idx, n_rows))
+                raw_ts[row.flag].append(row_timestamp(mtime, row.bytepack_sec, bp_last))
         added = {flag_labels[f]: len(raw_ts[f]) - n0[f] for f in sorted(target_flags)}
         print(f"  {prefix}: {len(files)} file(s)  rows {added}")
 
