@@ -99,14 +99,32 @@ class ReflectanceCalculator:
         with np.errstate(divide="ignore", invalid="ignore"):
             omr_d_raw = self.rl_factor * (ratio_smooth * alpha_za - alpha_he) / (1.0 - ratio_smooth)
         
-        r_curve_raw = np.clip(1.0 - omr_d_raw * self.cavity_len, 0.0, 1.0)
+        # 비물리 판정용 *unclipped* R.
+        # 박사님 MATLAB(Rs2.m:96)은 clip 없이 R1 을 그대로 둬서 ratio>=1 인
+        # 사이클이 R>1 로 드러나 육안에서 걸러진다. 우리 파이프라인은 자동
+        # 처리라, clip 으로 1.0 에 가두면(예전 동작) 그 비물리 사이클이
+        # R=1.000 으로 위장돼 'R>0.90' 품질체크를 통과해 트렌드에 들어갔다.
+        # → 유효성은 clip 전(unclipped) 값으로 판정하고, clip 된 r_curve_raw 는
+        #   저장·플롯(0..1)용으로만 쓴다.
+        r_curve_unclipped = 1.0 - omr_d_raw * self.cavity_len
+        r_curve_raw = np.clip(r_curve_unclipped, 0.0, 1.0)
 
         # 4. 🌟 [MATLAB 로직 이식] 채널별 동적 ROI 설정 및 품질 체크
         # 지정된 파장(roi_min ~ roi_max) 구간만 평가 및 피팅에 사용
         roi_mask = (wave_nm >= roi_min) & (wave_nm <= roi_max)
-        
-        # R값이 물리적으로 정상인(0.9 이상) 픽셀만 골라냄
-        valid_mask = roi_mask & np.isfinite(r_curve_raw) & (r_curve_raw > 0.90)
+
+        # ── 물리적으로 유효한 픽셀만 선택 ────────────────────────────────
+        #  (a) ratio < 1 : 고흡수 ZA 는 저흡수 He 보다 어두워야 한다. ratio>=1 이면
+        #      분모 (1-ratio)<=0 → omr_d<=0 → R>=1 (비물리). 이 픽셀이 예전엔
+        #      clip 때문에 R=1.0 으로 위장돼 통과, R_mean=1.000 가짜값을 만들었다.
+        #  (b) 0.90 < R_unclipped < 1.0 : clip 전 값이 물리적 반사율 범위(1 미만).
+        valid_mask = (
+            roi_mask
+            & np.isfinite(r_curve_unclipped)
+            & (ratio_smooth < 1.0)
+            & (r_curve_unclipped > 0.90)
+            & (r_curve_unclipped < 1.0)
+        )
         
         n_roi_pixels = np.sum(roi_mask)
         if n_roi_pixels > 0:
@@ -116,8 +134,15 @@ class ReflectanceCalculator:
 
         if self.valid_fraction < min_valid_fraction:
             self.quality_ok = False
-            # 에러 메시지에 현재 ROI 대역을 표시
-            raise RuntimeError(f"R-curve quality check failed. Valid inside ROI ({roi_min}-{roi_max}nm): {self.valid_fraction * 100:.0f}%")
+            # ratio>=1 이 ROI 대부분을 차지하면(ZA>=He, 비물리) 그 사실을 명시
+            roi_ratio = ratio_smooth[roi_mask]
+            extra = ""
+            if roi_ratio.size and float(np.median(roi_ratio)) >= 1.0:
+                extra = " — ZA>=He (ratio>=1) 비물리 사이클"
+            raise RuntimeError(
+                f"R-curve quality check failed. Valid inside ROI "
+                f"({roi_min}-{roi_max}nm): {self.valid_fraction * 100:.0f}%{extra}"
+            )
         else:
             self.quality_ok = True
 
