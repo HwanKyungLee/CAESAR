@@ -29,7 +29,7 @@ plt.rcParams["axes.unicode_minus"] = False
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HOT_DIR = os.environ.get(
     "CAESAR_HOT_DIR",
-    r"C:\Doasis_Work\raw,alpha_by_nam\CAESAR_Hot\2026-05",
+    r"D:\Yeosu_2026\CAESAR_Hot\2026-05",
 )
 OUT_DIR = os.environ.get(
     "CAESAR_TPRED_OUT",
