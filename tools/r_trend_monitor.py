@@ -83,6 +83,19 @@ except ImportError as e:
     # 로그에 표시하고 finished("")를 emit한다.
     raise ImportError(f"필수 모듈을 찾을 수 없습니다: {e}") from e
 
+# core/ 는 저장소 루트에 있다. r_batch_calculator import 시 루트가 sys.path에 추가되지만
+# 방어적으로 한 번 더 보장한다 (intensity-index 진단에서 flag 상수가 필요).
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from core.raw_parser import (   # noqa: E402
+    FLAG_AMBIENT as RP_FLAG_AMBIENT,   # = 1   (대기 sampling)
+    FLAG_ZA      as RP_FLAG_ZA,        # = 500 (Zero Air)
+    FLAG_HE      as RP_FLAG_HE,        # = 510 (Helium)
+    COL_FLAG,                          # = 4   (state flag 컬럼)
+    COL_TIME_LO, COL_TIME_HI,          # = 0, 1 (bytepack 타임스탬프)
+)
+
 # ════════════════════════════════════════════════════════════════
 #  유틸리티 함수 (반드시 설정보다 위에 있어야 합니다)
 # ════════════════════════════════════════════════════════════════
@@ -159,6 +172,13 @@ HOT_FILES  = None
 SHOW_LEFF  = True
 SHOW_PLOT  = False
 PLOT_DPI   = 150
+
+# ── He/ZA 인덱싱 검증용 intensity 시계열 진단 (남 우희 박사님 요청) ──────────
+# R 그림을 낼 때 함께 그려서, ZA/He flag 인덱싱이 제대로 잡혔는지(=평소 amb보다
+# 높은 신호로 또렷이 구분되는지)와 ZA가 1시간에 한 번씩 주입되는지 눈으로
+# 더블체크한다. ambient(flag=1)는 옅은 배경, ZA/He는 검정 마커로 강조한다.
+SHOW_INTENSITY_INDEX = True
+INTENSITY_AMBIENT_STRIDE = 10    # ambient는 N행마다 1점만 (가독성·속도). ZA/He는 전부.
 # ════════════════════════════════════════════════════════════════
 
 _DATE_RE  = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
@@ -187,6 +207,20 @@ def _parse_timestamp(filepath: str) -> datetime:
     except OSError:
         return datetime.now(tz=_KST_TZ)
 
+def _resolve_files(directory: str, file_list=None) -> list[str]:
+    """scan_directory와 intensity 진단이 **동일한** 파일 목록을 쓰도록 일원화.
+
+    file_list가 주어지면 그 중 실재하는 파일만, 아니면 directory(없으면 하위
+    폴더까지 재귀) 안의 *.dat 를 파일명 순으로 반환한다.
+    """
+    if file_list is not None:
+        return sorted(str(f) for f in file_list if os.path.isfile(str(f)))
+    files = sorted(glob.glob(os.path.join(directory, FILE_PATTERN)))
+    if not files:
+        files = sorted(glob.glob(os.path.join(directory, "**", FILE_PATTERN), recursive=True))
+    return files
+
+
 def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                    ts_tz=None,
@@ -201,12 +235,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     * 보정 실패 파일에서 He 스캔이 나와도 last_he를 오염시키지 않음.
     * quality_ok 기준을 실측 valid_fraction(~44 %)에 맞게 0.30으로 완화.
     """
-    if file_list is not None:
-        files = sorted(str(f) for f in file_list if os.path.isfile(str(f)))
-    else:
-        files = sorted(glob.glob(os.path.join(directory, FILE_PATTERN)))
-        if not files:
-            files = sorted(glob.glob(os.path.join(directory, "**", FILE_PATTERN), recursive=True))
+    files = _resolve_files(directory, file_list)
 
     if not files:
         print(f"  .dat 파일 없음: {directory}")
@@ -486,12 +515,16 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
     plt.close(fig)
 
 def plot_r_curves_per_channel(results, channel_name, color, out_path):
-    """Plot every scan's R(λ) curve plus the mean spectrum for one channel.
+    """채널별 R / Path Length(Leff) / α_cavity 3패널 (박사님 Fig 42·43 스타일).
 
-    Mirrors 박사님 Rs2.m line 144 (``plot(wv, R1, '.', wv, Rr1, 'g')``):
-    each scan's R(λ) is drawn at low opacity so day-to-day stability is
-    visible, with the mean and ±1σ band overlaid.  When a fit window
-    was active the corresponding wavelength range is shaded.
+    R 패널: raw R(보간 전)을 점으로 옅게 깔고 5차 다항식 보간 R을 초록 선으로
+    덮는다 (박사님 Rs2.m line 144 ``plot(wv, R1, '.', wv, Rr1, 'g')``). Leff·α
+    패널은 스캔별 곡선 + mean ± 1σ.
+
+    ── α_cavity 계산 ────────────────────────────────────────────────
+    α_cavity = (1 − R) / d 는 **5차 다항식으로 보간된 R**(r_curve = r_curve_fit)
+    에서 계산한다 (raw R 아님). reflectance_calc.calculate()의 omr_d_fitted 와
+    동일한 정의이며, Leff = 1/α (km) 도 같은 fitted R에서 유도된다.
     """
     if not results:
         print(f"  [R(λ)] {channel_name}: no data")
@@ -508,35 +541,256 @@ def plot_r_curves_per_channel(results, channel_name, color, out_path):
     waves   = [w[:n_min] for w in waves]
     curves  = [c[:n_min] for c in curves]
     wave_common = np.asarray(waves[0], dtype=float)
-    r_stack     = np.asarray(curves, dtype=float)
+    r_stack     = np.asarray(curves, dtype=float)   # fitted R per scan (ROI)
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-
-    # Per-scan overlay (alpha blending)
-    for r in r_stack:
-        ax.plot(wave_common, r, color=color, alpha=0.07, lw=0.6)
-
-    # Mean + ±1σ
-    r_mean = np.mean(r_stack, axis=0)
-    r_std  = np.std(r_stack, axis=0)
-    ax.fill_between(wave_common, r_mean - r_std, r_mean + r_std,
-                    color=color, alpha=0.25, label="±1σ across scans")
-    ax.plot(wave_common, r_mean, color=color, lw=1.8, label="mean R(λ)")
-
-    # Highlight fit window when one was used consistently
+    # Fit window (있으면 raw R을 같은 ROI로 클립하는 데도 쓴다)
     fws = {r.get("fit_window_nm") for r in results}
     fws.discard(None)
-    if len(fws) == 1:
-        fw = fws.pop()
-        ax.axvspan(fw[0], fw[1], alpha=0.06, color="green",
-                   label=f"fit window {fw[0]:.0f}-{fw[1]:.0f} nm")
+    fw = fws.pop() if len(fws) == 1 else None
 
-    ax.set_xlabel("Wavelength (nm)")
-    ax.set_ylabel("Reflectivity R(λ)")
-    ax.set_title(f"CAESAR Pro — {channel_name} R(λ) ({len(r_stack)} scans)")
+    # raw R(보간 전)을 같은 ROI 격자로 클립해 stack — 박사님 Fig 42의 파란 점
+    raw_stack = None
+    raw_list = []
+    for r in results:
+        wf, rr = r.get("wave_nm_full"), r.get("r_curve_raw")
+        if wf is None or rr is None:
+            raw_list = None
+            break
+        wf = np.asarray(wf, dtype=float)
+        rr = np.asarray(rr, dtype=float)
+        m = (wf >= fw[0]) & (wf <= fw[1]) if fw is not None else np.ones(wf.shape, bool)
+        raw_list.append(rr[m][:n_min])
+    if raw_list:
+        nraw = min(n_min, min(len(x) for x in raw_list))
+        raw_stack = np.asarray([x[:nraw] for x in raw_list], dtype=float)
+
+    # α_cavity = (1 − R_fit)/d  [cm⁻¹],  Leff = 1/α  [km]  (fitted R 사용)
+    alpha_stack = (1.0 - r_stack) / CAVITY_LEN
+    alpha_safe  = np.maximum(alpha_stack, 1e-9)      # div0/음수 방지 floor
+    leff_stack  = 1.0 / alpha_safe * 1e-5            # cm → km
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True, squeeze=False)
+    ax_r, ax_l, ax_a = axes[0, 0], axes[1, 0], axes[2, 0]
+
+    def _overlay(ax, stack, ylabel, mean_label):
+        for row in stack:
+            ax.plot(wave_common, row, color=color, alpha=0.07, lw=0.6)
+        m = np.nanmean(stack, axis=0)
+        s = np.nanstd(stack, axis=0)
+        ax.fill_between(wave_common, m - s, m + s, color=color, alpha=0.25,
+                        label="±1σ across scans")
+        ax.plot(wave_common, m, color=color, lw=1.8, label=mean_label)
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=8)
+
+    # ── R 패널: raw R 점(파랑/채널색) + 5차 poly-fit 선(초록) — 박사님 Fig 42 ──
+    # 박사님 Rs2.m line 144  plot(wv, R1, '.', wv, Rr1, 'g')  스타일.
+    if raw_stack is not None and raw_stack.size:
+        wave_raw = wave_common[:raw_stack.shape[1]]
+        for row in raw_stack:
+            ax_r.plot(wave_raw, row, ".", color=color, ms=1.5, alpha=0.10)
+        # 범례용 대표 점 1개 + 평균 raw
+        ax_r.plot([], [], ".", color=color, ms=6, label="raw R (per-scan points)")
+    r_fit_mean = np.nanmean(r_stack, axis=0)
+    r_fit_std  = np.nanstd(r_stack, axis=0)
+    ax_r.fill_between(wave_common, r_fit_mean - r_fit_std, r_fit_mean + r_fit_std,
+                      color="green", alpha=0.15, label="±1σ (fit)")
+    ax_r.plot(wave_common, r_fit_mean, color="green", lw=2.0,
+              label="mean R(λ) — 5th-poly fit")
+    ax_r.set_ylabel("Mirror Reflectivity R(λ)")
+    ax_r.grid(True, alpha=0.3)
+    ax_r.legend(loc="best", fontsize=8)
+
+    _overlay(ax_l, leff_stack, "Path Length Leff [km]",    "mean Leff")
+    _overlay(ax_a, alpha_stack, "α cavity [cm⁻¹]",         "mean α=(1−R)/d")
+
+    # Highlight fit window when one was used consistently
+    if fw is not None:
+        for ax in (ax_r, ax_l, ax_a):
+            ax.axvspan(fw[0], fw[1], alpha=0.06, color="green")
+
+    ax_a.set_xlabel("Wavelength (nm)")
+    fig.suptitle(f"CAESAR Pro — {channel_name}  R / Leff / α_cavity "
+                 f"({len(r_stack)} scans, cavity={CAVITY_LEN} cm)", fontsize=12)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    print(f"  [PNG] {out_path}")
+    if SHOW_PLOT: plt.show()
+    plt.close(fig)
+
+
+
+# ════════════════════════════════════════════════════════════════
+#  He/ZA 인덱싱 검증용 intensity 시계열 (남 우희 박사님 요청)
+# ════════════════════════════════════════════════════════════════
+def _bytepack_sec(c0, c1) -> float:
+    """col0(low16)·col1(high16)를 LabVIEW bytepack 초로 변환.
+
+    절대 오프셋은 부정확할 수 있으나 행 간 상대 간격(~0.97초/행)은 신뢰할 수
+    있어, 파일 mtime에 마지막 행을 앵커링해 각 행의 시각을 추정하는 데 쓴다.
+    (plot_spectra_by_date.py와 동일한 접근)
+    """
+    try:
+        return ((int(float(c0)) << 16) | int(float(c1))) / 100.0
+    except (ValueError, TypeError):
+        return float("nan")
+
+
+def _safe_peak(tok: str) -> float:
+    try:
+        return float(tok)
+    except (ValueError, TypeError):
+        return float("nan")
+
+
+def collect_intensity_by_flag(files: list[str], spec_start: int, spec_end: int,
+                              ts_tz, peak_lo: int = 0, peak_hi: int = 2048,
+                              ambient_stride: int = INTENSITY_AMBIENT_STRIDE
+                              ) -> tuple[dict[int, dict], list[tuple[int, str]]]:
+    """파일들에서 ambient/ZA/He 행별 peak intensity를 시각·scan index와 함께 수집.
+
+    반환: ``(series, boundaries)``
+      * ``series[flag]`` = ``{"t": times, "idx": scan_index, "pk": peaks}``
+        (flag ∈ {1, 500, 510}).
+        - ``t``   : 파일 mtime(ts_tz 적용)에 마지막 행 bytepack을 앵커링한 naive
+                    datetime (R-trend 플롯 x축과 동일한 tz 규약).
+        - ``idx`` : 모든 파일을 이어붙인 전역 scan-index (박사님 Fig 41/66 x축).
+      * ``boundaries`` = ``[(file_start_idx, basename), ...]`` — index 플롯에서
+        파일 경계 세로선/라벨용.
+
+    성능
+    ----
+    R 계산용 scan_directory 와 별개의 2차 패스이지만, ambient 행은 매
+    ``ambient_stride`` 번째만 스펙트럼을 파싱(앞 5컬럼만 부분 split해 flag/시각을
+    먼저 확인)하므로 대부분의 행은 저비용으로 건너뛴다. ZA/He 행은 전부 읽어
+    주입 블록(1시간 1회 ZA, 3시간 1회 He)이 또렷이 보이게 한다.
+    """
+    flags_want = (RP_FLAG_AMBIENT, RP_FLAG_ZA, RP_FLAG_HE)
+    series: dict[int, dict] = {f: {"t": [], "idx": [], "pk": []} for f in flags_want}
+    boundaries: list[tuple[int, str]] = []
+    lo = spec_start + max(0, peak_lo)
+    hi = min(spec_end, spec_start + peak_hi)
+    stride = max(1, int(ambient_stride))
+    global_idx = 0   # 모든 파일을 이어붙인 전역 행 인덱스
+
+    for fp in files:
+        if not os.path.isfile(fp):
+            continue
+        boundaries.append((global_idx, os.path.basename(fp)))
+        mt = datetime.fromtimestamp(os.path.getmtime(fp), tz=ts_tz)
+        rows: list[tuple[int, int, float, float]] = []   # (flag, idx, bytepack_sec, peak)
+        amb_count = 0
+        last_bp = float("nan")
+        with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                sep = "\t" if "\t" in s else None
+                # 앞 5컬럼만 우선 분리 → flag/시각 확인 (건너뛸 행은 전체 split 회피)
+                head = s.split(sep, 5) if sep else s.split(None, 5)
+                if len(head) <= COL_FLAG:
+                    continue
+                try:
+                    flag = int(float(head[COL_FLAG]))
+                except ValueError:
+                    continue
+                # 데이터 행이 확정된 시점에 전역 인덱스 1 증가 (박사님 row index와 정렬)
+                row_idx = global_idx
+                global_idx += 1
+                bp = _bytepack_sec(head[COL_TIME_LO], head[COL_TIME_HI])
+                if bp == bp:                 # NaN 이 아니면 (NaN != NaN)
+                    last_bp = bp
+                if flag not in flags_want:
+                    continue
+                if flag == RP_FLAG_AMBIENT:
+                    amb_count += 1
+                    if amb_count % stride:
+                        continue
+                toks = s.split(sep) if sep else s.split()
+                if len(toks) <= hi:
+                    continue
+                try:
+                    vals = np.array(toks[lo:hi], dtype=float)
+                except ValueError:
+                    vals = np.fromiter(
+                        (_safe_peak(t) for t in toks[lo:hi]),
+                        dtype=float, count=hi - lo,
+                    )
+                vals = vals[np.isfinite(vals)]
+                if vals.size == 0:
+                    continue
+                rows.append((flag, row_idx, bp, float(np.max(vals))))
+
+        for flag, row_idx, bp, pk in rows:
+            if bp != bp or last_bp != last_bp:
+                t = mt.replace(tzinfo=None)
+            else:
+                t = (mt - timedelta(seconds=(last_bp - bp))).replace(tzinfo=None)
+            series[flag]["t"].append(t)
+            series[flag]["idx"].append(row_idx)
+            series[flag]["pk"].append(pk)
+
+    for f in flags_want:
+        series[f] = {k: np.array(v) for k, v in series[f].items()}
+    return series, boundaries
+
+
+def _scatter_flags(ax, series: dict, xkey: str, channel_color: str):
+    """ambient(채널색 옅게) + ZA/He(검정 강조)를 한 axes에 그리는 공통 루틴.
+
+    xkey: "t"(시간) 또는 "idx"(scan index). ZA=검정 빈 원, He=검정 채운 삼각형.
+    amb median 참조선을 그려 ZA/He가 그 위로 또렷이 떠야 인덱싱이 정상임을 본다.
+    반환: 데이터가 하나라도 있으면 True.
+    """
+    amb, za, he = (series.get(f, {}) for f in (RP_FLAG_AMBIENT, RP_FLAG_ZA, RP_FLAG_HE))
+    amb_x, amb_p = amb.get(xkey, np.array([])), amb.get("pk", np.array([]))
+    za_x,  za_p  = za.get(xkey,  np.array([])), za.get("pk",  np.array([]))
+    he_x,  he_p  = he.get(xkey,  np.array([])), he.get("pk",  np.array([]))
+    if amb_x.size == 0 and za_x.size == 0 and he_x.size == 0:
+        return False
+
+    if amb_x.size:
+        ax.scatter(amb_x, amb_p, s=7, c=channel_color, marker=".", alpha=0.30,
+                   zorder=1, label=f"amb / sampling ({amb_x.size})")
+    if amb_p.size:
+        amb_med = float(np.nanmedian(amb_p))
+        ax.axhline(amb_med, color="seagreen", linestyle="--", linewidth=0.8,
+                   alpha=0.6, label=f"amb median = {amb_med:,.0f}")
+    if za_x.size:
+        ax.scatter(za_x, za_p, s=30, facecolors="none", edgecolors="black",
+                   marker="o", linewidths=0.9, alpha=0.9, zorder=3,
+                   label=f"ZA (500, {za_x.size})")
+    if he_x.size:
+        ax.scatter(he_x, he_p, s=34, c="black", marker="^", alpha=0.9,
+                   zorder=4, label=f"He (510, {he_x.size})")
+    ax.set_ylabel("Peak intensity (counts)")
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=9)
+    ax.legend(fontsize=8, loc="best")
+    return True
 
+
+def plot_intensity_timeseries(series: dict, channel_name: str, out_path: str,
+                              color: str = "0.4"):
+    """ZA/He 인덱싱 검증용 intensity **시간축** 시계열 (전체 기간 1장).
+
+    ZA가 ~1시간 간격으로 묶여 보이는지(주입 cadence) 확인하기 좋다.
+    """
+    fig, ax = plt.subplots(figsize=(14, 5))
+    if not _scatter_flags(ax, series, "t", color):
+        print(f"  [Intensity-time] {channel_name}: 데이터 없음 — 스킵")
+        plt.close(fig); return
+    ax.set_xlabel("Date / Time (KST)")
+    ax.set_title(
+        f"CAESAR Pro - {channel_name} Intensity time series\n"
+        "He/ZA indexing check (ZA/He should sit above amb; ZA injected ~1/hour)"
+    )
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d\n%H:%M"))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.setp(ax.xaxis.get_majorticklabels(), fontsize=7)
     plt.tight_layout()
     os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
@@ -544,6 +798,34 @@ def plot_r_curves_per_channel(results, channel_name, color, out_path):
     if SHOW_PLOT: plt.show()
     plt.close(fig)
 
+
+def plot_intensity_index(series: dict, boundaries: list, channel_name: str,
+                         out_path: str, color: str = "steelblue"):
+    """ZA/He 인덱싱 검증용 intensity **scan-index** 시계열 (박사님 Fig 41/66 스타일).
+
+    x축은 모든 파일을 이어붙인 전역 scan index. ambient를 채널색으로 옅게 깔고
+    ZA/He를 검정으로 덮어, 주입 구간에서 검정 점이 ambient 밴드보다 위로 솟는지
+    행 단위로 확인한다. 파일 경계는 옅은 세로선으로 표시한다.
+    """
+    fig, ax = plt.subplots(figsize=(14, 5))
+    if not _scatter_flags(ax, series, "idx", color):
+        print(f"  [Intensity-idx] {channel_name}: 데이터 없음 — 스킵")
+        plt.close(fig); return
+    # 파일 경계 세로선 (너무 많으면 생략)
+    if 1 < len(boundaries) <= 40:
+        for start_idx, _name in boundaries[1:]:
+            ax.axvline(start_idx, color="0.85", linewidth=0.6, zorder=0)
+    ax.set_xlabel("Scan index (all files concatenated)")
+    ax.set_title(
+        f"CAESAR Pro - {channel_name} Intensity vs scan index\n"
+        "He/ZA indexing check (black ZA/He markers should land on elevated rows)"
+    )
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    print(f"  [PNG] {out_path}")
+    if SHOW_PLOT: plt.show()
+    plt.close(fig)
 
 
 def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
@@ -656,6 +938,31 @@ def main():
         if results_cold:    plot_r_curves_per_channel(results_cold,    "Cold",        "steelblue",  os.path.join(out_folder, "R_curve_Cold.png"))
         if results_hot_pns: plot_r_curves_per_channel(results_hot_pns, "Hot PNs(roi1)", "darkorange", os.path.join(out_folder, "R_curve_Hot_PNs.png"))
         if results_hot_ans: plot_r_curves_per_channel(results_hot_ans, "Hot ANs(roi2)", "crimson",    os.path.join(out_folder, "R_curve_Hot_ANs.png"))
+
+        # ── He/ZA 인덱싱 검증용 intensity 시계열 (남 우희 박사님 요청) ──────
+        # R 그림과 같은 파일을 다시 읽어 ambient/ZA/He peak intensity를 시간순으로
+        # 그린다. ZA/He가 amb 위로 또렷이 떠야 인덱싱이 정상이고, ZA 점이 ~1시간
+        # 간격으로 묶여 보여야 주입 cadence가 정상이다.
+        if SHOW_INTENSITY_INDEX:
+            print(f"\n{bar}\n  intensity 시계열 (He/ZA 인덱싱 체크)\n{bar}")
+            ch_specs = [
+                ("Cold",          COLD_DIR, COLD_FILES, SPEC_START_DEFAULT, SPEC_END_DEFAULT, COLD_TS_TZ,
+                 "steelblue", "Cold"),
+                ("Hot PNs(roi1)", HOT_DIR,  HOT_FILES,  SPEC_START_DEFAULT, SPEC_END_DEFAULT, HOT_TS_TZ,
+                 "darkorange", "Hot_PNs"),
+                ("Hot ANs(roi2)", HOT_DIR,  HOT_FILES,  SPEC_START_ANS,     SPEC_END_ANS,     HOT_ANS_TS_TZ,
+                 "crimson", "Hot_ANs"),
+            ]
+            for name, ddir, dfiles, sp_s, sp_e, tz, col, tag in ch_specs:
+                files = _resolve_files(ddir, dfiles)
+                if not files:
+                    continue
+                series, boundaries = collect_intensity_by_flag(files, sp_s, sp_e, ts_tz=tz)
+                # 박사님 Fig 41/66 스타일 (scan index) + 전체 기간 time축, 둘 다 출력
+                plot_intensity_index(series, boundaries, name,
+                                     os.path.join(out_folder, f"Intensity_scanidx_{tag}.png"), col)
+                plot_intensity_timeseries(series, name,
+                                          os.path.join(out_folder, f"Intensity_time_{tag}.png"), col)
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  완료 — 반사율 요약                                            ║")

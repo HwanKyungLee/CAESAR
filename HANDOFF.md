@@ -184,6 +184,19 @@ Stage 4로 만든 알파(`*_alpha_trace.dat`)를 DOAS 피팅하면 잔차/신호
 2. ~~**(미해결) 핏레인지가 Run 시 바뀌는 버그**~~ — ✅ 완료. `apply_roi_from_graph`/`update_range`에 `_analysis_running` 가드 추가 → Run 중에는 모니터 ROI 신호가 txt_min/max를 덮어쓰지 않음.
 3. **(품질) 1% 도전** — 4번 표대로 dark 프레임 + 측정 레퍼런스 확보 후.
 4. **(백로그) #1 전체 60개 파일 R 시계열 계산** — `tools/r_trend_monitor.py`.
+5. **(완료) He/ZA 인덱싱 검증 intensity 시계열 + α_cavity 패널** — 남 우희 박사님 요청
+   (Fig 41/66, 42/43 레퍼런스 반영). R 그림 생성 시 채널별로 다음을 함께 출력:
+   - `Intensity_scanidx_{Cold,Hot_PNs,Hot_ANs}.png` — **scan index** x축 (박사님 Fig 41/66).
+     ambient를 채널색으로 옅게 깔고 ZA(검정 빈 원)·He(검정 채운 삼각형)를 덮어 인덱싱이
+     제대로 잡혔는지(검정이 elevated row에 안착하는지) 행 단위 확인. 파일 경계 세로선.
+   - `Intensity_time_{...}.png` — **시간축** x축. ZA ~1시간 주입 cadence 확인용.
+   - `R_curve_{...}.png` — R / Path Length(Leff) / **α_cavity** 3패널 (박사님 Fig 42/43).
+     ⚠️ α_cavity = (1−R)/d 는 **5차 다항식으로 보간된 R**(r_curve_fit)에서 계산
+     (reflectance_calc.omr_d_fitted와 동일 정의), raw R 아님.
+   - 구현: `collect_intensity_by_flag()`(scan idx+time+파일경계 수집),
+     `plot_intensity_index()`, `plot_intensity_timeseries()`, 확장된
+     `plot_r_curves_per_channel()`. `SHOW_INTENSITY_INDEX`/`INTENSITY_AMBIENT_STRIDE`로 토글.
+   - `main()` 반환 시그니처(GUI `_RTrendWorker`)는 유지.
 
 ---
 
