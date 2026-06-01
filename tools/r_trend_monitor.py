@@ -517,8 +517,9 @@ def plot_single_channel(results, channel_name, r_expected, out_path, color="stee
 def plot_r_curves_per_channel(results, channel_name, color, out_path):
     """채널별 R / Path Length(Leff) / α_cavity 3패널 (박사님 Fig 42·43 스타일).
 
-    각 스캔의 곡선을 옅게 겹쳐 그리고 mean ± 1σ를 덮어 day-to-day 안정성을
-    본다 (박사님 Rs2.m line 144 ``plot(wv, R1, '.', wv, Rr1, 'g')``).
+    R 패널: raw R(보간 전)을 점으로 옅게 깔고 5차 다항식 보간 R을 초록 선으로
+    덮는다 (박사님 Rs2.m line 144 ``plot(wv, R1, '.', wv, Rr1, 'g')``). Leff·α
+    패널은 스캔별 곡선 + mean ± 1σ.
 
     ── α_cavity 계산 ────────────────────────────────────────────────
     α_cavity = (1 − R) / d 는 **5차 다항식으로 보간된 R**(r_curve = r_curve_fit)
@@ -542,6 +543,27 @@ def plot_r_curves_per_channel(results, channel_name, color, out_path):
     wave_common = np.asarray(waves[0], dtype=float)
     r_stack     = np.asarray(curves, dtype=float)   # fitted R per scan (ROI)
 
+    # Fit window (있으면 raw R을 같은 ROI로 클립하는 데도 쓴다)
+    fws = {r.get("fit_window_nm") for r in results}
+    fws.discard(None)
+    fw = fws.pop() if len(fws) == 1 else None
+
+    # raw R(보간 전)을 같은 ROI 격자로 클립해 stack — 박사님 Fig 42의 파란 점
+    raw_stack = None
+    raw_list = []
+    for r in results:
+        wf, rr = r.get("wave_nm_full"), r.get("r_curve_raw")
+        if wf is None or rr is None:
+            raw_list = None
+            break
+        wf = np.asarray(wf, dtype=float)
+        rr = np.asarray(rr, dtype=float)
+        m = (wf >= fw[0]) & (wf <= fw[1]) if fw is not None else np.ones(wf.shape, bool)
+        raw_list.append(rr[m][:n_min])
+    if raw_list:
+        nraw = min(n_min, min(len(x) for x in raw_list))
+        raw_stack = np.asarray([x[:nraw] for x in raw_list], dtype=float)
+
     # α_cavity = (1 − R_fit)/d  [cm⁻¹],  Leff = 1/α  [km]  (fitted R 사용)
     alpha_stack = (1.0 - r_stack) / CAVITY_LEN
     alpha_safe  = np.maximum(alpha_stack, 1e-9)      # div0/음수 방지 floor
@@ -562,15 +584,29 @@ def plot_r_curves_per_channel(results, channel_name, color, out_path):
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=8)
 
-    _overlay(ax_r, r_stack,    "Mirror Reflectivity R(λ)", "mean R(λ) (5th-poly fit)")
+    # ── R 패널: raw R 점(파랑/채널색) + 5차 poly-fit 선(초록) — 박사님 Fig 42 ──
+    # 박사님 Rs2.m line 144  plot(wv, R1, '.', wv, Rr1, 'g')  스타일.
+    if raw_stack is not None and raw_stack.size:
+        wave_raw = wave_common[:raw_stack.shape[1]]
+        for row in raw_stack:
+            ax_r.plot(wave_raw, row, ".", color=color, ms=1.5, alpha=0.10)
+        # 범례용 대표 점 1개 + 평균 raw
+        ax_r.plot([], [], ".", color=color, ms=6, label="raw R (per-scan points)")
+    r_fit_mean = np.nanmean(r_stack, axis=0)
+    r_fit_std  = np.nanstd(r_stack, axis=0)
+    ax_r.fill_between(wave_common, r_fit_mean - r_fit_std, r_fit_mean + r_fit_std,
+                      color="green", alpha=0.15, label="±1σ (fit)")
+    ax_r.plot(wave_common, r_fit_mean, color="green", lw=2.0,
+              label="mean R(λ) — 5th-poly fit")
+    ax_r.set_ylabel("Mirror Reflectivity R(λ)")
+    ax_r.grid(True, alpha=0.3)
+    ax_r.legend(loc="best", fontsize=8)
+
     _overlay(ax_l, leff_stack, "Path Length Leff [km]",    "mean Leff")
     _overlay(ax_a, alpha_stack, "α cavity [cm⁻¹]",         "mean α=(1−R)/d")
 
     # Highlight fit window when one was used consistently
-    fws = {r.get("fit_window_nm") for r in results}
-    fws.discard(None)
-    if len(fws) == 1:
-        fw = fws.pop()
+    if fw is not None:
         for ax in (ax_r, ax_l, ax_a):
             ax.axvspan(fw[0], fw[1], alpha=0.06, color="green")
 
