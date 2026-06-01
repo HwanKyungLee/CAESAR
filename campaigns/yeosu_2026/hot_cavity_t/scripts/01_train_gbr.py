@@ -54,8 +54,8 @@ SCALE = {
     6175: ("÷100",  lambda x: x/100.0),
 }
 
-# --- Train data: 5/27 ~ 5/29 (col 6175 alive period) ---
-TRAIN_DATES = [f"2026-05-{d:02d}" for d in range(27, 30)]
+# --- Train data: 5/27 ~ 5/31 (col 6175 alive period) ---
+TRAIN_DATES = [f"2026-05-{d:02d}" for d in range(27, 32)]
 train_files = []
 for d in TRAIN_DATES:
     train_files += sorted(glob.glob(os.path.join(HOT_DIR, f"{d}-*.dat")))

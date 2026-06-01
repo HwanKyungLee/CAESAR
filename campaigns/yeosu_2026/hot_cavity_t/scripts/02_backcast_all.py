@@ -118,7 +118,7 @@ with open(csv_path, "w", encoding="utf-8") as f:
     f.write("# Hot left-cavity T unified series (Yeosu 2026 campaign)\n")
     f.write("# Model: sklearn GradientBoostingRegressor (n_est=200, max_depth=5, lr=0.05)\n")
     f.write("# Features: c6149/100, c6153/100, P_PNs(=c6162*0.6895), P_ANs(=c6164*0.6895), T_spt(=c6174/100)\n")
-    f.write("# Trained on 5/27~5/29 (col 6175 alive period). No bias correction needed.\n")
+    f.write("# Trained on 5/27~5/31 (col 6175 alive period). No bias correction needed.\n")
     f.write("# T_final = T_measured (col 6175/100) if available else T_predicted (GBR)\n")
     f.write("ts,T_spt_C,T_predicted_C,T_measured_c6175_C,T_final_C,source,file,row_idx\n")
     for i, r in enumerate(rows_out):
@@ -158,7 +158,7 @@ ax.axvline(recovery, color="darkgreen", lw=1.2, ls="--", alpha=0.7,
            label="5/27 10:56 — col 6175 onset (수리 시점)")
 
 ax.set_title("Hot 좌측 캐비티 T 통합 시계열 (역추정 + 실측)  "
-             "[GBR trained on col 6175, 5/27~5/29]")
+             "[GBR trained on col 6175, 5/27~5/31]")
 ax.set_xlabel("시간 (KST)")
 ax.set_ylabel("좌측 캐비티 T (°C)")
 ax.legend(loc="best")
