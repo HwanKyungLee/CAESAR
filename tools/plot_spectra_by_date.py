@@ -29,7 +29,7 @@ python tools/plot_spectra_by_date.py --date 20260529 20260530 20260601 \\
 Notes
 -----
 * --raw_dir is searched RECURSIVELY (month subfolders 2026-05, 2026-06 OK).
-* Timestamp = filename date (UTC) + col1 seconds → KST.
+* Timestamp = file mtime (close time) anchored backward at 0.97 s/row.
 """
 from __future__ import annotations
 import argparse, os, re, sys
@@ -64,12 +64,14 @@ def find_files(raw_dir: str, prefix: str) -> list[str]:
     return sorted(hits)
 
 
-def row_timestamp(fname, col1_sec, mtime, row_idx):
-    m = _DATE_RE.search(os.path.basename(fname))
-    if m and np.isfinite(col1_sec) and 0.0 <= col1_sec < 86400.0:
-        base = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=UTC)
-        return (base + timedelta(seconds=col1_sec)).astimezone(KST)
-    return mtime + timedelta(seconds=row_idx * 0.97)
+def row_timestamp(mtime: datetime, row_idx: int, n_rows: int) -> datetime:
+    """Timestamp via mtime (= file-close time) anchored backward.
+
+    mtime is the moment the file was last written.  Rows were written
+    sequentially at ~0.97 s/row, so row 0 started ≈ n_rows*0.97 s before
+    mtime and row i is at mtime - (n_rows - 1 - i)*0.97 s.
+    """
+    return mtime - timedelta(seconds=(n_rows - 1 - row_idx) * 0.97)
 
 
 def _stats(seg: np.ndarray):
@@ -163,53 +165,54 @@ def main() -> None:
             if ch_key is None:
                 continue
             mtime = parser.layout.mtime
-            for row, specs in parser.iter_rows_with_spectra(channels=(ch_key,)):
+            # Collect all rows first so we know n_rows for timestamp back-calc
+            file_rows = list(parser.iter_rows_with_spectra(channels=(ch_key,)))
+            n_rows = len(file_rows)
+            for row, specs in file_rows:
                 if row.flag not in target_flags:
                     continue
                 sp = specs.get(ch_key)
                 if sp is None or sp.size == 0:
                     continue
                 raw_pk[row.flag].append(float(np.nanmax(sp[p_lo:p_hi])))
-                raw_ts[row.flag].append(
-                    row_timestamp(path, row.time_centisec, mtime, row.row_idx))
+                raw_ts[row.flag].append(row_timestamp(mtime, row.row_idx, n_rows))
         added = {flag_labels[f]: len(raw_ts[f]) - n0[f] for f in sorted(target_flags)}
         print(f"  {prefix}: {len(files)} file(s)  rows {added}")
 
     ordered = [f for f in [FLAG_ZA, FLAG_HE, FLAG_AMBIENT] if f in target_flags]
-    fig, axes = plt.subplots(len(ordered), 1, figsize=(15, 4.0 * len(ordered)),
-                             squeeze=False, sharex=True)
+    fig, ax = plt.subplots(figsize=(15, 6))
 
-    for ax, flag in zip(axes[:, 0], ordered):
+    legend_entries = []
+    for flag in ordered:
         ts = np.array(raw_ts[flag]); pk = np.array(raw_pk[flag])
         if ts.size == 0:
-            ax.text(0.5, 0.5, f"No {flag_labels[flag]} data",
-                    ha="center", va="center", transform=ax.transAxes, fontsize=11)
-            ax.set_title(flag_labels[flag]); continue
+            print(f"  (no data for {flag_labels[flag]})")
+            continue
 
         if flag == FLAG_AMBIENT:
             T, A, LO, HI = bin_series(ts, pk, args.sampling_bin_min)
-            sub = f"{len(T)} bins of {args.sampling_bin_min:g} min  ({ts.size} rows)"
+            sub = f"{len(T)} bins/{args.sampling_bin_min:g}min"
         else:
             T, A, LO, HI = group_events(ts, pk, args.event_gap_min)
-            sub = f"{len(T)} cycles  ({ts.size} rows)"
+            sub = f"{len(T)} cycles"
 
         c = flag_colors[flag]
-        # min / max as faint lines
-        ax.plot(T, HI, "-", color=c, lw=0.8, alpha=0.35, label="max")
-        ax.plot(T, LO, "-", color=c, lw=0.8, alpha=0.35, label="min")
-        # average as dots (+ thin connecting line for readability)
-        ax.plot(T, A, "-", color=c, lw=0.5, alpha=0.5)
-        ax.plot(T, A, ".", color=c, ms=4, alpha=0.95, label="average")
-        ax.set_ylabel("Peak counts")
-        ax.set_title(f"{flag_labels[flag]} — {sub}")
-        ax.legend(fontsize=8, loc="best")
-        ax.grid(True, alpha=0.25)
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+        ax.plot(T, HI, "-", color=c, lw=0.8, alpha=0.30)
+        ax.plot(T, LO, "-", color=c, lw=0.8, alpha=0.30)
+        ax.plot(T, A,  "-", color=c, lw=0.5, alpha=0.50)
+        line, = ax.plot(T, A, ".", color=c, ms=4, alpha=0.95)
+        legend_entries.append((line, f"{flag_labels[flag]}  avg·min/max  ({sub}, {ts.size} rows)"))
 
-    axes[-1, 0].set_xlabel("Time (KST)")
-    fig.suptitle(f"Peak-value trend by flag — {ch_label} / {dates[0]}–{dates[-1]}",
-                 fontsize=13)
+    if legend_entries:
+        ax.legend([e[0] for e in legend_entries],
+                  [e[1] for e in legend_entries],
+                  fontsize=9, loc="best")
+    ax.set_ylabel("Peak counts")
+    ax.set_xlabel("Time (KST)")
+    ax.grid(True, alpha=0.25)
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+    fig.suptitle(f"Peak-value trend — {ch_label} / {dates[0]}–{dates[-1]}", fontsize=13)
     fig.autofmt_xdate()
     fig.tight_layout(rect=[0, 0, 1, 0.97])
 
