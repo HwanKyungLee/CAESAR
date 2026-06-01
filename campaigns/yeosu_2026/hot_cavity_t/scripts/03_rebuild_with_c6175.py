@@ -38,7 +38,7 @@ OUT_DIR = os.environ.get(
 )
 os.makedirs(OUT_DIR, exist_ok=True)
 MODEL_PKL = os.path.join(OUT_DIR, "hot_t_best_model.pkl")
-ROW_STRIDE = 10
+ROW_STRIDE = 1
 
 FEAT_COLS = [6149, 6153, 6162, 6164, 6174]
 SCALE = {

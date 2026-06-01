@@ -37,7 +37,7 @@ OUT_DIR = os.environ.get(
     os.path.normpath(os.path.join(_HERE, "..", "model")),
 )
 os.makedirs(OUT_DIR, exist_ok=True)
-ROW_STRIDE = 10
+ROW_STRIDE = 1
 
 # Feature columns (must match training)
 FEAT_COLS = [6149, 6153, 6162, 6164, 6174]
