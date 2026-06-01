@@ -128,7 +128,7 @@ def main() -> None:
 
         buckets: dict[int, list[np.ndarray]] = {f: [] for f in target_flags}
         for path in files:
-            parser = RawParser(path, system=args.system)
+            parser = RawParser(path)
             ch_key = next(
                 (c for c, b in parser.layout.spec_blocks.items() if b == spec_slice), None
             )
