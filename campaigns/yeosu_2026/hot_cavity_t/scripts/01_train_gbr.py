@@ -1,16 +1,16 @@
 """Maximize R^2 for T_cav_left prediction.
 
 Try multiple feature sets + (optional) gradient boosting if available.
-Output the BEST model and back-cast pre-5/22 with it.
+Output the BEST model and back-cast pre-5/27 with it.
 
-Live & variable HK candidates (verified across 5/18~5/21 to ensure predictors
+Live & variable HK candidates (verified across 5/18~5/26 to ensure predictors
 are available during the missing period):
   - col 6149 (raw, ÷100 ≈ 23-28)
   - col 6153 (raw, ÷100 ≈ 33-46)
   - col 6162  P_PNs   (×0.6895 = mbar)
   - col 6164  P_ANs   (×0.6895 = mbar)
   - col 6174  T_spt   (÷100 = °C)
-Target: col 6180  T_cav_left (÷100 = °C)  [alive 5/22+]
+Target: col 6175  T_cav_left (÷100 = °C)  [alive 5/27 10:56 KST+]
 """
 from __future__ import annotations
 import os, glob, time
@@ -26,7 +26,7 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HOT_DIR = os.environ.get(
     "CAESAR_HOT_DIR",
-    r"C:\Doasis_Work\raw,alpha_by_nam\CAESAR_Hot\2026-05",
+    r"D:\Yeosu_2026\CAESAR_Hot\2026-05",
 )
 OUT_DIR = os.environ.get(
     "CAESAR_TPRED_OUT",
@@ -42,7 +42,7 @@ CANDIDATES = {
     "P_ANs": 6164,
     "T_spt": 6174,
 }
-TARGET = 6180
+TARGET = 6175
 
 # Raw scalings (we'll apply when reading)
 SCALE = {
@@ -51,11 +51,11 @@ SCALE = {
     6162: ("×0.69", lambda x: x*0.6894733),
     6164: ("×0.69", lambda x: x*0.6894733),
     6174: ("÷100",  lambda x: x/100.0),
-    6180: ("÷100",  lambda x: x/100.0),
+    6175: ("÷100",  lambda x: x/100.0),
 }
 
-# --- Train data: 5/22 ~ 5/29 ---
-TRAIN_DATES = [f"2026-05-{d:02d}" for d in range(22, 30)]
+# --- Train data: 5/27 ~ 5/31 (col 6175 alive period) ---
+TRAIN_DATES = [f"2026-05-{d:02d}" for d in range(27, 32)]
 train_files = []
 for d in TRAIN_DATES:
     train_files += sorted(glob.glob(os.path.join(HOT_DIR, f"{d}-*.dat")))

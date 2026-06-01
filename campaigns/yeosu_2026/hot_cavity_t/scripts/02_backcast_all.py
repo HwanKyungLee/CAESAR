@@ -4,8 +4,9 @@ the entire 5/18 ~ 5/29 period.
 For each row:
   - Read features (c6149, c6153, P_PNs, P_ANs, T_spt)
   - GBR.predict → T_predicted
-  - Read col 6180 raw; if non-sentinel, T_measured = col 6180 / 100
+  - Read col 6175 raw; if non-sentinel, T_measured = col 6175 / 100
   - Unified output column: T_final = T_measured if available else T_predicted
+  (Model trained directly on col 6175, 5/27~5/29 — no bias correction needed)
 """
 from __future__ import annotations
 import os, glob, time, pickle
@@ -28,7 +29,7 @@ plt.rcParams["axes.unicode_minus"] = False
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HOT_DIR = os.environ.get(
     "CAESAR_HOT_DIR",
-    r"C:\Doasis_Work\raw,alpha_by_nam\CAESAR_Hot\2026-05",
+    r"D:\Yeosu_2026\CAESAR_Hot\2026-05",
 )
 # Default: keep outputs (CSV + plot) alongside the trained model under
 # campaigns/yeosu_2026/hot_cavity_t/model/.
@@ -47,11 +48,9 @@ SCALE = {
     6162: lambda x: x*0.6894733,
     6164: lambda x: x*0.6894733,
     6174: lambda x: x/100.0,
-    6180: lambda x: x/100.0,
     6175: lambda x: x/100.0,
 }
-TARGET = 6180
-ALT_TARGET = 6175
+TARGET = 6175
 
 print("Loading saved model...")
 with open(os.path.join(OUT_DIR, "hot_t_best_model.pkl"), "rb") as f:
@@ -63,7 +62,7 @@ print(f"  Features: {state['feat_keys']}")
 files = sorted(glob.glob(os.path.join(HOT_DIR, "*.dat")))
 print(f"\nScanning {len(files)} Hot files...")
 
-rows_out = []  # (ts, T_spt, T_predicted, T_measured (or nan), T_alt (or nan), file, row, src)
+rows_out = []  # (ts, T_spt, feats, T_measured_6175 (or nan), file, row)
 t0 = time.time()
 for fi, path in enumerate(files, 1):
     base = os.path.basename(path)
@@ -89,16 +88,13 @@ for fi, path in enumerate(files, 1):
                     feats.append(SCALE[c](v))
                 if bad:
                     continue
-                # Measured (5/22+)
                 v_target = float(toks[TARGET])
                 t_meas = SCALE[TARGET](v_target) if v_target not in (0, 65535) else float("nan")
-                v_alt = float(toks[ALT_TARGET])
-                t_alt  = SCALE[ALT_TARGET](v_alt) if v_alt not in (0, 65535) else float("nan")
             except (ValueError, IndexError):
                 continue
             t_spt = feats[FEAT_COLS.index(6174)]
             ts = mtime + timedelta(seconds=i*0.97)
-            rows_out.append((ts, t_spt, feats, t_meas, t_alt, base, i))
+            rows_out.append((ts, t_spt, feats, t_meas, base, i))
     if fi % 30 == 0 or fi == len(files):
         print(f"  [{fi}/{len(files)}]  rows={len(rows_out)}  elapsed={time.time()-t0:.1f}s")
 
@@ -111,7 +107,7 @@ t1 = time.time()
 preds = gbr.predict(X)
 print(f"  predict: {time.time()-t1:.1f}s for {len(X)} rows")
 
-# Build unified column: measured if available, else predicted
+# Build unified column: measured (col 6175) if available, else predicted
 t_meas_arr = np.array([r[3] for r in rows_out])
 has_meas = ~np.isnan(t_meas_arr)
 T_final = np.where(has_meas, t_meas_arr, preds)
@@ -122,20 +118,19 @@ with open(csv_path, "w", encoding="utf-8") as f:
     f.write("# Hot left-cavity T unified series (Yeosu 2026 campaign)\n")
     f.write("# Model: sklearn GradientBoostingRegressor (n_est=200, max_depth=5, lr=0.05)\n")
     f.write("# Features: c6149/100, c6153/100, P_PNs(=c6162*0.6895), P_ANs(=c6164*0.6895), T_spt(=c6174/100)\n")
-    f.write("# Trained on 5/22~5/29 (col 6180 alive period). Test R²=0.981, RMSE=0.244°C\n")
-    f.write("# T_final = T_measured (col 6180/100) if available else T_predicted (GBR)\n")
-    f.write("ts,T_spt_C,T_predicted_C,T_measured_C,T_alt_c6175_C,T_final_C,source,file,row_idx\n")
+    f.write("# Trained on 5/27~5/31 (col 6175 alive period). No bias correction needed.\n")
+    f.write("# T_final = T_measured (col 6175/100) if available else T_predicted (GBR)\n")
+    f.write("ts,T_spt_C,T_predicted_C,T_measured_c6175_C,T_final_C,source,file,row_idx\n")
     for i, r in enumerate(rows_out):
-        ts, tspt, _, tmeas, talt, fname, ridx = r
+        ts, tspt, _, tmeas, fname, ridx = r
         src = "measured" if has_meas[i] else "predicted"
         tmeas_str = "" if np.isnan(tmeas) else f"{tmeas:.3f}"
-        talt_str  = "" if np.isnan(talt) else f"{talt:.3f}"
         f.write(f"{ts.isoformat(timespec='seconds')},{tspt:.3f},{preds[i]:.3f},"
-                f"{tmeas_str},{talt_str},{T_final[i]:.3f},{src},{fname},{ridx}\n")
+                f"{tmeas_str},{T_final[i]:.3f},{src},{fname},{ridx}\n")
 print(f"\nUnified CSV -> {csv_path}")
 print(f"  Total rows: {len(rows_out)}")
-print(f"  Measured rows (5/22+): {has_meas.sum()}  ({100*has_meas.mean():.1f}%)")
-print(f"  Predicted rows (pre-5/22): {(~has_meas).sum()}")
+print(f"  Measured rows (col 6175, 5/27 10:56~): {has_meas.sum()}  ({100*has_meas.mean():.1f}%)")
+print(f"  Predicted rows (5/18~5/27 10:56): {(~has_meas).sum()}")
 
 # Per-day summary
 ts_arr = np.array([r[0] for r in rows_out])
@@ -154,16 +149,16 @@ fig, ax = plt.subplots(figsize=(15, 6))
 m_pred = ~has_meas
 m_meas = has_meas
 ax.plot(ts_arr[m_pred], T_final[m_pred], "b.", ms=2, alpha=0.5,
-        label=f"역추정 (5/18~5/21, GBR n={m_pred.sum()})")
+        label=f"역추정 (5/18~5/27 오전, GBR n={m_pred.sum()})")
 ax.plot(ts_arr[m_meas], T_final[m_meas], "r.", ms=2, alpha=0.4,
-        label=f"실측 col 6180 (5/22~, n={m_meas.sum()})")
+        label=f"실측 col 6175 (5/27 10:56~, n={m_meas.sum()})")
 
-recovery = datetime(2026, 5, 22, 0, 8)
+recovery = datetime(2026, 5, 27, 10, 56)
 ax.axvline(recovery, color="darkgreen", lw=1.2, ls="--", alpha=0.7,
-           label="5/22 00:08 — col 6180 onset")
+           label="5/27 10:56 — col 6175 onset (수리 시점)")
 
 ax.set_title("Hot 좌측 캐비티 T 통합 시계열 (역추정 + 실측)  "
-             "[GBR test R²=0.981, RMSE=0.244°C]")
+             "[GBR trained on col 6175, 5/27~5/31]")
 ax.set_xlabel("시간 (KST)")
 ax.set_ylabel("좌측 캐비티 T (°C)")
 ax.legend(loc="best")

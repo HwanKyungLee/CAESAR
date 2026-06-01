@@ -1,14 +1,13 @@
-"""Rebuild unified T_left_cavity CSV with col 6175 as the measured source.
+"""[DEPRECATED] This script is no longer needed.
 
-Difference from previous version:
-  - T_final = col 6175 (when available, 5/27 10:56 onwards) else GBR prediction
-  - GBR was trained on col 6180. We apply a small bias correction (+0.1°C) so
-    predictions land on the col 6175 scale. (col 6175 - col 6180 mean = +0.10°C
-    in overlap period.)
-  - col 6180 is kept in the CSV as an auxiliary cross-check column.
+Previously: trained GBR on col 6180 (5/22~), applied +0.10°C bias correction
+to align with col 6175 scale.
 
-Output: temp_predict/output/hot_T_left_cavity_unified_c6175.csv (+ png)
+Now: 01_train_gbr.py trains directly on col 6175 (5/27~5/29), and
+02_backcast_all.py back-casts 5/18~5/26 with no bias correction needed.
+Run 01 then 02 only.
 """
+raise SystemExit("This script is deprecated. Use 01_train_gbr.py + 02_backcast_all.py instead.")
 from __future__ import annotations
 import os, glob, time, pickle
 from datetime import datetime, timedelta
@@ -30,7 +29,7 @@ plt.rcParams["axes.unicode_minus"] = False
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HOT_DIR = os.environ.get(
     "CAESAR_HOT_DIR",
-    r"C:\Doasis_Work\raw,alpha_by_nam\CAESAR_Hot\2026-05",
+    r"D:\Yeosu_2026\CAESAR_Hot\2026-05",
 )
 OUT_DIR = os.environ.get(
     "CAESAR_TPRED_OUT",
