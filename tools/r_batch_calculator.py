@@ -112,6 +112,12 @@ WAVE_CAL_HOT_ANS = _first_existing(
 CAVITY_LEN = 51.8    # cm
 RL_FACTOR  = 0.933
 
+# near-0 dropout 스캔 제외 임계값(peak counts). 램프 off/셔터/취득 실패 시
+# 스펙트럼 peak가 ≈0으로 찍히는데, 이를 ZA/He 평균에 넣으면 ratio가 깨져
+# R이 비물리값이 된다. 정상 신호 peak는 보통 3만+ 이므로 1000은 dropout만
+# 안전하게 걸러낸다(실데이터는 안 건드림). 필요시 caller가 올려 잡을 수 있다.
+MIN_PEAK_INTENSITY = 1000.0
+
 OUTPUT_DIR  = r"."
 FILE_PATTERN = "*.dat"
 
@@ -247,6 +253,11 @@ def read_all_scans(
                 continue
             intensity = intensity[np.isfinite(intensity)]
             if intensity.size == 0:
+                continue
+
+            # near-0 dropout 스캔 제외 (램프 off/셔터/취득 실패 → peak≈0).
+            # 이런 스캔이 ZA/He 평균에 들어가면 ratio가 깨져 R이 비물리값이 된다.
+            if float(np.max(intensity)) < MIN_PEAK_INTENSITY:
                 continue
 
             # T (°C) — fall back to 25.0 if sentinel

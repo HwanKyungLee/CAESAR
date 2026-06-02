@@ -132,8 +132,8 @@ WAVE_CAL_HOT_ANS = _DEFAULT_WAVE_CAL_HOT_ANS    # ANs(roi2)=CH3
 
 OUTPUT_DIR  = r"."
 FILE_PATTERN = "*.dat"
-R_EXPECTED_COLD = 0.9990
-R_EXPECTED_HOT  = 0.9990
+R_EXPECTED_COLD = 0.9999
+R_EXPECTED_HOT  = 0.9999
 R_WARN_DELTA = 0.0005
 
 # ── Channel R-fit wavelength windows ─────────────────────────────────
@@ -476,14 +476,16 @@ def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
     ax_r.legend(fontsize=8, loc="lower left")
     ax_r.grid(True, alpha=0.3)
 
-    # Zoom Y-axis so ±0.01 % changes near R≈99.99 % are clearly visible.
-    # Window = ±5σ of the data, but never narrower than ±0.05 % (5e-4).
-    r_mean_val = float(np.mean(r_mean))
+    # Zoom Y-axis so ~1e-5 변동이 보이게 데이터에 타이트하게 맞춘다.
+    # 예전엔 floor 5e-4 + 기대/경고선(0.9985) 강제 포함이라 축이 0.9985까지
+    # 늘어나 0.9999 데이터가 맨 위 직선으로 뭉개졌다. 이제 기대/경고선은
+    # 강제로 포함하지 않고, 데이터 중앙값 ±max(4σ, 1.5e-5)로만 확대한다.
+    # (이상치 dip이 있으면 σ가 커져 자동으로 창이 넓어져 dip도 보인다.)
+    r_med_val  = float(np.median(r_mean))
     r_std_val  = float(np.std(r_mean))
-    margin     = max(r_std_val * 5.0, 5e-4)
-    # Also guarantee the expected-R and warn-limit lines stay inside the frame.
-    y_lo = min(r_mean_val - margin, r_expected - R_WARN_DELTA - 1e-4)
-    y_hi = max(r_mean_val + margin, r_expected + 1e-4)
+    margin     = max(r_std_val * 4.0, 1.5e-5)
+    y_lo = r_med_val - margin
+    y_hi = min(r_med_val + margin, 1.0 + 5e-6)
     ax_r.set_ylim(y_lo, y_hi)
 
     if ax_l is not None:
@@ -957,12 +959,11 @@ def main():
                 files = _resolve_files(ddir, dfiles)
                 if not files:
                     continue
-                series, boundaries = collect_intensity_by_flag(files, sp_s, sp_e, ts_tz=tz)
-                # 박사님 Fig 41/66 스타일 (scan index) + 전체 기간 time축, 둘 다 출력
-                plot_intensity_index(series, boundaries, name,
-                                     os.path.join(out_folder, f"Intensity_scanidx_{tag}.png"), col)
+                series, _boundaries = collect_intensity_by_flag(files, sp_s, sp_e, ts_tz=tz)
+                # date/time 축 하나로 통합. (scan-index 축은 균일 cadence에선 time축과
+                # 사실상 동일해 중복이라 제거 — 시간 공백이 보이는 time축만 남긴다.)
                 plot_intensity_timeseries(series, name,
-                                          os.path.join(out_folder, f"Intensity_time_{tag}.png"), col)
+                                          os.path.join(out_folder, f"Intensity_{tag}.png"), col)
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  완료 — 반사율 요약                                            ║")

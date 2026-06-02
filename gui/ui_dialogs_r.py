@@ -708,7 +708,12 @@ class RTrendMonitorDialog(QDialog):
                  [r["r_mean"] * 100 for r in hot_pns_results] +
                  [r["r_mean"] * 100 for r in hot_ans_results])
         if all_r:
-            self._pw.setYRange(min(all_r) - 0.05, max(all_r) + 0.05, padding=0)
+            # 0.9999 근처 변동이 보이도록 타이트하게 확대. (예전 ±0.05%는 너무 넓어
+            # 전부 평평하게 보였다.) 중앙값 ±max(4σ, 0.0015%)로 줌.
+            arr = np.array(all_r, dtype=float)
+            med = float(np.median(arr)); sd = float(np.std(arr))
+            margin = max(sd * 4.0, 0.0015)   # percent 단위 (0.0015% = 1.5e-5)
+            self._pw.setYRange(med - margin, min(med + margin, 100.0 + 5e-4), padding=0)
 
         # 부모 윈도우로 결과 전달 — 이게 없으면 워커 데이터가 이 다이얼로그
         # 내부 플롯에만 들어가고, app_window 가 연결한 Setup 탭 R/Leff 시계열
