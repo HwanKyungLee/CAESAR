@@ -13,3 +13,7 @@ __pycache__/
 
 # HITRAN 라인리스트 로컬 캐시 (대용량, 사용자별 다운로드)
 hitran_data/
+
+# 로컬 개발 환경 (머신별 경로/대용량)
+.venv/
+.vscode/
