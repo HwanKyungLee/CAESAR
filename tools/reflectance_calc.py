@@ -39,6 +39,20 @@ from core.physics import RayleighPhysics  # noqa: E402,F401  (re-export for call
 # Reflectance Calculator (Engine)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# He/ZA 신호 대비(contrast) 유효 band.
+#   contrast = (I_He − I_ZA)/I_He = 1 − ratio
+# 정상 사이클은 세 채널 모두 contrast ≈ 0.17~0.21 로 매우 일정하다. 두 가지
+# 고장 모드를 band 양끝으로 거른다:
+#   · 하한(MIN): contrast < 5%  → ZA≈He 또는 ZA>He. 분모(1−ratio)→0/음수
+#                → R이 너무 낮거나 R>1 (비물리).
+#   · 상한(MAX): contrast > 35% → ZA 폭락(dropout, ZA≪He). omr_d→0
+#                → R→1, Leff 폭발 (예: 2026-05-27 오후 ZA dropout).
+# 정상 0.17~0.21 이 band 한가운데라 여유가 크다. 더 빡세게/느슨하게 하려면
+# 두 값만 조정.
+MIN_HE_ZA_CONTRAST = 0.05
+MAX_HE_ZA_CONTRAST = 0.35
+
+
 class ReflectanceCalculator:
     def __init__(self, cavity_len: float = 51.8, rl_factor: float = 0.933):
         self.cavity_len = cavity_len
@@ -63,7 +77,8 @@ class ReflectanceCalculator:
         mean_p = float(np.mean([s[2] for s in spectra]))
         return mean_cnt, mean_t, mean_p
 
-    def calculate(self, wave_nm: np.ndarray = None, min_valid_fraction: float = 0.3, roi_min: float = 430.0, roi_max: float = 470.0):
+    def calculate(self, wave_nm: np.ndarray = None, min_valid_fraction: float = 0.3, roi_min: float = 430.0, roi_max: float = 470.0,
+                  min_contrast: float = MIN_HE_ZA_CONTRAST, max_contrast: float = MAX_HE_ZA_CONTRAST):
         """
         [반환값] 
         wave_nm: 파장 배열
@@ -113,35 +128,52 @@ class ReflectanceCalculator:
         # 지정된 파장(roi_min ~ roi_max) 구간만 평가 및 피팅에 사용
         roi_mask = (wave_nm >= roi_min) & (wave_nm <= roi_max)
 
+        # ── He/ZA 신호 대비(contrast) = (I_He − I_ZA)/I_He = 1 − ratio ──────
+        # ZA(고흡수)는 He(저흡수)보다 어두워야(ratio<1) 하고 그 대비가 충분해야
+        # omr_d=(1−R)/d 가 신뢰성 있다. 대비가 작거나(ZA≈He) 음수면(ZA>He) R이
+        # 1 근처로 튀고 Leff가 폭발한다(dropout). (사용자 요청 로직)
+        roi_contrast = 1.0 - ratio_smooth
+
         # ── 물리적으로 유효한 픽셀만 선택 ────────────────────────────────
-        #  (a) ratio < 1 : 고흡수 ZA 는 저흡수 He 보다 어두워야 한다. ratio>=1 이면
-        #      분모 (1-ratio)<=0 → omr_d<=0 → R>=1 (비물리). 이 픽셀이 예전엔
-        #      clip 때문에 R=1.0 으로 위장돼 통과, R_mean=1.000 가짜값을 만들었다.
+        #  (a) min_contrast ≤ 대비 ≤ max_contrast : 정상 contrast band(0.17~0.21)
+        #       안. 너무 작으면(ZA≈He/ZA>He) R 비물리, 너무 크면(ZA 폭락/dropout)
+        #       omr_d→0 → R≈1/Leff 폭발. 둘 다 제외.
         #  (b) 0.90 < R_unclipped < 1.0 : clip 전 값이 물리적 반사율 범위(1 미만).
         valid_mask = (
             roi_mask
             & np.isfinite(r_curve_unclipped)
-            & (ratio_smooth < 1.0)
+            & (roi_contrast >= min_contrast)
+            & (roi_contrast <= max_contrast)
             & (r_curve_unclipped > 0.90)
             & (r_curve_unclipped < 1.0)
         )
-        
+
         n_roi_pixels = np.sum(roi_mask)
         if n_roi_pixels > 0:
             self.valid_fraction = float(np.sum(valid_mask)) / n_roi_pixels
+            contrast_med = float(np.median(roi_contrast[roi_mask]))
         else:
             self.valid_fraction = 0.0
+            contrast_med = -1.0
+        self.he_za_contrast = contrast_med   # 진단용 저장
 
-        if self.valid_fraction < min_valid_fraction:
+        # 사이클 단위 게이트: ROI 중앙값 대비가 band를 벗어나면 통째 제외.
+        if (contrast_med < min_contrast) or (contrast_med > max_contrast) \
+                or (self.valid_fraction < min_valid_fraction):
             self.quality_ok = False
-            # ratio>=1 이 ROI 대부분을 차지하면(ZA>=He, 비물리) 그 사실을 명시
-            roi_ratio = ratio_smooth[roi_mask]
-            extra = ""
-            if roi_ratio.size and float(np.median(roi_ratio)) >= 1.0:
-                extra = " — ZA>=He (ratio>=1) 비물리 사이클"
+            if contrast_med < min_contrast:
+                reason = (f"He/ZA 대비 부족 (median (He-ZA)/He = {contrast_med*100:.1f}% "
+                          f"< {min_contrast*100:.0f}%)")
+                if contrast_med < 0:
+                    reason += " — ZA>=He"
+            elif contrast_med > max_contrast:
+                reason = (f"ZA 폭락(dropout) — 대비 과대 (median (He-ZA)/He = "
+                          f"{contrast_med*100:.1f}% > {max_contrast*100:.0f}%)")
+            else:
+                reason = (f"valid {self.valid_fraction*100:.0f}% < "
+                          f"{min_valid_fraction*100:.0f}%")
             raise RuntimeError(
-                f"R-curve quality check failed. Valid inside ROI "
-                f"({roi_min}-{roi_max}nm): {self.valid_fraction * 100:.0f}%{extra}"
+                f"R-curve quality check failed: {reason}  (ROI {roi_min}-{roi_max}nm)"
             )
         else:
             self.quality_ok = True
