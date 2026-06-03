@@ -405,7 +405,12 @@ class CAESARAnalyzer(QMainWindow):
         # Tab 2: Analysis Monitor
         self.monitor = MonitorWidget(self.engine)
         self.main_tabs.addTab(self.monitor, "📈 Analysis Monitor")
-        
+
+        # Tab 3: Result Viewer (저장된 R/α/레퍼런스/농도 결과 파일을 불러와 표시)
+        from .ui_result_viewer import ResultViewerWidget
+        self.result_viewer = ResultViewerWidget(self)
+        self.main_tabs.addTab(self.result_viewer, "📂 결과 뷰어")
+
         right_layout.addWidget(self.main_tabs)
         
         # Keep Existing Signal Connections
