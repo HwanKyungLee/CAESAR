@@ -1004,7 +1004,8 @@ class AlphaExportWorker(QThread):
                  dark_spectrum=None,    # 1-D float array (full 2048 px), or None
                  channel=1,             # spectrometer channel (1=CH1/ROI1)
                  r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
-                 r_cal_omr_max=1e-5):   # block-mean omr_d 상한 — 이보다 크면 reject
+                 r_cal_omr_max=1e-5,    # block-mean omr_d 상한 — 이보다 크면 reject
+                 avg_sec=60.0):         # ambient 시간평균 창(초). 박사님 avgsec=60. 0이면 스캔별(평균 안 함)
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
           기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
@@ -1027,6 +1028,7 @@ class AlphaExportWorker(QThread):
         self.output_dir  = output_dir
         self.r_cal_valid_min = float(r_cal_valid_min)
         self.r_cal_omr_max   = float(r_cal_omr_max)
+        self.avg_sec         = float(avg_sec)
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -1175,31 +1177,59 @@ class AlphaExportWorker(QThread):
             za_spectra = [s - dark for s in za_spectra]
             he_spectra = [s - dark for s in he_spectra]
 
-        # ── R-calibration: clean ZA block / clean He(mean) ───────────────────
+        # ── R-calibration: R Trend Monitor와 동일한 reflectance_calc 로 통일 ──
+        # α 가 쓰는 (1-R)/d 를 R Trend 파이프라인과 같은 코드로 만든다. near-0
+        # 필터·He/ZA contrast band·5차 다항식 피팅·비물리 제외가 그대로 적용된
+        # omr_d_fitted 를 calib 으로 사용한다. 품질 미달/오류 시에는 기존
+        # per-block median 방식으로 폴백해 robustness 유지.
         if za_spectra and he_spectra:
-            i_he_clean   = np.nanmean(np.array(he_spectra), axis=0)
-            t_he_clean   = float(np.nanmean(he_t_list))
-            p_he_clean   = float(np.nanmean(he_p_list))
-            i_he_s       = np.where(np.abs(i_he_clean) > 1.0, i_he_clean, 1.0)
-            alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_he_clean, p_he_clean, 'helium')
-            for i_za_b, t_za_b, p_za_b, g_za_b in zip(za_spectra, za_t_list, za_p_list, za_gidx):
-                alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_za_b, p_za_b, 'zero_air')
-                ratio = i_za_b / i_he_s
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
-                valid = np.isfinite(omr_d) & (omr_d > 0)
-                if (valid.mean() >= self.r_cal_valid_min
-                        and np.nanmean(omr_d[valid]) < self.r_cal_omr_max):
-                    x = np.arange(n_pix)
-                    omr_d_clean = np.interp(x, x[valid], omr_d[valid])
-                    calib_candidates.append(omr_d_clean)
-                    leff  = np.mean(1.0 / omr_d_clean) * 1e-5
-                    rmean = 1.0 - np.mean(omr_d_clean) * self.cavity_len
-                    info  = f"omr_d={np.mean(omr_d_clean):.3e} cm-1  Leff={leff:.2f} km  R={rmean:.6f}"
-                    self.status_msg.emit(f"[R-CAL] block g~{g_za_b:.0f}: {info}")
-            # 헤더용 R 정보(전 파일 공통)
-            calib_str = (f"Leff={np.mean(1.0/np.median(np.array(calib_candidates),axis=0))*1e-5:.2f} km"
-                         if calib_candidates else "unknown")
+            calib_str = "unknown"
+            try:
+                import sys as _sys
+                _tools = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
+                if _tools not in _sys.path:
+                    _sys.path.insert(0, _tools)
+                from reflectance_calc import ReflectanceCalculator
+                rc = ReflectanceCalculator(cavity_len=self.cavity_len, rl_factor=self.rl_factor)
+                for s, t, p in zip(za_spectra, za_t_list, za_p_list):
+                    rc.add_za_spectrum(s, t, p)
+                for s, t, p in zip(he_spectra, he_t_list, he_p_list):
+                    rc.add_he_spectrum(s, t, p)
+                roi_lo, roi_hi = float(np.nanmin(wave_nm)), float(np.nanmax(wave_nm))
+                _w, _rraw, r_fit, omr_d_fit = rc.calculate(
+                    wave_nm, min_valid_fraction=0.30, roi_min=roi_lo, roi_max=roi_hi)
+                omr_d_fit = np.maximum(np.asarray(omr_d_fit, dtype=float), 1e-12)
+                calib_candidates.append(omr_d_fit)   # 단일 통일 곡선 (하류 median=자기자신)
+                leff  = float(np.mean(1.0 / omr_d_fit) * 1e-5)
+                rmean = float(np.mean(r_fit))
+                calib_str = (f"Leff={leff:.2f} km  R={rmean:.6f}  "
+                             f"contrast={getattr(rc, 'he_za_contrast', float('nan')):.3f}")
+                self.status_msg.emit(
+                    f"[R-CAL 통일/reflectance_calc] {calib_str}  "
+                    f"(ZA {len(za_spectra)}블록, He {len(he_spectra)}블록)")
+            except Exception as e:
+                # 폴백: 기존 per-block median 방식 (전환플래그 오염 등은 위 필터가
+                # 없으므로 R Trend 와 다를 수 있음 — 어디까지나 비상용)
+                self.status_msg.emit(f"[R-CAL] reflectance_calc 실패 → 기존 방식 폴백: {e}")
+                i_he_clean   = np.nanmean(np.array(he_spectra), axis=0)
+                t_he_clean   = float(np.nanmean(he_t_list))
+                p_he_clean   = float(np.nanmean(he_p_list))
+                i_he_s       = np.where(np.abs(i_he_clean) > 1.0, i_he_clean, 1.0)
+                alpha_ray_he = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_he_clean, p_he_clean, 'helium')
+                for i_za_b, t_za_b, p_za_b, g_za_b in zip(za_spectra, za_t_list, za_p_list, za_gidx):
+                    alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_za_b, p_za_b, 'zero_air')
+                    ratio = i_za_b / i_he_s
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
+                    valid = np.isfinite(omr_d) & (omr_d > 0)
+                    if (valid.mean() >= self.r_cal_valid_min
+                            and np.nanmean(omr_d[valid]) < self.r_cal_omr_max):
+                        x = np.arange(n_pix)
+                        calib_candidates.append(np.interp(x, x[valid], omr_d[valid]))
+                if calib_candidates:
+                    calib_str = (f"Leff={np.mean(1.0/np.median(np.array(calib_candidates),axis=0))*1e-5:.2f}"
+                                 f" km (fallback)")
             for fp_amb in {e[0] for e in amb_buffer}:
                 calib_info_per_file[fp_amb] = calib_str
 
@@ -1245,44 +1275,77 @@ class AlphaExportWorker(QThread):
             self.finished.emit("ERROR: R-calibration 또는 ZA 스펙트럼 없음")
             return
 
-        # ── Pass 2: compute alpha for each ambient row ────────────────────────
-        self.status_msg.emit(f"Pass 2: {len(amb_buffer)}개 ambient 행 alpha 계산 중…")
+        # ── Pass 2: ambient 를 avg_sec(기본 60초) 시간평균 후 alpha 계산 ────────
+        # 박사님 Alpha 파이프라인(Step2 avgsec=60)과 동일. 단일 스캔(~1초)은
+        # noise가 커 DOAS 피팅이 불안정해진다 → gidx-시간(약 0.97초/행) 기준으로
+        # avg_sec 창마다 ambient intensity 를 평균해 SNR 을 √N 배 높인다.
+        # (gidx 는 ZA/He 주입 행까지 포함한 전역 카운터라, 주입으로 생기는
+        #  시간 공백도 자동 반영되어 공백을 넘어 평균되지 않는다.)
+        SEC_PER_ROW = 0.97
+        avg_sec = getattr(self, 'avg_sec', 60.0)
 
-        alpha_buffer = {}   # fp → list of (row_idx, T, P, alpha_array)
+        def _avg_ambient(entries):
+            """한 파일 ambient entries 를 avg_sec 시간창으로 묶어 평균.
+            반환: [(rep_row_idx, mean_gidx, T, P, I_avg, n_in_bin), ...]"""
+            if not entries:
+                return []
+            entries = sorted(entries, key=lambda e: e[2])   # by gidx
+            g0 = entries[0][2]
+            bins = {}
+            for (_fp, rid, g, t, p, i) in entries:
+                b = int((g - g0) * SEC_PER_ROW / avg_sec) if avg_sec > 0 else len(bins)
+                bins.setdefault(b, []).append((rid, g, t, p, i))
+            out = []
+            for b in sorted(bins):
+                grp = bins[b]
+                I = np.nanmean(np.array([x[4] for x in grp], dtype=float), axis=0)
+                T = float(np.nanmean([x[2] for x in grp]))
+                P = float(np.nanmean([x[3] for x in grp]))
+                gmean = float(np.mean([x[1] for x in grp]))
+                out.append((grp[0][0], gmean, T, P, I, len(grp)))
+            return out
 
-        for fp, row_idx, gidx, t_am, p_am, i_am in amb_buffer:
+        amb_by_fp = {}
+        for e in amb_buffer:
+            amb_by_fp.setdefault(e[0], []).append(e)
+
+        alpha_buffer = {}   # fp → list of (row_idx, T, P, alpha_array, n_avg)
+        n_bins_total = 0
+        for fp, entries in amb_by_fp.items():
             if not self.is_running:
                 break
-
-            if use_pchip:
-                g = float(gidx)
-                if g < za_x_min:
-                    i0_interp, t_i0, p_i0 = i0_first, t_first, p_first
-                elif g > za_x_max:
-                    i0_interp, t_i0, p_i0 = i0_last,  t_last,  p_last
+            for (row_idx, gmean, t_am, p_am, i_am, n_avg) in _avg_ambient(entries):
+                if use_pchip:
+                    g = float(gmean)
+                    if g < za_x_min:
+                        i0_interp, t_i0, p_i0 = i0_first, t_first, p_first
+                    elif g > za_x_max:
+                        i0_interp, t_i0, p_i0 = i0_last,  t_last,  p_last
+                    else:
+                        i0_interp = pchip_i0(g)
+                        t_i0      = float(pchip_t(g))
+                        p_i0      = float(pchip_p(g))
                 else:
-                    i0_interp = pchip_i0(g)
-                    t_i0      = float(pchip_t(g))
-                    p_i0      = float(pchip_p(g))
-            else:
-                i0_interp = i_za_static
-                t_i0      = t_za_static
-                p_i0      = p_za_static
+                    i0_interp = i_za_static
+                    t_i0      = t_za_static
+                    p_i0      = p_za_static
 
-            # i0_interp: PCHIP I₀ (이미 dark-corrected, Pass 1에서 저장)
-            # i_am: raw ambient → Pass 2에서 dark 보정
-            i_am_dc = (i_am - dark) if has_dark else i_am
-            i0_s   = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
-            i_am_s = np.where(i_am_dc   > 0, i_am_dc,   1e-9).astype(float)
+                # i0_interp: PCHIP I₀ (이미 dark-corrected). i_am: 평균 ambient.
+                i_am_dc = (i_am - dark) if has_dark else i_am
+                i0_s   = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
+                i_am_s = np.where(i_am_dc   > 0, i_am_dc,   1e-9).astype(float)
 
-            alpha_ref    = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
-            alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
+                alpha_ref    = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
+                alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
 
-            alpha = ((best_omr_d / self.rl_factor + alpha_ref)
-                     * ((i0_s - i_am_s) / i_am_s)
-                     - (alpha_sample - alpha_ref))
+                alpha = ((best_omr_d / self.rl_factor + alpha_ref)
+                         * ((i0_s - i_am_s) / i_am_s)
+                         - (alpha_sample - alpha_ref))
 
-            alpha_buffer.setdefault(fp, []).append((row_idx, t_am, p_am, alpha))
+                alpha_buffer.setdefault(fp, []).append((row_idx, t_am, p_am, alpha, n_avg))
+                n_bins_total += 1
+        self.status_msg.emit(
+            f"Pass 2: ambient {len(amb_buffer)}행 → {avg_sec:.0f}초 평균 {n_bins_total}개 bin 으로 alpha 계산")
 
         # ── Write one alpha_trace file per source file ─────────────────────────
         n_saved  = 0
@@ -1297,6 +1360,7 @@ class AlphaExportWorker(QThread):
                 f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
                 f.write(f"# RL_factor={self.rl_factor}  d={self.cavity_len} cm\n")
                 f.write(f"# I0_mode={i0_mode}  ZA_count={n_za}\n")
+                f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (ambient {self.avg_sec:.0f}초 시간평균 후 alpha)\n")
                 dark_note = f"mean={dark.mean():.1f}" if has_dark else "None"
                 f.write(f"# dark_correction={dark_note}\n")
                 f.write(f"# Calibration: {calib_info_per_file.get(fp, 'unknown')}\n")
@@ -1304,11 +1368,12 @@ class AlphaExportWorker(QThread):
                 f.write(f"# wavelength_nm:\t{wv_str}\n")
                 f.write("row_idx\tT_C\tP_mbar\t" +
                         '\t'.join(f"px{pix_min+j}" for j in range(n_pix)) + "\n")
-                for rid, T, P, alpha in rows:
+                for rid, T, P, alpha, n_avg in rows:
                     vals = '\t'.join(f"{v:.6e}" for v in alpha)
                     f.write(f"{rid}\t{T:.2f}\t{P:.2f}\t{vals}\n")
             n_saved += 1
-            self.status_msg.emit(f"저장: {out_path}  ({len(rows)} ambient 스캔, {i0_mode} I₀)")
+            self.status_msg.emit(
+                f"저장: {out_path}  ({len(rows)}개 bin = {self.avg_sec:.0f}초 평균, {i0_mode} I₀)")
 
         self.finished.emit(self.output_dir if n_saved > 0 else "ERROR: 저장된 파일 없음")
 

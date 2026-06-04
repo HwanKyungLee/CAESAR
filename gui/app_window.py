@@ -879,6 +879,23 @@ class CAESARAnalyzer(QMainWindow):
             "먼저 '측정 파일 로드'와 '파장 캘리브레이션 로드'를 완료하세요.")
         lay_alpha_two.addWidget(btn_step1)
 
+        # ambient 시간평균 창 (박사님 Step2 avgsec, 기본 60초). DOAS 피팅 안정용.
+        lay_avgsec = QHBoxLayout()
+        lay_avgsec.addWidget(QLabel("ambient 평균(초):"))
+        self.spin_alpha_avgsec = QDoubleSpinBox()
+        self.spin_alpha_avgsec.setRange(0.0, 600.0)
+        self.spin_alpha_avgsec.setDecimals(0)
+        self.spin_alpha_avgsec.setSingleStep(10.0)
+        self.spin_alpha_avgsec.setValue(60.0)
+        self.spin_alpha_avgsec.setFixedWidth(90)
+        self.spin_alpha_avgsec.setToolTip(
+            "α 계산 전 ambient 스펙트럼을 이 초만큼 시간평균해 노이즈를 줄인다.\n"
+            "박사님 기본값 60초. 단일 스캔(~1초)은 noise가 커 DOAS 피팅이 불안정.\n"
+            "0 = 평균 없이 스캔별 α.")
+        lay_avgsec.addWidget(self.spin_alpha_avgsec)
+        lay_avgsec.addStretch(1)
+        lay_alpha_two.addLayout(lay_avgsec)
+
         # Alpha save dir (also used by main RUN → save_alpha checkbox)
         lay_alpha_save = QHBoxLayout()
         self.chk_save_alpha = QCheckBox("RUN 중 α 저장 (직접 분석 병행)")
@@ -1626,6 +1643,7 @@ class CAESARAnalyzer(QMainWindow):
             output_dir    = out_dir,
             dark_spectrum = dark_spectrum,
             channel       = getattr(self, '_detected_channels', 1),
+            avg_sec       = self.spin_alpha_avgsec.value(),
         )
 
         self._alpha_export_worker.total_ready.connect(
