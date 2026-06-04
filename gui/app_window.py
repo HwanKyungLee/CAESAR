@@ -1791,6 +1791,11 @@ class CAESARAnalyzer(QMainWindow):
             output_dir=output_dir,
             pixel_min=pixel_min,
             pixel_max=pixel_max,
+            # raw 핏과 동일한 VarPro 설정 전달 → raw↔alpha 일치
+            ref_properties=getattr(self, 'ref_props', None),
+            step_limit=self.spin_step_limit.value() if hasattr(self, 'spin_step_limit') else 0.5,
+            tikhonov_lambda=self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0,
+            use_robust=self.chk_robust.isChecked() if hasattr(self, 'chk_robust') else False,
         )
         self._alpha_fit_worker.progress.connect(
             lambda n: self.status.setText(f"📊 Alpha 피팅: {n}행 처리 중...")
