@@ -2514,6 +2514,27 @@ class CAESARAnalyzer(QMainWindow):
     # ---------------------------------------------------------
     # Multithreading Analysis Execution (Worker)
     # ---------------------------------------------------------
+    def _alpha_channel_groups(self, file_list):
+        """입력이 모두 알파trace 파일이면 파일명(_PNs_/_ANs_/_CH3_/_Cold_)으로
+        채널 그룹화해 {채널idx: [entries]} 반환. 하나라도 알파trace가 아니면 None
+        (= 일반 raw 입력이므로 기존 채널 검출 로직 사용)."""
+        if not file_list:
+            return None
+        label_to_ch = {'pns': 1, 'ans': 2, 'ch3': 3, 'cold': 1}
+        groups = {}
+        for entry in file_list:
+            fp = entry if isinstance(entry, str) else self._entry_filepath(entry)
+            name = os.path.basename(str(fp)).lower()
+            if 'alpha_trace' not in name:
+                return None
+            ch = 1
+            for lbl, c in label_to_ch.items():
+                if f'_{lbl}_' in name:
+                    ch = c
+                    break
+            groups.setdefault(ch, []).append(entry)
+        return groups or None
+
     def start_analysis(self):
         """
         Validates settings, builds the initial parameter vector p0, and starts
@@ -2542,6 +2563,11 @@ class CAESARAnalyzer(QMainWindow):
 
         # Multi-channel state
         n_ch = self._detected_channels
+        # 알파trace 파일 입력이면 파일명(_PNs_/_ANs_/_CH3_)으로 채널 그룹화 →
+        # 채널별 워커로 분리해 CH1/CH2 트렌드가 섞이지 않게 한다.
+        self._alpha_groups = self._alpha_channel_groups(self.file_list)
+        if self._alpha_groups:
+            n_ch = len(self._alpha_groups)
         self._multi_channel_mode = (n_ch > 1)
         self._workers = []
         self._workers_done = 0
@@ -2675,9 +2701,11 @@ class CAESARAnalyzer(QMainWindow):
         flag_he  = self._parse_flags(self.txt_flag_he.text())
         flag_amb = self._parse_flags(self.txt_flag_amb.text())
 
-        for ch in range(1, n_ch + 1):
+        ch_list = sorted(self._alpha_groups) if self._alpha_groups else list(range(1, n_ch + 1))
+        for ch in ch_list:
+            files_for_ch = self._alpha_groups[ch] if self._alpha_groups else self.file_list
             w = AnalysisWorker(
-                self.engine, self.file_list, pixel_min, pixel_max,
+                self.engine, files_for_ch, pixel_min, pixel_max,
                 p0, (bounds_low, bounds_high), interval, delay_ms,
                 ref_properties=getattr(self, 'ref_props', {}),
                 i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d,
