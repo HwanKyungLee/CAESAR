@@ -467,9 +467,7 @@ class CAESARAnalyzer(QMainWindow):
         """Build the Daily Run tab: scenario, setup status checklist, R trend charts."""
         lay = QVBoxLayout(self.daily_run_tab)
 
-        top_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # ── Left: Scenario + Setup Status ────────────────────────────
+        # ── Scenario + Setup Status (R 표시는 Setup 탭 Cavity Diagnostics로 일원화) ──
         left_w = QWidget()
         left_v = QVBoxLayout(left_w)
 
@@ -506,25 +504,7 @@ class CAESARAnalyzer(QMainWindow):
         grp_status.setLayout(lay_status)
         left_v.addWidget(grp_status)
         left_v.addStretch(1)
-        top_splitter.addWidget(left_w)
-
-        # ── Right: 안내 (R 표시는 Setup 탭으로 일원화) ───────────────
-        # 중복 제거: R(λ) 스펙트럼 + R/Leff 시계열은 Setup → Cavity Diagnostics
-        # 한 곳에서만 본다. (_daily_r_pw/_daily_rt_pw 미생성 → 갱신 메서드는
-        # hasattr 가드로 자동 no-op)
-        right_w = QWidget()
-        right_v = QVBoxLayout(right_w)
-        _note = QLabel("🪞 거울 반사율 R(λ) / R·Leff 시계열은\n"
-                       "Setup 탭 → 🔬 Cavity Diagnostics 에서 확인하세요.")
-        _note.setStyleSheet("color:#6A1B9A; font-weight:bold;")
-        _note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_v.addStretch(1)
-        right_v.addWidget(_note)
-        right_v.addStretch(1)
-        top_splitter.addWidget(right_w)
-
-        top_splitter.setSizes([520, 420])
-        lay.addWidget(top_splitter)
+        lay.addWidget(left_w)
 
     # ──────────────────────────────────────────────────────────────────
     # Daily Run helpers
