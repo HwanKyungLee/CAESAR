@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog,
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox,
                              QCheckBox, QFormLayout, QMenu, QRadioButton)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 
 from core.engine import UniversalEngine
@@ -39,9 +39,25 @@ class CAESARAnalyzer(QMainWindow):
         self.ref_widgets = []
         
         self.calib_squeeze = 1.0
-        
+
+        # Per-button "last used directory" memory (survives restarts).
+        self._qsettings = QSettings("CAESAR", "app")
+
         self.init_ui()
-        
+
+    def _dlg_dir(self, key, save=None):
+        """Last-directory memory for file dialogs, keyed per button.
+
+        Call with no `save` to get the remembered start directory (for the
+        QFileDialog 3rd arg); call with the chosen path to remember its folder.
+        """
+        if save:
+            d = save if os.path.isdir(save) else os.path.dirname(save)
+            if d:
+                self._qsettings.setValue(f"dlgdir/{key}", d)
+            return d
+        return self._qsettings.value(f"dlgdir/{key}", "", type=str)
+
     def init_ui(self):
         from core.data_io import ui_scale
         s = ui_scale()
@@ -1535,7 +1551,8 @@ class CAESARAnalyzer(QMainWindow):
 
     def browse_i0_file(self):
         """Browse and set the I0 (Zero-air) measurement file."""
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select I0 File", "", "Data Files (*.dat *.txt *.csv)")
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select I0 File", self._dlg_dir('i0'), "Data Files (*.dat *.txt *.csv)")
+        self._dlg_dir('i0', filepath)
         if filepath:
             self.set_i0_path(filepath)
 
@@ -1576,7 +1593,8 @@ class CAESARAnalyzer(QMainWindow):
 
     def browse_offset_file(self):
         """Browse and load a detector offset spectrum (ADC pedestal, integration-time independent)."""
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select Offset Spectrum", "", "Data Files (*.dat *.txt *.csv)")
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select Offset Spectrum", self._dlg_dir('offset'), "Data Files (*.dat *.txt *.csv)")
+        self._dlg_dir('offset', filepath)
         if not filepath:
             return
         try:
@@ -1597,7 +1615,8 @@ class CAESARAnalyzer(QMainWindow):
 
     def browse_alpha_save_dir(self):
         """Browse and set the output directory for intermediate alpha spectra."""
-        d = QFileDialog.getExistingDirectory(self, "Alpha 중간 저장 폴더 선택")
+        d = QFileDialog.getExistingDirectory(self, "Alpha 중간 저장 폴더 선택", self._dlg_dir('alpha_save'))
+        self._dlg_dir('alpha_save', d)
         if d:
             self.alpha_save_dir = d
             self.lbl_alpha_dir.setText(os.path.basename(d) or d)
@@ -1612,7 +1631,8 @@ class CAESARAnalyzer(QMainWindow):
             QMessageBox.warning(self, "No Wavelength Cal",
                                 "파장 캘리브레이션 파일을 먼저 로드하세요.")
             return
-        out_dir = QFileDialog.getExistingDirectory(self, "Alpha 파일 저장 폴더 선택")
+        out_dir = QFileDialog.getExistingDirectory(self, "Alpha 파일 저장 폴더 선택", self._dlg_dir('alpha_out'))
+        self._dlg_dir('alpha_out', out_dir)
         if not out_dir:
             return
 
@@ -1729,11 +1749,12 @@ class CAESARAnalyzer(QMainWindow):
             return
 
         alpha_files, _ = QFileDialog.getOpenFileNames(
-            self, "Alpha Trace 파일 선택", "",
+            self, "Alpha Trace 파일 선택", self._dlg_dir('alpha_fit'),
             "Alpha Trace (*.dat);;All Files (*)"
         )
         if not alpha_files:
             return
+        self._dlg_dir('alpha_fit', alpha_files[0])
 
         output_dir = QFileDialog.getExistingDirectory(
             self, "결과 저장 폴더 선택",
@@ -1838,7 +1859,8 @@ class CAESARAnalyzer(QMainWindow):
 
     def browse_r_file(self):
         """Browse and set the Reflectivity (R-Curve) file."""
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select R-Curve File", "", "Data Files (*.dat *.txt *.csv)")
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select R-Curve File", self._dlg_dir('rcurve'), "Data Files (*.dat *.txt *.csv)")
+        self._dlg_dir('rcurve', filepath)
         if filepath:
             self.lbl_r_path.setText(os.path.basename(filepath))
             self.lbl_r_path.setStyleSheet("color: blue; font-weight: bold;")
@@ -2086,7 +2108,8 @@ class CAESARAnalyzer(QMainWindow):
             filepath = auto_path
             self.loaded_wl_path = filepath # 🌟 Remember path for saving scenarios
         else:
-            filepath, _ = QFileDialog.getOpenFileName(self, "Load Wavelengths (nm)", "", "Text/CSV (*.txt *.csv *.dat)")
+            filepath, _ = QFileDialog.getOpenFileName(self, "Load Wavelengths (nm)", self._dlg_dir('wavecal'), "Text/CSV (*.txt *.csv *.dat)")
+            self._dlg_dir('wavecal', filepath)
             if not filepath: return
             self.loaded_wl_path = filepath # 🌟 Remember path for saving scenarios
             
@@ -2146,7 +2169,9 @@ class CAESARAnalyzer(QMainWindow):
 
     def batch_load_refs(self):
         """Batch load multiple reference files at once."""
-        files, _ = QFileDialog.getOpenFileNames(self, "Select References", "", "All Files (*.*)")
+        files, _ = QFileDialog.getOpenFileNames(self, "Select References", self._dlg_dir('refs'), "All Files (*.*)")
+        if files:
+            self._dlg_dir('refs', files[0])
         if files: 
             for f in sorted(files): 
                 self.add_ref_row(self.guess_gas_name(f), f)
@@ -2204,7 +2229,8 @@ class CAESARAnalyzer(QMainWindow):
         btn_delete.setFixedWidth(int(30 * self._s))
         
         def select_file_wrapper():
-            f, _ = QFileDialog.getOpenFileName(self, "Select Reference", "", "All Files (*.*)")
+            f, _ = QFileDialog.getOpenFileName(self, "Select Reference", self._dlg_dir('refs'), "All Files (*.*)")
+            self._dlg_dir('refs', f)
             if f:
                 lbl_path.setText(os.path.basename(f))
                 txt_name.setText(self.guess_gas_name(f))
@@ -2369,15 +2395,16 @@ class CAESARAnalyzer(QMainWindow):
 
     def _load_files(self):
         """Loads specific measurement files selected by the user."""
-        files, _ = QFileDialog.getOpenFileNames(self, "Select Measurement Files", "", "Data Files (*.dat *.txt *.csv)")
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Measurement Files", self._dlg_dir('data'), "Data Files (*.dat *.txt *.csv)")
         if files:
+            self._dlg_dir('data', files[0])
             self._update_file_table(sorted(files))
 
     def _load_folder(self):
         """Scans a selected folder and loads all valid measurement files."""
-        folder_path = QFileDialog.getExistingDirectory(self, "Select Measurement Folder")
-        
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Measurement Folder", self._dlg_dir('data'))
         if folder_path:
+            self._dlg_dir('data', folder_path)
             # Filter files by valid extensions (.dat, .txt, .csv)
             valid_extensions = ('.dat', '.txt', '.csv')
             files = [
@@ -2573,6 +2600,7 @@ class CAESARAnalyzer(QMainWindow):
         self._workers_done = 0
         self._workers_total = n_ch
         self._next_table_row = 0   # dynamic row counter for multi-channel append
+        self._scan_counts = {}     # channel → expanded-scan count (progress denominator)
 
         # 🌟 UI Table Reset: start empty — rows are added dynamically as scans complete
         self.table.setSortingEnabled(False)
@@ -2734,13 +2762,16 @@ class CAESARAnalyzer(QMainWindow):
             w.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
 
             # Connect signals
-            w.progress.connect(self.pbar.setValue)
+            #   Progress is driven by completed-result count vs total scans across
+            #   ALL channels (see update_table / _on_scan_count_ready), NOT by each
+            #   worker's local file counter — otherwise parallel workers race and the
+            #   bar caps at 100/N % (the "2채널이면 50%에서 멈춤" bug).
             w.result_ready.connect(self.update_table)
             w.plot_update.connect(self.monitor.update_spectrum)
             w.trend_update.connect(self.monitor.update_trend)
             w.finished.connect(self.analysis_finished)
             w.r_curve_update.connect(self._on_r_curve_update)
-            w.scan_count_ready.connect(self._on_scan_count_ready)
+            w.scan_count_ready.connect(lambda n, ch=ch: self._on_scan_count_ready(n, ch))
 
             self._workers.append(w)
 
@@ -2758,15 +2789,22 @@ class CAESARAnalyzer(QMainWindow):
         for w in self._workers:
             w.start()
         
-    def _on_scan_count_ready(self, total_scans):
-        """Called once a worker has finished expanding all files into individual scans."""
-        # Progress bar advances by file (not scan) to stay manageable
-        self.pbar.setMaximum(len(self.file_list))
+    def _on_scan_count_ready(self, total_scans, ch=1):
+        """Called once a worker has finished expanding all files into individual scans.
+
+        Progress denominator = SUM of expanded-scan counts across every channel
+        worker (each worker reports its own count for its channel). The bar value
+        is the number of completed results (see update_table), so it reaches 100%
+        only when every channel's every scan is done.
+        """
+        self._scan_counts[ch] = total_scans
+        total_all = max(1, sum(self._scan_counts.values()))
+        self.pbar.setMaximum(total_all)
         if self._multi_channel_mode:
             # Multi-channel: rows arrive interleaved from parallel workers — grow dynamically
             n_ch = self._workers_total
             self.status.setText(
-                f"🏃 {total_scans:,} scans × {n_ch} CH / {len(self.file_list)} file(s) — processing..."
+                f"🏃 {total_all:,} scans ({n_ch} CH) / {len(self.file_list)} file(s) — processing..."
             )
         else:
             # Single-channel: pre-allocate rows for O(1) update_table writes
@@ -2846,8 +2884,9 @@ class CAESARAnalyzer(QMainWindow):
         if item:
             self.table.scrollToItem(item)
 
-        # Advance progress bar
-        self.pbar.setValue(row + 1)
+        # Advance progress bar by completed-result count (works for both single- and
+        # multi-channel: denominator is the summed scan count across all workers).
+        self.pbar.setValue(len(self.results))
         
     def analysis_finished(self, stopped=False):
         """Re-enables UI once ALL channel workers have finished."""
@@ -3028,24 +3067,41 @@ class CAESARAnalyzer(QMainWindow):
         that file, then sends the result to the monitor — allowing you to inspect
         any individual spectrum without re-running the full analysis.
         """
-        if row >= len(self.file_list): 
+        # File name lives in col 0 normally, but col 1 when the "Ch" column is
+        # prepended in multi-channel mode.
+        fc = 1 if getattr(self, '_multi_channel_mode', False) else 0
+        item = self.table.item(row, fc)
+        if item is None:
             return
-            
-        fname = self.table.item(row, 0).text()
+        fname = item.text()
         entry = self._entry_from_display_name(fname)
         if not entry:
             return
         filepath = self._entry_filepath(entry)
         row_idx  = self._entry_row_index(entry)
 
-        # 파일명으로 결과 조회 (행 인덱스가 아니라 → 정렬/순서 어긋나도 안전)
-        _res = (self.results[row] if (row < len(self.results)
-                and self.results[row].get('File') == fname)
-                else next((r for r in self.results if r.get('File') == fname), None))
+        # 파일명으로 결과 조회 (행 인덱스가 아니라 → 정렬/순서 어긋나도 안전).
+        # 멀티채널이면 같은 파일명이 채널마다 있을 수 있으니 클릭한 행의 채널까지 일치시킨다.
+        ch_txt = self.table.item(row, 0).text() if fc == 1 else ''
+        want_ch = int(ch_txt.replace('CH', '')) if ch_txt.startswith('CH') else None
+        def _match(r):
+            if r.get('File') != fname:
+                return False
+            return want_ch is None or int(r.get('Channel', 1)) == want_ch
+        _res = (self.results[row] if (row < len(self.results) and _match(self.results[row]))
+                else next((r for r in self.results if _match(r)), None))
         if _res is not None:
             params = _res.get('Params')
             if params is None:
                 return
+
+            # 클릭한 결과의 채널로 Monitor 표시채널을 맞춰 채널필터에 막히지 않게 한다.
+            try:
+                ch = int(params.get('channel', _res.get('Channel', 1)))
+                if hasattr(self.monitor, 'cb_fit_channel'):
+                    self.monitor.cb_fit_channel.setCurrentIndex(max(0, min(ch - 1, self.monitor.cb_fit_channel.count() - 1)))
+            except Exception:
+                pass
 
             try:
                 f_min, f_max = int(self.txt_min.text()), int(self.txt_max.text())
@@ -3078,8 +3134,9 @@ class CAESARAnalyzer(QMainWindow):
                 
     def on_table_single_click(self, row, col):
         # 결과가 있으면 클릭만으로 그 스캔 fit 그래프(리플레이) 표시; 없으면 기존 raw 뷰어.
-        if 0 <= row < self.table.rowCount() and self.table.item(row, 0) is not None:
-            fname = self.table.item(row, 0).text()
+        fc = 1 if getattr(self, '_multi_channel_mode', False) else 0
+        if 0 <= row < self.table.rowCount() and self.table.item(row, fc) is not None:
+            fname = self.table.item(row, fc).text()
             if any(r.get('File') == fname for r in self.results):
                 self.on_table_double_click(row, col)
                 return
