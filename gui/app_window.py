@@ -3010,8 +3010,12 @@ class CAESARAnalyzer(QMainWindow):
         filepath = self._entry_filepath(entry)
         row_idx  = self._entry_row_index(entry)
 
-        if row < len(self.results) and self.results[row]['File'] == fname:
-            params = self.results[row].get('Params')
+        # 파일명으로 결과 조회 (행 인덱스가 아니라 → 정렬/순서 어긋나도 안전)
+        _res = (self.results[row] if (row < len(self.results)
+                and self.results[row].get('File') == fname)
+                else next((r for r in self.results if r.get('File') == fname), None))
+        if _res is not None:
+            params = _res.get('Params')
             if params is None:
                 return
 
@@ -3045,7 +3049,13 @@ class CAESARAnalyzer(QMainWindow):
                 print(f"Double-click viewer failed to load: {e}")
                 
     def on_table_single_click(self, row, col):
-        if self.monitor.tabs.currentIndex() == 3 and self.monitor.cb_view.currentIndex() == 0: 
+        # 결과가 있으면 클릭만으로 그 스캔 fit 그래프(리플레이) 표시; 없으면 기존 raw 뷰어.
+        if 0 <= row < self.table.rowCount() and self.table.item(row, 0) is not None:
+            fname = self.table.item(row, 0).text()
+            if any(r.get('File') == fname for r in self.results):
+                self.on_table_double_click(row, col)
+                return
+        if self.monitor.tabs.currentIndex() == 3 and self.monitor.cb_view.currentIndex() == 0:
             self.refresh_viewer()
             
     def refresh_viewer(self):
