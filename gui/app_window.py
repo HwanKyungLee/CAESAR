@@ -95,7 +95,7 @@ class CAESARAnalyzer(QMainWindow):
         # Lock References Button
         btn_lock = QPushButton("🔒 Lock References (Commit)")
         btn_lock.clicked.connect(self.lock_ref)
-        btn_lock.setStyleSheet("background-color: #e1f5fe; color: #0277bd; font-weight: bold; padding: 5px;")
+        btn_lock.setStyleSheet("font-weight: bold; padding: 5px;")
         lay_ref.addWidget(btn_lock)
         
         # ILS Convolution (advanced) — hidden by default.
@@ -105,7 +105,7 @@ class CAESARAnalyzer(QMainWindow):
         self._btn_toggle_ils = QPushButton(
             "▶  ILS 콘볼루션 (고급 — Stage 2 레퍼런스 사용 시 불필요)")
         self._btn_toggle_ils.setStyleSheet(
-            "text-align: left; color: #9e9e9e; background: #FAFAFA; "
+            "text-align: left; color: #9e9e9e; "
             "border: 1px solid #E0E0E0; padding: 3px 8px; font-size: 11px;")
         self._btn_toggle_ils.setToolTip(
             "레퍼런스 제너레이터(Stage 2)로 이미 ILS를 적용한 레퍼런스를\n"
@@ -153,7 +153,7 @@ class CAESARAnalyzer(QMainWindow):
         layout_conv.addWidget(self.spin_fwhm_lorentzian)
 
         self.btn_apply_ils = QPushButton("Apply ILS")
-        self.btn_apply_ils.setStyleSheet("background-color: #e0e0e0; font-weight: bold;")
+        self.btn_apply_ils.setStyleSheet("font-weight: bold;")
         self.btn_apply_ils.clicked.connect(self.apply_convolution)
         layout_conv.addWidget(self.btn_apply_ils)
         lay_ref.addWidget(self._ils_container)
@@ -199,21 +199,22 @@ class CAESARAnalyzer(QMainWindow):
         layout_px.addWidget(btn_sel)
         lay_set.addLayout(layout_px)
         
-        # Wavelength-based Selection
+        # Wavelength-based Selection — 시작 nm ~ 끝 nm 직접 입력
         layout_nm = QHBoxLayout()
-        layout_nm.addWidget(QLabel("Target nm:"))
-        self.spin_target_nm = QDoubleSpinBox()
-        self.spin_target_nm.setRange(200, 1000)
-        self.spin_target_nm.setValue(455.0)
-        layout_nm.addWidget(self.spin_target_nm)
-        
-        layout_nm.addWidget(QLabel("Window (±nm):"))
-        self.spin_window_nm = QDoubleSpinBox()
-        self.spin_window_nm.setRange(1, 200)
-        self.spin_window_nm.setValue(20.0)
-        layout_nm.addWidget(self.spin_window_nm)
-        
-        btn_apply_nm = QPushButton("Set Range by nm")
+        layout_nm.addWidget(QLabel("Fit 범위(nm):"))
+        self.spin_fit_start_nm = QDoubleSpinBox()
+        self.spin_fit_start_nm.setRange(200, 1000)
+        self.spin_fit_start_nm.setDecimals(1)
+        self.spin_fit_start_nm.setValue(435.0)
+        layout_nm.addWidget(self.spin_fit_start_nm)
+        layout_nm.addWidget(QLabel("~"))
+        self.spin_fit_end_nm = QDoubleSpinBox()
+        self.spin_fit_end_nm.setRange(200, 1000)
+        self.spin_fit_end_nm.setDecimals(1)
+        self.spin_fit_end_nm.setValue(480.0)
+        layout_nm.addWidget(self.spin_fit_end_nm)
+
+        btn_apply_nm = QPushButton("nm 범위 적용")
         btn_apply_nm.clicked.connect(self.set_range_from_nm)
         layout_nm.addWidget(btn_apply_nm)
         lay_set.addLayout(layout_nm)
@@ -225,7 +226,7 @@ class CAESARAnalyzer(QMainWindow):
         self._params_visible = True
         self._btn_toggle_params = QPushButton("▼  Parameters")
         self._btn_toggle_params.setStyleSheet(
-            "text-align: left; font-weight: bold; background: #ECEFF1; "
+            "text-align: left; font-weight: bold; "
             "border: 1px solid #B0BEC5; padding: 4px 8px;")
         left_layout.addWidget(self._btn_toggle_params)
 
@@ -268,7 +269,7 @@ class CAESARAnalyzer(QMainWindow):
 
         self.ref_props = {}
         btn_props = QPushButton("⚙️ Properties")
-        btn_props.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
+        btn_props.setStyleSheet("font-weight: bold;")
         btn_props.clicked.connect(self.open_ref_properties)
         lay_calib.addWidget(btn_props)
         lay_calib_main.addLayout(lay_calib)
@@ -614,7 +615,7 @@ class CAESARAnalyzer(QMainWindow):
         self._ils_applied = False
         if hasattr(self, 'btn_apply_ils'):
             self.btn_apply_ils.setStyleSheet(
-                "background-color: #FF6F00; color: white; font-weight: bold;")
+                "font-weight: bold;")
 
     def _update_daily_r_chart(self):
         """Plot current R(λ) in the Daily Run tab."""
@@ -841,11 +842,11 @@ class CAESARAnalyzer(QMainWindow):
 
         btn_ref_gen = QPushButton("✂️ Reference Generator")
         btn_ref_gen.clicked.connect(self.open_reference_generator)
-        btn_ref_gen.setStyleSheet("background-color: #fff3e0; font-weight: bold;")
+        btn_ref_gen.setStyleSheet("font-weight: bold;")
 
         btn_r_trend = QPushButton("📈 R Trend Monitor (거울 반사율 시계열)")
         btn_r_trend.clicked.connect(self.open_r_trend_monitor)
-        btn_r_trend.setStyleSheet("background-color: #ede7f6; font-weight: bold;")
+        btn_r_trend.setStyleSheet("font-weight: bold;")
         btn_r_trend.setToolTip(
             "raw .dat 파일 디렉토리를 스캔해서 파일마다 R 값을 계산하고\n"
             "반사율 시계열 그래프(PNG)와 결과(.dat)를 저장합니다.\n"
@@ -871,7 +872,7 @@ class CAESARAnalyzer(QMainWindow):
         btn_step1 = QPushButton("▶  1단계: Raw → Alpha 파일 생성")
         btn_step1.clicked.connect(self.export_alpha_files)
         btn_step1.setStyleSheet(
-            "background-color: #E3F2FD; font-weight: bold; "
+            "font-weight: bold; "
             "padding: 6px; border: 1px solid #90CAF9;")
         btn_step1.setToolTip(
             "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm⁻¹) 계산\n"
@@ -916,7 +917,7 @@ class CAESARAnalyzer(QMainWindow):
         btn_step2 = QPushButton("▶  2단계: Alpha 파일 → 피팅")
         btn_step2.clicked.connect(self.run_alpha_fit)
         btn_step2.setStyleSheet(
-            "background-color: #E8F5E9; font-weight: bold; "
+            "font-weight: bold; "
             "padding: 6px; border: 1px solid #A5D6A7;")
         btn_step2.setToolTip(
             "1단계로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
@@ -930,7 +931,7 @@ class CAESARAnalyzer(QMainWindow):
         # R-Curve Generator (standalone tool for offline R derivation)
         btn_r_gen = QPushButton("📊 R-Curve Generator (offline .mat / separate files)")
         btn_r_gen.clicked.connect(self.open_r_generator)
-        btn_r_gen.setStyleSheet("background-color: #e8f5e9; padding: 4px;")
+        btn_r_gen.setStyleSheet("padding: 4px;")
         btn_r_gen.setToolTip(
             "별도 He/ZA 파일(또는 .mat)에서 R-Curve를 계산합니다.\n"
             "Araon 측정 파일처럼 He/ZA가 내장된 경우에는 불필요합니다.\n"
@@ -993,7 +994,7 @@ class CAESARAnalyzer(QMainWindow):
         self._manual_override_visible = False
         self._btn_toggle_override = QPushButton("▶  Manual Override  (I₀, R, flags, T/P fallback)")
         self._btn_toggle_override.setStyleSheet(
-            "text-align: left; color: #546E7A; background: #F5F5F5; "
+            "text-align: left; color: #546E7A; "
             "border: 1px solid #CFD8DC; padding: 3px 8px;")
         control_layout.addWidget(self._btn_toggle_override)
 
@@ -1111,7 +1112,7 @@ class CAESARAnalyzer(QMainWindow):
         self._det_corr_visible = False
         self._btn_toggle_det = QPushButton("▶  Detector Corrections (dark / offset / stray light)")
         self._btn_toggle_det.setStyleSheet(
-            "text-align: left; color: #546E7A; background: #FAFAFA; "
+            "text-align: left; color: #546E7A; "
             "border: 1px solid #E0E0E0; padding: 3px 8px;")
         control_layout.addWidget(self._btn_toggle_det)
 
@@ -1297,7 +1298,7 @@ class CAESARAnalyzer(QMainWindow):
 
         row_btn = QHBoxLayout()
         self.btn_fwhm_run = QPushButton("🌀 Run Validation")
-        self.btn_fwhm_run.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold;")
+        self.btn_fwhm_run.setStyleSheet("font-weight: bold;")
         self.btn_fwhm_run.clicked.connect(self._fwhm_run_validation)
         self.btn_fwhm_set_active = QPushButton("✅ Set best as active NO2 ref")
         self.btn_fwhm_set_active.setEnabled(False)
@@ -2079,11 +2080,11 @@ class CAESARAnalyzer(QMainWindow):
             QMessageBox.warning(self, "Error", "Please load the X-Axis (nm) wavelength file first!")
             return
             
-        target = self.spin_target_nm.value()
-        window = self.spin_window_nm.value()
-        min_nm = target - window
-        max_nm = target + window
-        
+        min_nm = self.spin_fit_start_nm.value()
+        max_nm = self.spin_fit_end_nm.value()
+        if min_nm > max_nm:
+            min_nm, max_nm = max_nm, min_nm
+
         wl = self.monitor.wavelengths
         idx_min = np.abs(wl - min_nm).argmin()
         idx_max = np.abs(wl - max_nm).argmin()
@@ -2286,7 +2287,7 @@ class CAESARAnalyzer(QMainWindow):
             self._ils_applied = False
             if hasattr(self, 'btn_apply_ils'):
                 self.btn_apply_ils.setStyleSheet(
-                    "background-color: #FF6F00; color: white; font-weight: bold;")
+                    "font-weight: bold;")
             self._refresh_setup_status()
         else:
             QMessageBox.warning(self, "Error", "No valid references found to lock, or an error occurred.")
@@ -2426,7 +2427,7 @@ class CAESARAnalyzer(QMainWindow):
         self._ils_applied = True
         if hasattr(self, 'btn_apply_ils'):
             self.btn_apply_ils.setStyleSheet(
-                "background-color: #2E7D32; color: white; font-weight: bold;")
+                "font-weight: bold;")
 
         self._refresh_setup_status()
         QMessageBox.information(self, "Applied", f"ILS Blur ({label}) successfully applied.")
