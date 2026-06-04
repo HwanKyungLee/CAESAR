@@ -18,7 +18,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFileDialog, QComboBox, QSplitter,
+    QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt
 
@@ -28,16 +28,18 @@ _KIND_BY_LABEL = {
     "자동 판별": "auto",
     "R 트렌드 (시계열)": "r_trend",
     "R(λ) 곡선": "r_curve",
-    "α 스펙트럼": "array",
+    "α trace (평균 스펙트럼)": "alpha_trace",
+    "배열 스펙트럼": "array",
     "레퍼런스 스펙트럼": "reference",
-    "농도 시계열": "concentration",
+    "농도·fit 시계열": "concentration",
 }
 _KIND_KO = {
     "r_trend": "R 트렌드 (시계열)",
     "r_curve": "R(λ) 곡선",
-    "array": "α/배열 스펙트럼",
+    "alpha_trace": "α trace (평균 스펙트럼)",
+    "array": "배열 스펙트럼",
     "reference": "레퍼런스 스펙트럼",
-    "concentration": "농도 시계열",
+    "concentration": "농도·fit 시계열",
 }
 _PALETTE = ["#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
             "#0097A7", "#C2185B", "#5D4037"]
@@ -55,12 +57,16 @@ class ResultViewerWidget(QWidget):
     def _init_ui(self):
         root = QVBoxLayout(self)
 
-        # 상단 바: 열기 버튼 + 종류 콤보 + 상태 라벨
+        # 상단 바: 파일/폴더 열기 + 종류 콤보 + 상태 라벨
         bar = QHBoxLayout()
-        self._btn = QPushButton("📂 결과 파일 열기")
-        self._btn.setFixedWidth(150)
+        self._btn = QPushButton("📂 파일 열기")
+        self._btn.setFixedWidth(110)
         self._btn.clicked.connect(self._open)
         bar.addWidget(self._btn)
+        self._btn_folder = QPushButton("📁 폴더 열기")
+        self._btn_folder.setFixedWidth(110)
+        self._btn_folder.clicked.connect(self._open_folder)
+        bar.addWidget(self._btn_folder)
 
         bar.addWidget(QLabel("종류:"))
         self._combo = QComboBox()
@@ -69,31 +75,79 @@ class ResultViewerWidget(QWidget):
         self._combo.currentIndexChanged.connect(self._reload)
         bar.addWidget(self._combo)
 
-        self._lbl = QLabel("R 트렌드 / R(λ) / α / 레퍼런스 / 농도 결과 파일(.dat·.csv·.txt)을 열어보세요.")
+        self._lbl = QLabel("결과 파일/폴더를 열어보세요 (R트렌드 / R(λ) / α / 레퍼런스 / 농도·fit).")
         self._lbl.setStyleSheet("color:#666;")
         bar.addWidget(self._lbl, 1)
         root.addLayout(bar)
 
-        # 플롯 2단(위=주, 아래=보조). 보조는 필요할 때만 표시.
-        split = QSplitter(Qt.Orientation.Vertical)
+        # 좌: 폴더 파일목록(형태별 그룹) / 우: 플롯 2단(위=주, 아래=보조)
+        hsplit = QSplitter(Qt.Orientation.Horizontal)
+        self._list = QListWidget()
+        self._list.setMinimumWidth(230)
+        self._list.itemClicked.connect(self._on_list_item)
+        hsplit.addWidget(self._list)
+
+        psplit = QSplitter(Qt.Orientation.Vertical)
         self._pw_top = pg.PlotWidget()
         self._pw_bot = pg.PlotWidget()
         for pw in (self._pw_top, self._pw_bot):
             pw.setBackground('w')
             pw.showGrid(x=True, y=True, alpha=0.3)
             pw.addLegend(offset=(10, 10))
-        split.addWidget(self._pw_top)
-        split.addWidget(self._pw_bot)
-        split.setSizes([400, 250])
-        root.addWidget(split, 1)
+        psplit.addWidget(self._pw_top)
+        psplit.addWidget(self._pw_bot)
+        psplit.setSizes([400, 250])
+        hsplit.addWidget(psplit)
+        hsplit.setSizes([240, 780])
+        root.addWidget(hsplit, 1)
 
     # ──────────────────────────────────────────────────────────────
     def _open(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "결과 파일 선택", "",
-            "결과 파일 (*.dat *.csv *.txt);;모든 파일 (*)")
+            "결과 파일 (*.dat *.csv *.txt *.tsv);;모든 파일 (*)")
         if path:
             self._path = path
+            self._reload()
+
+    def _open_folder(self):
+        """폴더를 받아 내부 결과파일을 형태별로 그룹·목록화. 항목 클릭 → 표시."""
+        import glob
+        d = QFileDialog.getExistingDirectory(self, "결과 폴더 선택")
+        if not d:
+            return
+        files = []
+        for ext in ("*.dat", "*.csv", "*.txt", "*.tsv"):
+            files += glob.glob(os.path.join(d, ext))
+            files += glob.glob(os.path.join(d, "**", ext), recursive=True)
+        files = sorted(set(files))
+        groups = {}
+        for f in files:
+            try:
+                k = self._detect(f)
+            except Exception:
+                k = "array"
+            groups.setdefault(k, []).append(f)
+        self._list.clear()
+        order = ["r_trend", "concentration", "r_curve", "array", "reference"]
+        n = 0
+        for k in order + [g for g in groups if g not in order]:
+            for f in groups.get(k, []):
+                it = QListWidgetItem(f"[{_KIND_KO.get(k, k)}] {os.path.basename(f)}")
+                it.setData(Qt.ItemDataRole.UserRole, f)
+                self._list.addItem(it)
+                n += 1
+        if n:
+            self._lbl.setText(f"📁 {os.path.basename(d)} — 결과파일 {n}개. 왼쪽 목록에서 선택.")
+            self._lbl.setStyleSheet("color:#1565C0;")
+        else:
+            self._lbl.setText(f"📁 {os.path.basename(d)} — 결과파일(.dat/.csv/.txt/.tsv) 없음.")
+            self._lbl.setStyleSheet("color:#C62828;")
+
+    def _on_list_item(self, item):
+        f = item.data(Qt.ItemDataRole.UserRole)
+        if f:
+            self._path = f
             self._reload()
 
     def _reload(self):
@@ -108,6 +162,7 @@ class ResultViewerWidget(QWidget):
             handler = {
                 "r_trend": self._plot_r_trend,
                 "r_curve": self._plot_r_curve,
+                "alpha_trace": self._plot_alpha_trace,
                 "reference": self._plot_reference,
                 "concentration": self._plot_concentration,
                 "array": self._plot_array,
@@ -142,6 +197,10 @@ class ResultViewerWidget(QWidget):
             return "r_curve"
         if name.endswith("_r.dat"):
             return "r_curve"
+        if "_alpha_trace" in name or "alpha export" in head:
+            return "alpha_trace"
+        if name.endswith(".tsv") or "rms_cm" in head or name.endswith("_fit.tsv"):
+            return "concentration"
         if "wavelength" in head and "reflect" in head:
             return "reference"
         if any(k in head for k in ("datetime", "timestamp", "doy", "no2", "hcho",
@@ -241,6 +300,42 @@ class ResultViewerWidget(QWidget):
             self._pw_bot.show()
         else:
             self._pw_bot.hide()
+
+    # ── α trace (alpha_trace.dat) → 평균 α 스펙트럼 ±1σ ─────────────
+    def _plot_alpha_trace(self, path):
+        wave = None
+        rows = []
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                if ln.startswith("# wavelength_nm:"):
+                    try:
+                        wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
+                                         if v.strip()], dtype=float)
+                    except Exception:
+                        pass
+                    continue
+                if ln.startswith("#") or ln.lower().startswith("row_idx"):
+                    continue
+                p = ln.rstrip().split("\t")
+                if len(p) > 4:
+                    try:
+                        rows.append([float(x) for x in p[3:]])
+                    except ValueError:
+                        pass
+        if not rows:
+            raise ValueError("alpha 데이터 행이 없습니다")
+        a = np.array(rows, dtype=float)
+        if wave is None or len(wave) != a.shape[1]:
+            wave = np.arange(a.shape[1], dtype=float)
+        m = np.nanmean(a, axis=0); s = np.nanstd(a, axis=0)
+        self._set_time_axis(self._pw_top, False)
+        self._pw_top.plot(wave, m + s, pen=pg.mkPen((255, 140, 0, 90), width=1))
+        self._pw_top.plot(wave, m - s, pen=pg.mkPen((255, 140, 0, 90), width=1))
+        self._pw_top.plot(wave, m, pen=pg.mkPen(_PALETTE[1], width=2), name="mean α")
+        self._pw_top.setLabel("left", "α (cm⁻¹)")
+        self._pw_top.setLabel("bottom", "Wavelength (nm)")
+        self._pw_top.setTitle(f"α 평균 스펙트럼 — {os.path.basename(path)} ({a.shape[0]} scans, ±1σ)")
+        self._pw_bot.hide()
 
     # ── 레퍼런스 스펙트럼 (.csv) ───────────────────────────────────
     def _plot_reference(self, path):
