@@ -1173,7 +1173,8 @@ class MonitorWidget(QWidget):
         self.init_tab_trend_pg()
         self.init_tab_viewer_pg()
         self.init_tab_hq_mpl()
-        self.init_tab_r_viewer()
+        # R Viewer 탭 제거(중복): 거울 반사율은 Setup 탭 → Cavity Diagnostics 한 곳에서만.
+        # init_tab_r_viewer() 및 _r_* 헬퍼는 호출하지 않음(정의는 남겨두되 미사용).
 
     # Shared toolbar factory
     def _create_reset_toolbar(self, target_glw=None, target_pw=None):

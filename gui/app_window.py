@@ -508,37 +508,22 @@ class CAESARAnalyzer(QMainWindow):
         left_v.addStretch(1)
         top_splitter.addWidget(left_w)
 
-        # ── Right: R(λ) curve + R time series ────────────────────────
+        # ── Right: 안내 (R 표시는 Setup 탭으로 일원화) ───────────────
+        # 중복 제거: R(λ) 스펙트럼 + R/Leff 시계열은 Setup → Cavity Diagnostics
+        # 한 곳에서만 본다. (_daily_r_pw/_daily_rt_pw 미생성 → 갱신 메서드는
+        # hasattr 가드로 자동 no-op)
         right_w = QWidget()
         right_v = QVBoxLayout(right_w)
-
-        grp_r = QGroupBox("🪞 Mirror Reflectivity — Current Session")
-        grp_r.setStyleSheet("QGroupBox { font-weight: bold; color: #6A1B9A; }")
-        lay_r = QVBoxLayout()
-
-        self._daily_r_pw = pg.PlotWidget()
-        self._daily_r_pw.setLabel('left', 'R (%)')
-        self._daily_r_pw.setLabel('bottom', 'Wavelength (nm)')
-        self._daily_r_pw.showGrid(x=True, y=True, alpha=0.3)
-        self._daily_r_pw.setTitle("R(λ) from last ZA/He calibration")
-        self._daily_r_pw.setMinimumHeight(190)
-        lay_r.addWidget(self._daily_r_pw)
-
-        self._daily_rt_pw = pg.PlotWidget()
-        self._daily_rt_pw.setLabel('left', 'R median (%)')
-        self._daily_rt_pw.setLabel('bottom', 'UTC Time')
-        self._daily_rt_pw.showGrid(x=True, y=True, alpha=0.3)
-        self._daily_rt_pw.setTitle("R time series (run R Trend Monitor to populate)")
-        self._daily_rt_pw.setMinimumHeight(160)
-        _ts_axis = pg.DateAxisItem(orientation='bottom')
-        self._daily_rt_pw.setAxisItems({'bottom': _ts_axis})
-        lay_r.addWidget(self._daily_rt_pw)
-
-        grp_r.setLayout(lay_r)
-        right_v.addWidget(grp_r)
+        _note = QLabel("🪞 거울 반사율 R(λ) / R·Leff 시계열은\n"
+                       "Setup 탭 → 🔬 Cavity Diagnostics 에서 확인하세요.")
+        _note.setStyleSheet("color:#6A1B9A; font-weight:bold;")
+        _note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_v.addStretch(1)
+        right_v.addWidget(_note)
+        right_v.addStretch(1)
         top_splitter.addWidget(right_w)
 
-        top_splitter.setSizes([320, 620])
+        top_splitter.setSizes([520, 420])
         lay.addWidget(top_splitter)
 
     # ──────────────────────────────────────────────────────────────────
