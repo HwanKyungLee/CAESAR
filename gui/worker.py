@@ -791,6 +791,17 @@ class AlphaExportWorker(QThread):
         done_scans  = 0
         global_idx  = 0
 
+        # 행별 실제 시각(연초기준 초) — 박사님 doy와 동일한 bytepack 시각.
+        # row_idx×0.97 합성 대신 실측값으로 60s 평균 binning/출력 시간축에 사용.
+        _sec_cache = {}
+        def _row_sec(fp, ridx):
+            arr = _sec_cache.get(fp)
+            if arr is None:
+                arr = DataIO.all_row_seconds(fp)
+                _sec_cache[fp] = arr if arr is not None else np.array([])
+                arr = _sec_cache[fp]
+            return float(arr[ridx]) if (arr.size and ridx < arr.size) else np.nan
+
         dark = self.dark   # None or 1-D array (n_pix,)
         has_dark = dark is not None
         if has_dark:
@@ -833,7 +844,8 @@ class AlphaExportWorker(QThread):
                 za_p_list.append(env_p)
 
             elif is_amb:
-                amb_buffer.append((fp, row_idx, global_idx, env_t, env_p,
+                amb_buffer.append((fp, row_idx, global_idx, _row_sec(fp, row_idx),
+                                   env_t, env_p,
                                    intensity_raw.copy()))   # raw 저장, Pass 2에서 보정
                 done_scans += 1
                 self.progress.emit(done_scans)
@@ -979,28 +991,40 @@ class AlphaExportWorker(QThread):
         # avg_sec 창마다 ambient intensity 를 평균해 SNR 을 √N 배 높인다.
         # (gidx 는 ZA/He 주입 행까지 포함한 전역 카운터라, 주입으로 생기는
         #  시간 공백도 자동 반영되어 공백을 넘어 평균되지 않는다.)
-        SEC_PER_ROW = 0.97
+        SEC_PER_ROW = 0.97   # (폴백) 실측 시각이 없을 때만 사용
         avg_sec = getattr(self, 'avg_sec', 60.0)
 
         def _avg_ambient(entries):
             """한 파일 ambient entries 를 avg_sec 시간창으로 묶어 평균.
-            반환: [(rep_row_idx, mean_gidx, T, P, I_avg, n_in_bin), ...]"""
+            binning은 **실측 시각(sec, 박사님 doy 기준)** 차분 기준 — row×0.97 합성이
+            아니라 실제 시간 갭을 반영(주입/공백을 넘어 평균되지 않음).
+            반환: [(rep_row_idx, mean_gidx, rep_sec, T, P, I_avg, n_in_bin), ...]"""
             if not entries:
                 return []
             entries = sorted(entries, key=lambda e: e[2])   # by gidx
             g0 = entries[0][2]
+            # 실측 sec 가 유효하면 그걸로, 아니면 gidx×0.97 폴백
+            secs = np.array([e[3] for e in entries], dtype=float)
+            use_real = np.isfinite(secs).all()
+            s0 = secs[0] if use_real else None
             bins = {}
-            for (_fp, rid, g, t, p, i) in entries:
-                b = int((g - g0) * SEC_PER_ROW / avg_sec) if avg_sec > 0 else len(bins)
-                bins.setdefault(b, []).append((rid, g, t, p, i))
+            for (_fp, rid, g, sec, t, p, i) in entries:
+                if avg_sec <= 0:
+                    b = len(bins)
+                elif use_real:
+                    b = int((sec - s0) / avg_sec)
+                else:
+                    b = int((g - g0) * SEC_PER_ROW / avg_sec)
+                bins.setdefault(b, []).append((rid, g, sec, t, p, i))
             out = []
             for b in sorted(bins):
                 grp = bins[b]
-                I = np.nanmean(np.array([x[4] for x in grp], dtype=float), axis=0)
-                T = float(np.nanmean([x[2] for x in grp]))
-                P = float(np.nanmean([x[3] for x in grp]))
+                I = np.nanmean(np.array([x[5] for x in grp], dtype=float), axis=0)
+                T = float(np.nanmean([x[3] for x in grp]))
+                P = float(np.nanmean([x[4] for x in grp]))
                 gmean = float(np.mean([x[1] for x in grp]))
-                out.append((grp[0][0], gmean, T, P, I, len(grp)))
+                rep_sec = float(np.nanmean([x[2] for x in grp]))
+                out.append((grp[0][0], gmean, rep_sec, T, P, I, len(grp)))
             return out
 
         amb_by_fp = {}
@@ -1012,7 +1036,7 @@ class AlphaExportWorker(QThread):
         for fp, entries in amb_by_fp.items():
             if not self.is_running:
                 break
-            for (row_idx, gmean, t_am, p_am, i_am, n_avg) in _avg_ambient(entries):
+            for (row_idx, gmean, rep_sec, t_am, p_am, i_am, n_avg) in _avg_ambient(entries):
                 if use_pchip:
                     g = float(gmean)
                     if g < za_x_min:
@@ -1040,7 +1064,7 @@ class AlphaExportWorker(QThread):
                          * ((i0_s - i_am_s) / i_am_s)
                          - (alpha_sample - alpha_ref))
 
-                alpha_buffer.setdefault(fp, []).append((row_idx, t_am, p_am, alpha, n_avg))
+                alpha_buffer.setdefault(fp, []).append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
                 n_bins_total += 1
         self.status_msg.emit(
             f"Pass 2: ambient {len(amb_buffer)}행 → {avg_sec:.0f}초 평균 {n_bins_total}개 bin 으로 alpha 계산")
@@ -1051,10 +1075,18 @@ class AlphaExportWorker(QThread):
         i0_mode  = "PCHIP" if use_pchip else "static"
         n_za     = len(za_gidx)
 
+        from datetime import datetime as _dt, timedelta as _td
         lbl_tag = f"_{self.channel_label}" if self.channel_label else ""
         for fp, rows in alpha_buffer.items():
             stem     = os.path.splitext(os.path.basename(fp))[0]
             out_path = os.path.join(self.output_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
+            _yr = DataIO._file_year(fp) or 2026
+            def _doy_iso(sec):
+                if not np.isfinite(sec):
+                    return float('nan'), ''
+                doy = sec / 86400.0 + 1.0
+                iso = (_dt(_yr, 1, 1) + _td(seconds=float(sec))).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                return doy, iso
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
                 f.write(f"# channel={self.channel}  label={self.channel_label or 'single'}\n")
@@ -1066,11 +1098,13 @@ class AlphaExportWorker(QThread):
                 f.write(f"# Calibration: {calib_info_per_file.get(fp, 'unknown')}\n")
                 wv_str = '\t'.join(f"{w:.4f}" for w in wave_nm)
                 f.write(f"# wavelength_nm:\t{wv_str}\n")
-                f.write("row_idx\tT_C\tP_mbar\t" +
+                f.write("# time = bytepack(col0,col1)/100 (박사님 doy와 동일, 타임존 변환 없음)\n")
+                f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
                         '\t'.join(f"px{pix_min+j}" for j in range(n_pix)) + "\n")
-                for rid, T, P, alpha, n_avg in rows:
+                for rid, rep_sec, T, P, alpha, n_avg in rows:
+                    doy, iso = _doy_iso(rep_sec)
                     vals = '\t'.join(f"{v:.6e}" for v in alpha)
-                    f.write(f"{rid}\t{T:.2f}\t{P:.2f}\t{vals}\n")
+                    f.write(f"{rid}\t{doy:.6f}\t{iso}\t{T:.2f}\t{P:.2f}\t{vals}\n")
             n_saved += 1
             self.status_msg.emit(
                 f"저장: {out_path}  ({len(rows)}개 bin = {self.avg_sec:.0f}초 평균, {i0_mode} I₀)")
@@ -1202,16 +1236,29 @@ class AlphaFitWorker(QThread):
                 self.status_msg.emit(f"SKIP {fname}: 데이터 없음")
                 continue
 
-            # ── n_pix: 헤더 파장 수 우선, 없으면 첫 행 컬럼 수로 감지 ────────
+            # ── 컬럼 헤더(row_idx …) 파싱 → 메타/alpha 위치(구·신 포맷 모두 지원) ──
+            # 구: row_idx, T_C, P_mbar, px…   신: row_idx, doy, datetime, T_C, P_mbar, px…
+            hdr_cols = next((l.rstrip('\n').split('\t')
+                             for l in lines if l.startswith('row_idx')), None)
+            def _mi(name, default=None):
+                return hdr_cols.index(name) if (hdr_cols and name in hdr_cols) else default
+            first_px = None
+            if hdr_cols:
+                first_px = next((i for i, c in enumerate(hdr_cols) if c.startswith('px')), None)
+            idx_doy = _mi('doy')
+            idx_dt  = _mi('datetime')
+            idx_T   = _mi('T_C', 1)
+            idx_P   = _mi('P_mbar', 2)
+            alpha_start = first_px if first_px is not None else 3
+
+            # ── n_pix: 헤더 파장 수 우선, 없으면 컬럼 수로 감지 ────────────────
             first_parts = data_lines[0].strip().split('\t')
             n_cols = len(first_parts)
 
             if wave_nm_file is not None:
                 n_pix = len(wave_nm_file)
-            elif n_cols > 3:
-                # row_idx / T_C / P_mbar / alpha×n_pix
-                n_pix = n_cols - 3
-                # 파장축 폴백: engine 파장축에서 px_min 기준으로 자름
+            elif n_cols > alpha_start:
+                n_pix = n_cols - alpha_start
                 if engine._wave_axis is not None:
                     full_wave = np.asarray(engine._wave_axis, dtype=float)
                     px_min = self.pixel_min
@@ -1286,9 +1333,9 @@ class AlphaFitWorker(QThread):
                     break
 
                 parts = line.strip().split('\t')
-                if len(parts) < 3 + n_pix:
+                if len(parts) < alpha_start + n_pix:
                     self.status_msg.emit(
-                        f"  행 스킵: 컬럼 {len(parts)} < 필요 {3+n_pix} "
+                        f"  행 스킵: 컬럼 {len(parts)} < 필요 {alpha_start+n_pix} "
                         f"(파일 n_pix={n_pix}와 행 컬럼 수 불일치)")
                     done += 1
                     self.progress.emit(done)
@@ -1296,9 +1343,11 @@ class AlphaFitWorker(QThread):
 
                 try:
                     row_idx = int(float(parts[0]))
-                    T_C     = float(parts[1])
-                    P_mbar  = float(parts[2])
-                    alpha   = np.array([float(v) for v in parts[3:3 + n_pix]], dtype=float)
+                    T_C     = float(parts[idx_T])
+                    P_mbar  = float(parts[idx_P])
+                    row_doy = float(parts[idx_doy]) if idx_doy is not None else float('nan')
+                    row_dt  = parts[idx_dt] if idx_dt is not None else ''
+                    alpha   = np.array([float(v) for v in parts[alpha_start:alpha_start + n_pix]], dtype=float)
                 except (ValueError, IndexError) as e:
                     self.status_msg.emit(f"  행 파싱 오류: {e}")
                     done += 1
@@ -1338,7 +1387,7 @@ class AlphaFitWorker(QThread):
                     N_cm3 = gas_coeffs[gi] * mult / scale
                     ppb_vals[name] = (N_cm3 / n_air) * 1e9
 
-                result_rows.append((row_idx, T_C, P_mbar, ppb_vals, rms))
+                result_rows.append((row_idx, row_doy, row_dt, T_C, P_mbar, ppb_vals, rms))
                 done += 1
                 self.progress.emit(done)
 
@@ -1357,17 +1406,21 @@ class AlphaFitWorker(QThread):
             ]
             if src_chan:
                 header_lines.append(f"# {src_chan}")
+            # alpha 에 시각 컬럼이 있었으면 fit 결과에도 그대로 통과(실시간 시계열용).
+            has_time = any(np.isfinite(r[1]) or r[2] for r in result_rows)
+            time_hdr = "doy\tdatetime\t" if has_time else ""
             header_lines += [
                 f"# conc_unit=ppb  rms_unit=cm-1  poly_deg={self.poly_deg}",
                 f"# generated={_dt.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                "row_idx\tT_C\tP_mbar\t" + '\t'.join(gas_list) + '\trms_cm-1',
+                "row_idx\t" + time_hdr + "T_C\tP_mbar\t" + '\t'.join(gas_list) + '\trms_cm-1',
             ]
             header = '\n'.join(header_lines) + '\n'
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(header)
-                for row_idx, T, P, ppb_vals, rms in result_rows:
+                for row_idx, row_doy, row_dt, T, P, ppb_vals, rms in result_rows:
                     vals = '\t'.join(f"{ppb_vals.get(g, 0):.4f}" for g in gas_list)
-                    f.write(f"{row_idx}\t{T:.2f}\t{P:.2f}\t{vals}\t{rms:.4e}\n")
+                    tcol = (f"{row_doy:.6f}\t{row_dt}\t" if has_time else "")
+                    f.write(f"{row_idx}\t{tcol}{T:.2f}\t{P:.2f}\t{vals}\t{rms:.4e}\n")
 
             self.status_msg.emit(f"저장: {out_path}  ({len(result_rows)}행, {n_gas}가스)")
 

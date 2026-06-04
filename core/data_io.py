@@ -553,45 +553,64 @@ class DataIO:
                 f"HK Data Load Failed ({os.path.basename(filepath)}): {str(e)}"
             )
 
+    # ── LabVIEW bytepack 시각(박사님 doy와 동일) ──────────────────────────
+    # col0=상위16bit, col1=하위16bit. bytepack=(col0<<16)|col1 은 "연초(1/1 00:00)
+    # 이후 centisecond(0.01초)" 카운터. 박사님 .mat 의 doy 와 검증결과 std=0.0000s 로
+    # 완전 일치(Cold·Hot). 행간격이 일정 0.97s 가 아니라 실제 갭(-수십초~+수초)이
+    # 있으므로 row_index×0.97 합성이 아니라 이 값을 읽어야 한다.
+    _DATE_RE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
+
+    @staticmethod
+    def _bytepack_year_seconds(col0, col1):
+        """(col0,col1) → 연초 기준 초(centisecond/100). 박사님 doy = 초/86400 + 1."""
+        bp = (int(col0) << 16) | (int(col1) & 0xFFFF)
+        return bp / 100.0
+
+    @staticmethod
+    def _file_year(filepath):
+        m = DataIO._DATE_RE.search(os.path.basename(filepath))
+        return int(m.group(1)) if m else None
+
     @staticmethod
     def parse_row_timestamp(filepath, row_index=0):
+        """Araon row의 (col0,col1) bytepack → naive datetime (박사님 doy와 동일, 타임존 변환 없음).
+
+        연도는 파일명 YYYY-MM-DD 에서 취한다(bytepack은 연초 기준이라 연도 필요).
+        파일명에 날짜가 없거나 실패하면 파일 수정시각으로 폴백.
         """
-        Reconstructs a measurement datetime from an Araon Mega-Matrix row.
-
-        Column layout (verified against 2026-05-18 .dat sample, 6179 cols):
-          col 0  → absolute scan counter (constant within one file — NOT a date)
-          col 1  → seconds since UTC midnight  (e.g. 44207 = 12:16:47 UTC)
-
-        The calendar date (UTC) is extracted from the filename by the pattern
-        "YYYY-MM-DD" (e.g. "2026-05-18-023.dat").  col 1 gives the UTC time
-        within that day; the result is then converted to KST (UTC+9).
-
-        Falls back to the file's modification time → KST when the date pattern
-        is absent or col 1 is out of the [0, 86400) range.
-
-        Returns: datetime with KST timezone, or None on total failure.
-        """
-        UTC = timezone.utc
-        KST = timezone(timedelta(hours=9))
-        _DATE_RE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
-
         try:
             raw = DataIO._read_row_raw(filepath, row_index)
-            if len(raw) >= 6175:
-                secs = float(raw[1])   # seconds since UTC midnight (col 1)
-                if 0.0 <= secs < 86400.0:
-                    fname = os.path.basename(filepath)
-                    m = _DATE_RE.search(fname)
-                    if m:
-                        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                        base_utc = datetime(year, month, day, tzinfo=UTC)
-                        return (base_utc + timedelta(seconds=secs)).astimezone(KST)
+            year = DataIO._file_year(filepath)
+            if len(raw) >= 2 and year:
+                sec = DataIO._bytepack_year_seconds(raw[0], raw[1])
+                return datetime(year, 1, 1) + timedelta(seconds=sec)
         except Exception:
             pass
-
-        # Fallback: file modification time → KST
         try:
-            return datetime.fromtimestamp(os.path.getmtime(filepath), tz=KST)
+            return datetime.fromtimestamp(os.path.getmtime(filepath))
+        except Exception:
+            return None
+
+    @staticmethod
+    def parse_row_doy(filepath, row_index=0):
+        """행의 day-of-year(소수, 1-based) — 박사님 doy 와 동일. 실패 시 None."""
+        try:
+            raw = DataIO._read_row_raw(filepath, row_index)
+            return DataIO._bytepack_year_seconds(raw[0], raw[1]) / 86400.0 + 1.0
+        except Exception:
+            return None
+
+    @staticmethod
+    def all_row_seconds(filepath):
+        """파일 전 행의 연초기준 초 배열(벡터화). 60s 평균/시간축용. 실패 시 None."""
+        try:
+            rows = DataIO._load_file_to_cache(filepath)
+            import numpy as _np
+            out = _np.full(len(rows), _np.nan)
+            for i, r in enumerate(rows):
+                if len(r) >= 2:
+                    out[i] = DataIO._bytepack_year_seconds(r[0], r[1])
+            return out
         except Exception:
             return None
 

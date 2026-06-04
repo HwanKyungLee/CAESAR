@@ -331,6 +331,7 @@ class ResultViewerWidget(QWidget):
     def _plot_alpha_trace(self, path):
         wave = None
         rows = []
+        alpha_start = 3   # 'px' 헤더에서 정함(구:3, 신:5 — doy/datetime 추가)
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for ln in f:
                 if ln.startswith("# wavelength_nm:"):
@@ -340,12 +341,18 @@ class ResultViewerWidget(QWidget):
                     except Exception:
                         pass
                     continue
-                if ln.startswith("#") or ln.lower().startswith("row_idx"):
+                if ln.lower().startswith("row_idx"):
+                    cols = ln.rstrip("\n").split("\t")
+                    fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
+                    if fp is not None:
+                        alpha_start = fp
+                    continue
+                if ln.startswith("#"):
                     continue
                 p = ln.rstrip().split("\t")
-                if len(p) > 4:
+                if len(p) > alpha_start:
                     try:
-                        rows.append([float(x) for x in p[3:]])
+                        rows.append([float(x) for x in p[alpha_start:]])
                     except ValueError:
                         pass
         if not rows:
@@ -436,33 +443,59 @@ class ResultViewerWidget(QWidget):
     # ── fit 결과 (_fit.tsv) → 가스별 ppb + RMS + 통계 ────────────────
     @staticmethod
     def _load_fit_table(path):
-        """헤더 `row_idx T_C P_mbar <gases...> rms_cm-1` 파싱.
-        반환: {'row_idx','T','P','rms', 'gases':{name: ndarray}}."""
-        gases, rows = [], []
+        """헤더 위치 기반 파싱(구·신 포맷). 구: row_idx T_C P_mbar <gases> rms_cm-1.
+        신: row_idx doy datetime T_C P_mbar <gases> rms_cm-1.
+        반환: {'row_idx','T','P','rms','doy','time'(epoch초),'gases':{name:ndarray}}."""
+        import datetime as _dt
+        hdr, rows = None, []
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for ln in f:
                 s = ln.rstrip("\n")
                 if not s.strip() or s.startswith("#"):
                     continue
                 if s.lower().startswith("row_idx"):
-                    cols = s.split("\t")
-                    gases = cols[3:-1]   # 앞 row_idx/T/P, 끝 rms 제외
+                    hdr = s.split("\t")
                     continue
-                c = s.split("\t")
-                if len(c) < 4:
+                if hdr is None:
                     continue
-                try:
-                    rows.append([float(x) for x in c])
-                except ValueError:
-                    continue
-        if not gases or not rows:
+                rows.append(s.split("\t"))
+        if hdr is None or not rows:
             raise ValueError("fit 결과 헤더/데이터 행을 찾지 못했습니다")
-        arr = np.array(rows, dtype=float)
-        out = {"row_idx": arr[:, 0], "T": arr[:, 1], "P": arr[:, 2],
-               "rms": arr[:, -1], "gases": {}, "path": path}
-        for i, g in enumerate(gases):
-            if 3 + i < arr.shape[1] - 1:   # 가스 컬럼은 마지막 rms 컬럼 앞
-                out["gases"][g] = arr[:, 3 + i]
+        idx = {n: i for i, n in enumerate(hdr)}
+        rms_i = idx.get("rms_cm-1", len(hdr) - 1)
+        p_i = idx.get("P_mbar", 2)
+        gas_cols = list(range(p_i + 1, rms_i))   # P_mbar 다음 ~ rms 직전 = 가스들
+
+        def colf(j):
+            out = np.full(len(rows), np.nan)
+            for k, r in enumerate(rows):
+                if j is not None and j < len(r):
+                    try:
+                        out[k] = float(r[j])
+                    except ValueError:
+                        pass
+            return out
+
+        out = {"row_idx": colf(idx.get("row_idx", 0)), "T": colf(idx.get("T_C")),
+               "P": colf(p_i), "rms": colf(rms_i), "doy": colf(idx.get("doy")),
+               "time": None, "gases": {}, "path": path}
+        for j in gas_cols:
+            out["gases"][hdr[j]] = colf(j)
+
+        # datetime 컬럼 → epoch 초(시간축용)
+        di = idx.get("datetime")
+        if di is not None:
+            ts = np.full(len(rows), np.nan)
+            for k, r in enumerate(rows):
+                if di < len(r) and r[di].strip():
+                    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                        try:
+                            ts[k] = _dt.datetime.strptime(r[di].strip(), fmt).timestamp()
+                            break
+                        except ValueError:
+                            pass
+            if np.isfinite(ts).any():
+                out["time"] = ts
         return out
 
     def _sync_gas_combo(self, names):
@@ -492,9 +525,12 @@ class ResultViewerWidget(QWidget):
         sel = self._gas_combo.currentText() or "전체"
         names = list(t["gases"].keys()) if sel in ("전체", "") else [sel]
 
-        x = t["row_idx"]
-        self._set_time_axis(self._pw_top, False)
-        self._set_time_axis(self._pw_bot, False)
+        # x축: 실제 시각(datetime)이 있으면 그걸로(실시간 시계열), 없으면 row_idx
+        has_time = t.get("time") is not None and np.isfinite(t["time"]).any()
+        x = t["time"] if has_time else t["row_idx"]
+        self._set_time_axis(self._pw_top, has_time)
+        self._set_time_axis(self._pw_bot, has_time)
+        xlabel = "Date / Time" if has_time else "row_idx (≈시간)"
 
         stats = []
         for i, g in enumerate(names):
@@ -517,13 +553,13 @@ class ResultViewerWidget(QWidget):
                     nout = 0
                 stats.append(f"{g}: μ={mu:.3g}±{sd:.2g} ppb · ±3σ이상치 {nout}")
         self._pw_top.setLabel("left", "농도 (ppb)")
-        self._pw_top.setLabel("bottom", "row_idx (≈시간)")
+        self._pw_top.setLabel("bottom", xlabel)
         self._pw_top.setTitle(f"fit 결과 — {os.path.basename(path)} ({len(x)} scans)")
 
         self._pw_bot.show()
         self._pw_bot.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=2), name="RMS")
         self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
-        self._pw_bot.setLabel("bottom", "row_idx")
+        self._pw_bot.setLabel("bottom", xlabel)
         self._pw_bot.setTitle("RMS 시계열")
 
         self._stats_lbl.setText("   |   ".join(stats))
@@ -585,9 +621,10 @@ class ResultViewerWidget(QWidget):
             xclick = float(mp.x())
         except Exception:
             return
-        ri = t["row_idx"]
-        j = int(np.argmin(np.abs(ri - xclick)))
-        row_idx = int(ri[j])
+        # 플롯에 쓴 x축(시간 우선, 없으면 row_idx)으로 가장 가까운 점을 찾는다
+        xarr = t["time"] if (t.get("time") is not None and np.isfinite(t["time"]).any()) else t["row_idx"]
+        j = int(np.nanargmin(np.abs(xarr - xclick)))
+        row_idx = int(t["row_idx"][j])
         alpha_path = self._sibling_alpha(self._path)
         if not alpha_path:
             self._stats_lbl.setText(f"row {row_idx}: 형제 alpha_trace.dat을 못 찾아 α 팝업 불가")
@@ -613,6 +650,7 @@ class ResultViewerWidget(QWidget):
         """alpha_trace.dat에서 row_idx 행의 α 스펙트럼을 팝업으로 표시."""
         wave = None
         target = None
+        alpha_start = 3
         with open(alpha_path, "r", encoding="utf-8", errors="replace") as f:
             for ln in f:
                 if ln.startswith("# wavelength_nm:"):
@@ -622,13 +660,19 @@ class ResultViewerWidget(QWidget):
                     except Exception:
                         pass
                     continue
-                if ln.startswith("#") or ln.lower().startswith("row_idx"):
+                if ln.lower().startswith("row_idx"):
+                    cols = ln.rstrip("\n").split("\t")
+                    fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
+                    if fp is not None:
+                        alpha_start = fp
+                    continue
+                if ln.startswith("#"):
                     continue
                 p = ln.rstrip().split("\t")
-                if len(p) > 4:
+                if len(p) > alpha_start:
                     try:
                         if int(float(p[0])) == row_idx:
-                            target = np.array([float(x) for x in p[3:]], dtype=float)
+                            target = np.array([float(x) for x in p[alpha_start:]], dtype=float)
                             break
                     except ValueError:
                         continue
