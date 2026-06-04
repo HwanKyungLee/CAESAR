@@ -1005,7 +1005,8 @@ class AlphaExportWorker(QThread):
                  channel=1,             # spectrometer channel (1=CH1/ROI1)
                  r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
                  r_cal_omr_max=1e-5,    # block-mean omr_d 상한 — 이보다 크면 reject
-                 avg_sec=60.0):         # ambient 시간평균 창(초). 박사님 avgsec=60. 0이면 스캔별(평균 안 함)
+                 avg_sec=60.0,          # ambient 시간평균 창(초). 박사님 avgsec=60. 0이면 스캔별(평균 안 함)
+                 channel_label=""):     # 채널 라벨(PNs/ANs/Cold 등) — 출력 파일명·헤더에 사용
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
           기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
@@ -1029,6 +1030,7 @@ class AlphaExportWorker(QThread):
         self.r_cal_valid_min = float(r_cal_valid_min)
         self.r_cal_omr_max   = float(r_cal_omr_max)
         self.avg_sec         = float(avg_sec)
+        self.channel_label   = str(channel_label)
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -1353,11 +1355,13 @@ class AlphaExportWorker(QThread):
         i0_mode  = "PCHIP" if use_pchip else "static"
         n_za     = len(za_gidx)
 
+        lbl_tag = f"_{self.channel_label}" if self.channel_label else ""
         for fp, rows in alpha_buffer.items():
             stem     = os.path.splitext(os.path.basename(fp))[0]
-            out_path = os.path.join(self.output_dir, f"{stem}_alpha_trace.dat")
+            out_path = os.path.join(self.output_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
+                f.write(f"# channel={self.channel}  label={self.channel_label or 'single'}\n")
                 f.write(f"# RL_factor={self.rl_factor}  d={self.cavity_len} cm\n")
                 f.write(f"# I0_mode={i0_mode}  ZA_count={n_za}\n")
                 f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (ambient {self.avg_sec:.0f}초 시간평균 후 alpha)\n")

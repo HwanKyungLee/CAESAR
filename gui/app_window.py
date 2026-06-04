@@ -1604,74 +1604,122 @@ class CAESARAnalyzer(QMainWindow):
             self.lbl_alpha_dir.setStyleSheet("color: #1565C0; font-weight: bold;")
 
     def export_alpha_files(self):
-        """피팅 없이 BBCEAS alpha만 계산해서 파일로 저장한다."""
+        """피팅 없이 BBCEAS alpha만 계산해 저장. Hot 2채널이면 채널별로 각각 저장."""
         if not hasattr(self, 'file_list') or not self.file_list:
             QMessageBox.warning(self, "No Files", "먼저 측정 파일을 로드하세요.")
             return
-
-        if self.engine._wave_axis is None:
+        if getattr(self, 'wavelengths', None) is None and self.engine._wave_axis is None:
             QMessageBox.warning(self, "No Wavelength Cal",
                                 "파장 캘리브레이션 파일을 먼저 로드하세요.")
             return
-
         out_dir = QFileDialog.getExistingDirectory(self, "Alpha 파일 저장 폴더 선택")
         if not out_dir:
             return
 
-        try:
-            pixel_min = int(self.txt_min.text())
-            pixel_max = int(self.txt_max.text())
-        except ValueError:
-            QMessageBox.warning(self, "Input Error", "Pixel Min/Max를 확인하세요.")
+        n_ch = int(getattr(self, '_detected_channels', 1) or 1)
+        configs = self._build_alpha_channel_configs(n_ch)
+        if not configs:
+            QMessageBox.warning(self, "채널 설정 실패",
+                                "채널별 파장보정/픽셀 범위를 만들 수 없습니다.\n"
+                                f"Hot(≥2ch)은 {self._WV_CAL_BASE}\\roi1,roi2 의 Calib 파일이 필요합니다.")
             return
 
-        import numpy as np
-        pixel_idx = np.arange(pixel_min, pixel_max)
-        wave_nm   = self.engine.pixel_to_wavelength(pixel_idx)
+        # 채널별 워커를 순차 실행(큐). Hot=2채널 → PNs, ANs 각각 생성.
+        self._alpha_queue     = list(configs)
+        self._alpha_out_dir   = out_dir
+        self._alpha_dark      = getattr(self, 'dark_data', None)
+        self._alpha_done_msgs = []
+        self.status.setText(f"📁 Alpha 내보내기 시작 ({n_ch}채널)...")
+        self._start_next_alpha_export()
 
-        dark_spectrum = getattr(self, 'dark_data', None)   # Browse Dark로 로드한 경우
+    # wv_cal 자동탐색 베이스 (채널별 파장보정 — 사용자 지정 위치)
+    _WV_CAL_BASE = r"C:\Doasis_Work\Output\wv_cal"
 
+    def _channel_wave_cal(self, n_ch, ch):
+        """채널 → per-pixel 파장 배열. 1ch=로드된 cal, ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
+        if n_ch == 1:
+            wl = getattr(self, 'wavelengths', None)
+            return np.asarray(wl, dtype=float).flatten() if wl is not None else None
+        roi = {1: 'roi1', 2: 'roi2', 3: 'roi3'}.get(ch)
+        if roi:
+            import glob
+            d = os.path.join(self._WV_CAL_BASE, roi)
+            cands = sorted(glob.glob(os.path.join(d, 'Calib_*.txt'))) if os.path.isdir(d) else []
+            if cands:
+                try:
+                    return np.loadtxt(cands[-1]).flatten()
+                except Exception:
+                    pass
+        wl = getattr(self, 'wavelengths', None)   # 폴백: 로드된 단일 cal
+        return np.asarray(wl, dtype=float).flatten() if wl is not None else None
+
+    def _build_alpha_channel_configs(self, n_ch):
+        """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max) — nm 핏레인지를 채널 cal로 변환."""
+        label_for = {1: 'Cold'} if n_ch == 1 else {1: 'PNs', 2: 'ANs', 3: 'CH3'}
+        start_nm = self.spin_fit_start_nm.value()
+        end_nm   = self.spin_fit_end_nm.value()
+        if start_nm > end_nm:
+            start_nm, end_nm = end_nm, start_nm
+        configs = []
+        for ch in range(1, n_ch + 1):
+            wave_full = self._channel_wave_cal(n_ch, ch)
+            if wave_full is None or len(wave_full) == 0:
+                continue
+            pmin = int(np.abs(wave_full - start_nm).argmin())
+            pmax = int(np.abs(wave_full - end_nm).argmin())
+            if pmin > pmax:
+                pmin, pmax = pmax, pmin
+            if pmax <= pmin:
+                pmax = pmin + 1
+            configs.append(dict(channel=ch, label=label_for.get(ch, f'CH{ch}'),
+                                wave_nm=wave_full[pmin:pmax],
+                                pixel_min=pmin, pixel_max=pmax))
+        return configs
+
+    def _start_next_alpha_export(self):
+        if not getattr(self, '_alpha_queue', None):
+            done = getattr(self, '_alpha_done_msgs', [])
+            self.status.setText(f"✅ Alpha 내보내기 완료 → {self._alpha_out_dir}")
+            QMessageBox.information(
+                self, "Alpha Export 완료",
+                "채널별 α 저장 완료:\n" + "\n".join(done) +
+                f"\n\n저장 위치:\n{self._alpha_out_dir}\n"
+                "파일명: {소스}_{채널}_alpha_trace.dat\n"
+                "결과 뷰어 / 2단계 피팅에 사용 가능.")
+            return
+        cfg = self._alpha_queue.pop(0)
+        self.status.setText(
+            f"📁 Alpha [{cfg['label']}] 계산 중 (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
         self._alpha_export_worker = AlphaExportWorker(
             file_list     = self.file_list,
-            pixel_min     = pixel_min,
-            pixel_max     = pixel_max,
-            wave_nm       = wave_nm,
+            pixel_min     = cfg['pixel_min'],
+            pixel_max     = cfg['pixel_max'],
+            wave_nm       = cfg['wave_nm'],
             flag_za       = self._parse_flags(self.txt_flag_za.text()),
             flag_he       = self._parse_flags(self.txt_flag_he.text()),
             flag_amb      = self._parse_flags(self.txt_flag_amb.text()),
             rl_factor     = self.spin_rl_factor.value(),
             cavity_len    = self.spin_d_len.value(),
-            output_dir    = out_dir,
-            dark_spectrum = dark_spectrum,
-            channel       = getattr(self, '_detected_channels', 1),
+            output_dir    = self._alpha_out_dir,
+            dark_spectrum = self._alpha_dark,
+            channel       = cfg['channel'],
             avg_sec       = self.spin_alpha_avgsec.value(),
-        )
-
-        self._alpha_export_worker.total_ready.connect(
-            lambda n: self.status.setText(f"📁 Alpha 내보내기: 총 {n:,} 스캔 처리 중...")
+            channel_label = cfg['label'],
         )
         self._alpha_export_worker.progress.connect(
-            lambda n: self.status.setText(f"📁 Alpha 내보내기: {n} 스캔 완료...")
-        )
-        self._alpha_export_worker.status_msg.connect(
-            lambda msg: print(f"[AlphaExport] {msg}")
-        )
-        self._alpha_export_worker.finished.connect(self._on_alpha_export_done)
+            lambda n, lbl=cfg['label']: self.status.setText(f"📁 [{lbl}] {n} 스캔..."))
+        self._alpha_export_worker.status_msg.connect(lambda m: print(f"[AlphaExport] {m}"))
+        self._alpha_export_worker.finished.connect(
+            lambda res, lbl=cfg['label']: self._on_alpha_channel_done(res, lbl))
         self._alpha_export_worker.start()
-        self.status.setText("📁 Alpha 내보내기 시작...")
 
-    def _on_alpha_export_done(self, result):
-        if result.startswith("ERROR"):
-            QMessageBox.warning(self, "Alpha Export 실패", result)
-            self.status.setText("❌ Alpha 내보내기 실패")
+    def _on_alpha_channel_done(self, result, label):
+        if str(result).startswith("ERROR"):
+            self._alpha_done_msgs.append(f"  [{label}] 실패: {result}")
+            self.status.setText(f"❌ Alpha [{label}] 실패")
         else:
-            msg = (f"Alpha 파일 저장 완료!\n\n저장 위치:\n{result}\n\n"
-                   f"각 파일: {{소스파일명}}_alpha_trace.dat\n"
-                   f"형식: row_idx / T / P / alpha[px{self.txt_min.text()}..{self.txt_max.text()}]\n\n"
-                   f"이 파일을 박사님 alpha_trace와 비교하거나\n"
-                   f"CAESAR Pro에 로드해서 Linear 피팅 가능.")
-            QMessageBox.information(self, "Alpha Export 완료", msg)
-            self.status.setText(f"✅ Alpha 내보내기 완료 → {result}")
+            self._alpha_done_msgs.append(f"  [{label}] ✅")
+        self._start_next_alpha_export()
 
     def run_alpha_fit(self):
         """저장된 alpha_trace.dat 파일을 선택해서 DOAS 피팅을 실행한다."""
