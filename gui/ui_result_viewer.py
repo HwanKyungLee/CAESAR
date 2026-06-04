@@ -26,6 +26,7 @@ from PyQt6.QtCore import Qt
 # 수동 선택 콤보 라벨 ↔ 내부 kind 매핑
 _KIND_BY_LABEL = {
     "자동 판별": "auto",
+    "fit 결과 (가스별 ppb·RMS)": "fit",
     "R 트렌드 (시계열)": "r_trend",
     "R(λ) 곡선": "r_curve",
     "α trace (평균 스펙트럼)": "alpha_trace",
@@ -34,6 +35,7 @@ _KIND_BY_LABEL = {
     "농도·fit 시계열": "concentration",
 }
 _KIND_KO = {
+    "fit": "fit 결과 (가스별 ppb·RMS)",
     "r_trend": "R 트렌드 (시계열)",
     "r_curve": "R(λ) 곡선",
     "alpha_trace": "α trace (평균 스펙트럼)",
@@ -75,17 +77,37 @@ class ResultViewerWidget(QWidget):
         self._combo.currentIndexChanged.connect(self._reload)
         bar.addWidget(self._combo)
 
-        self._lbl = QLabel("결과 파일/폴더를 열어보세요 (R트렌드 / R(λ) / α / 레퍼런스 / 농도·fit).")
+        self._lbl = QLabel("결과 파일/폴더를 열어보세요 (fit / R트렌드 / R(λ) / α / 레퍼런스).")
         self._lbl.setStyleSheet("color:#666;")
         bar.addWidget(self._lbl, 1)
         root.addLayout(bar)
+
+        # fit 분석 컨트롤 바: 가스 선택 + 다중파일 비교 + 통계 라벨
+        fbar = QHBoxLayout()
+        fbar.addWidget(QLabel("가스:"))
+        self._gas_combo = QComboBox()
+        self._gas_combo.setFixedWidth(140)
+        self._gas_combo.currentIndexChanged.connect(self._on_gas_changed)
+        fbar.addWidget(self._gas_combo)
+        self._btn_compare = QPushButton("📊 선택파일 겹쳐비교")
+        self._btn_compare.setFixedWidth(150)
+        self._btn_compare.clicked.connect(self._overlay_compare)
+        fbar.addWidget(self._btn_compare)
+        self._stats_lbl = QLabel("")
+        self._stats_lbl.setStyleSheet("color:#444;")
+        fbar.addWidget(self._stats_lbl, 1)
+        root.addLayout(fbar)
 
         # 좌: 폴더 파일목록(형태별 그룹) / 우: 플롯 2단(위=주, 아래=보조)
         hsplit = QSplitter(Qt.Orientation.Horizontal)
         self._list = QListWidget()
         self._list.setMinimumWidth(230)
+        # 다중 선택 → 여러 fit 파일 겹쳐비교 가능
+        self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.itemClicked.connect(self._on_list_item)
         hsplit.addWidget(self._list)
+
+        self._fit_cache = None   # 최근 로드한 fit 테이블(포인트클릭 α 팝업용)
 
         psplit = QSplitter(Qt.Orientation.Vertical)
         self._pw_top = pg.PlotWidget()
@@ -160,6 +182,7 @@ class ResultViewerWidget(QWidget):
         self._pw_bot.show()
         try:
             handler = {
+                "fit": self._plot_fit,
                 "r_trend": self._plot_r_trend,
                 "r_curve": self._plot_r_curve,
                 "alpha_trace": self._plot_alpha_trace,
@@ -199,7 +222,10 @@ class ResultViewerWidget(QWidget):
             return "r_curve"
         if "_alpha_trace" in name or "alpha export" in head:
             return "alpha_trace"
-        if name.endswith(".tsv") or "rms_cm" in head or name.endswith("_fit.tsv"):
+        # fit 결과: 헤더 row_idx … rms_cm-1 (가스별 ppb 컬럼)
+        if name.endswith("_fit.tsv") or ("row_idx" in head and "rms_cm" in head):
+            return "fit"
+        if name.endswith(".tsv") or "rms_cm" in head:
             return "concentration"
         if "wavelength" in head and "reflect" in head:
             return "reference"
@@ -406,3 +432,220 @@ class ResultViewerWidget(QWidget):
         self._pw_top.setLabel("left", "Value (α / optical depth 등)")
         self._pw_top.setTitle(f"배열 — {os.path.basename(path)}  shape={d.shape}")
         self._pw_bot.hide()
+
+    # ── fit 결과 (_fit.tsv) → 가스별 ppb + RMS + 통계 ────────────────
+    @staticmethod
+    def _load_fit_table(path):
+        """헤더 `row_idx T_C P_mbar <gases...> rms_cm-1` 파싱.
+        반환: {'row_idx','T','P','rms', 'gases':{name: ndarray}}."""
+        gases, rows = [], []
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                s = ln.rstrip("\n")
+                if not s.strip() or s.startswith("#"):
+                    continue
+                if s.lower().startswith("row_idx"):
+                    cols = s.split("\t")
+                    gases = cols[3:-1]   # 앞 row_idx/T/P, 끝 rms 제외
+                    continue
+                c = s.split("\t")
+                if len(c) < 4:
+                    continue
+                try:
+                    rows.append([float(x) for x in c])
+                except ValueError:
+                    continue
+        if not gases or not rows:
+            raise ValueError("fit 결과 헤더/데이터 행을 찾지 못했습니다")
+        arr = np.array(rows, dtype=float)
+        out = {"row_idx": arr[:, 0], "T": arr[:, 1], "P": arr[:, 2],
+               "rms": arr[:, -1], "gases": {}, "path": path}
+        for i, g in enumerate(gases):
+            if 3 + i < arr.shape[1] - 1:   # 가스 컬럼은 마지막 rms 컬럼 앞
+                out["gases"][g] = arr[:, 3 + i]
+        return out
+
+    def _sync_gas_combo(self, names):
+        """가스 콤보를 fit 파일의 가스목록으로 (선택 유지하며) 갱신."""
+        want = ["전체"] + list(names)
+        cur = self._gas_combo.currentText()
+        have = [self._gas_combo.itemText(i) for i in range(self._gas_combo.count())]
+        if have == want:
+            return
+        self._gas_combo.blockSignals(True)
+        self._gas_combo.clear()
+        self._gas_combo.addItems(want)
+        if cur in want:
+            self._gas_combo.setCurrentText(cur)
+        self._gas_combo.blockSignals(False)
+
+    def _on_gas_changed(self, _idx):
+        # fit 모드에서 가스 선택 바뀌면 현재 파일 다시 그림
+        if self._fit_cache and self._path:
+            self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
+            self._plot_fit(self._path)
+
+    def _plot_fit(self, path):
+        t = self._load_fit_table(path)
+        self._fit_cache = t
+        self._sync_gas_combo(list(t["gases"].keys()))
+        sel = self._gas_combo.currentText() or "전체"
+        names = list(t["gases"].keys()) if sel in ("전체", "") else [sel]
+
+        x = t["row_idx"]
+        self._set_time_axis(self._pw_top, False)
+        self._set_time_axis(self._pw_bot, False)
+
+        stats = []
+        for i, g in enumerate(names):
+            y = t["gases"].get(g)
+            if y is None:
+                continue
+            col = _PALETTE[i % len(_PALETTE)]
+            self._pw_top.plot(x, y, pen=pg.mkPen(col, width=2), symbol="o",
+                              symbolSize=4, symbolBrush=col, name=f"{g} (ppb)")
+            fin = y[np.isfinite(y)]
+            if fin.size:
+                mu, sd = float(np.mean(fin)), float(np.std(fin))
+                if sd > 0:
+                    om = np.abs(y - mu) > 3 * sd
+                    nout = int(np.sum(om))
+                    if om.any():
+                        self._pw_top.plot(x[om], y[om], pen=None, symbol="x",
+                                          symbolSize=11, symbolBrush=(211, 47, 47))
+                else:
+                    nout = 0
+                stats.append(f"{g}: μ={mu:.3g}±{sd:.2g} ppb · ±3σ이상치 {nout}")
+        self._pw_top.setLabel("left", "농도 (ppb)")
+        self._pw_top.setLabel("bottom", "row_idx (≈시간)")
+        self._pw_top.setTitle(f"fit 결과 — {os.path.basename(path)} ({len(x)} scans)")
+
+        self._pw_bot.show()
+        self._pw_bot.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=2), name="RMS")
+        self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
+        self._pw_bot.setLabel("bottom", "row_idx")
+        self._pw_bot.setTitle("RMS 시계열")
+
+        self._stats_lbl.setText("   |   ".join(stats))
+        # 포인트 클릭 → 해당 scan의 α 스펙트럼 팝업(형제 alpha_trace.dat 있으면)
+        try:
+            self._pw_top.scene().sigMouseClicked.disconnect(self._on_fit_point_clicked)
+        except (TypeError, RuntimeError):
+            pass
+        self._pw_top.scene().sigMouseClicked.connect(self._on_fit_point_clicked)
+
+    def _overlay_compare(self):
+        """목록에서 다중 선택된 fit 파일들의 현재 가스 ppb·RMS를 겹쳐 비교."""
+        items = self._list.selectedItems()
+        paths = []
+        for it in items:
+            p = it.data(Qt.ItemDataRole.UserRole)
+            if p and (p.lower().endswith("_fit.tsv") or self._detect(p) == "fit"):
+                paths.append(p)
+        if not paths:
+            self._stats_lbl.setText("⚠️ 비교하려면 목록에서 fit 파일을 2개 이상 선택하세요.")
+            return
+        gas = self._gas_combo.currentText()
+        self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
+        self._set_time_axis(self._pw_top, False)
+        self._set_time_axis(self._pw_bot, False)
+        summ = []
+        for i, p in enumerate(paths):
+            try:
+                t = self._load_fit_table(p)
+            except Exception:
+                continue
+            g = gas if gas in t["gases"] else next(iter(t["gases"]), None)
+            if g is None:
+                continue
+            col = _PALETTE[i % len(_PALETTE)]
+            lbl = os.path.basename(p).replace("_fit.tsv", "")
+            y = t["gases"][g]
+            self._pw_top.plot(t["row_idx"], y, pen=pg.mkPen(col, width=2), name=f"{lbl}:{g}")
+            self._pw_bot.plot(t["row_idx"], t["rms"],
+                              pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DashLine),
+                              name=f"{lbl} RMS")
+            fin = y[np.isfinite(y)]
+            if fin.size:
+                summ.append(f"{lbl}: μ={float(np.mean(fin)):.3g}±{float(np.std(fin)):.2g}")
+        self._pw_top.setLabel("left", "농도 (ppb)")
+        self._pw_top.setLabel("bottom", "row_idx (≈시간)")
+        self._pw_top.setTitle(f"비교 — {gas} ({len(paths)} files)")
+        self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
+        self._stats_lbl.setText("   |   ".join(summ))
+
+    def _on_fit_point_clicked(self, ev):
+        """ppb 그래프 클릭 → 가장 가까운 scan의 α 스펙트럼을 팝업(형제 alpha_trace)."""
+        t = self._fit_cache
+        if not t or self._path is None:
+            return
+        try:
+            vb = self._pw_top.getViewBox()
+            mp = vb.mapSceneToView(ev.scenePos())
+            xclick = float(mp.x())
+        except Exception:
+            return
+        ri = t["row_idx"]
+        j = int(np.argmin(np.abs(ri - xclick)))
+        row_idx = int(ri[j])
+        alpha_path = self._sibling_alpha(self._path)
+        if not alpha_path:
+            self._stats_lbl.setText(f"row {row_idx}: 형제 alpha_trace.dat을 못 찾아 α 팝업 불가")
+            return
+        self._show_alpha_popup(alpha_path, row_idx)
+
+    @staticmethod
+    def _sibling_alpha(fit_path):
+        """`*_fit.tsv` 옆의 대응 `*_alpha_trace.dat` 경로 추정."""
+        base = os.path.basename(fit_path)
+        stem = base[:-8] if base.endswith("_fit.tsv") else os.path.splitext(base)[0]
+        d = os.path.dirname(fit_path)
+        cands = [os.path.join(d, stem + "_alpha_trace.dat"),
+                 os.path.join(d, stem + ".dat")]
+        import glob
+        cands += glob.glob(os.path.join(d, stem + "*alpha_trace.dat"))
+        for c in cands:
+            if os.path.isfile(c):
+                return c
+        return None
+
+    def _show_alpha_popup(self, alpha_path, row_idx):
+        """alpha_trace.dat에서 row_idx 행의 α 스펙트럼을 팝업으로 표시."""
+        wave = None
+        target = None
+        with open(alpha_path, "r", encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                if ln.startswith("# wavelength_nm:"):
+                    try:
+                        wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
+                                         if v.strip()], dtype=float)
+                    except Exception:
+                        pass
+                    continue
+                if ln.startswith("#") or ln.lower().startswith("row_idx"):
+                    continue
+                p = ln.rstrip().split("\t")
+                if len(p) > 4:
+                    try:
+                        if int(float(p[0])) == row_idx:
+                            target = np.array([float(x) for x in p[3:]], dtype=float)
+                            break
+                    except ValueError:
+                        continue
+        if target is None:
+            self._stats_lbl.setText(f"alpha_trace에 row {row_idx} 없음")
+            return
+        if wave is None or len(wave) != len(target):
+            wave = np.arange(len(target), dtype=float)
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"α 스펙트럼 — row {row_idx} ({os.path.basename(alpha_path)})")
+        dlg.resize(720, 460)
+        lay = QVBoxLayout(dlg)
+        pw = pg.PlotWidget()
+        pw.setBackground("w"); pw.showGrid(x=True, y=True, alpha=0.3)
+        pw.plot(wave, target, pen=pg.mkPen(_PALETTE[1], width=1.5))
+        pw.setLabel("left", "α (cm⁻¹)"); pw.setLabel("bottom", "Wavelength (nm)")
+        pw.setTitle(f"α — row {row_idx}")
+        lay.addWidget(pw)
+        dlg.show()
