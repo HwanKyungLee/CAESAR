@@ -1149,6 +1149,22 @@ class MonitorWidget(QWidget):
         self._r_auto_timer.timeout.connect(self._r_auto_refresh)
 
         layout = QVBoxLayout(self)
+
+        # ── 표시 채널 선택 ───────────────────────────────────────────
+        # 병렬 채널(CH1=PNs, CH2=ANs …) 피팅이 섞여 찍히는 것을 막기 위해
+        # Components / Fit View 탭은 선택된 채널의 스캔만 렌더한다.
+        self._view_channel = 1
+        self._latest_by_channel = {}
+        _chbar = QHBoxLayout()
+        _chbar.addWidget(QLabel("표시 채널:"))
+        self.cb_fit_channel = QComboBox()
+        self.cb_fit_channel.addItems(["CH1", "CH2", "CH3"])
+        self.cb_fit_channel.setFixedWidth(80)
+        self.cb_fit_channel.currentIndexChanged.connect(self._on_view_channel_changed)
+        _chbar.addWidget(self.cb_fit_channel)
+        _chbar.addStretch(1)
+        layout.addLayout(_chbar)
+
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
@@ -1926,10 +1942,22 @@ class MonitorWidget(QWidget):
     # ---------------------------------------------------------
     # Real-Time Rendering Methods
     # ---------------------------------------------------------
+    def _on_view_channel_changed(self, idx):
+        """채널 콤보 변경 → 새로 선택된 채널의 마지막 스캔을 즉시 다시 렌더."""
+        self._view_channel = idx + 1
+        data = self._latest_by_channel.get(self._view_channel)
+        if data:
+            self.update_spectrum(*data)
+
     def update_spectrum(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
+        # 채널 필터: 어느 채널 스캔이든 최신본은 보관하되, 선택 채널만 화면에 렌더
+        ch = int(fit_params.get('channel', 1)) if isinstance(fit_params, dict) else 1
+        self._latest_by_channel[ch] = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
+        if ch != getattr(self, '_view_channel', 1):
+            return
         self.latest_fit_data = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
-        
-        if self.tabs.currentIndex() == 0: 
+
+        if self.tabs.currentIndex() == 0:
             self.update_components(pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params)
             
         x_plot, x_label = self.get_x_axis(pixel_idx)

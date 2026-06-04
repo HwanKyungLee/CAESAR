@@ -784,7 +784,8 @@ class AnalysisWorker(QThread):
                             'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
                             'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
                             'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f)
+                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f),
+                            'channel': self.channel
                         }
                         result['Params'] = final_params_dict 
                         
