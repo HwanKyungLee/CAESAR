@@ -207,6 +207,35 @@ def _parse_timestamp(filepath: str) -> datetime:
     except OSError:
         return datetime.now(tz=_KST_TZ)
 
+def _file_bytepack_kst(filepath: str, ts_tz) -> datetime:
+    """첫 데이터행의 (col0,col1) bytepack 실제 스캔시각 → 채널 tz 해석 후 KST로 변환.
+
+    bytepack=(col0<<16)|col1 = 연초기준 centisecond(박사님 doy와 동일). col1 단독이
+    아니라 col0(상위워드)까지 합쳐 wrap을 정확히 처리한다. ts_tz는 채널별 instrument
+    clock 관례(Cold=UTC, Hot=KST)이며, 이를 KST 로 정규화해 Cold/Hot 시간축을 일치시킨다.
+    실패 시 파일 mtime 폴백.
+    """
+    try:
+        m = _DATE_RE.search(os.path.basename(filepath))
+        year = int(m.group(1)) if m else None
+        if year is not None:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    toks = line.split("\t")
+                    if len(toks) <= COL_TIME_HI:
+                        continue
+                    try:
+                        c0 = int(float(toks[COL_TIME_LO]))
+                        c1 = int(float(toks[COL_TIME_HI]))
+                    except ValueError:
+                        continue
+                    sec = ((c0 << 16) | (c1 & 0xFFFF)) / 100.0
+                    naive = datetime(year, 1, 1) + timedelta(seconds=sec)
+                    return naive.replace(tzinfo=ts_tz).astimezone(_KST_TZ)
+    except Exception:
+        pass
+    return datetime.fromtimestamp(os.path.getmtime(filepath), tz=ts_tz).astimezone(_KST_TZ)
+
 def _resolve_files(directory: str, file_list=None) -> list[str]:
     """scan_directory와 intensity 진단이 **동일한** 파일 목록을 쓰도록 일원화.
 
@@ -252,12 +281,12 @@ def scan_directory(directory: str, wave_nm, file_list=None,
         za, he = read_all_scans(fp, col_press, col_temp,
                                 spec_start, spec_end)
 
-        # ── 타임스탬프: 파일 mtime만 사용 ────────────────────────────────────
-        # ※ col1은 센티초(centiseconds) 단위 → UTC 초로 오해하면 날짜가 수백 일 틀림.
-        #   col1의 0→65444 리셋은 스캔 사이클 재시작일 뿐, 자정 crossing이 아님.
-        #   상세 설명은 파일 맨 위 docstring 참조.
+        # ── 타임스탬프: bytepack 실제 스캔시각(박사님 doy와 동일) → KST 정규화 ──
+        # col0(상위)+col1(하위)을 합친 bytepack centisecond. 채널 tz(Cold=UTC/Hot=KST)
+        # 를 KST로 변환해 Cold·Hot 시계열을 같은 축에 맞춘다. (구: 파일 mtime → 복사
+        # 시각 불확실성 + Cold가 instrument clock보다 +9h 어긋나던 문제 해소)
         _tz = ts_tz if ts_tz is not None else _KST_TZ
-        ts = datetime.fromtimestamp(os.path.getmtime(fp), tz=_tz)
+        ts = _file_bytepack_kst(fp, _tz)
         ts_str = ts.strftime("%m/%d %H:%M")
 
         # He 스캔을 만나도 보정 품질을 먼저 확인한 뒤에만 last_he 갱신

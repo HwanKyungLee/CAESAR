@@ -447,16 +447,13 @@ class DrNamAlphaWorker(QThread):
 
         spec1_cols = list(range(s1, e1))   # 2048 cols
         spec2_cols = list(range(s2, e2))
-        hk_cols    = [1, c_flag, c_t, c_p1, c_p2, c_p3]
+        hk_cols    = [0, 1, c_flag, c_t, c_p1, c_p2, c_p3]   # 0,1 = bytepack 시각 상·하위워드
         usecols    = sorted(set(hk_cols + spec1_cols + spec2_cols))
 
         chunks = []
         for fp in files:
             self._emit_status(f"  read {os.path.basename(fp)} (pandas C-engine)…")
             try:
-                mtime = _dt.datetime.fromtimestamp(os.path.getmtime(fp))
-                file_start_dt = mtime - _dt.timedelta(hours=1)
-
                 df = pd.read_csv(
                     fp,
                     sep="\t", header=None, engine="c",
@@ -472,31 +469,20 @@ class DrNamAlphaWorker(QThread):
             if df.empty:
                 continue
 
-            # Filter rows: 0 < centi < 86400 and finite
+            # Filter rows: 유효 col1(0 < centi < 86400) and finite
             centi = df[1].to_numpy()
             mask = np.isfinite(centi) & (centi > 0.0) & (centi < 86400.0)
             if not mask.any():
                 continue
             df = df.loc[mask].reset_index(drop=True)
-            centi = df[1].to_numpy()
 
-            # Monotonise across col1 wrap-around (one cycle ≈ 14.4 min @ 100 Hz)
-            diffs = np.diff(centi)
-            wrap_step = 14.4 * 60.0 * 100.0   # centisec
-            cum_wrap = np.zeros_like(centi)
-            cur = 0.0
-            for i in range(1, centi.size):
-                if diffs[i - 1] < -3600.0:
-                    cur += wrap_step
-                cum_wrap[i] = cur
-            centi_abs = centi + cum_wrap
-            secs = centi_abs / 100.0
-
-            # Vectorised DOY: start_dt → DOY base + seconds since start_of_year
-            year = file_start_dt.year
-            start_of_year = _dt.datetime(year, 1, 1)
-            base_sec = (file_start_dt - start_of_year).total_seconds()
-            doy = (base_sec + secs) / 86400.0 + 1.0
+            # DOY = bytepack((col0<<16)|col1)/100/86400 + 1  (박사님 doy/std_t와 동일).
+            # col0(상위워드)가 wrap을 담당하므로 수동 wrap 보정·mtime 앵커 불필요.
+            c0 = df[0].to_numpy()
+            c1 = df[1].to_numpy()
+            bp = (c0.astype(np.int64) << 16) | (c1.astype(np.int64) & 0xFFFF)
+            secs = bp.astype(np.float64) / 100.0
+            doy = secs / 86400.0 + 1.0
 
             # Slice spectra (pandas keeps column labels = original col indices)
             ch1 = df.loc[:, spec1_cols].to_numpy(dtype=np.float64)
