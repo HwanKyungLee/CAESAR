@@ -457,6 +457,28 @@ class RTrendMonitorDialog(QDialog):
             self, "파일 선택", "", "텍스트 파일 (*.txt *.dat *.csv);;모든 파일 (*)")
         if f: line_edit.setText(f)
 
+    @staticmethod
+    def _norm_date(s, default):
+        """'20260531' 또는 '2026-05-31' → '2026-05-31'. 빈 값이면 default."""
+        s = (s or "").strip().replace("-", "")
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+        return default
+
+    @staticmethod
+    def _files_in_range(directory, lo, hi):
+        """directory(및 하위폴더)에서 파일명 날짜(YYYY-MM-DD)가 [lo,hi]인 .dat 정렬 반환.
+        부모폴더를 주면 월별 하위폴더를 함께 스캔해 월 경계를 넘는다."""
+        import glob, re
+        pats = (glob.glob(os.path.join(directory, "*.dat")) +
+                glob.glob(os.path.join(directory, "**", "*.dat"), recursive=True))
+        out = []
+        for f in set(pats):
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(f))
+            if m and lo <= m.group(1) <= hi:
+                out.append(f)
+        return sorted(out)
+
     def _init_ui(self):
         main = QVBoxLayout(self)
 
@@ -527,6 +549,16 @@ class RTrendMonitorDialog(QDialog):
 
         row_data("Cold 데이터:",     "_le_cold_dir", "_cold_files_list", "_hint_cold", "_tz_cold", "UTC (−9h)")
         row_data("Hot 데이터:",      "_le_hot_dir",  "_hot_files_list",  "_hint_hot", "_tz_hot", "KST")
+
+        # 날짜 범위 (월 경계 넘어 선택 — 비우면 폴더 전체). 부모폴더(예: CAESAR_Cold)를
+        # 주고 날짜범위를 넣으면 2026-05 / 2026-06 하위폴더를 함께 스캔해 5/31↔6/1 연결.
+        self._le_date_start = QLineEdit(); self._le_date_start.setPlaceholderText("YYYYMMDD 시작 (예: 20260531)")
+        self._le_date_end   = QLineEdit(); self._le_date_end.setPlaceholderText("YYYYMMDD 끝 (예: 20260601)")
+        _dr = QHBoxLayout()
+        _dr.addWidget(self._le_date_start); _dr.addWidget(QLabel("~")); _dr.addWidget(self._le_date_end)
+        _drw = QWidget(); _drw.setLayout(_dr)
+        form.addRow("날짜 범위(선택):", _drw)
+
         row_file("Cold 파장 보정 파일:",        "_le_wl_cold")
         row_file("Hot PNs(roi1) 파장 보정:",   "_le_wl_hot")
         row_file("Hot ANs(roi2) 파장 보정:",   "_le_wl_hot_ans")
@@ -613,6 +645,23 @@ class RTrendMonitorDialog(QDialog):
         if not (cold_dir or cold_files) and not (hot_dir or hot_files):
             QMessageBox.warning(self, "입력 오류", "Cold 또는 Hot 데이터의 폴더나 파일을 지정해주세요.")
             return
+
+        # 날짜 범위가 있으면 폴더를 재귀 스캔해 월 경계를 넘는 파일 목록을 구성한다.
+        ds = self._le_date_start.text().strip()
+        de = self._le_date_end.text().strip()
+        if ds or de:
+            lo = self._norm_date(ds, "0000-00-00")
+            hi = self._norm_date(de, "9999-99-99")
+            if cold_dir:
+                sel = self._files_in_range(cold_dir, lo, hi)
+                if sel:
+                    cold_files = sel
+            if hot_dir:
+                sel = self._files_in_range(hot_dir, lo, hi)
+                if sel:
+                    hot_files = sel
+            self._log.append(
+                f"[날짜범위] {lo} ~ {hi}  →  Cold {len(cold_files or [])}개 / Hot {len(hot_files or [])}개")
 
         cfg = {
             "cold_dir":   cold_dir,
