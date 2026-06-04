@@ -3146,12 +3146,22 @@ class CAESARAnalyzer(QMainWindow):
     def refresh_viewer(self):
         """Updates the fast viewer tab with raw measurement or reference data."""
         idx = self.monitor.cb_view.currentIndex()
+        # Target fit band (nm) — used to zoom the reference view to the fit window.
+        try:
+            band = (self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value())
+        except Exception:
+            band = None
+
         if idx == 0: # Measurement Data
             row = self.table.currentRow()
-            if row < 0 or row >= len(self.file_list): 
+            if row < 0 or row >= self.table.rowCount():
                 return
-            
-            fname = self.table.item(row, 0).text()
+
+            fc = 1 if getattr(self, '_multi_channel_mode', False) else 0
+            it = self.table.item(row, fc)
+            if it is None:
+                return
+            fname = it.text()
             entry = self._entry_from_display_name(fname)
             if entry:
                 fp  = self._entry_filepath(entry)
@@ -3170,10 +3180,10 @@ class CAESARAnalyzer(QMainWindow):
             
             if is_raw and ref_name in self.engine.raw_references:
                 y = self.engine.raw_references[ref_name]
-                self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (RAW): {ref_name}", 'r', style='.')
+                self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (RAW): {ref_name}", 'r', style='.', xband=band)
             elif ref_name in self.engine.interpolators:
                 y = self.engine.interpolators[ref_name](np.arange(len(self.engine.raw_references[ref_name])))
-                self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (Conv): {ref_name}", 'r', style='-')
+                self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (Conv): {ref_name}", 'r', style='-', xband=band)
 
 
     def save_scenario(self):

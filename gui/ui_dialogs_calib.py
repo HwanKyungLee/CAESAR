@@ -1019,40 +1019,43 @@ class RangeSelectorDialog(QDialog):
                 props=dict(alpha=0.3, facecolor='yellow')
             )
 
-            # Update initial reference overlay
+            # Update initial reference overlay (also calls canvas.draw())
             self.update_ref(self.combo.currentText())
 
         except Exception as e:
-            print(f"Failed to load plot data: {e}")
+            # Surface the failure ON the canvas instead of silently leaving it blank
+            # (the "창은 뜨는데 그래프가 안 뜸" symptom was a swallowed load error).
+            import traceback
+            traceback.print_exc()
+            try:
+                self.ax.clear()
+                self.ax.text(0.5, 0.5, f"데이터 로드 실패:\n{e}",
+                             ha='center', va='center', transform=self.ax.transAxes,
+                             color='red', fontsize=10, wrap=True)
+                self.canvas.draw()
+            except Exception:
+                pass
 
     def update_ref(self, name):
-        """Draws the selected reference gas spectrum on the secondary Y-axis."""
+        """Draws the selected reference gas spectrum on the secondary Y-axis.
+
+        engine.interpolators are indexed by PIXEL number (engine.py builds them as
+        interp1d(arange(len), intensity)). So we must evaluate them at the measured
+        spectrum's own pixel indices and plot the result against self.x — whether
+        self.x is in nm or pixels. (The previous code fed nm straight into a
+        pixel-domain interpolator, so the overlay was sampled at the wrong place.)
+        """
         self.ax2.clear()
 
-        if name in self.engine.interpolators:
-            wave_mode = getattr(self, '_wave_mode', False)
-            if wave_mode:
-                # x is already in nm — interpolators expect nm
-                x_nm = self.x.astype(float)
-            else:
-                # x is pixel index — convert to nm via engine wave axis if possible
-                wave = getattr(self.engine, '_wave_axis', None)
-                if wave is not None:
-                    wave = np.asarray(wave, dtype=float).flatten()
-                    x_nm = np.interp(self.x, np.arange(len(wave)), wave)
-                else:
-                    # No calibration at all — interpolators won't align; skip overlay
-                    self.canvas.draw()
-                    return
-
-            y_ref = self.engine.interpolators[name](x_nm)
-
+        px = getattr(self, '_pixel_idx', None)
+        if name in self.engine.interpolators and px is not None:
+            y_ref = self.engine.interpolators[name](np.asarray(px, dtype=float))
             self.ax2.plot(self.x, y_ref, 'r--', alpha=0.8, label=f'Ref: {name}')
 
-            ymin, ymax = np.min(y_ref), np.max(y_ref)
-            if ymax - ymin > 1e-65:
-                margin = (ymax - ymin) * 0.1
-                self.ax2.set_ylim(ymin - margin, ymax + margin)
+            yfin = y_ref[np.isfinite(y_ref)]
+            if yfin.size and (yfin.max() - yfin.min()) > 1e-65:
+                margin = (yfin.max() - yfin.min()) * 0.1
+                self.ax2.set_ylim(yfin.min() - margin, yfin.max() + margin)
 
             self.ax2.legend(loc='upper left', fontsize=8)
 

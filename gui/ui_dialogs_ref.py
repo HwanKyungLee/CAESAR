@@ -1925,19 +1925,56 @@ class MonitorWidget(QWidget):
         else: 
             self.lbl_sat.setText("Status: OK"); self.lbl_sat.setStyleSheet("color: green; font-weight: bold")
             
-    def plot_viewer(self, x, y, title, color='b', style='-'):
+    def plot_viewer(self, x, y, title, color='b', style='-', xband=None):
         self.latest_raw_data = (x, y, title)
         x_plot, x_label = self.get_x_axis(x)
         self.pw_view.setLabel('bottom', x_label)
         self.pw_view.setTitle(title)
-        
+
         pen = pg.mkPen(color, width=1.5) if style == '-' else None
         sym = 'o' if style != '-' else None
-        
+
         self.curve_view.setData(x_plot, y, pen=pen, symbol=sym, symbolSize=3, symbolBrush=color)
+        self._apply_view_range(x_plot, np.asarray(y, dtype=float), xband, x_label)
+        self.update_stats(y)
+
+    def _apply_view_range(self, x_plot, y, xband, x_label):
+        """Keep newly drawn data inside the visible viewport.
+
+        - xband=(lo,hi) in nm: zoom to that target band (e.g. fit range 400~500)
+          and fit Y to the data inside the band. Only honoured when the x-axis is
+          in wavelength units.
+        - else, if 'auto fit' is on: full autoRange.
+        - else (manual zoom kept): only auto-fit when the new data's x-range does
+          NOT overlap the current view, so a new dataset never lands fully
+          off-screen (the "그래프 화면 넘어가서 안 보임" bug).
+        """
+        x_plot = np.asarray(x_plot, dtype=float)
+        if x_plot.size == 0:
+            return
+        if xband is not None and str(x_label).startswith("Wavelength"):
+            lo, hi = float(xband[0]), float(xband[1])
+            if hi < lo:
+                lo, hi = hi, lo
+            self.pw_view.setXRange(lo, hi, padding=0.02)
+            m = (x_plot >= lo) & (x_plot <= hi)
+            yb = y[m] if np.any(m) else y
+            yb = yb[np.isfinite(yb)]
+            if yb.size:
+                ylo, yhi = float(yb.min()), float(yb.max())
+                pad = (yhi - ylo) * 0.1 or abs(yhi) * 0.1 or 1.0
+                self.pw_view.setYRange(ylo - pad, yhi + pad, padding=0)
+            return
         if self.chk_autofit.isChecked():
             self.pw_view.autoRange()
-        self.update_stats(y)
+            return
+        try:
+            (xmin, xmax), _ = self.pw_view.getViewBox().viewRange()
+            dxmin, dxmax = float(np.nanmin(x_plot)), float(np.nanmax(x_plot))
+            if dxmax < xmin or dxmin > xmax:   # no overlap → data is off-screen
+                self.pw_view.autoRange()
+        except Exception:
+            self.pw_view.autoRange()
 
     # ---------------------------------------------------------
     # Real-Time Rendering Methods
