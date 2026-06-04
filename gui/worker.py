@@ -1580,7 +1580,22 @@ class AlphaFitWorker(QThread):
                 self.status_msg.emit(f"SKIP {fname}: 피팅된 행 없음")
                 continue
 
-            header = 'row_idx\tT_C\tP_mbar\t' + '\t'.join(gas_list) + '\trms_cm-1\n'
+            # 출처/단위 명시 헤더 — 어떤 alpha(=어떤 raw)에서 나온 결과인지 명확히.
+            from datetime import datetime as _dt
+            src_chan = next((l.strip().lstrip('#').strip()
+                             for l in lines if l.startswith('# channel=')), '')
+            header_lines = [
+                "# CAESAR Pro Fit Result",
+                f"# source_alpha={fname}",
+            ]
+            if src_chan:
+                header_lines.append(f"# {src_chan}")
+            header_lines += [
+                f"# conc_unit=ppb  rms_unit=cm-1  poly_deg={self.poly_deg}",
+                f"# generated={_dt.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "row_idx\tT_C\tP_mbar\t" + '\t'.join(gas_list) + '\trms_cm-1',
+            ]
+            header = '\n'.join(header_lines) + '\n'
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(header)
                 for row_idx, T, P, ppb_vals, rms in result_rows:

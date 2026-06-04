@@ -234,7 +234,23 @@ class CAESARAnalyzer(QMainWindow):
         btn_apply_nm.clicked.connect(self.set_range_from_nm)
         layout_nm.addWidget(btn_apply_nm)
         lay_set.addLayout(layout_nm)
-        
+
+        # 채널별 Fit 범위(nm) — ≥2채널 감지 시에만 표시. 위 메인 행 = CH1(ROI1).
+        self._ch_fit_nm = {}     # ch -> (start_spin, end_spin)
+        self._ch_fit_rows = {}   # ch -> 행 위젯(표시/숨김)
+        for _ch, _roi in ((2, 'ROI2'), (3, 'ROI3')):
+            _roww = QWidget()
+            _rl = QHBoxLayout(_roww)
+            _rl.setContentsMargins(0, 0, 0, 0)
+            _rl.addWidget(QLabel(f"  └ CH{_ch}({_roi}) nm:"))
+            _s = QDoubleSpinBox(); _s.setRange(200, 1000); _s.setDecimals(1); _s.setValue(435.0)
+            _e = QDoubleSpinBox(); _e.setRange(200, 1000); _e.setDecimals(1); _e.setValue(480.0)
+            _rl.addWidget(_s); _rl.addWidget(QLabel("~")); _rl.addWidget(_e); _rl.addStretch(1)
+            _roww.setVisible(False)
+            lay_set.addWidget(_roww)
+            self._ch_fit_nm[_ch] = (_s, _e)
+            self._ch_fit_rows[_ch] = _roww
+
         grp_set.setLayout(lay_set)
         left_layout.addWidget(grp_set)
         
@@ -1673,18 +1689,26 @@ class CAESARAnalyzer(QMainWindow):
         wl = getattr(self, 'wavelengths', None)   # 폴백: 로드된 단일 cal
         return np.asarray(wl, dtype=float).flatten() if wl is not None else None
 
+    def _fit_nm_for_channel(self, ch):
+        """채널별 Fit 범위(nm). CH1/단일 = 메인 스핀, CH2/CH3 = 전용 행(노출 시).
+        반환은 항상 (lo, hi) 정렬."""
+        n_active = int(getattr(self, '_detected_channels', 1) or 1)
+        if ch in getattr(self, '_ch_fit_nm', {}) and ch <= n_active:
+            s, e = self._ch_fit_nm[ch]
+            lo, hi = s.value(), e.value()
+        else:
+            lo, hi = self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value()
+        return (lo, hi) if lo <= hi else (hi, lo)
+
     def _build_alpha_channel_configs(self, n_ch):
-        """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max) — nm 핏레인지를 채널 cal로 변환."""
+        """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max) — 채널별 nm 핏레인지를 채널 cal로 변환."""
         label_for = {1: 'Cold'} if n_ch == 1 else {1: 'PNs', 2: 'ANs', 3: 'CH3'}
-        start_nm = self.spin_fit_start_nm.value()
-        end_nm   = self.spin_fit_end_nm.value()
-        if start_nm > end_nm:
-            start_nm, end_nm = end_nm, start_nm
         configs = []
         for ch in range(1, n_ch + 1):
             wave_full = self._channel_wave_cal(n_ch, ch)
             if wave_full is None or len(wave_full) == 0:
                 continue
+            start_nm, end_nm = self._fit_nm_for_channel(ch)
             pmin = int(np.abs(wave_full - start_nm).argmin())
             pmax = int(np.abs(wave_full - end_nm).argmin())
             if pmin > pmax:
@@ -2477,6 +2501,9 @@ class CAESARAnalyzer(QMainWindow):
             }
             label = ch_labels.get(n, f"{n}채널")
             self.lbl_channel_info.setText(label)
+            # 채널별 Fit 범위(nm) 행: 감지된 채널 수만큼만 노출
+            for _ch, _roww in getattr(self, '_ch_fit_rows', {}).items():
+                _roww.setVisible(_ch <= n)
             colours = {1: "#1565C0", 2: "#6A1B9A", 3: "#2E7D32"}
             self.lbl_channel_info.setStyleSheet(
                 f"color: {colours.get(n, '#333')}; font-weight: bold;")
