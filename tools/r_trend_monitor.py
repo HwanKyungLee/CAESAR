@@ -712,6 +712,8 @@ def collect_intensity_by_flag(files: list[str], spec_start: int, spec_end: int,
             continue
         boundaries.append((global_idx, os.path.basename(fp)))
         mt = datetime.fromtimestamp(os.path.getmtime(fp), tz=ts_tz)
+        _ym = _DATE_RE.search(os.path.basename(fp))
+        _yr = int(_ym.group(1)) if _ym else None
         rows: list[tuple[int, int, float, float]] = []   # (flag, idx, bytepack_sec, peak)
         amb_count = 0
         last_bp = float("nan")
@@ -757,10 +759,13 @@ def collect_intensity_by_flag(files: list[str], spec_start: int, spec_end: int,
                 rows.append((flag, row_idx, bp, float(np.max(vals))))
 
         for flag, row_idx, bp, pk in rows:
-            if bp != bp or last_bp != last_bp:
-                t = mt.replace(tzinfo=None)
+            # 시각 = 순수 bytepack → 채널 tz(Cold=UTC/Hot=KST) 해석 후 KST 정규화.
+            # (R-트렌드 x축과 동일한 기준. 구: mtime 앵커 → Cold에서 ~1h 어긋남)
+            if bp != bp or _yr is None:
+                t = mt.astimezone(_KST_TZ).replace(tzinfo=None)   # 폴백
             else:
-                t = (mt - timedelta(seconds=(last_bp - bp))).replace(tzinfo=None)
+                naive = datetime(_yr, 1, 1) + timedelta(seconds=bp)
+                t = naive.replace(tzinfo=ts_tz).astimezone(_KST_TZ).replace(tzinfo=None)
             series[flag]["t"].append(t)
             series[flag]["idx"].append(row_idx)
             series[flag]["pk"].append(pk)
