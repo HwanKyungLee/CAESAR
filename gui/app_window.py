@@ -91,14 +91,13 @@ class CAESARAnalyzer(QMainWindow):
         _btn_delc.setToolTip("현재 채널 삭제")
         _btn_delc.clicked.connect(self._del_channel_tab)
         _chtab_bar.addWidget(_btn_addc); _chtab_bar.addWidget(_btn_delc)
-        _chtab_bar.addWidget(QLabel("데이터:"))
+        _chtab_bar.addWidget(QLabel("데이터(선택):"))
         self._ed_ch_datalabel = QLineEdit()
         self._ed_ch_datalabel.setFixedWidth(int(80 * self._s))
-        self._ed_ch_datalabel.setPlaceholderText("cold/pns/ans")
+        self._ed_ch_datalabel.setPlaceholderText("자동")
         self._ed_ch_datalabel.setToolTip(
-            "이 채널이 받을 알파 파일명 라벨(예: cold, pns, ans).\n"
-            "Load Data로 전체 알파를 한 번에 넣어도 파일명에 이 라벨이 든 것만 이 채널로 분배.\n"
-            "비우면 기존 자동매핑(PNs=1, ANs=2).")
+            "기본은 알파 헤더의 채널번호(# channel=N)로 자동 분배 → 비워두면 됨(캠페인 무관).\n"
+            "특수 케이스만 라벨 override: 파일명/헤더 label/'ch{N}' 중 매칭되는 알파를 이 채널로.")
         _chtab_bar.addWidget(self._ed_ch_datalabel)
         left_layout.addLayout(_chtab_bar)
 
@@ -2580,23 +2579,56 @@ class CAESARAnalyzer(QMainWindow):
     # ---------------------------------------------------------
     # Multithreading Analysis Execution (Worker)
     # ---------------------------------------------------------
+    @staticmethod
+    def _alpha_file_meta(fp):
+        """알파 파일 헤더에서 (channel_index, label) 추출. 우리 Alpha Export가
+        '# channel=N  label=X' 를 항상 기록 → 캠페인 무관 generic 매핑용.
+        반환: (int 또는 None, str 소문자 또는 '')."""
+        ch, lbl = None, ''
+        try:
+            with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+                for _ in range(15):
+                    ln = f.readline()
+                    if not ln or not ln.startswith('#'):
+                        break
+                    if 'channel=' in ln:
+                        try:
+                            ch = int(ln.split('channel=', 1)[1].strip().split()[0])
+                        except (ValueError, IndexError):
+                            pass
+                    if 'label=' in ln:
+                        lbl = ln.split('label=', 1)[1].strip().split()[0].lower()
+        except Exception:
+            pass
+        return ch, lbl
+
     def _channel_data_groups(self):
-        """채널별 데이터 파일 그룹 — 각 채널 config의 data_label(예 cold/pns/ans)로
-        로드된 file_list를 분배. 라벨이 하나도 없으면 기존 _alpha_groups(자동매핑) 사용.
-        → Load Data로 전체 알파를 한 번에 넣어도 채널마다 자기 라벨 파일만 받음."""
+        """채널별 데이터 파일 그룹. **기본: 알파 헤더의 채널 인덱스(# channel=N)로 자동
+        분배** → 캠페인 무관(라벨 타이핑 불필요). 채널 config에 data_label을 적어두면 그게
+        우선(파일명/헤더 label/채널index 어느 거로든 매칭). 둘 다 없으면 기존 _alpha_groups."""
         if self._active_channel in self._channel_configs:
             self._channel_configs[self._active_channel] = self._capture_config()
         labels = {ch: ((cfg.get('data_label') or '').strip().lower())
                   for ch, cfg in self._channel_configs.items() if cfg}
-        if any(labels.values()):
-            groups = {}
-            for entry in self.file_list:
-                name = os.path.basename(str(self._entry_filepath(entry))).lower()
-                for ch, lbl in labels.items():
-                    if lbl and lbl in name:
-                        groups.setdefault(ch, []).append(entry)
-                        break
-            return groups or None
+        tab_chs = set(self._channel_configs.keys())
+        groups = {}
+        for entry in self.file_list:
+            fp = self._entry_filepath(entry)
+            name = os.path.basename(str(fp)).lower()
+            hdr_ch, hdr_lbl = self._alpha_file_meta(fp)
+            assigned = None
+            # 1) 사용자가 적은 data_label override(파일명/헤더label/'chN' 매칭)
+            for ch, lbl in labels.items():
+                if lbl and (lbl in name or lbl == hdr_lbl or lbl == f"ch{ch}"):
+                    assigned = ch
+                    break
+            # 2) 기본: 헤더 채널 인덱스 → 같은 번호 탭(generic)
+            if assigned is None and hdr_ch in tab_chs:
+                assigned = hdr_ch
+            if assigned is not None:
+                groups.setdefault(assigned, []).append(entry)
+        if groups:
+            return groups
         return self._alpha_groups
 
     def _alpha_channel_groups(self, file_list):
