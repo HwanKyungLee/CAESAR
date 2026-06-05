@@ -69,6 +69,7 @@ class CAESARAnalyzer(QMainWindow):
         # =========================================================
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
+        self._left_col = left_layout   # α 파이프라인을 분석 영역으로 합치기 위해 참조 보관
 
         # --- 1. Reference Management Section ---
         grp_ref = QGroupBox("References")
@@ -925,7 +926,13 @@ class CAESARAnalyzer(QMainWindow):
         lay_alpha_two.addWidget(btn_step2)
 
         grp_alpha_two.setLayout(lay_alpha_two)
-        control_layout.addWidget(grp_alpha_two)
+        # 분석 진입점 통합: α 파이프라인을 Setup이 아니라 좌측 분석 컬럼의
+        # 'Analysis (RUN)' 바로 아래(상태바 앞)로 이동 → 직접 RUN과 한곳에.
+        _col = getattr(self, '_left_col', None)
+        if _col is not None and hasattr(self, 'status'):
+            _col.insertWidget(_col.indexOf(self.status), grp_alpha_two)
+        else:
+            control_layout.addWidget(grp_alpha_two)
 
         # R-Curve Generator (standalone tool for offline R derivation)
         btn_r_gen = QPushButton("📊 R-Curve Generator (offline .mat / separate files)")
