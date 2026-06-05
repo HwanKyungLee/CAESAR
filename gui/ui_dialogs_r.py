@@ -35,7 +35,8 @@ from numpy.polynomial import chebyshev
 from core.data_io import DataIO
 
 # [PyQt6] Modules
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from gui.dlg_dir import dlg_dir
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, 
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
@@ -199,7 +200,8 @@ class R_GeneratorDialog(QDialog):
 
     def load_data(self, slot):
         """Loads spectrum data, filtering out specialized headers (e.g., Ocean Optics timestamps)."""
-        filename, _ = QFileDialog.getOpenFileName(self, f"Select Spectrum {slot}", "", "Data Files (*.txt *.dat *.csv)")
+        filename, _ = QFileDialog.getOpenFileName(self, f"Select Spectrum {slot}", dlg_dir("spectrum"), "Data Files (*.txt *.dat *.csv)")
+        dlg_dir("spectrum", filename)
         if not filename: return
 
         try:
@@ -324,7 +326,9 @@ class R_GeneratorDialog(QDialog):
             default_fname = f"RCurve_{gas1}_vs_{gas2}_d{cavity_len}cm_{date_str}.csv"
 
             # Save the result
-            save_path, _ = QFileDialog.getSaveFileName(self, "Save R-Curve", default_fname, "CSV (*.csv)")
+            _start = os.path.join(dlg_dir("rcurve_save"), default_fname) if dlg_dir("rcurve_save") else default_fname
+            save_path, _ = QFileDialog.getSaveFileName(self, "Save R-Curve", _start, "CSV (*.csv)")
+            dlg_dir("rcurve_save", save_path)
 
             if save_path:
                 pd.DataFrame({'Wavelength': self.wl, 'Reflectivity': r_curve}).to_csv(save_path, index=False)
@@ -449,12 +453,14 @@ class RTrendMonitorDialog(QDialog):
                 self._spin_rl.setValue(parent.spin_rl_factor.value())
 
     def _pick_dir(self, line_edit):
-        d = QFileDialog.getExistingDirectory(self, "폴더 선택")
+        d = QFileDialog.getExistingDirectory(self, "폴더 선택", dlg_dir("r_folder"))
+        dlg_dir("r_folder", d)
         if d: line_edit.setText(d)
 
     def _pick_file(self, line_edit):
         f, _ = QFileDialog.getOpenFileName(
-            self, "파일 선택", "", "텍스트 파일 (*.txt *.dat *.csv);;모든 파일 (*)")
+            self, "파일 선택", dlg_dir("r_file"), "텍스트 파일 (*.txt *.dat *.csv);;모든 파일 (*)")
+        dlg_dir("r_file", f)
         if f: line_edit.setText(f)
 
     @staticmethod
@@ -503,14 +509,17 @@ class RTrendMonitorDialog(QDialog):
             setattr(self, hint_attr, hint)
 
             def pick_dir():
-                d = QFileDialog.getExistingDirectory(self, "폴더 선택")
+                d = QFileDialog.getExistingDirectory(self, "폴더 선택", dlg_dir("r_folder"))
+                dlg_dir("r_folder", d)
                 if d:
                     le.setText(d)
                     setattr(self, files_attr, [])
                     hint.setText("")
 
             def pick_files():
-                files, _ = QFileDialog.getOpenFileNames(self, "파일 선택 (복수 가능)", "", "DAT 파일 (*.dat);;모든 파일 (*)")
+                files, _ = QFileDialog.getOpenFileNames(self, "파일 선택 (복수 가능)", dlg_dir("r_files"), "DAT 파일 (*.dat);;모든 파일 (*)")
+                if files:
+                    dlg_dir("r_files", files[0])
                 if files:
                     le.setText("")
                     setattr(self, files_attr, files)

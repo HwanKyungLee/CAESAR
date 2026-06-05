@@ -46,17 +46,9 @@ class CAESARAnalyzer(QMainWindow):
         self.init_ui()
 
     def _dlg_dir(self, key, save=None):
-        """Last-directory memory for file dialogs, keyed per button.
-
-        Call with no `save` to get the remembered start directory (for the
-        QFileDialog 3rd arg); call with the chosen path to remember its folder.
-        """
-        if save:
-            d = save if os.path.isdir(save) else os.path.dirname(save)
-            if d:
-                self._qsettings.setValue(f"dlgdir/{key}", d)
-            return d
-        return self._qsettings.value(f"dlgdir/{key}", "", type=str)
+        """Last-directory memory for file dialogs, keyed per button (공용 모듈 위임)."""
+        from gui.dlg_dir import dlg_dir
+        return dlg_dir(key, save)
 
     def init_ui(self):
         from core.data_io import ui_scale
@@ -1326,7 +1318,8 @@ class CAESARAnalyzer(QMainWindow):
 
     # ── FWHM Best-Match (Setup tab Tab 2) ──────────────────────────────
     def _fwhm_pick_sweep_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Choose FWHM sweep folder")
+        d = QFileDialog.getExistingDirectory(self, "Choose FWHM sweep folder", self._dlg_dir('fwhm'))
+        self._dlg_dir('fwhm', d)
         if not d:
             return
         self._fwhm_sweep_folder = d
@@ -1337,9 +1330,10 @@ class CAESARAnalyzer(QMainWindow):
 
     def _fwhm_pick_alpha_file(self):
         f, _ = QFileDialog.getOpenFileName(
-            self, "Pick α file", "",
+            self, "Pick α file", self._dlg_dir('fwhm_alpha'),
             "Data Files (*.dat *.txt *.csv);;All Files (*)"
         )
+        self._dlg_dir('fwhm_alpha', f)
         if not f:
             return
         self._fwhm_alpha_file_path = f
@@ -1540,10 +1534,11 @@ class CAESARAnalyzer(QMainWindow):
     def browse_dark_file(self):
         """Browse and load a dark current spectrum (.dat/.txt/.csv 또는 MATLAB .mat)."""
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Select Dark Spectrum", "",
+            self, "Select Dark Spectrum", self._dlg_dir('dark'),
             "Data Files (*.dat *.txt *.csv *.mat);;All Files (*)")
         if not filepath:
             return
+        self._dlg_dir('dark', filepath)
         try:
             import numpy as np
             if filepath.lower().endswith(".mat"):
@@ -2996,7 +2991,9 @@ class CAESARAnalyzer(QMainWindow):
 
         default_fname = f"{now_str}_Result_{gas_list_str}_{wl_str}_Poly{poly_deg}_L{lam_val:g}_{robust_str}_Step[{step_val}]_{sh_str}_{sq_str}.dat"
         
-        path, _ = QFileDialog.getSaveFileName(self, "Save Data", default_fname, "Data Files (*.dat);;CSV Files (*.csv)")
+        _start = os.path.join(self._dlg_dir('save'), default_fname) if self._dlg_dir('save') else default_fname
+        path, _ = QFileDialog.getSaveFileName(self, "Save Data", _start, "Data Files (*.dat);;CSV Files (*.csv)")
+        self._dlg_dir('save', path)
 
         if path:
             try:
@@ -3236,7 +3233,9 @@ class CAESARAnalyzer(QMainWindow):
         }
 
         # 3. Open file save dialog
-        path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", default_fname, "JSON Files (*.json)")
+        _start = os.path.join(self._dlg_dir('scenario'), default_fname) if self._dlg_dir('scenario') else default_fname
+        path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", _start, "JSON Files (*.json)")
+        self._dlg_dir('scenario', path)
         if path:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
@@ -3257,8 +3256,9 @@ class CAESARAnalyzer(QMainWindow):
 
         After load_scenario() the user only needs to click 'Load Data' then 'RUN'.
         """
-        path, _ = QFileDialog.getOpenFileName(self, "Load Fit Scenario", "", "JSON Files (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load Fit Scenario", self._dlg_dir('scenario'), "JSON Files (*.json)")
         if not path: return
+        self._dlg_dir('scenario', path)
         
         try:
             with open(path, 'r', encoding='utf-8') as f:

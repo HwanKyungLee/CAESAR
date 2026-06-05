@@ -35,8 +35,9 @@ from numpy.polynomial import chebyshev
 from core.data_io import DataIO
 
 # [PyQt6] Modules
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
+from gui.dlg_dir import dlg_dir
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, 
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
@@ -533,7 +534,8 @@ class WavelengthCalibrationDialog(QDialog):
 
     def load_spectrum(self):
         """Load calibration spectrum dynamically using a robust header mapping for LightField."""
-        filename, _ = QFileDialog.getOpenFileName(self, "Open Lamp Spectrum", "", "Data Files (*.dat *.txt *.csv)")
+        filename, _ = QFileDialog.getOpenFileName(self, "Open Lamp Spectrum", dlg_dir("lamp"), "Data Files (*.dat *.txt *.csv)")
+        dlg_dir("lamp", filename)
         if not filename: 
             return
             
@@ -768,9 +770,11 @@ class WavelengthCalibrationDialog(QDialog):
 
         # 3. Specify Save Path
         filters = "Text Files (*.txt);;Data Files (*.dat);;CSV Files (*.csv)"
+        _start = os.path.join(dlg_dir("calib_save"), suggested_name) if dlg_dir("calib_save") else suggested_name
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save & Apply Calibration", suggested_name, filters
+            self, "Save & Apply Calibration", _start, filters
         )
+        dlg_dir("calib_save", save_path)
 
         if save_path:
             # Generate Metadata Header including FWHM
@@ -818,9 +822,11 @@ class WavelengthCalibrationDialog(QDialog):
         date_str = datetime.datetime.now().strftime("%Y%m%d")
         suggested_name = f"FWHM_Analysis_{date_str}.txt"
 
+        _start = os.path.join(dlg_dir("calib_save"), suggested_name) if dlg_dir("calib_save") else suggested_name
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save FWHM & Sigma Data", suggested_name, "Text Files (*.txt);;CSV Files (*.csv)"
+            self, "Save FWHM & Sigma Data", _start, "Text Files (*.txt);;CSV Files (*.csv)"
         )
+        dlg_dir("calib_save", save_path)
 
         if save_path:
             try:

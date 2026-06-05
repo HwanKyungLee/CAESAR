@@ -35,8 +35,9 @@ from numpy.polynomial import chebyshev
 from core.data_io import DataIO
 
 # [PyQt6] Modules
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
+from gui.dlg_dir import dlg_dir
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, 
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog, 
                              QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox, 
@@ -597,7 +598,8 @@ class ReferenceGeneratorDialog(QDialog):
         return None, "no match"
 
     def load_raw_reference(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Open Raw Ref", "", "Data Files (*.txt *.csv *.dat)")
+        filename, _ = QFileDialog.getOpenFileName(self, "Open Raw Ref", dlg_dir("rawref"), "Data Files (*.txt *.csv *.dat)")
+        dlg_dir("rawref", filename)
         if not filename: return
         try:
             wave_nm_ref, intensity_raw = DataIO.load_reference(filename)
@@ -709,7 +711,8 @@ class ReferenceGeneratorDialog(QDialog):
 
     def load_target_wavelength(self, path: str = None):
         if path is None:
-            path, _ = QFileDialog.getOpenFileName(self, "Open Wavelength", "", "Text Files (*.txt *.csv)")
+            path, _ = QFileDialog.getOpenFileName(self, "Open Wavelength", dlg_dir("wavecal"), "Text Files (*.txt *.csv)")
+            dlg_dir("wavecal", path)
         if not path:
             return
         df = pd.read_csv(path, header=None)
@@ -811,7 +814,8 @@ class ReferenceGeneratorDialog(QDialog):
         passes the resolved path directly.
         """
         if path is None:
-            filename, _ = QFileDialog.getOpenFileName(self, "Open FWHM Profile", "", "Text Files (*.txt *.csv)")
+            filename, _ = QFileDialog.getOpenFileName(self, "Open FWHM Profile", dlg_dir("fwhm_profile"), "Text Files (*.txt *.csv)")
+            dlg_dir("fwhm_profile", filename)
         else:
             filename = path
         if not filename: return
@@ -1012,7 +1016,8 @@ class ReferenceGeneratorDialog(QDialog):
         return result
 
     def _pick_sweep_outdir(self):
-        dirpath = QFileDialog.getExistingDirectory(self, "Choose FWHM Sweep Output Folder")
+        dirpath = QFileDialog.getExistingDirectory(self, "Choose FWHM Sweep Output Folder", dlg_dir("fwhm_sweep"))
+        dlg_dir("fwhm_sweep", dirpath)
         if not dirpath:
             return
         self._sweep_outdir = dirpath
@@ -1107,7 +1112,9 @@ class ReferenceGeneratorDialog(QDialog):
     def save_reference(self):
         """Saves the fully processed reference spectrum with metadata header."""
         filters = "Data Files (*.dat);;Text Files (*.txt);;CSV Files (*.csv)"
-        filename, _ = QFileDialog.getSaveFileName(self, "Save Reference", self.suggested_filename, filters)
+        _start = os.path.join(dlg_dir("ref_save"), self.suggested_filename) if dlg_dir("ref_save") else self.suggested_filename
+        filename, _ = QFileDialog.getSaveFileName(self, "Save Reference", _start, filters)
+        dlg_dir("ref_save", filename)
         
         if filename:
             # 🌟 Append mathematical metadata as a header string
@@ -1568,7 +1575,8 @@ class MonitorWidget(QWidget):
 
     def _r_pick(self, line_edit):
         from PyQt6.QtWidgets import QFileDialog
-        d = QFileDialog.getExistingDirectory(self, "폴더 선택")
+        d = QFileDialog.getExistingDirectory(self, "폴더 선택", dlg_dir("ref_folder"))
+        dlg_dir("ref_folder", d)
         if d: line_edit.setText(d)
 
     @staticmethod

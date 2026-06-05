@@ -125,17 +125,22 @@ class ResultViewerWidget(QWidget):
 
     # ──────────────────────────────────────────────────────────────
     def _open(self):
+        from gui.dlg_dir import dlg_dir
         path, _ = QFileDialog.getOpenFileName(
-            self, "결과 파일 선택", "",
+            self, "결과 파일 선택", dlg_dir("result"),
             "결과 파일 (*.dat *.csv *.txt *.tsv);;모든 파일 (*)")
         if path:
+            dlg_dir("result", path)
             self._path = path
             self._reload()
 
     def _open_folder(self):
         """폴더를 받아 내부 결과파일을 형태별로 그룹·목록화. 항목 클릭 → 표시."""
         import glob
-        d = QFileDialog.getExistingDirectory(self, "결과 폴더 선택")
+        from gui.dlg_dir import dlg_dir
+        d = QFileDialog.getExistingDirectory(self, "결과 폴더 선택", dlg_dir("result_folder"))
+        if d:
+            dlg_dir("result_folder", d)
         if not d:
             return
         files = []
