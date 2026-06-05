@@ -240,7 +240,10 @@ class CAESARAnalyzer(QMainWindow):
         self._ch_wavecal_btn[1] = _wb1
         lay_set.addLayout(layout_nm)
 
-        # 채널별 Fit 범위(nm) + wavecal — ≥2/3채널 감지 시에만 표시(CH2=ROI2, CH3=ROI3).
+        # CH1은 위 메인 행(항상 활성). CH2/CH3는 '➕ 채널 추가' 버튼으로 추가/제거(레퍼런스 Add 방식).
+        self._ch_fit_nm[1] = (self.spin_fit_start_nm, self.spin_fit_end_nm)
+        self._ch_fit_rows[1] = None
+        self._ch_active = {1: True, 2: False, 3: False}
         for _ch, _roi in ((2, 'ROI2'), (3, 'ROI3')):
             _roww = QWidget()
             _rl = QHBoxLayout(_roww)
@@ -249,15 +252,24 @@ class CAESARAnalyzer(QMainWindow):
             _s = QDoubleSpinBox(); _s.setRange(200, 1000); _s.setDecimals(1); _s.setValue(435.0)
             _e = QDoubleSpinBox(); _e.setRange(200, 1000); _e.setDecimals(1); _e.setValue(480.0)
             _rl.addWidget(_s); _rl.addWidget(QLabel("~")); _rl.addWidget(_e)
-            _wb = QPushButton("📂 wavecal(자동)")
+            _wb = QPushButton("📂 wavecal")
             _wb.setToolTip(f"CH{_ch}({_roi}) 파장보정 파일 직접 선택. 미선택 시 wv_cal/{_roi.lower()} 자동탐색")
             _wb.clicked.connect(lambda _checked, c=_ch: self._load_ch_wavecal(c))
-            _rl.addWidget(_wb); _rl.addStretch(1)
+            _rl.addWidget(_wb)
+            _xb = QPushButton("✕"); _xb.setFixedWidth(int(26 * self._s))
+            _xb.setToolTip(f"CH{_ch} 제거")
+            _xb.clicked.connect(lambda _checked, c=_ch: self._remove_fit_channel(c))
+            _rl.addWidget(_xb); _rl.addStretch(1)
             _roww.setVisible(False)
             lay_set.addWidget(_roww)
             self._ch_fit_nm[_ch] = (_s, _e)
             self._ch_fit_rows[_ch] = _roww
             self._ch_wavecal_btn[_ch] = _wb
+
+        self._btn_add_ch = QPushButton("➕ 채널 추가 (CH2/CH3 · ROI2/ROI3)")
+        self._btn_add_ch.setToolTip("Hot처럼 채널이 2~3개면 채널마다 wavecal·파장범위를 따로 설정")
+        self._btn_add_ch.clicked.connect(self._add_fit_channel)
+        lay_set.addWidget(self._btn_add_ch)
 
         grp_set.setLayout(lay_set)
         left_layout.addWidget(grp_set)
@@ -1578,8 +1590,7 @@ class CAESARAnalyzer(QMainWindow):
         except Exception:
             n_ch = int(getattr(self, '_detected_channels', 1) or 1)
         self._detected_channels = n_ch
-        for _ch, _roww in getattr(self, '_ch_fit_rows', {}).items():
-            _roww.setVisible(_ch <= n_ch)
+        self._set_active_fit_channels(n_ch)
 
         configs = self._build_alpha_channel_configs(n_ch)
         if not configs:
@@ -1654,11 +1665,41 @@ class CAESARAnalyzer(QMainWindow):
         wl = getattr(self, 'wavelengths', None)   # 폴백: 로드된 단일 cal
         return np.asarray(wl, dtype=float).flatten() if wl is not None else None
 
+    def _add_fit_channel(self):
+        """➕ 채널 추가 — 다음 비활성 채널(CH2→CH3) 행을 노출."""
+        for ch in (2, 3):
+            if not self._ch_active.get(ch):
+                self._ch_active[ch] = True
+                self._ch_fit_rows[ch].setVisible(True)
+                break
+        self._update_add_ch_btn()
+
+    def _remove_fit_channel(self, ch):
+        """채널 행 제거(숨김)."""
+        self._ch_active[ch] = False
+        if self._ch_fit_rows.get(ch) is not None:
+            self._ch_fit_rows[ch].setVisible(False)
+        self._update_add_ch_btn()
+
+    def _set_active_fit_channels(self, n):
+        """감지/생성 채널 수 n에 맞춰 CH2/CH3 행 활성/비활성(자동)."""
+        for ch in (2, 3):
+            on = ch <= n
+            self._ch_active[ch] = on
+            if self._ch_fit_rows.get(ch) is not None:
+                self._ch_fit_rows[ch].setVisible(on)
+        self._update_add_ch_btn()
+
+    def _update_add_ch_btn(self):
+        if not hasattr(self, '_btn_add_ch'):
+            return
+        n = sum(1 for c in (1, 2, 3) if self._ch_active.get(c))
+        self._btn_add_ch.setEnabled(n < 3)
+        self._btn_add_ch.setText("➕ 채널 추가 (CH2/CH3 · ROI2/ROI3)" if n < 3 else "최대 3채널")
+
     def _fit_nm_for_channel(self, ch):
-        """채널별 Fit 범위(nm). CH1/단일 = 메인 스핀, CH2/CH3 = 전용 행(노출 시).
-        반환은 항상 (lo, hi) 정렬."""
-        n_active = int(getattr(self, '_detected_channels', 1) or 1)
-        if ch in getattr(self, '_ch_fit_nm', {}) and ch <= n_active:
+        """채널별 Fit 범위(nm). 활성 채널이면 그 행의 값, 아니면 메인(CH1). (lo,hi) 정렬."""
+        if ch in getattr(self, '_ch_fit_nm', {}) and self._ch_active.get(ch):
             s, e = self._ch_fit_nm[ch]
             lo, hi = s.value(), e.value()
         else:
@@ -2492,9 +2533,8 @@ class CAESARAnalyzer(QMainWindow):
             }
             label = ch_labels.get(n, f"{n}채널")
             self.lbl_channel_info.setText(label)
-            # 채널별 Fit 범위(nm) 행: 감지된 채널 수만큼만 노출
-            for _ch, _roww in getattr(self, '_ch_fit_rows', {}).items():
-                _roww.setVisible(_ch <= n)
+            # 채널별 Fit 범위(nm) 행: 감지된 채널 수만큼 자동 활성(사용자가 ➕/✕로 조정 가능)
+            self._set_active_fit_channels(n)
             colours = {1: "#1565C0", 2: "#6A1B9A", 3: "#2E7D32"}
             self.lbl_channel_info.setStyleSheet(
                 f"color: {colours.get(n, '#333')}; font-weight: bold;")
@@ -2537,16 +2577,38 @@ class CAESARAnalyzer(QMainWindow):
         # Use the middle file as a representative spectrum for the visual preview
         mid_entry = self.file_list[len(self.file_list) // 2]
         mid_file = self._entry_filepath(mid_entry)
-        self.sel_dlg = RangeSelectorDialog(mid_file, mn, mx, self.engine)
+        # 활성 채널 목록 → 다이얼로그에서 '적용 채널'로 범위를 채널별 설정
+        roi = {1: 'ROI1', 2: 'ROI2', 3: 'ROI3'}
+        channels = [(c, f"CH{c}({roi[c]})") for c in (1, 2, 3) if self._ch_active.get(c)]
+        self.sel_dlg = RangeSelectorDialog(mid_file, mn, mx, self.engine, channels=channels)
         self.sel_dlg.apply_range.connect(self.update_range)
+        self.sel_dlg.apply_channel.connect(self._set_channel_range_from_selector)
         self.sel_dlg.exec()
-        
+
     def update_range(self, min_idx, max_idx):
         """Updates the text boxes with the visual selection."""
         if getattr(self, '_analysis_running', False):
             return
         self.txt_min.setText(str(min_idx))
         self.txt_max.setText(str(max_idx))
+
+    def _set_channel_range_from_selector(self, ch, lo, hi, is_nm):
+        """Vis.Select에서 고른 범위를 해당 채널의 nm 범위로 설정."""
+        if getattr(self, '_analysis_running', False):
+            return
+        if lo > hi:
+            lo, hi = hi, lo
+        if not is_nm:
+            # 픽셀 선택이면 마스터 wavecal로 nm 변환(가능할 때)
+            wl = getattr(self, 'wavelengths', None)
+            if wl is not None and len(wl) > int(hi):
+                lo, hi = float(wl[int(lo)]), float(wl[int(hi)])
+        if ch in self._ch_fit_nm:
+            s, e = self._ch_fit_nm[ch]
+            s.setValue(lo); e.setValue(hi)
+            if ch == 1:
+                self.set_range_from_nm()   # CH1은 픽셀 범위(txt_min/max)도 갱신
+        self.status.setText(f"✅ CH{ch} Fit 범위 = {lo:.1f}~{hi:.1f} nm")
 
     def apply_roi_from_graph(self, min_val, max_val):
         """Updates the fitting range directly from the fast monitor ROI selection."""

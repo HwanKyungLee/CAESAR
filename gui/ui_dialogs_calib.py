@@ -878,23 +878,27 @@ class RangeSelectorDialog(QDialog):
     Supports overlaying reference spectra for precise visual alignment.
     """
     apply_range = pyqtSignal(int, int)
+    apply_channel = pyqtSignal(int, float, float, bool)   # (channel, lo, hi, is_nm)
 
-    def __init__(self, data_path, pixel_min, pixel_max, engine):
+    def __init__(self, data_path, pixel_min, pixel_max, engine, channels=None):
         super().__init__()
         self.setWindowTitle("🔍 Fit Range Selector")
         _s = _ui_scale()
         self.resize(int(900 * _s), int(600 * _s))
-        
+
         # --- Initialize Analysis Data & State ---
         self.engine = engine
         self.data_path = data_path
         self.min_sel = int(pixel_min)
         self.max_sel = int(pixel_max)
-        
+        self._channels = channels or []   # [(ch, label), ...] — 채널별 적용 시
+        self._sel_lo = self._sel_hi = None
+        self._sel_is_nm = False
+
         self.x = None
         self.y = None
         self.span = None
-        
+
         self.setup_ui()
         self.load_plot()
 
@@ -910,7 +914,17 @@ class RangeSelectorDialog(QDialog):
         self.combo.addItems(["None"] + self.engine.gas_list)
         self.combo.currentTextChanged.connect(self.update_ref)
         top_layout.addWidget(self.combo)
-        
+
+        # 적용 채널 — 선택한 범위를 이 채널의 nm 범위로 설정(멀티채널 시)
+        self.combo_ch = None
+        if self._channels:
+            top_layout.addSpacing(12)
+            top_layout.addWidget(QLabel("적용 채널:"))
+            self.combo_ch = QComboBox()
+            for ch, lbl in self._channels:
+                self.combo_ch.addItem(lbl, ch)
+            top_layout.addWidget(self.combo_ch)
+
         top_layout.addStretch(1)
         top_layout.addWidget(QLabel("🖱️ Left: Select Range | Right: Pan | Wheel: Zoom"))
         self.main_layout.addLayout(top_layout)
@@ -1134,22 +1148,26 @@ class RangeSelectorDialog(QDialog):
         self.canvas.draw()
 
     def on_select(self, val_min, val_max):
-        """Stores pixel indices of the dragged range (converting from nm if needed)."""
-        if getattr(self, '_wave_mode', False):
-            # Convert nm → nearest pixel index
-            wave = self.x   # sorted ascending or descending
-            # Use argmin for robustness (handles both ascending and descending wavelength axes)
+        """Stores pixel indices(+원래 드래그 값) of the dragged range."""
+        lo, hi = (val_min, val_max) if val_min <= val_max else (val_max, val_min)
+        self._sel_is_nm = bool(getattr(self, '_wave_mode', False))
+        self._sel_lo, self._sel_hi = float(lo), float(hi)
+        if self._sel_is_nm:
+            wave = self.x
             self.min_sel = int(np.argmin(np.abs(wave - val_min)))
             self.max_sel = int(np.argmin(np.abs(wave - val_max)))
-            # Ensure min < max
             if self.min_sel > self.max_sel:
                 self.min_sel, self.max_sel = self.max_sel, self.min_sel
         else:
-            self.min_sel = int(val_min)
-            self.max_sel = int(val_max)
+            self.min_sel = int(lo)
+            self.max_sel = int(hi)
 
     def emit_apply(self):
-        """Sends the selected range to the main program and closes the dialog."""
-        self.apply_range.emit(self.min_sel, self.max_sel)
+        """선택 범위를 메인에 전달하고 닫는다. 채널콤보가 있으면 그 채널의 nm 범위로."""
+        if self.combo_ch is not None and self._sel_lo is not None:
+            ch = self.combo_ch.currentData()
+            self.apply_channel.emit(int(ch), self._sel_lo, self._sel_hi, self._sel_is_nm)
+        else:
+            self.apply_range.emit(self.min_sel, self.max_sel)
         self.accept()
 
