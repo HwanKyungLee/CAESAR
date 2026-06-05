@@ -91,6 +91,15 @@ class CAESARAnalyzer(QMainWindow):
         _btn_delc.setToolTip("현재 채널 삭제")
         _btn_delc.clicked.connect(self._del_channel_tab)
         _chtab_bar.addWidget(_btn_addc); _chtab_bar.addWidget(_btn_delc)
+        _chtab_bar.addWidget(QLabel("데이터:"))
+        self._ed_ch_datalabel = QLineEdit()
+        self._ed_ch_datalabel.setFixedWidth(int(80 * self._s))
+        self._ed_ch_datalabel.setPlaceholderText("cold/pns/ans")
+        self._ed_ch_datalabel.setToolTip(
+            "이 채널이 받을 알파 파일명 라벨(예: cold, pns, ans).\n"
+            "Load Data로 전체 알파를 한 번에 넣어도 파일명에 이 라벨이 든 것만 이 채널로 분배.\n"
+            "비우면 기존 자동매핑(PNs=1, ANs=2).")
+        _chtab_bar.addWidget(self._ed_ch_datalabel)
         left_layout.addLayout(_chtab_bar)
 
         # --- 1. Reference Management Section ---
@@ -2571,6 +2580,25 @@ class CAESARAnalyzer(QMainWindow):
     # ---------------------------------------------------------
     # Multithreading Analysis Execution (Worker)
     # ---------------------------------------------------------
+    def _channel_data_groups(self):
+        """채널별 데이터 파일 그룹 — 각 채널 config의 data_label(예 cold/pns/ans)로
+        로드된 file_list를 분배. 라벨이 하나도 없으면 기존 _alpha_groups(자동매핑) 사용.
+        → Load Data로 전체 알파를 한 번에 넣어도 채널마다 자기 라벨 파일만 받음."""
+        if self._active_channel in self._channel_configs:
+            self._channel_configs[self._active_channel] = self._capture_config()
+        labels = {ch: ((cfg.get('data_label') or '').strip().lower())
+                  for ch, cfg in self._channel_configs.items() if cfg}
+        if any(labels.values()):
+            groups = {}
+            for entry in self.file_list:
+                name = os.path.basename(str(self._entry_filepath(entry))).lower()
+                for ch, lbl in labels.items():
+                    if lbl and lbl in name:
+                        groups.setdefault(ch, []).append(entry)
+                        break
+            return groups or None
+        return self._alpha_groups
+
     def _alpha_channel_groups(self, file_list):
         """입력이 모두 알파trace 파일이면 파일명(_PNs_/_ANs_/_CH3_/_Cold_)으로
         채널 그룹화해 {채널idx: [entries]} 반환. 하나라도 알파trace가 아니면 None
@@ -2766,6 +2794,8 @@ class CAESARAnalyzer(QMainWindow):
         per_channel = len(active_chs) > 1
 
         if per_channel:
+            # 채널별 data_label로 파일 분배(라벨 없으면 기존 _alpha_groups)
+            self._alpha_groups = self._channel_data_groups()
             ch_list = active_chs
             self._multi_channel_mode = True
             self._workers_total = len(ch_list)
@@ -3374,6 +3404,7 @@ class CAESARAnalyzer(QMainWindow):
         return {
             "wl_path": getattr(self, 'loaded_wl_path', ""),
             "refs": refs_data,
+            "data_label": self._ed_ch_datalabel.text().strip() if hasattr(self, '_ed_ch_datalabel') else "",
             "f_min": self.txt_min.text(),
             "f_max": self.txt_max.text(),
             "fit_start_nm": self.spin_fit_start_nm.value(),
@@ -3393,6 +3424,8 @@ class CAESARAnalyzer(QMainWindow):
         """_capture_config 로 만든 dict를 UI/엔진에 복원. load_refs=False면 레퍼런스/엔진은 건드리지 않음."""
         self.txt_min.setText(str(scenario.get("f_min", "")))
         self.txt_max.setText(str(scenario.get("f_max", "")))
+        if hasattr(self, '_ed_ch_datalabel'):
+            self._ed_ch_datalabel.setText(scenario.get("data_label", ""))
         if "fit_start_nm" in scenario:
             self.spin_fit_start_nm.setValue(scenario["fit_start_nm"])
         if "fit_end_nm" in scenario:
