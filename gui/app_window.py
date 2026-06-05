@@ -2803,6 +2803,8 @@ class CAESARAnalyzer(QMainWindow):
                 cav_ch = cfg.get('cavity_d', cavity_d); rl_ch = cfg.get('rl_factor', 1.0)
                 lam_ch = cfg.get('tikhonov_lambda', 0.0); rob_ch = cfg.get('use_robust', False)
                 step_ch = cfg.get('step_limit', 0.5)
+                kq_ch = cfg.get('kalman_q', self.spin_kalman_q.value())
+                kr_ch = cfg.get('kalman_r', self.spin_kalman_r.value())
             else:
                 eng_ch = self.engine; rp_ch = getattr(self, 'ref_props', {})
                 p0_ch, lo_ch, hi_ch = p0, bounds_low, bounds_high
@@ -2810,6 +2812,7 @@ class CAESARAnalyzer(QMainWindow):
                 cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
                 lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
                 step_ch = step_limit_val
+                kq_ch = self.spin_kalman_q.value(); kr_ch = self.spin_kalman_r.value()
 
             w = AnalysisWorker(
                 eng_ch, files_for_ch, pmin, pmax,
@@ -2834,8 +2837,8 @@ class CAESARAnalyzer(QMainWindow):
             w.step_limit = step_ch
             w.tikhonov_lambda = lam_ch
             w.use_robust_fitting = rob_ch
-            w.kalman_q = self.spin_kalman_q.value()
-            w.kalman_r = self.spin_kalman_r.value()
+            w.kalman_q = kq_ch
+            w.kalman_r = kr_ch
             w.temperature = self.spin_temp.value()
             w.pressure = self.spin_pres.value()
             w.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
