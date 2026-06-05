@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QTableWidget, QTableWidgetItem, QMessageBox,
                              QProgressBar, QGroupBox, QLineEdit, QScrollArea, QDialog,
-                             QComboBox, QSplitter, QTabWidget, QDoubleSpinBox, QSpinBox,
+                             QComboBox, QSplitter, QTabWidget, QTabBar, QDoubleSpinBox, QSpinBox,
                              QCheckBox, QFormLayout, QMenu, QRadioButton)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
@@ -70,6 +70,28 @@ class CAESARAnalyzer(QMainWindow):
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         self._left_col = left_layout   # α 파이프라인을 분석 영역으로 합치기 위해 참조 보관
+
+        # ── 채널 탭 바 ─────────────────────────────────────────────────
+        # 채널마다 독립 설정(references/wavecal/parameters/fit range)을 두고 병렬 피팅.
+        # 겉은 탭, 속은 '현재 채널 설정 갈아끼우기'(_capture/_apply_config 재사용).
+        self._channel_configs = {1: None}   # ch -> config dict(스냅샷)
+        self._active_channel = 1
+        self._switching_channel = False
+        _chtab_bar = QHBoxLayout()
+        self._channel_tabbar = QTabBar()
+        self._channel_tabbar.setExpanding(False)
+        i0 = self._channel_tabbar.addTab("CH1")
+        self._channel_tabbar.setTabData(i0, 1)
+        self._channel_tabbar.currentChanged.connect(self._on_channel_tab_changed)
+        _chtab_bar.addWidget(self._channel_tabbar, 1)
+        _btn_addc = QPushButton("➕"); _btn_addc.setFixedWidth(int(30 * self._s))
+        _btn_addc.setToolTip("채널 추가(현재 채널 설정을 복사해서 새 채널 생성)")
+        _btn_addc.clicked.connect(self._add_channel_tab)
+        _btn_delc = QPushButton("✕"); _btn_delc.setFixedWidth(int(30 * self._s))
+        _btn_delc.setToolTip("현재 채널 삭제")
+        _btn_delc.clicked.connect(self._del_channel_tab)
+        _chtab_bar.addWidget(_btn_addc); _chtab_bar.addWidget(_btn_delc)
+        left_layout.addLayout(_chtab_bar)
 
         # --- 1. Reference Management Section ---
         grp_ref = QGroupBox("References")
@@ -3280,6 +3302,48 @@ class CAESARAnalyzer(QMainWindow):
                 y = self.engine.interpolators[ref_name](np.arange(len(self.engine.raw_references[ref_name])))
                 self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (Conv): {ref_name}", 'r', style='-', xband=band)
 
+
+    # ── 채널 탭(독립 설정) ─────────────────────────────────────────────
+    def _on_channel_tab_changed(self, idx):
+        """탭 전환 — 현재 채널 설정을 저장하고 선택 채널 설정을 UI/엔진에 로드."""
+        if self._switching_channel or idx < 0:
+            return
+        ch = self._channel_tabbar.tabData(idx)
+        if ch is None or ch == self._active_channel:
+            return
+        # 현재 채널 스냅샷 저장(단, 방금 삭제된 채널은 다시 저장하지 않음)
+        if self._active_channel in self._channel_configs:
+            self._channel_configs[self._active_channel] = self._capture_config()
+        self._active_channel = ch
+        cfg = self._channel_configs.get(ch)
+        if cfg is not None:
+            self._switching_channel = True
+            try:
+                self._apply_config(cfg, load_refs=True)
+            finally:
+                self._switching_channel = False
+
+    def _add_channel_tab(self):
+        """➕ — 현재 채널 설정을 복사한 새 채널 탭 생성(시작값=복사본)."""
+        import copy
+        self._channel_configs[self._active_channel] = self._capture_config()
+        new_ch = (max(self._channel_configs.keys()) + 1) if self._channel_configs else 1
+        self._channel_configs[new_ch] = copy.deepcopy(self._channel_configs[self._active_channel])
+        i = self._channel_tabbar.addTab(f"CH{new_ch}")
+        self._channel_tabbar.setTabData(i, new_ch)
+        self._channel_tabbar.setCurrentIndex(i)   # currentChanged → 복사본 적용
+
+    def _del_channel_tab(self):
+        """✕ — 현재 채널 삭제(최소 1채널 유지)."""
+        if self._channel_tabbar.count() <= 1:
+            return
+        idx = self._channel_tabbar.currentIndex()
+        ch = self._channel_tabbar.tabData(idx)
+        self._channel_configs.pop(ch, None)
+        # 제거된 채널을 다시 저장하지 않도록 active를 무효화 후 removeTab
+        # → currentChanged가 인접 채널을 로드.
+        self._active_channel = None
+        self._channel_tabbar.removeTab(idx)
 
     def _capture_config(self):
         """현재 UI/엔진 설정 전체를 dict로 캡처 — 채널 전환·복사·시나리오 저장에 재사용.
