@@ -3303,6 +3303,49 @@ class CAESARAnalyzer(QMainWindow):
                 self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (Conv): {ref_name}", 'r', style='-', xband=band)
 
 
+    @staticmethod
+    def _load_wavecal_array(path):
+        """wavecal 파일 → 1D nm 배열(load_wavelength_cal과 동일 파싱). 실패 시 None."""
+        try:
+            try:
+                df = pd.read_csv(path, sep=r'\s+', header=None)
+            except Exception:
+                df = pd.read_csv(path, sep=',', header=None)
+            for i in range(df.shape[1]):
+                col = pd.to_numeric(df.iloc[:, i], errors='coerce').dropna()
+                if len(col) > 10:
+                    return col.values.flatten()
+        except Exception:
+            pass
+        return None
+
+    def _build_engine_from_config(self, cfg):
+        """채널 config(dict)로 독립 UniversalEngine 생성(자체 wavecal+references+scaling).
+        채널별 병렬 피팅용. 실패한 ref는 건너뛴다."""
+        from core.engine import UniversalEngine
+        eng = UniversalEngine()
+        wave = None
+        wlp = cfg.get('wl_path', '')
+        if wlp and os.path.exists(wlp):
+            wave = self._load_wavecal_array(wlp)
+        if wave is None:   # 폴백: 현재 로드된 마스터 wavecal
+            wl = getattr(self, 'wavelengths', None)
+            wave = np.asarray(wl, dtype=float).flatten() if wl is not None else None
+        if wave is not None:
+            eng.set_wavelength_axis(wave)
+        for ref in cfg.get('refs', []):
+            if os.path.exists(ref.get('path', '')):
+                try:
+                    eng.add_reference(name=ref['name'], filepath=ref['path'],
+                                      wave_nm=wave, multiplier=10.0 ** ref.get('mult', 0))
+                except Exception as e:
+                    print(f"[ch engine] ref 실패 {ref.get('name')}: {e}")
+        try:
+            eng.apply_ils_convolution(0.0)
+        except Exception:
+            pass
+        return eng
+
     # ── 채널 탭(독립 설정) ─────────────────────────────────────────────
     def _on_channel_tab_changed(self, idx):
         """탭 전환 — 현재 채널 설정을 저장하고 선택 채널 설정을 UI/엔진에 로드."""
