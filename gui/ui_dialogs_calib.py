@@ -984,21 +984,87 @@ class RangeSelectorDialog(QDialog):
         best_spectrum = np.where(np.isfinite(best_spectrum), best_spectrum, 0.0)
         return np.arange(len(best_spectrum)), best_spectrum
 
+    @staticmethod
+    def _is_alpha_trace(path):
+        """alpha_trace.dat 인지(헤더 '# wavelength_nm:' 존재)."""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                for _ in range(40):
+                    l = f.readline()
+                    if not l:
+                        break
+                    if l.startswith("# wavelength_nm:"):
+                        return True
+        except Exception:
+            pass
+        return False
+
+    def _load_alpha_trace_for_display(self):
+        """alpha_trace.dat의 첫 데이터행 α 스펙트럼을 표시용으로 로드.
+
+        반환 (pixel_idx_for_ref, alpha, file_wave_nm):
+          · file_wave_nm : 파일 자체 헤더 파장(표시 x축)
+          · pixel_idx_for_ref : 파일 파장 → engine 픽셀 매핑(레퍼런스 overlay 정렬용).
+            engine 파장축이 없으면 0..n-1.
+        """
+        wave = None
+        alpha = None
+        alpha_start = 3
+        with open(self.data_path, "r", encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                if ln.startswith("# wavelength_nm:"):
+                    wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
+                                     if v.strip()], dtype=float)
+                    continue
+                if ln.lower().startswith("row_idx"):
+                    cols = ln.rstrip("\n").split("\t")
+                    fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
+                    if fp is not None:
+                        alpha_start = fp
+                    continue
+                if ln.startswith("#"):
+                    continue
+                p = ln.rstrip().split("\t")
+                if len(p) > alpha_start:
+                    try:
+                        alpha = np.array([float(x) for x in p[alpha_start:]], dtype=float)
+                        break
+                    except ValueError:
+                        continue
+        if alpha is None:
+            raise RuntimeError("alpha_trace 데이터 행을 찾지 못했습니다")
+        if wave is None or len(wave) != len(alpha):
+            wave = np.arange(len(alpha), dtype=float)
+        wax = getattr(self.engine, "_wave_axis", None)
+        if wax is not None and len(wave):
+            wax = np.asarray(wax, dtype=float).flatten()
+            from scipy.interpolate import interp1d
+            px_of = interp1d(wax, np.arange(len(wax)), bounds_error=False, fill_value="extrapolate")
+            eng_px = np.asarray(px_of(wave), dtype=float)
+        else:
+            eng_px = np.arange(len(alpha), dtype=float)
+        return eng_px, alpha, wave
+
     def load_plot(self):
         """Loads selected data, plots it on a nm axis (if calibration available), and activates SpanSelector."""
         try:
-            if DataIO.is_araon_mega_matrix(self.data_path):
+            file_wave = None
+            if "alpha_trace" in os.path.basename(self.data_path).lower() or self._is_alpha_trace(self.data_path):
+                pixel_idx, intensity_raw, file_wave = self._load_alpha_trace_for_display()
+            elif DataIO.is_araon_mega_matrix(self.data_path):
                 pixel_idx, intensity_raw = self._load_araon_spectrum_for_display()
             else:
                 pixel_idx, intensity_raw = DataIO.load_measurement(self.data_path, pixel_min=0)
 
             self.y = intensity_raw
-            self._pixel_idx = pixel_idx   # always keep original pixel indices
+            self._pixel_idx = pixel_idx   # 레퍼런스 평가용 픽셀(alpha면 engine 픽셀 매핑)
 
-            # Use wavelength axis when available and length-matched
-            wave = getattr(self.engine, '_wave_axis', None)
-            if wave is not None:
-                wave = np.asarray(wave, dtype=float).flatten()
+            # 파장축: alpha는 파일 자체 헤더 파장, 그 외 engine._wave_axis
+            wave = file_wave
+            if wave is None:
+                wave = getattr(self.engine, '_wave_axis', None)
+                if wave is not None:
+                    wave = np.asarray(wave, dtype=float).flatten()
             if wave is not None and len(wave) == len(intensity_raw):
                 self.x = wave
                 self._wave_mode = True
