@@ -1348,7 +1348,7 @@ class MonitorWidget(QWidget):
         h_stat.addWidget(self.lbl_max); h_stat.addWidget(self.lbl_min); h_stat.addWidget(self.lbl_mean); h_stat.addWidget(self.lbl_sat)
         l_view.addWidget(grp_stat)
         
-        self.tabs.addTab(self.tab_view, "📂 Viewer (Fast)")
+        self.tabs.addTab(self.tab_view, "🔎 빠른보기 (raw)")
 
     # =========================================================
     # [Tab 5] HQ Export

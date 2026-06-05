@@ -71,7 +71,7 @@ class CAESARAnalyzer(QMainWindow):
         left_layout = QVBoxLayout(left_widget)
 
         # --- 1. Reference Management Section ---
-        grp_ref = QGroupBox("1. Reference")
+        grp_ref = QGroupBox("References")
         grp_ref.setMinimumHeight(int(250 * self._s))
         lay_ref = QVBoxLayout()
 
@@ -179,7 +179,7 @@ class CAESARAnalyzer(QMainWindow):
         left_layout.addWidget(grp_ref)
         
         # --- 2. Fit Range & Calibration Section ---
-        grp_set = QGroupBox("2. Fit Range & Calibration")
+        grp_set = QGroupBox("Fit Range")
         lay_set = QVBoxLayout()
         
         # Pixel-based Selection
@@ -357,7 +357,7 @@ class CAESARAnalyzer(QMainWindow):
         self._btn_toggle_params.clicked.connect(_toggle_params)
 
         # --- 3. Analysis Control Section ---
-        grp_ctl = QGroupBox("3. Analysis")
+        grp_ctl = QGroupBox("Analysis (RUN)")
         lay_ctl = QVBoxLayout()
         
         layout_row1 = QHBoxLayout()
@@ -830,7 +830,7 @@ class CAESARAnalyzer(QMainWindow):
         control_layout = QVBoxLayout()
         
         # Group 1: Daily-use tools
-        grp_calib = QGroupBox("1. Tools")
+        grp_calib = QGroupBox("Tools")
         lay_calib = QVBoxLayout()
 
         btn_calib_tool = QPushButton("🔍 Wavelength Calibration Tool")
@@ -856,7 +856,7 @@ class CAESARAnalyzer(QMainWindow):
         control_layout.addWidget(grp_calib)
 
         # Group 2: 2단계 분석 (Raw → Alpha → 피팅)
-        grp_alpha_two = QGroupBox("2. 2단계 분석  (Raw → Alpha → 피팅)")
+        grp_alpha_two = QGroupBox("α 파이프라인  (Raw → Alpha → 피팅)")
         lay_alpha_two = QVBoxLayout()
 
         lbl_alpha_desc = QLabel(
@@ -935,7 +935,7 @@ class CAESARAnalyzer(QMainWindow):
         control_layout.addWidget(btn_r_gen)
 
         # Group 3: Cavity Setup — only d, RL, Leff (everything else from raw file)
-        grp_physics = QGroupBox("3. Cavity Setup")
+        grp_physics = QGroupBox("Cavity Setup")
         lay_physics = QFormLayout()
 
         # Auto-detected channel info (read-only — updated when files are loaded)
