@@ -3083,7 +3083,9 @@ class CAESARAnalyzer(QMainWindow):
         lam_val = self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0
         robust_str = "Robust" if hasattr(self, 'chk_robust') and self.chk_robust.isChecked() else "Std"
 
-        default_fname = f"{now_str}_Result_{gas_list_str}_{wl_str}_Poly{poly_deg}_L{lam_val:g}_{robust_str}_Step[{step_val}]_{sh_str}_{sq_str}.dat"
+        _nact = len([c for c, v in getattr(self, '_channel_configs', {}).items() if v is not None])
+        ch_tag = f"{_nact}CH_" if _nact > 1 else ""
+        default_fname = f"{now_str}_Result_{ch_tag}{gas_list_str}_{wl_str}_Poly{poly_deg}_L{lam_val:g}_{robust_str}_Step[{step_val}]_{sh_str}_{sq_str}.dat"
         
         _start = os.path.join(self._dlg_dir('save'), default_fname) if self._dlg_dir('save') else default_fname
         path, _ = QFileDialog.getSaveFileName(self, "Save Data", _start, "Data Files (*.dat);;CSV Files (*.csv)")
@@ -3429,11 +3431,24 @@ class CAESARAnalyzer(QMainWindow):
                 self.lock_ref()
 
     def save_scenario(self):
-        """현재 fit 설정을 JSON으로 저장(=_capture_config). load_scenario로 복원."""
-        cfg = self._capture_config()
+        """모든 채널 탭 설정을 하나의 JSON으로 저장(v2). load_scenario로 채널 탭 복원."""
+        # 현재 채널 스냅샷
+        if self._active_channel in self._channel_configs:
+            self._channel_configs[self._active_channel] = self._capture_config()
+        chans = {c: v for c, v in self._channel_configs.items() if v is not None}
+        if not chans:
+            chans = {1: self._capture_config()}
+        scenario = {
+            "version": 2,
+            "active": self._active_channel if self._active_channel in chans else sorted(chans)[0],
+            "channels": {str(c): cfg for c, cfg in chans.items()},
+        }
+        cfg = chans.get(scenario["active"], next(iter(chans.values())))
+        nch = len(chans)
         gas_list_str = "_".join(self.engine.gas_list) if (hasattr(self, 'engine') and self.engine.gas_list) else "NoRefs"
         robust_str = "Robust" if cfg["use_robust"] else "Std"
-        default_fname = (f"FitSet_{gas_list_str}_{cfg['f_min']}-{cfg['f_max']}px_"
+        ch_tag = f"{nch}CH_" if nch > 1 else ""
+        default_fname = (f"FitSet_{ch_tag}{gas_list_str}_{cfg['fit_start_nm']:.0f}-{cfg['fit_end_nm']:.0f}nm_"
                          f"Poly{cfg['poly_deg']}_L{cfg['tikhonov_lambda']:g}_{robust_str}.json")
         _start = os.path.join(self._dlg_dir('scenario'), default_fname) if self._dlg_dir('scenario') else default_fname
         path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", _start, "JSON Files (*.json)")
@@ -3441,13 +3456,13 @@ class CAESARAnalyzer(QMainWindow):
         if path:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(cfg, f, indent=4)
-                QMessageBox.information(self, "Success", f"Scenario saved!\nFile: {os.path.basename(path)}")
+                    json.dump(scenario, f, indent=4)
+                QMessageBox.information(self, "Success", f"{nch}채널 설정 저장!\nFile: {os.path.basename(path)}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Save Failed:\n{e}")
 
     def load_scenario(self):
-        """저장된 fit 설정 JSON을 복원(=_apply_config)."""
+        """저장된 fit 설정 JSON 복원. v2(채널들) / v1(단일) 모두 지원."""
         path, _ = QFileDialog.getOpenFileName(self, "Load Fit Scenario", self._dlg_dir('scenario'), "JSON Files (*.json)")
         if not path:
             return
@@ -3455,13 +3470,38 @@ class CAESARAnalyzer(QMainWindow):
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 scenario = json.load(f)
-            self._apply_config(scenario, load_refs=True)
-            if scenario.get("refs"):
+            if isinstance(scenario, dict) and "channels" in scenario:   # v2 멀티채널
+                chans = {int(c): cfg for c, cfg in scenario["channels"].items()}
+                self._load_channel_scenario(chans, scenario.get("active", sorted(chans)[0]))
                 QMessageBox.information(self, "Auto-Load Success",
-                                        "🚀 wavelengths · references · lock · parameters 모두 복원됨.\n"
-                                        "[Load Data] 후 RUN 하세요!")
-            else:
-                QMessageBox.information(self, "Success", "📂 Scenario parameters loaded.")
+                                        f"🚀 {len(chans)}채널 설정 복원됨(채널 탭).\n[Load Data] 후 RUN 하세요!")
+            else:   # v1 단일(하위호환)
+                self._apply_config(scenario, load_refs=True)
+                self._channel_configs = {1: self._capture_config()}
+                QMessageBox.information(self, "Success", "📂 설정 복원됨(단일 채널).")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load scenario:\n{e}")
+
+    def _load_channel_scenario(self, chans, active):
+        """여러 채널 config를 채널 탭으로 복원."""
+        tb = self._channel_tabbar
+        self._switching_channel = True
+        while tb.count() > 0:
+            tb.removeTab(0)
+        for ch in sorted(chans):
+            i = tb.addTab(f"CH{ch}")
+            tb.setTabData(i, ch)
+        self._switching_channel = False
+        self._channel_configs = dict(chans)
+        if active not in chans:
+            active = sorted(chans)[0]
+        self._active_channel = active
+        # 활성 탭 선택(핸들러 억제) 후 직접 apply
+        for i in range(tb.count()):
+            if tb.tabData(i) == active:
+                self._switching_channel = True
+                tb.setCurrentIndex(i)
+                self._switching_channel = False
+                break
+        self._apply_config(chans[active], load_refs=True)
  
