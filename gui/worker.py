@@ -1396,13 +1396,19 @@ class AlphaFitWorker(QThread):
                 self.status_msg.emit(f"SKIP {fname}: 피팅된 행 없음")
                 continue
 
-            # 출처/단위 명시 헤더 — 어떤 alpha(=어떤 raw)에서 나온 결과인지 명확히.
+            # 출처/단위 명시 헤더 — raw→alpha→fit 전체 사슬을 추적 가능하게.
             from datetime import datetime as _dt
             src_chan = next((l.strip().lstrip('#').strip()
                              for l in lines if l.startswith('# channel=')), '')
+            # alpha 헤더의 '# CAESAR Pro Alpha Export — {raw}' 에서 원본 raw 파일명 추출
+            raw_src = next((l.split('—', 1)[1].strip()
+                            for l in lines if l.startswith('# CAESAR Pro Alpha Export')
+                            and '—' in l), '')
             header_lines = [
                 "# CAESAR Pro Fit Result",
+                f"# raw_source={raw_src}" if raw_src else "# raw_source=unknown",
                 f"# source_alpha={fname}",
+                f"# fit_range_nm={wave_nm_file[0]:.1f}-{wave_nm_file[-1]:.1f}",
             ]
             if src_chan:
                 header_lines.append(f"# {src_chan}")

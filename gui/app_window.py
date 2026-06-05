@@ -227,9 +227,11 @@ class CAESARAnalyzer(QMainWindow):
         layout_nm.addWidget(btn_apply_nm)
         lay_set.addLayout(layout_nm)
 
-        # 채널별 Fit 범위(nm) — ≥2채널 감지 시에만 표시. 위 메인 행 = CH1(ROI1).
-        self._ch_fit_nm = {}     # ch -> (start_spin, end_spin)
-        self._ch_fit_rows = {}   # ch -> 행 위젯(표시/숨김)
+        # 채널별 Fit 범위(nm) + wavecal — ≥2채널 감지 시에만 표시. 위 메인 행 = CH1(ROI1).
+        self._ch_fit_nm = {}        # ch -> (start_spin, end_spin)
+        self._ch_fit_rows = {}      # ch -> 행 위젯(표시/숨김)
+        self._ch_wavecal = {}       # ch -> 사용자가 직접 고른 wavecal per-pixel 배열
+        self._ch_wavecal_btn = {}   # ch -> 버튼(파일명 표시)
         for _ch, _roi in ((2, 'ROI2'), (3, 'ROI3')):
             _roww = QWidget()
             _rl = QHBoxLayout(_roww)
@@ -237,11 +239,16 @@ class CAESARAnalyzer(QMainWindow):
             _rl.addWidget(QLabel(f"  └ CH{_ch}({_roi}) nm:"))
             _s = QDoubleSpinBox(); _s.setRange(200, 1000); _s.setDecimals(1); _s.setValue(435.0)
             _e = QDoubleSpinBox(); _e.setRange(200, 1000); _e.setDecimals(1); _e.setValue(480.0)
-            _rl.addWidget(_s); _rl.addWidget(QLabel("~")); _rl.addWidget(_e); _rl.addStretch(1)
+            _rl.addWidget(_s); _rl.addWidget(QLabel("~")); _rl.addWidget(_e)
+            _wb = QPushButton("📂 wavecal(자동)")
+            _wb.setToolTip(f"CH{_ch}({_roi}) 파장보정 파일 직접 선택. 미선택 시 wv_cal/{_roi.lower()} 자동탐색")
+            _wb.clicked.connect(lambda _checked, c=_ch: self._load_ch_wavecal(c))
+            _rl.addWidget(_wb); _rl.addStretch(1)
             _roww.setVisible(False)
             lay_set.addWidget(_roww)
             self._ch_fit_nm[_ch] = (_s, _e)
             self._ch_fit_rows[_ch] = _roww
+            self._ch_wavecal_btn[_ch] = _wb
 
         grp_set.setLayout(lay_set)
         left_layout.addWidget(grp_set)
@@ -1631,8 +1638,30 @@ class CAESARAnalyzer(QMainWindow):
     # wv_cal 자동탐색 베이스 (채널별 파장보정 — 사용자 지정 위치)
     _WV_CAL_BASE = r"C:\Doasis_Work\Output\wv_cal"
 
+    def _load_ch_wavecal(self, ch):
+        """CH{ch} wavecal 파일 직접 선택 → per-pixel 배열 저장(자동탐색보다 우선)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"CH{ch} wavecal 선택", self._dlg_dir('wavecal'),
+            "Text/CSV (*.txt *.csv *.dat)")
+        if not path:
+            return
+        self._dlg_dir('wavecal', path)
+        try:
+            arr = np.loadtxt(path).flatten()
+        except Exception as e:
+            QMessageBox.warning(self, "wavecal 로드 실패", f"{os.path.basename(path)}\n{e}")
+            return
+        self._ch_wavecal[ch] = arr
+        btn = self._ch_wavecal_btn.get(ch)
+        if btn:
+            btn.setText(f"📂 {os.path.basename(path)} ({len(arr)}px)")
+
     def _channel_wave_cal(self, n_ch, ch):
-        """채널 → per-pixel 파장 배열. 1ch=로드된 cal, ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
+        """채널 → per-pixel 파장 배열. 우선순위: 사용자가 직접 고른 wavecal →
+        1ch=로드된 cal → ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
+        user = getattr(self, '_ch_wavecal', {}).get(ch)
+        if user is not None and len(user):
+            return np.asarray(user, dtype=float).flatten()
         if n_ch == 1:
             wl = getattr(self, 'wavelengths', None)
             return np.asarray(wl, dtype=float).flatten() if wl is not None else None
