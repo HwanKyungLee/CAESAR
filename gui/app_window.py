@@ -394,9 +394,25 @@ class CAESARAnalyzer(QMainWindow):
         self.chk_turbo = QCheckBox("Turbo")
         layout_perf.addWidget(self.chk_turbo)
         
+        # RUN이 raw를 처리할 때 각 스캔 α를 함께 저장(옵션). RUN-time 옵션이라 여기 둠.
+        layout_asave = QHBoxLayout()
+        self.chk_save_alpha = QCheckBox("RUN 중 α 저장")
+        self.chk_save_alpha.setToolTip(
+            "메인 RUN이 raw를 직접 분석할 때 각 스캔의 α 스펙트럼도 파일로 저장.\n"
+            "파일명: {원본}_alpha.dat  단위: cm⁻¹  (Alpha Generator와 별개)")
+        self.lbl_alpha_dir = QLabel("(폴더 미설정)")
+        self.lbl_alpha_dir.setStyleSheet("color: gray; font-size: 11px;")
+        _btn_adir = QPushButton("폴더")
+        _btn_adir.setFixedWidth(int(50 * self._s))
+        _btn_adir.clicked.connect(self.browse_alpha_save_dir)
+        layout_asave.addWidget(self.chk_save_alpha)
+        layout_asave.addWidget(self.lbl_alpha_dir, 1)
+        layout_asave.addWidget(_btn_adir)
+
         lay_ctl.addLayout(layout_row1)
         lay_ctl.addLayout(layout_perf)
         lay_ctl.addLayout(layout_row2)
+        lay_ctl.addLayout(layout_asave)
         grp_ctl.setLayout(lay_ctl)
         left_layout.addWidget(grp_ctl)
         
@@ -859,90 +875,15 @@ class CAESARAnalyzer(QMainWindow):
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
 
-        # Group 2: 2단계 분석 (Raw → Alpha → 피팅)
-        grp_alpha_two = QGroupBox("α 파이프라인  (Raw → Alpha → 피팅)")
-        lay_alpha_two = QVBoxLayout()
-
-        lbl_alpha_desc = QLabel(
-            "측정 파일에서 먼저 α 스펙트럼을 추출(1단계)한 뒤,\n"
-            "저장된 α 파일을 불러와 DOAS 피팅을 수행(2단계)합니다.")
-        lbl_alpha_desc.setStyleSheet("color: #546E7A; font-size: 11px; padding: 2px 0;")
-        lay_alpha_two.addWidget(lbl_alpha_desc)
-
-        btn_step1 = QPushButton("▶  1단계: Raw → Alpha 파일 생성")
-        btn_step1.clicked.connect(self.export_alpha_files)
-        btn_step1.setStyleSheet(
-            "font-weight: bold; "
-            "padding: 6px; border: 1px solid #90CAF9;")
-        btn_step1.setToolTip(
-            "He/ZA 캘리브레이션 → ambient 스캔마다 α(cm⁻¹) 계산\n"
-            "→ 지정 폴더에 {소스파일명}_alpha_trace.dat 저장.\n"
-            "먼저 '측정 파일 로드'와 '파장 캘리브레이션 로드'를 완료하세요.")
-        lay_alpha_two.addWidget(btn_step1)
-
-        # ambient 시간평균 창 (박사님 Step2 avgsec, 기본 60초). DOAS 피팅 안정용.
-        lay_avgsec = QHBoxLayout()
-        lay_avgsec.addWidget(QLabel("ambient 평균(초):"))
-        self.spin_alpha_avgsec = QDoubleSpinBox()
-        self.spin_alpha_avgsec.setRange(0.0, 600.0)
-        self.spin_alpha_avgsec.setDecimals(0)
-        self.spin_alpha_avgsec.setSingleStep(10.0)
-        self.spin_alpha_avgsec.setValue(60.0)
-        self.spin_alpha_avgsec.setFixedWidth(90)
-        self.spin_alpha_avgsec.setToolTip(
-            "α 계산 전 ambient 스펙트럼을 이 초만큼 시간평균해 노이즈를 줄인다.\n"
-            "박사님 기본값 60초. 단일 스캔(~1초)은 noise가 커 DOAS 피팅이 불안정.\n"
-            "0 = 평균 없이 스캔별 α.")
-        lay_avgsec.addWidget(self.spin_alpha_avgsec)
-        lay_avgsec.addStretch(1)
-        lay_alpha_two.addLayout(lay_avgsec)
-
-        # Alpha save dir (also used by main RUN → save_alpha checkbox)
-        lay_alpha_save = QHBoxLayout()
-        self.chk_save_alpha = QCheckBox("RUN 중 α 저장 (직접 분석 병행)")
-        self.chk_save_alpha.setToolTip(
-            "메인 RUN 버튼으로 직접 분석할 때도 각 스캔의 α 스펙트럼을\n"
-            "파일로 함께 저장합니다. 2단계 분석과 독립적으로 동작합니다.\n"
-            "파일명: {원본파일명}_alpha.dat  단위: cm⁻¹")
-        self.lbl_alpha_dir = QLabel("(저장 폴더 미설정)")
-        self.lbl_alpha_dir.setStyleSheet("color: gray; font-size: 11px;")
-        btn_alpha_dir = QPushButton("폴더")
-        btn_alpha_dir.setFixedWidth(50)
-        btn_alpha_dir.clicked.connect(self.browse_alpha_save_dir)
-        lay_alpha_save.addWidget(self.chk_save_alpha)
-        lay_alpha_save.addWidget(self.lbl_alpha_dir, 1)
-        lay_alpha_save.addWidget(btn_alpha_dir)
-        lay_alpha_two.addLayout(lay_alpha_save)
-
-        btn_step2 = QPushButton("▶  2단계: Alpha 파일 → 피팅")
-        btn_step2.clicked.connect(self.run_alpha_fit)
-        btn_step2.setStyleSheet(
-            "font-weight: bold; "
-            "padding: 6px; border: 1px solid #A5D6A7;")
-        btn_step2.setToolTip(
-            "1단계로 생성한 *_alpha_trace.dat 파일을 선택하여\n"
-            "DOAS 피팅 수행 → *_fit.tsv 결과 저장.\n"
-            "먼저 '레퍼런스 Lock'과 '파장 캘리브레이션 로드'를 완료하세요.")
-        lay_alpha_two.addWidget(btn_step2)
-
-        grp_alpha_two.setLayout(lay_alpha_two)
-        # 분석 진입점 통합: α 파이프라인을 Setup이 아니라 좌측 분석 컬럼의
-        # 'Analysis (RUN)' 바로 아래(상태바 앞)로 이동 → 직접 RUN과 한곳에.
-        _col = getattr(self, '_left_col', None)
-        if _col is not None and hasattr(self, 'status'):
-            _col.insertWidget(_col.indexOf(self.status), grp_alpha_two)
-        else:
-            control_layout.addWidget(grp_alpha_two)
-
-        # R-Curve Generator (standalone tool for offline R derivation)
-        btn_r_gen = QPushButton("📊 R-Curve Generator (offline .mat / separate files)")
-        btn_r_gen.clicked.connect(self.open_r_generator)
-        btn_r_gen.setStyleSheet("padding: 4px;")
-        btn_r_gen.setToolTip(
-            "별도 He/ZA 파일(또는 .mat)에서 R-Curve를 계산합니다.\n"
-            "Araon 측정 파일처럼 He/ZA가 내장된 경우에는 불필요합니다.\n"
-            "(R은 RUN 중 자동 추출되거나 R Trend Monitor로 배치 계산됩니다.)")
-        control_layout.addWidget(btn_r_gen)
+        # Alpha Generator — raw → alpha 생성은 별도 팝업창에서(분석=알파 피팅과 분리).
+        # 분석(좌측)은 알파를 넣고 RUN해 피팅. 알파 생성만 여기 Setup에서 창으로.
+        btn_alpha_gen = QPushButton("🧪 Alpha Generator  (Raw → Alpha 생성)")
+        btn_alpha_gen.clicked.connect(self.open_alpha_generator)
+        btn_alpha_gen.setStyleSheet("font-weight: bold; padding: 8px; border: 1px solid #90CAF9;")
+        btn_alpha_gen.setToolTip(
+            "팝업창에서 raw 측정파일을 받아 α 스펙트럼(*_alpha_trace.dat)을 생성한다.\n"
+            "wavecal/핏레인지/cavity/flags 는 이 메인 UI 설정을 그대로 사용.")
+        control_layout.addWidget(btn_alpha_gen)
 
         # Group 3: Cavity Setup — only d, RL, Leff (everything else from raw file)
         grp_physics = QGroupBox("Cavity Setup")
@@ -1615,35 +1556,57 @@ class CAESARAnalyzer(QMainWindow):
             self.lbl_alpha_dir.setText(os.path.basename(d) or d)
             self.lbl_alpha_dir.setStyleSheet("color: #1565C0; font-weight: bold;")
 
-    def export_alpha_files(self):
-        """피팅 없이 BBCEAS alpha만 계산해 저장. Hot 2채널이면 채널별로 각각 저장."""
-        if not hasattr(self, 'file_list') or not self.file_list:
-            QMessageBox.warning(self, "No Files", "먼저 측정 파일을 로드하세요.")
-            return
+    def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
+                           status_cb=None, done_cb=None):
+        """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
+
+        Alpha Generator 팝업이 raw 파일목록/출력폴더/avgsec를 넘겨 호출할 수 있다.
+        인자가 없으면(레거시) 메인 file_list/프롬프트/메인 avgsec를 사용.
+        wavecal/핏레인지/cavity/flags 는 항상 메인 UI 설정을 재사용한다.
+        반환: True(시작됨) / False(검증 실패)."""
+        flist = list(file_list) if file_list is not None else getattr(self, 'file_list', None)
+        if not flist:
+            QMessageBox.warning(self, "No Files", "먼저 측정(raw) 파일을 로드하세요.")
+            return False
         if getattr(self, 'wavelengths', None) is None and self.engine._wave_axis is None:
             QMessageBox.warning(self, "No Wavelength Cal",
                                 "파장 캘리브레이션 파일을 먼저 로드하세요.")
-            return
-        out_dir = QFileDialog.getExistingDirectory(self, "Alpha 파일 저장 폴더 선택", self._dlg_dir('alpha_out'))
-        self._dlg_dir('alpha_out', out_dir)
+            return False
+        if out_dir is None:
+            out_dir = QFileDialog.getExistingDirectory(self, "Alpha 파일 저장 폴더 선택", self._dlg_dir('alpha_out'))
+            self._dlg_dir('alpha_out', out_dir)
         if not out_dir:
-            return
+            return False
 
-        n_ch = int(getattr(self, '_detected_channels', 1) or 1)
+        # 채널 수: 넘겨받은 raw 첫 파일에서 감지(메인 _detected_channels도 갱신해 per-ch 설정 일치)
+        try:
+            from core.data_io import DataIO
+            n_ch = int(DataIO.detect_channels(self._entry_filepath(flist[0])) or 1)
+        except Exception:
+            n_ch = int(getattr(self, '_detected_channels', 1) or 1)
+        self._detected_channels = n_ch
+        for _ch, _roww in getattr(self, '_ch_fit_rows', {}).items():
+            _roww.setVisible(_ch <= n_ch)
+
         configs = self._build_alpha_channel_configs(n_ch)
         if not configs:
             QMessageBox.warning(self, "채널 설정 실패",
                                 "채널별 파장보정/픽셀 범위를 만들 수 없습니다.\n"
                                 f"Hot(≥2ch)은 {self._WV_CAL_BASE}\\roi1,roi2 의 Calib 파일이 필요합니다.")
-            return
+            return False
 
         # 채널별 워커를 순차 실행(큐). Hot=2채널 → PNs, ANs 각각 생성.
-        self._alpha_queue     = list(configs)
-        self._alpha_out_dir   = out_dir
-        self._alpha_dark      = getattr(self, 'dark_data', None)
-        self._alpha_done_msgs = []
+        self._alpha_queue      = list(configs)
+        self._alpha_file_list  = flist
+        self._alpha_out_dir    = out_dir
+        self._alpha_avgsec     = float(avg_sec) if avg_sec is not None else 60.0
+        self._alpha_dark       = getattr(self, 'dark_data', None)
+        self._alpha_done_msgs  = []
+        self._alpha_status_cb  = status_cb   # 팝업 진행표시(옵션)
+        self._alpha_user_done_cb = done_cb   # 팝업 완료콜백(옵션)
         self.status.setText(f"📁 Alpha 내보내기 시작 ({n_ch}채널)...")
         self._start_next_alpha_export()
+        return True
 
     # wv_cal 자동탐색 베이스 (채널별 파장보정 — 사용자 지정 위치)
     _WV_CAL_BASE = r"C:\Doasis_Work\Output\wv_cal"
@@ -1723,18 +1686,21 @@ class CAESARAnalyzer(QMainWindow):
         if not getattr(self, '_alpha_queue', None):
             done = getattr(self, '_alpha_done_msgs', [])
             self.status.setText(f"✅ Alpha 내보내기 완료 → {self._alpha_out_dir}")
-            QMessageBox.information(
-                self, "Alpha Export 완료",
-                "채널별 α 저장 완료:\n" + "\n".join(done) +
-                f"\n\n저장 위치:\n{self._alpha_out_dir}\n"
-                "파일명: {소스}_{채널}_alpha_trace.dat\n"
-                "결과 뷰어 / 2단계 피팅에 사용 가능.")
+            cb = getattr(self, '_alpha_user_done_cb', None)
+            if cb:   # Alpha Generator 팝업이 띄운 경우 콜백으로 알림(자체 메시지)
+                cb(self._alpha_out_dir, list(done))
+            else:
+                QMessageBox.information(
+                    self, "Alpha Export 완료",
+                    "채널별 α 저장 완료:\n" + "\n".join(done) +
+                    f"\n\n저장 위치:\n{self._alpha_out_dir}\n"
+                    "파일명: {소스}_{채널}_alpha_trace.dat\n"
+                    "결과 뷰어 / 분석(RUN)에 사용 가능.")
             return
         cfg = self._alpha_queue.pop(0)
-        self.status.setText(
-            f"📁 Alpha [{cfg['label']}] 계산 중 (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
+        self._alpha_status(f"📁 Alpha [{cfg['label']}] 계산 중 (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
         self._alpha_export_worker = AlphaExportWorker(
-            file_list     = self.file_list,
+            file_list     = self._alpha_file_list,
             pixel_min     = cfg['pixel_min'],
             pixel_max     = cfg['pixel_max'],
             wave_nm       = cfg['wave_nm'],
@@ -1746,15 +1712,33 @@ class CAESARAnalyzer(QMainWindow):
             output_dir    = self._alpha_out_dir,
             dark_spectrum = self._alpha_dark,
             channel       = cfg['channel'],
-            avg_sec       = self.spin_alpha_avgsec.value(),
+            avg_sec       = self._alpha_avgsec,
             channel_label = cfg['label'],
         )
         self._alpha_export_worker.progress.connect(
-            lambda n, lbl=cfg['label']: self.status.setText(f"📁 [{lbl}] {n} 스캔..."))
+            lambda n, lbl=cfg['label']: self._alpha_status(f"📁 [{lbl}] {n} 스캔..."))
         self._alpha_export_worker.status_msg.connect(lambda m: print(f"[AlphaExport] {m}"))
         self._alpha_export_worker.finished.connect(
             lambda res, lbl=cfg['label']: self._on_alpha_channel_done(res, lbl))
         self._alpha_export_worker.start()
+
+    def _alpha_status(self, msg):
+        """alpha export 진행 표시 — 메인 상태바 + (팝업 콜백 있으면) 팝업에도."""
+        self.status.setText(msg)
+        cb = getattr(self, '_alpha_status_cb', None)
+        if cb:
+            cb(msg)
+
+    def open_alpha_generator(self):
+        """Raw → Alpha 생성 팝업창. 메인 UI 설정(wavecal/핏레인지/cavity/flags) 재사용."""
+        if getattr(self, 'wavelengths', None) is None and self.engine._wave_axis is None:
+            QMessageBox.warning(self, "No Wavelength Cal",
+                                "먼저 메인에서 파장 캘리브레이션을 로드하세요\n"
+                                "(Alpha 생성은 그 설정을 사용합니다).")
+            return
+        from .ui_alpha_gen import AlphaGeneratorDialog
+        dlg = AlphaGeneratorDialog(self)
+        dlg.exec()
 
     def _on_alpha_channel_done(self, result, label):
         if str(result).startswith("ERROR"):
