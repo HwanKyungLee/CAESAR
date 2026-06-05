@@ -2844,14 +2844,63 @@ class CAESARAnalyzer(QMainWindow):
         flag_he  = self._parse_flags(self.txt_flag_he.text())
         flag_amb = self._parse_flags(self.txt_flag_amb.text())
 
-        ch_list = sorted(self._alpha_groups) if self._alpha_groups else list(range(1, n_ch + 1))
+        # 채널 탭이 2개 이상이면 채널별 독립 엔진/설정으로 병렬 피팅(현재 탭 먼저 스냅샷).
+        if self._active_channel in self._channel_configs:
+            self._channel_configs[self._active_channel] = self._capture_config()
+        active_chs = sorted(c for c, v in self._channel_configs.items() if v is not None)
+        per_channel = len(active_chs) > 1
+
+        if per_channel:
+            ch_list = active_chs
+            self._multi_channel_mode = True
+            self._workers_total = len(ch_list)
+            self._scan_counts = {}
+        else:
+            ch_list = sorted(self._alpha_groups) if self._alpha_groups else list(range(1, n_ch + 1))
+
         for ch in ch_list:
-            files_for_ch = self._alpha_groups[ch] if self._alpha_groups else self.file_list
+            if self._alpha_groups:
+                files_for_ch = self._alpha_groups.get(ch, self.file_list if not per_channel else None)
+                if files_for_ch is None:
+                    continue   # 이 채널에 매칭되는 데이터 없음
+            else:
+                files_for_ch = self.file_list
+
+            # 채널별 설정(per_channel) vs 공용(단일)
+            if per_channel:
+                cfg = self._channel_configs[ch]
+                eng_ch = self._build_engine_from_config(cfg)
+                rp_ch = cfg.get('ref_props', {})
+                ng = len(eng_ch.gas_list)
+                npoly = int(cfg.get('poly_deg', 3)) + 1
+                p0_ch = [0.0, self.calib_squeeze] + [0.1] * ng + [0] * npoly
+                lo_ch = [-np.inf, 0.95] + [0.0] * ng + [-np.inf] * npoly
+                hi_ch = [np.inf, 1.05] + [np.inf] * ng + [np.inf] * npoly
+                wax = getattr(eng_ch, '_wave_axis', None)
+                if wax is not None:
+                    wa = np.asarray(wax, dtype=float).flatten()
+                    pmin = int(np.abs(wa - cfg.get('fit_start_nm', 435.0)).argmin())
+                    pmax = int(np.abs(wa - cfg.get('fit_end_nm', 480.0)).argmin())
+                    if pmin > pmax:
+                        pmin, pmax = pmax, pmin
+                else:
+                    pmin, pmax = pixel_min, pixel_max
+                cav_ch = cfg.get('cavity_d', cavity_d); rl_ch = cfg.get('rl_factor', 1.0)
+                lam_ch = cfg.get('tikhonov_lambda', 0.0); rob_ch = cfg.get('use_robust', False)
+                step_ch = cfg.get('step_limit', 0.5)
+            else:
+                eng_ch = self.engine; rp_ch = getattr(self, 'ref_props', {})
+                p0_ch, lo_ch, hi_ch = p0, bounds_low, bounds_high
+                pmin, pmax = pixel_min, pixel_max
+                cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
+                lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
+                step_ch = step_limit_val
+
             w = AnalysisWorker(
-                self.engine, files_for_ch, pixel_min, pixel_max,
-                p0, (bounds_low, bounds_high), interval, delay_ms,
-                ref_properties=getattr(self, 'ref_props', {}),
-                i0_array=sliced_i0, r_array=sliced_r, cavity_len=cavity_d,
+                eng_ch, files_for_ch, pmin, pmax,
+                p0_ch, (lo_ch, hi_ch), interval, delay_ms,
+                ref_properties=rp_ch,
+                i0_array=sliced_i0, r_array=sliced_r, cavity_len=cav_ch,
                 dark_array=sliced_dark,
                 dark_scale_factor=self.spin_dark_scale.value(),
                 offset_array=sliced_offset,
@@ -2863,13 +2912,13 @@ class CAESARAnalyzer(QMainWindow):
                 flag_amb=flag_amb,
                 save_alpha=False,   # α 저장은 Alpha Generator 전담
                 alpha_save_dir=getattr(self, 'alpha_save_dir', ''),
-                rl_factor=self.spin_rl_factor.value(),
+                rl_factor=rl_ch,
                 channel=ch
             )
 
-            w.step_limit = step_limit_val
-            w.tikhonov_lambda = self.spin_lambda.value()
-            w.use_robust_fitting = self.chk_robust.isChecked()
+            w.step_limit = step_ch
+            w.tikhonov_lambda = lam_ch
+            w.use_robust_fitting = rob_ch
             w.kalman_q = self.spin_kalman_q.value()
             w.kalman_r = self.spin_kalman_r.value()
             w.temperature = self.spin_temp.value()
@@ -2889,6 +2938,13 @@ class CAESARAnalyzer(QMainWindow):
             w.scan_count_ready.connect(lambda n, ch=ch: self._on_scan_count_ready(n, ch))
 
             self._workers.append(w)
+
+        if not self._workers:
+            QMessageBox.warning(self, "채널/데이터 불일치",
+                                "채널 탭에 매칭되는 데이터가 없습니다.\n"
+                                "(알파 파일명의 _PNs_/_ANs_ 채널과 탭 수를 확인하세요)")
+            self.b_run.setEnabled(True)
+            return
 
         # Keep self.worker pointing to CH1 worker for legacy stop/wait references
         self.worker = self._workers[0]
