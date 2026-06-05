@@ -3281,139 +3281,109 @@ class CAESARAnalyzer(QMainWindow):
                 self.monitor.plot_viewer(np.arange(len(y)), y, f"Ref (Conv): {ref_name}", 'r', style='-', xband=band)
 
 
-    def save_scenario(self):
-        """
-        Serializes the current fit configuration to a JSON file.
-
-        Everything needed to reproduce a run is stored:
-          - Reference file paths and their 10^exponent multipliers
-          - Wavelength calibration file path
-          - Pixel range, polynomial degree, step limit
-          - Shift/Squeeze mode constraints per gas (ref_props)
-          - Tikhonov λ, Robust flag, Kalman Q and R
-
-        The JSON can be reloaded via load_scenario() to instantly restore the
-        entire setup including auto-locking the references.
-        """
-        # 1. Extract gas list and basic info
-        gas_list_str = "_".join(self.engine.gas_list) if hasattr(self, 'engine') and self.engine.gas_list else "NoRefs"
-        f_min = self.txt_min.text()
-        f_max = self.txt_max.text()
-        poly = self.spin_poly_deg.value()
-        
-        # Prepare new parameter info for filename
-        lam_val = self.spin_lambda.value()
-        robust_str = "Robust" if self.chk_robust.isChecked() else "Std"
-        
-        # e.g., FitSet_NO2_H2O_1453-1646px_Poly4_L0.0001_Robust.json
-        default_fname = f"FitSet_{gas_list_str}_{f_min}-{f_max}px_Poly{poly}_L{lam_val:g}_{robust_str}.json"
-
-        # 2. Collect existing data
+    def _capture_config(self):
+        """현재 UI/엔진 설정 전체를 dict로 캡처 — 채널 전환·복사·시나리오 저장에 재사용.
+        (레퍼런스 경로·배율, wavecal, 픽셀/nm 핏레인지, poly/step/λ/robust/kalman, cavity)"""
         refs_data = []
-        if hasattr(self, 'ref_widgets'):
-            for rw in self.ref_widgets:
-                if rw['n'].text() and rw['fp']:
-                    refs_data.append({
-                        "name": rw['n'].text(),
-                        "path": rw['fp'],
-                        "mult": rw['mult'].value()
-                    })
-
-        scenario_data = {
-            "wl_path": getattr(self, 'loaded_wl_path', ""), 
-            "refs": refs_data,                              
-            "f_min": f_min,
-            "f_max": f_max,
-            "poly_deg": poly,
-            "step_limit": getattr(self, 'spin_step_limit', None).value() if hasattr(self, 'spin_step_limit') else 0.5,
-            "ref_props": getattr(self, 'ref_props', {}),
-            "tikhonov_lambda": lam_val,
-            "use_robust": self.chk_robust.isChecked(),
+        for rw in getattr(self, 'ref_widgets', []):
+            if rw['n'].text() and rw['fp']:
+                refs_data.append({"name": rw['n'].text(), "path": rw['fp'], "mult": rw['mult'].value()})
+        return {
+            "wl_path": getattr(self, 'loaded_wl_path', ""),
+            "refs": refs_data,
+            "f_min": self.txt_min.text(),
+            "f_max": self.txt_max.text(),
+            "fit_start_nm": self.spin_fit_start_nm.value(),
+            "fit_end_nm": self.spin_fit_end_nm.value(),
+            "poly_deg": self.spin_poly_deg.value(),
+            "step_limit": self.spin_step_limit.value() if hasattr(self, 'spin_step_limit') else 0.5,
+            "ref_props": dict(getattr(self, 'ref_props', {})),
+            "tikhonov_lambda": self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0,
+            "use_robust": self.chk_robust.isChecked() if hasattr(self, 'chk_robust') else False,
             "kalman_q": self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005,
-            "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050
+            "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050,
+            "cavity_d": self.spin_d_len.value() if hasattr(self, 'spin_d_len') else 100.0,
+            "rl_factor": self.spin_rl_factor.value() if hasattr(self, 'spin_rl_factor') else 1.0,
         }
 
-        # 3. Open file save dialog
+    def _apply_config(self, scenario, load_refs=True):
+        """_capture_config 로 만든 dict를 UI/엔진에 복원. load_refs=False면 레퍼런스/엔진은 건드리지 않음."""
+        self.txt_min.setText(str(scenario.get("f_min", "")))
+        self.txt_max.setText(str(scenario.get("f_max", "")))
+        if "fit_start_nm" in scenario:
+            self.spin_fit_start_nm.setValue(scenario["fit_start_nm"])
+        if "fit_end_nm" in scenario:
+            self.spin_fit_end_nm.setValue(scenario["fit_end_nm"])
+        self.spin_poly_deg.setValue(scenario.get("poly_deg", 3))
+        if hasattr(self, 'spin_step_limit'):
+            self.spin_step_limit.setValue(scenario.get("step_limit", 0.5))
+        self.ref_props = scenario.get("ref_props", {})
+        if hasattr(self, 'spin_lambda'):
+            self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
+        if hasattr(self, 'chk_robust'):
+            self.chk_robust.setChecked(scenario.get("use_robust", False))
+        if hasattr(self, 'spin_kalman_q'):
+            self.spin_kalman_q.setValue(scenario.get("kalman_q", 0.0005))
+        if hasattr(self, 'spin_kalman_r'):
+            self.spin_kalman_r.setValue(scenario.get("kalman_r", 0.050))
+        if hasattr(self, 'spin_d_len') and "cavity_d" in scenario:
+            self.spin_d_len.setValue(scenario["cavity_d"])
+        if hasattr(self, 'spin_rl_factor') and "rl_factor" in scenario:
+            self.spin_rl_factor.setValue(scenario["rl_factor"])
+
+        wl_path = scenario.get("wl_path", "")
+        if wl_path and os.path.exists(wl_path):
+            self.load_wavelength_cal(auto_path=wl_path)
+
+        if load_refs:
+            refs = scenario.get("refs", [])
+            # 기존 레퍼런스 UI/엔진 초기화 후 재구성
+            for rw in getattr(self, 'ref_widgets', []):
+                rw['w'].deleteLater()
+            if hasattr(self, 'ref_widgets'):
+                self.ref_widgets.clear()
+            self.engine.clear_engine()
+            for ref in refs:
+                if os.path.exists(ref['path']):
+                    self.add_ref_row(name=ref['name'], path=ref['path'])
+                    self.ref_widgets[-1]['mult'].setValue(ref.get('mult', 0))
+            if refs:
+                self.lock_ref()
+
+    def save_scenario(self):
+        """현재 fit 설정을 JSON으로 저장(=_capture_config). load_scenario로 복원."""
+        cfg = self._capture_config()
+        gas_list_str = "_".join(self.engine.gas_list) if (hasattr(self, 'engine') and self.engine.gas_list) else "NoRefs"
+        robust_str = "Robust" if cfg["use_robust"] else "Std"
+        default_fname = (f"FitSet_{gas_list_str}_{cfg['f_min']}-{cfg['f_max']}px_"
+                         f"Poly{cfg['poly_deg']}_L{cfg['tikhonov_lambda']:g}_{robust_str}.json")
         _start = os.path.join(self._dlg_dir('scenario'), default_fname) if self._dlg_dir('scenario') else default_fname
         path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", _start, "JSON Files (*.json)")
         self._dlg_dir('scenario', path)
         if path:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(scenario_data, f, indent=4)
+                    json.dump(cfg, f, indent=4)
                 QMessageBox.information(self, "Success", f"Scenario saved!\nFile: {os.path.basename(path)}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Save Failed:\n{e}")
 
     def load_scenario(self):
-        """
-        Restores a saved fit configuration from a JSON file.
-
-        Full automation sequence:
-          1. Restore all numeric UI parameters (pixel range, poly, lambda, etc.)
-          2. Auto-load the wavelength calibration file (if the path still exists)
-          3. Add each reference file back to the UI list with its multiplier
-          4. Auto-click 'Lock' to commit references to the engine
-
-        After load_scenario() the user only needs to click 'Load Data' then 'RUN'.
-        """
+        """저장된 fit 설정 JSON을 복원(=_apply_config)."""
         path, _ = QFileDialog.getOpenFileName(self, "Load Fit Scenario", self._dlg_dir('scenario'), "JSON Files (*.json)")
-        if not path: return
+        if not path:
+            return
         self._dlg_dir('scenario', path)
-        
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 scenario = json.load(f)
-                
-            # 1. Restore UI parameters
-            self.txt_min.setText(str(scenario.get("f_min", "")))
-            self.txt_max.setText(str(scenario.get("f_max", "")))
-            self.spin_poly_deg.setValue(scenario.get("poly_deg", 3))
-            if hasattr(self, 'spin_step_limit'):
-                self.spin_step_limit.setValue(scenario.get("step_limit", 0.5))
-            self.ref_props = scenario.get("ref_props", {})
-            
-            # Restore lambda and robust settings
-            if hasattr(self, 'spin_lambda'):
-                self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
-            if hasattr(self, 'chk_robust'):
-                self.chk_robust.setChecked(scenario.get("use_robust", False))
-            if hasattr(self, 'spin_kalman_q'):
-                self.spin_kalman_q.setValue(scenario.get("kalman_q", 0.0005))
-            if hasattr(self, 'spin_kalman_r'):
-                self.spin_kalman_r.setValue(scenario.get("kalman_r", 0.050))
-            
-            # 🌟 2. Auto-load wavelength file
-            wl_path = scenario.get("wl_path", "")
-            if wl_path and os.path.exists(wl_path):
-                self.load_wavelength_cal(auto_path=wl_path) 
-                
-            # 🌟 3. Auto-load references
-            refs = scenario.get("refs", [])
-            if refs:
-                # Clear existing reference UI
-                if hasattr(self, 'ref_widgets'):
-                    for rw in self.ref_widgets:
-                        rw['w'].deleteLater()
-                    self.ref_widgets.clear()
-                self.engine.clear_engine()
-                
-                # Add gases one by one from scenario
-                for ref in refs:
-                    if os.path.exists(ref['path']):
-                        self.add_ref_row(name=ref['name'], path=ref['path'])
-                        self.ref_widgets[-1]['mult'].setValue(ref.get('mult', 0))
-                        
-                # 🌟 4. Auto-click 'Lock' to finalize engine setup!
-                self.lock_ref()
-                
-                QMessageBox.information(self, "Auto-Load Success", 
-                                        "🚀 [Full-Auto Mode Activated]\n"
-                                        "Wavelengths, References, Locks, and Parameters have all been automatically configured!\n"
-                                        "You can now simply [Load Data] and hit RUN!")
+            self._apply_config(scenario, load_refs=True)
+            if scenario.get("refs"):
+                QMessageBox.information(self, "Auto-Load Success",
+                                        "🚀 wavelengths · references · lock · parameters 모두 복원됨.\n"
+                                        "[Load Data] 후 RUN 하세요!")
             else:
-                QMessageBox.information(self, "Success", "📂 Scenario parameters loaded successfully!")
-            
+                QMessageBox.information(self, "Success", "📂 Scenario parameters loaded.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load scenario:\n{e}")
  
