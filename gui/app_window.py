@@ -424,12 +424,11 @@ class CAESARAnalyzer(QMainWindow):
         # Main Tab Widget
         self.main_tabs = QTabWidget()
 
-        # Tab 0: Daily Run (scenario + setup status checklist + R trend)
+        # Daily Run(Scenario + Setup Status) — 별도 탭 대신 Setup 상단으로 흡수
         self.daily_run_tab = QWidget()
         self.setup_daily_run_tab()
-        self.main_tabs.addTab(self.daily_run_tab, "📋 Daily Run")
 
-        # Tab 1: Cavity Setup
+        # Tab 0: Setup (Daily Run 흡수 + Tools/α파이프라인/Cavity/진단)
         self.setup_tab = QWidget()
         self.setup_cavity_tab()
         self.main_tabs.addTab(self.setup_tab, "🛠️ Setup")
@@ -828,8 +827,12 @@ class CAESARAnalyzer(QMainWindow):
         
         # --- Left Panel: Controls ---
         control_layout = QVBoxLayout()
-        
-        # Group 1: Daily-use tools
+
+        # Daily Run(Scenario + Setup Status) 흡수 — Setup 좌측 상단
+        if hasattr(self, 'daily_run_tab'):
+            control_layout.addWidget(self.daily_run_tab)
+
+        # Group: Daily-use tools
         grp_calib = QGroupBox("Tools")
         lay_calib = QVBoxLayout()
 
@@ -1918,7 +1921,7 @@ class CAESARAnalyzer(QMainWindow):
 
         if filepath:
             self.set_i0_path(filepath)
-            self.main_tabs.setCurrentIndex(1)   # switch to Setup tab
+            self.main_tabs.setCurrentWidget(self.setup_tab)   # switch to Setup tab
             
     def set_i0_path(self, filepath):
         """Updates the I0 state, loads data, and updates UI."""
@@ -2804,8 +2807,8 @@ class CAESARAnalyzer(QMainWindow):
         self.b_stop.setEnabled(True)
         self.status.setText("🏃 Analysis in progress...")
 
-        # Switch to the Analysis Monitor tab automatically (index 2 in new 3-tab layout)
-        self.main_tabs.setCurrentIndex(2)
+        # Switch to the Analysis Monitor automatically
+        self.main_tabs.setCurrentWidget(self.monitor)
 
         for w in self._workers:
             w.start()
