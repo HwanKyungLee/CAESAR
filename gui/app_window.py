@@ -874,9 +874,16 @@ class CAESARAnalyzer(QMainWindow):
             "Cold / Hot 채널 분리 처리, Sellmeier 기반 Rayleigh 모델 사용."
         )
 
+        btn_peak_trend = QPushButton("📈 피크 트렌드 (He / ZA / Sampling)")
+        btn_peak_trend.clicked.connect(self.open_peak_trend)
+        btn_peak_trend.setToolTip(
+            "raw .dat 를 읽어 flag별(ZA/He/Sampling) peak intensity 시계열을 그림.\n"
+            "ZA/He는 cycle, Sampling은 시간bin 단위 avg·min/max → 이상치·주입주기 점검.")
+
         lay_calib.addWidget(btn_calib_tool)
         lay_calib.addWidget(btn_ref_gen)
         lay_calib.addWidget(btn_r_trend)
+        lay_calib.addWidget(btn_peak_trend)
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
 
@@ -1782,6 +1789,12 @@ class CAESARAnalyzer(QMainWindow):
             return
         from .ui_alpha_gen import AlphaGeneratorDialog
         dlg = AlphaGeneratorDialog(self)
+        dlg.exec()
+
+    def open_peak_trend(self):
+        """flag별(ZA/He/Sampling) 피크 트렌드 뷰어 팝업."""
+        from .ui_peak_trend import PeakTrendDialog
+        dlg = PeakTrendDialog(self, default_dir=self._dlg_dir('data'))
         dlg.exec()
 
     def _on_alpha_channel_done(self, result, label):
