@@ -103,6 +103,34 @@ class AnalysisWorker(QThread):
         self.etalon_freq_max = 0.40
 
     # ==========================================
+    # 알파 입력 처리 — 채널별(파일별) 파장축 사용
+    # ==========================================
+    def _is_alpha_input(self, fp):
+        c = getattr(self, '_alpha_input_cache', None)
+        if c is None:
+            c = self._alpha_input_cache = {}
+        if fp not in c:
+            try:
+                c[fp] = DataIO._is_alpha_trace_format(fp)
+            except Exception:
+                c[fp] = False
+        return c[fp]
+
+    def _alpha_pixels(self, wave_nm):
+        """알파 파장(nm) → engine 마스터축 픽셀. 레퍼런스(픽셀-인덱스)를 알파의 실제
+        파장 위치에서 평가하게 해, 마스터 wavecal이 채널과 달라도 정확히 정렬."""
+        wax = getattr(self.engine, '_wave_axis', None)
+        if wax is None:
+            return np.arange(len(wave_nm), dtype=float)
+        f = getattr(self, '_alpha_px_of', None)
+        if f is None:
+            from scipy.interpolate import interp1d
+            wax = np.asarray(wax, dtype=float).flatten()
+            f = self._alpha_px_of = interp1d(wax, np.arange(len(wax)),
+                                             bounds_error=False, fill_value='extrapolate')
+        return np.asarray(f(np.asarray(wave_nm, dtype=float)), dtype=float)
+
+    # ==========================================
     # VarPro 핏 — core.doas_fit.DoasFitter 로 위임(단일 구현 공유)
     # AnalysisWorker는 스캔 루프/상태(Kalman, etalon 한번검출, R-cal 등)만 소유.
     # ==========================================
@@ -241,21 +269,26 @@ class AnalysisWorker(QThread):
 
             try:
                 # 1. Load Spectrum and Housekeeping (including Flag)
-                pixel_idx, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(file_path, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
+                if self._is_alpha_input(file_path):
+                    # 알파 입력: 그 파일(채널)에 박힌 파장축으로 피팅(마스터 wavecal 아님).
+                    # 레퍼런스는 알파의 실제 파장에 평가되도록 engine 마스터축 픽셀로 매핑
+                    # → Hot CH2/CH3도 roi2/roi3 파장으로 정확히 정렬(채널별 wavecal 자동 반영).
+                    wave_nm, intensity_raw, env_t, env_p = DataIO.load_alpha_trace_row_full(file_path, row_idx)
+                    pixel_idx = self._alpha_pixels(wave_nm)
+                    state_flag = 1   # 알파는 ambient
+                else:
+                    pixel_idx, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(file_path, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
+                    # Guard: if _wave_axis is None, pixel_to_wavelength returns pixel indices
+                    # (~1453) → Rayleigh(λ⁻⁴) corrupted. Load a wavelength cal first.
+                    if self.engine._wave_axis is None:
+                        print("⚠️  WARNING: No wavelength calibration loaded in engine. "
+                              "pixel_to_wavelength() returns pixel indices as nm — "
+                              "Rayleigh calculation will be incorrect. Load a wavelength cal file first.")
+                    wave_nm = self.engine.pixel_to_wavelength(pixel_idx)
 
                 # Update current environment for PPB calculation
                 self.temperature = env_t
                 self.pressure = env_p
-
-                # Convert pixels to wavelength (nm) for Rayleigh calculation.
-                # Guard: if _wave_axis is None, pixel_to_wavelength returns pixel indices
-                # (~1453) which would be fed to Rayleigh(λ⁻⁴) as 1453 nm instead of ~455 nm,
-                # giving ~100× too-small Rayleigh coefficients and corrupted optical depths.
-                if self.engine._wave_axis is None:
-                    print("⚠️  WARNING: No wavelength calibration loaded in engine. "
-                          "pixel_to_wavelength() returns pixel indices as nm — "
-                          "Rayleigh calculation will be incorrect. Load a wavelength cal file first.")
-                wave_nm = self.engine.pixel_to_wavelength(pixel_idx)
 
                 # [ State Switching & R-Calibration ]
                 # Flag lists from UI: ZA=[500~503], He=[510~513], Amb=[1]

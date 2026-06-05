@@ -270,32 +270,65 @@ class DataIO:
         return max(count, 1)
 
     @staticmethod
+    def _alpha_layout(filepath):
+        """alpha_trace 헤더 파싱 → (alpha_start_col, t_idx, p_idx, px_start, wave_nm).
+
+        구포맷: row_idx  T_C  P_mbar  px...
+        신포맷: row_idx  doy  datetime  T_C  P_mbar  px...   (타임스탬프 컬럼 추가)
+        컬럼 위치를 헤더에서 읽어 둘 다 지원한다. wave_nm 은 '# wavelength_nm:' 배열."""
+        wave_nm = None
+        hdr = None
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if line.startswith('# wavelength_nm:'):
+                        try:
+                            wave_nm = np.array([float(v) for v in line.split(':', 1)[1].strip().split('\t')
+                                                if v.strip()], dtype=float)
+                        except Exception:
+                            pass
+                        continue
+                    if line.startswith('row_idx'):
+                        hdr = line.rstrip('\n').split('\t')
+                        break
+                    if not line.startswith('#') and line.strip():
+                        break
+        except Exception:
+            pass
+        if not hdr:
+            return 3, 1, 2, 0, wave_nm
+        first_px = next((i for i, c in enumerate(hdr) if c.startswith('px')), 3)
+        t_idx = hdr.index('T_C') if 'T_C' in hdr else 1
+        p_idx = hdr.index('P_mbar') if 'P_mbar' in hdr else 2
+        px_start = 0
+        if first_px < len(hdr) and hdr[first_px].startswith('px'):
+            try:
+                px_start = int(hdr[first_px][2:])
+            except ValueError:
+                px_start = 0
+        return first_px, t_idx, p_idx, px_start, wave_nm
+
+    @staticmethod
+    def read_alpha_trace_wavelengths(filepath):
+        """alpha_trace.dat의 '# wavelength_nm:' 채널별 파장축(없으면 None)."""
+        return DataIO._alpha_layout(filepath)[4]
+
+    @staticmethod
     def _load_alpha_trace_row(filepath, row_index, pixel_min=0, pixel_max=None):
-        """Load one data row from an alpha_trace.dat file.
+        """Load one data row from an alpha_trace.dat file (구·신 포맷 호환).
 
-        Reads T_C, P_mbar, and alpha values for the given data-row index.
+        헤더 위치로 T_C/P_mbar/alpha 컬럼을 판정(타임스탬프 doy/datetime 컬럼 대응).
         Pads the alpha array to 2048 pixels (zeros outside the exported range)
-        so that the caller's pixel_min/pixel_max slicing works correctly.
-
+        so the caller's pixel_min/pixel_max slicing works.
         Returns (pixel_idx, intensity_raw, state_flag=1, env_t, env_p).
         """
-        px_start = 0
+        first_px, t_idx, p_idx, px_start, _wave = DataIO._alpha_layout(filepath)
         data_rows = []
         try:
             with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
                 for line in fh:
                     s = line.strip()
-                    if not s or s.startswith('#'):
-                        continue
-                    if s.startswith('row_idx'):
-                        cols = s.split('\t')
-                        for c in cols[3:]:
-                            if c.startswith('px'):
-                                try:
-                                    px_start = int(c[2:])
-                                except ValueError:
-                                    pass
-                                break
+                    if not s or s.startswith('#') or s.startswith('row_idx'):
                         continue
                     data_rows.append(s)
         except Exception as e:
@@ -309,9 +342,9 @@ class DataIO:
 
         parts = data_rows[row_index].split('\t')
         try:
-            env_t = float(parts[1])
-            env_p = float(parts[2])
-            alpha_vals = np.array([float(v) for v in parts[3:]], dtype=float)
+            env_t = float(parts[t_idx])
+            env_p = float(parts[p_idx])
+            alpha_vals = np.array([float(v) for v in parts[first_px:]], dtype=float)
         except (ValueError, IndexError) as e:
             raise RuntimeError(
                 f"HK Data Load Failed ({os.path.basename(filepath)}): parse error: {e}")
@@ -328,6 +361,30 @@ class DataIO:
         pixel_idx = np.arange(p_min, p_max)
 
         return pixel_idx, intensity_raw, 1, env_t, env_p
+
+    @staticmethod
+    def load_alpha_trace_row_full(filepath, row_index):
+        """alpha_trace 한 행을 (wave_nm, alpha, T, P)로 — 패딩/슬라이스 없이 실제 데이터.
+
+        AnalysisWorker가 알파를 그 채널 자체 파장축으로 피팅하도록 쓰는 경로
+        (마스터 wavecal이 아니라 알파에 박힌 채널별 파장 사용)."""
+        first_px, t_idx, p_idx, px_start, wave_nm = DataIO._alpha_layout(filepath)
+        data_rows = []
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                s = line.strip()
+                if not s or s.startswith('#') or s.startswith('row_idx'):
+                    continue
+                data_rows.append(s)
+        if row_index >= len(data_rows):
+            raise RuntimeError(f"alpha row {row_index} not found ({len(data_rows)} rows)")
+        parts = data_rows[row_index].split('\t')
+        env_t = float(parts[t_idx])
+        env_p = float(parts[p_idx])
+        alpha = np.array([float(v) for v in parts[first_px:]], dtype=float)
+        if wave_nm is None or len(wave_nm) != len(alpha):
+            wave_nm = np.arange(len(alpha), dtype=float)
+        return wave_nm, alpha, env_t, env_p
 
     @staticmethod
     def expand_to_scan_list(filepath):
