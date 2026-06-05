@@ -208,9 +208,15 @@ class CAESARAnalyzer(QMainWindow):
         layout_px.addWidget(btn_sel)
         lay_set.addLayout(layout_px)
         
+        # 채널별 Fit 범위/wavecal 저장소(아래 nm 행들에서 채움). CH1=메인 행.
+        self._ch_fit_nm = {}        # ch -> (start_spin, end_spin)
+        self._ch_fit_rows = {}      # ch -> 행 위젯(표시/숨김)
+        self._ch_wavecal = {}       # ch -> 사용자가 직접 고른 wavecal per-pixel 배열
+        self._ch_wavecal_btn = {}   # ch -> 버튼(파일명 표시)
+
         # Wavelength-based Selection — 시작 nm ~ 끝 nm 직접 입력
         layout_nm = QHBoxLayout()
-        layout_nm.addWidget(QLabel("Fit 범위(nm):"))
+        layout_nm.addWidget(QLabel("CH1(ROI1) nm:"))
         self.spin_fit_start_nm = QDoubleSpinBox()
         self.spin_fit_start_nm.setRange(200, 1000)
         self.spin_fit_start_nm.setDecimals(1)
@@ -226,13 +232,15 @@ class CAESARAnalyzer(QMainWindow):
         btn_apply_nm = QPushButton("nm 범위 적용")
         btn_apply_nm.clicked.connect(self.set_range_from_nm)
         layout_nm.addWidget(btn_apply_nm)
+        # CH1 wavecal 직접 선택(미선택 시 Load X-Axis / wv_cal\\roi1 사용)
+        _wb1 = QPushButton("📂 wavecal")
+        _wb1.setToolTip("CH1(ROI1) 파장보정 파일 직접 선택. 미선택 시 Load X-Axis(nm) 또는 wv_cal/roi1 사용")
+        _wb1.clicked.connect(lambda _checked: self._load_ch_wavecal(1))
+        layout_nm.addWidget(_wb1)
+        self._ch_wavecal_btn[1] = _wb1
         lay_set.addLayout(layout_nm)
 
-        # 채널별 Fit 범위(nm) + wavecal — ≥2채널 감지 시에만 표시. 위 메인 행 = CH1(ROI1).
-        self._ch_fit_nm = {}        # ch -> (start_spin, end_spin)
-        self._ch_fit_rows = {}      # ch -> 행 위젯(표시/숨김)
-        self._ch_wavecal = {}       # ch -> 사용자가 직접 고른 wavecal per-pixel 배열
-        self._ch_wavecal_btn = {}   # ch -> 버튼(파일명 표시)
+        # 채널별 Fit 범위(nm) + wavecal — ≥2/3채널 감지 시에만 표시(CH2=ROI2, CH3=ROI3).
         for _ch, _roi in ((2, 'ROI2'), (3, 'ROI3')):
             _roww = QWidget()
             _rl = QHBoxLayout(_roww)
@@ -394,25 +402,10 @@ class CAESARAnalyzer(QMainWindow):
         self.chk_turbo = QCheckBox("Turbo")
         layout_perf.addWidget(self.chk_turbo)
         
-        # RUN이 raw를 처리할 때 각 스캔 α를 함께 저장(옵션). RUN-time 옵션이라 여기 둠.
-        layout_asave = QHBoxLayout()
-        self.chk_save_alpha = QCheckBox("RUN 중 α 저장")
-        self.chk_save_alpha.setToolTip(
-            "메인 RUN이 raw를 직접 분석할 때 각 스캔의 α 스펙트럼도 파일로 저장.\n"
-            "파일명: {원본}_alpha.dat  단위: cm⁻¹  (Alpha Generator와 별개)")
-        self.lbl_alpha_dir = QLabel("(폴더 미설정)")
-        self.lbl_alpha_dir.setStyleSheet("color: gray; font-size: 11px;")
-        _btn_adir = QPushButton("폴더")
-        _btn_adir.setFixedWidth(int(50 * self._s))
-        _btn_adir.clicked.connect(self.browse_alpha_save_dir)
-        layout_asave.addWidget(self.chk_save_alpha)
-        layout_asave.addWidget(self.lbl_alpha_dir, 1)
-        layout_asave.addWidget(_btn_adir)
-
+        # (RUN 중 α 저장 옵션 제거 — α 생성은 Alpha Generator 팝업이 전담)
         lay_ctl.addLayout(layout_row1)
         lay_ctl.addLayout(layout_perf)
         lay_ctl.addLayout(layout_row2)
-        lay_ctl.addLayout(layout_asave)
         grp_ctl.setLayout(lay_ctl)
         left_layout.addWidget(grp_ctl)
         
@@ -1628,6 +1621,16 @@ class CAESARAnalyzer(QMainWindow):
         btn = self._ch_wavecal_btn.get(ch)
         if btn:
             btn.setText(f"📂 {os.path.basename(path)} ({len(arr)}px)")
+        # CH1 wavecal은 마스터 축도 갱신(뷰어/레퍼런스/단일채널 일관)
+        if ch == 1:
+            self.wavelengths = arr
+            try:
+                self.engine.set_wavelength_axis(arr)
+            except Exception:
+                pass
+            if hasattr(self, 'monitor'):
+                self.monitor.set_wavelengths(arr)
+            self._refresh_setup_status() if hasattr(self, '_refresh_setup_status') else None
 
     def _channel_wave_cal(self, n_ch, ch):
         """채널 → per-pixel 파장 배열. 우선순위: 사용자가 직접 고른 wavecal →
@@ -2761,7 +2764,7 @@ class CAESARAnalyzer(QMainWindow):
                 flag_za=flag_za,
                 flag_he=flag_he,
                 flag_amb=flag_amb,
-                save_alpha=self.chk_save_alpha.isChecked(),
+                save_alpha=False,   # α 저장은 Alpha Generator 전담
                 alpha_save_dir=getattr(self, 'alpha_save_dir', ''),
                 rl_factor=self.spin_rl_factor.value(),
                 channel=ch
