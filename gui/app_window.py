@@ -256,6 +256,17 @@ class CAESARAnalyzer(QMainWindow):
         btn_apply_nm = QPushButton("nm 범위 적용")
         btn_apply_nm.clicked.connect(self.set_range_from_nm)
         layout_nm.addWidget(btn_apply_nm)
+
+        layout_nm.addSpacing(12)
+        layout_nm.addWidget(QLabel("핏 단위:"))
+        self.cb_fit_unit = QComboBox()
+        self.cb_fit_unit.addItems(["nm", "px"])
+        self.cb_fit_unit.setToolTip(
+            "nm: Fit 범위(nm)로 핏. px: 위의 Min/Max(픽셀)로 핏.\n"
+            "박사님 시나리오(예: Cold 775-1550)는 px로 두면 픽셀 인덱스를 정확히 재현합니다.\n"
+            "알파 피팅 시 px면 알파를 해당 픽셀구간으로 슬라이스해 핏합니다.")
+        self.cb_fit_unit.setFixedWidth(int(60 * self._s))
+        layout_nm.addWidget(self.cb_fit_unit)
         layout_nm.addStretch(1)
         lay_set.addLayout(layout_nm)
 
@@ -1685,6 +1696,28 @@ class CAESARAnalyzer(QMainWindow):
                 lo, hi = self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value()
         return (lo, hi) if lo <= hi else (hi, lo)
 
+    def _fit_unit_for_channel(self, ch):
+        """채널의 핏 단위('nm'|'px'). 활성 채널은 콤보, 아니면 config."""
+        if ch == self._active_channel and hasattr(self, 'cb_fit_unit'):
+            return self.cb_fit_unit.currentText()
+        cfg = self._channel_configs.get(ch)
+        return cfg.get('fit_unit', 'nm') if cfg else 'nm'
+
+    def _fit_px_for_channel(self, ch):
+        """채널의 핏범위 픽셀(f_min, f_max). 활성=txt_min/max, 아니면 config."""
+        if ch == self._active_channel:
+            try:
+                a, b = int(self.txt_min.text()), int(self.txt_max.text())
+            except Exception:
+                a, b = 0, 2047
+        else:
+            cfg = self._channel_configs.get(ch) or {}
+            try:
+                a, b = int(cfg.get('f_min', 0)), int(cfg.get('f_max', 2047))
+            except Exception:
+                a, b = 0, 2047
+        return (a, b) if a <= b else (b, a)
+
     def _build_alpha_channel_configs(self, n_ch, full_px=False):
         """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max).
         full_px=True(박사님 형식)면 핏윈도우 무시하고 전체 2048px 사용."""
@@ -1696,6 +1729,10 @@ class CAESARAnalyzer(QMainWindow):
                 continue
             if full_px:
                 pmin, pmax = 0, len(wave_full)
+            elif self._fit_unit_for_channel(ch) == 'px':
+                pmin, pmax = self._fit_px_for_channel(ch)
+                pmin = max(0, min(pmin, len(wave_full) - 1))
+                pmax = max(pmin + 1, min(pmax, len(wave_full)))
             else:
                 start_nm, end_nm = self._fit_nm_for_channel(ch)
                 pmin = int(np.abs(wave_full - start_nm).argmin())
@@ -2890,15 +2927,27 @@ class CAESARAnalyzer(QMainWindow):
                 p0_ch = [0.0, self.calib_squeeze] + [0.1] * ng + [0] * npoly
                 lo_ch = [-np.inf, 0.95] + [0.0] * ng + [-np.inf] * npoly
                 hi_ch = [np.inf, 1.05] + [np.inf] * ng + [np.inf] * npoly
-                wax = getattr(eng_ch, '_wave_axis', None)
-                if wax is not None:
-                    wa = np.asarray(wax, dtype=float).flatten()
-                    pmin = int(np.abs(wa - cfg.get('fit_start_nm', 435.0)).argmin())
-                    pmax = int(np.abs(wa - cfg.get('fit_end_nm', 480.0)).argmin())
+                funit_ch = cfg.get('fit_unit', 'nm')
+                fnm_lo_ch = float(cfg.get('fit_start_nm', 435.0))
+                fnm_hi_ch = float(cfg.get('fit_end_nm', 480.0))
+                if funit_ch == 'px':
+                    # 박사님 시나리오: 픽셀 인덱스를 그대로 사용(예 Cold 775-1550)
+                    try:
+                        pmin, pmax = int(cfg.get('f_min', 0)), int(cfg.get('f_max', 2047))
+                    except Exception:
+                        pmin, pmax = pixel_min, pixel_max
                     if pmin > pmax:
                         pmin, pmax = pmax, pmin
                 else:
-                    pmin, pmax = pixel_min, pixel_max
+                    wax = getattr(eng_ch, '_wave_axis', None)
+                    if wax is not None:
+                        wa = np.asarray(wax, dtype=float).flatten()
+                        pmin = int(np.abs(wa - fnm_lo_ch).argmin())
+                        pmax = int(np.abs(wa - fnm_hi_ch).argmin())
+                        if pmin > pmax:
+                            pmin, pmax = pmax, pmin
+                    else:
+                        pmin, pmax = pixel_min, pixel_max
                 cav_ch = cfg.get('cavity_d', cavity_d); rl_ch = cfg.get('rl_factor', 1.0)
                 lam_ch = cfg.get('tikhonov_lambda', 0.0); rob_ch = cfg.get('use_robust', False)
                 step_ch = cfg.get('step_limit', 0.5)
@@ -2907,6 +2956,8 @@ class CAESARAnalyzer(QMainWindow):
             else:
                 eng_ch = self.engine; rp_ch = getattr(self, 'ref_props', {})
                 p0_ch, lo_ch, hi_ch = p0, bounds_low, bounds_high
+                funit_ch = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
+                fnm_lo_ch = self.spin_fit_start_nm.value(); fnm_hi_ch = self.spin_fit_end_nm.value()
                 pmin, pmax = pixel_min, pixel_max
                 cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
                 lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
@@ -2938,6 +2989,10 @@ class CAESARAnalyzer(QMainWindow):
             w.use_robust_fitting = rob_ch
             w.kalman_q = kq_ch
             w.kalman_r = kr_ch
+            # 알파 피팅 핏범위(px면 알파를 픽셀구간으로 슬라이스)
+            w.fit_unit = funit_ch
+            w.fit_lo_nm = fnm_lo_ch
+            w.fit_hi_nm = fnm_hi_ch
             w.temperature = self.spin_temp.value()
             w.pressure = self.spin_pres.value()
             w.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
@@ -3478,6 +3533,7 @@ class CAESARAnalyzer(QMainWindow):
             "f_max": self.txt_max.text(),
             "fit_start_nm": self.spin_fit_start_nm.value(),
             "fit_end_nm": self.spin_fit_end_nm.value(),
+            "fit_unit": self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else "nm",
             "poly_deg": self.spin_poly_deg.value(),
             "step_limit": self.spin_step_limit.value() if hasattr(self, 'spin_step_limit') else 0.5,
             "ref_props": dict(getattr(self, 'ref_props', {})),
@@ -3499,6 +3555,8 @@ class CAESARAnalyzer(QMainWindow):
             self.spin_fit_start_nm.setValue(scenario["fit_start_nm"])
         if "fit_end_nm" in scenario:
             self.spin_fit_end_nm.setValue(scenario["fit_end_nm"])
+        if hasattr(self, 'cb_fit_unit') and "fit_unit" in scenario:
+            self.cb_fit_unit.setCurrentText(scenario.get("fit_unit", "nm"))
         self.spin_poly_deg.setValue(scenario.get("poly_deg", 3))
         if hasattr(self, 'spin_step_limit'):
             self.spin_step_limit.setValue(scenario.get("step_limit", 0.5))

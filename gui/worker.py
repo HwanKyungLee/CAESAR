@@ -130,6 +130,32 @@ class AnalysisWorker(QThread):
                                              bounds_error=False, fill_value='extrapolate')
         return np.asarray(f(np.asarray(wave_nm, dtype=float)), dtype=float)
 
+    def _alpha_fit_slice(self, wave_nm):
+        """알파 행을 핏범위로 슬라이스할 인덱스(slice) 또는 None(전체).
+        fit_unit=='px': [pixel_min:pixel_max] 픽셀구간(박사님 시나리오 775-1550 등 재현).
+        fit_unit=='nm': fit_lo_nm~fit_hi_nm 안의 파장만. 둘 다 None/full이면 전체 핏(기존 동작)."""
+        unit = getattr(self, 'fit_unit', 'nm')
+        n = len(wave_nm)
+        if unit == 'px':
+            a = max(0, int(self.pixel_min))
+            b = min(n, int(self.pixel_max)) if self.pixel_max else n
+            if b - a >= 2 and (a > 0 or b < n):
+                return slice(a, b)
+            return None
+        lo = getattr(self, 'fit_lo_nm', None)
+        hi = getattr(self, 'fit_hi_nm', None)
+        if lo is None or hi is None:
+            return None
+        lo, hi = (lo, hi) if lo <= hi else (hi, lo)
+        w = np.asarray(wave_nm, dtype=float)
+        # 알파 전체 파장범위를 (거의) 덮으면 슬라이스 안 함(기존 동작 보존)
+        if lo <= float(np.nanmin(w)) + 1e-6 and hi >= float(np.nanmax(w)) - 1e-6:
+            return None
+        idx = np.where((w >= lo) & (w <= hi))[0]
+        if len(idx) >= 2:
+            return slice(int(idx[0]), int(idx[-1]) + 1)
+        return None
+
     # ==========================================
     # VarPro 핏 — core.doas_fit.DoasFitter 로 위임(단일 구현 공유)
     # AnalysisWorker는 스캔 루프/상태(Kalman, etalon 한번검출, R-cal 등)만 소유.
@@ -274,6 +300,9 @@ class AnalysisWorker(QThread):
                     # 레퍼런스는 알파의 실제 파장에 평가되도록 engine 마스터축 픽셀로 매핑
                     # → Hot CH2/CH3도 roi2/roi3 파장으로 정확히 정렬(채널별 wavecal 자동 반영).
                     wave_nm, intensity_raw, env_t, env_p = DataIO.load_alpha_trace_row_full(file_path, row_idx)
+                    sl = self._alpha_fit_slice(wave_nm)
+                    if sl is not None:
+                        wave_nm = wave_nm[sl]; intensity_raw = intensity_raw[sl]
                     pixel_idx = self._alpha_pixels(wave_nm)
                     state_flag = 1   # 알파는 ambient
                 else:

@@ -1,0 +1,187 @@
+{
+    "_comment": "박사님 핏 시나리오 프리셋. CH1=Cold(775-1550,poly4), CH2=Hot ROI1(600-1270,poly4), CH3=Hot ROI2(900-1450,poly3). 모두 px단위. CHOCHO·H2O의 shift/squeeze는 NO2에 Link. ★완료할것: (1)H2O 단면 파일 지정, (2)CH2/CH3 Hot wavecal(wl_path) 지정. CH1 Cold wavecal은 채워둠.",
+    "version": 2,
+    "active": 1,
+    "channels": {
+        "1": {
+            "wl_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260604_Hg_400-497nm_Poly2.txt",
+            "refs": [
+                {
+                    "name": "NO2",
+                    "path": "C:/Doasis_Work/Reference raw\\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
+                    "mult": 0
+                },
+                {
+                    "name": "CHOCHO",
+                    "path": "C:/Doasis_Work/Reference raw\\CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
+                    "mult": -1
+                },
+                {
+                    "name": "H2O",
+                    "path": "",
+                    "mult": 0
+                }
+            ],
+            "data_label": "Cold",
+            "f_min": "775",
+            "f_max": "1550",
+            "fit_start_nm": 435.0,
+            "fit_end_nm": 480.0,
+            "fit_unit": "px",
+            "poly_deg": 4,
+            "step_limit": 0.5,
+            "ref_props": {
+                "NO2": {
+                    "sh_mode": "Limit",
+                    "sh_val": "-2.0, 2.0",
+                    "sq_mode": "Limit",
+                    "sq_val": "-0.02, 0.02",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                },
+                "CHOCHO": {
+                    "sh_mode": "Link",
+                    "sh_val": "NO2",
+                    "sq_mode": "Link",
+                    "sq_val": "NO2",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                },
+                "H2O": {
+                    "sh_mode": "Link",
+                    "sh_val": "NO2",
+                    "sq_mode": "Link",
+                    "sq_val": "NO2",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                }
+            },
+            "tikhonov_lambda": 0.0,
+            "use_robust": false,
+            "kalman_q": 0.0005,
+            "kalman_r": 0.05,
+            "cavity_d": 51.8,
+            "rl_factor": 1.0
+        },
+        "2": {
+            "wl_path": "",
+            "refs": [
+                {
+                    "name": "NO2",
+                    "path": "C:/Doasis_Work/Reference raw\\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
+                    "mult": 0
+                },
+                {
+                    "name": "CHOCHO",
+                    "path": "C:/Doasis_Work/Reference raw\\CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
+                    "mult": -1
+                },
+                {
+                    "name": "H2O",
+                    "path": "",
+                    "mult": 0
+                }
+            ],
+            "data_label": "PNs",
+            "f_min": "600",
+            "f_max": "1270",
+            "fit_start_nm": 435.0,
+            "fit_end_nm": 480.0,
+            "fit_unit": "px",
+            "poly_deg": 4,
+            "step_limit": 0.5,
+            "ref_props": {
+                "NO2": {
+                    "sh_mode": "Limit",
+                    "sh_val": "-2.0, 2.0",
+                    "sq_mode": "Limit",
+                    "sq_val": "-0.02, 0.02",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                },
+                "CHOCHO": {
+                    "sh_mode": "Link",
+                    "sh_val": "NO2",
+                    "sq_mode": "Link",
+                    "sq_val": "NO2",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                },
+                "H2O": {
+                    "sh_mode": "Link",
+                    "sh_val": "NO2",
+                    "sq_mode": "Link",
+                    "sq_val": "NO2",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                }
+            },
+            "tikhonov_lambda": 0.0,
+            "use_robust": false,
+            "kalman_q": 0.0005,
+            "kalman_r": 0.05,
+            "cavity_d": 51.8,
+            "rl_factor": 1.0
+        },
+        "3": {
+            "wl_path": "",
+            "refs": [
+                {
+                    "name": "NO2",
+                    "path": "C:/Doasis_Work/Reference raw\\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
+                    "mult": 0
+                },
+                {
+                    "name": "CHOCHO",
+                    "path": "C:/Doasis_Work/Reference raw\\CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
+                    "mult": -1
+                },
+                {
+                    "name": "H2O",
+                    "path": "",
+                    "mult": 0
+                }
+            ],
+            "data_label": "ANs",
+            "f_min": "900",
+            "f_max": "1450",
+            "fit_start_nm": 435.0,
+            "fit_end_nm": 480.0,
+            "fit_unit": "px",
+            "poly_deg": 3,
+            "step_limit": 0.5,
+            "ref_props": {
+                "NO2": {
+                    "sh_mode": "Limit",
+                    "sh_val": "-2.0, 2.0",
+                    "sq_mode": "Limit",
+                    "sq_val": "-0.02, 0.02",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                },
+                "CHOCHO": {
+                    "sh_mode": "Link",
+                    "sh_val": "NO2",
+                    "sq_mode": "Link",
+                    "sq_val": "NO2",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                },
+                "H2O": {
+                    "sh_mode": "Link",
+                    "sh_val": "NO2",
+                    "sq_mode": "Link",
+                    "sq_val": "NO2",
+                    "t_ref": 25.0,
+                    "t_coeff": 0.0
+                }
+            },
+            "tikhonov_lambda": 0.0,
+            "use_robust": false,
+            "kalman_q": 0.0005,
+            "kalman_r": 0.05,
+            "cavity_d": 51.8,
+            "rl_factor": 1.0
+        }
+    }
+}
