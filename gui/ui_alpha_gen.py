@@ -9,7 +9,7 @@ import os
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
-    QListWidget, QDoubleSpinBox, QMessageBox,
+    QListWidget, QDoubleSpinBox, QMessageBox, QCheckBox, QWidget,
 )
 
 from gui.dlg_dir import dlg_dir
@@ -75,6 +75,28 @@ class AlphaGeneratorDialog(QDialog):
         sav.addWidget(self._lbl_out, 1)
         root.addLayout(sav)
 
+        # 박사님 형식(per-bin .dat) 옵션
+        drn = QHBoxLayout()
+        self._chk_drnam = QCheckBox("박사님 형식 (전체 2048px · per-bin .dat)")
+        self._chk_drnam.setToolTip(
+            "체크하면 ch{N}_{YYYYMMDD}_NNNNNN.dat (2048줄·1컬럼·헤더없음) 으로 저장.\n"
+            "박사님 _avg_60s.mat의 std_t 그리드에 binning → 박사님 doasis가 읽을 수 있음.")
+        self._chk_drnam.toggled.connect(lambda on: self._mat_row.setVisible(on))
+        drn.addWidget(self._chk_drnam)
+        drn.addStretch(1)
+        root.addLayout(drn)
+
+        self._mat_row = QWidget()
+        mr = QHBoxLayout(self._mat_row); mr.setContentsMargins(0, 0, 0, 0)
+        btn_mat = QPushButton("📂 박사님 _avg_60s.mat (std_t)")
+        btn_mat.clicked.connect(self._pick_mat)
+        self._lbl_mat = QLabel("(std_t .mat 미설정)")
+        self._lbl_mat.setStyleSheet("color:gray;")
+        mr.addWidget(btn_mat); mr.addWidget(self._lbl_mat, 1)
+        self._mat_row.setVisible(False)
+        self._drnam_mat = ""
+        root.addWidget(self._mat_row)
+
         # 상태 + 실행
         self._lbl_status = QLabel("")
         self._lbl_status.setStyleSheet("color:#1565C0;")
@@ -131,6 +153,14 @@ class AlphaGeneratorDialog(QDialog):
             self._out_dir = d
             self._lbl_out.setText(d)
 
+    def _pick_mat(self):
+        f, _ = QFileDialog.getOpenFileName(
+            self, "박사님 _avg_60s.mat (std_t)", dlg_dir("drnam_mat"), "MAT (*.mat);;All Files (*)")
+        if f:
+            dlg_dir("drnam_mat", f)
+            self._drnam_mat = f
+            self._lbl_mat.setText(os.path.basename(f))
+
     # ──────────────────────────────────────────────────────────────
     def _generate(self):
         if not self._raw_files:
@@ -138,6 +168,10 @@ class AlphaGeneratorDialog(QDialog):
             return
         if not self._out_dir:
             QMessageBox.warning(self, "No Output", "저장 폴더를 선택하세요.")
+            return
+        drnam_mat = self._drnam_mat if self._chk_drnam.isChecked() else None
+        if self._chk_drnam.isChecked() and not drnam_mat:
+            QMessageBox.warning(self, "std_t 필요", "박사님 형식은 _avg_60s.mat(std_t)을 지정하세요.")
             return
         self._btn_gen.setEnabled(False)
         self._lbl_status.setText("α 생성 시작…")
@@ -147,6 +181,7 @@ class AlphaGeneratorDialog(QDialog):
             avg_sec=self._spin_avg.value(),
             status_cb=self._on_status,
             done_cb=self._on_done,
+            drnam_mat=drnam_mat,
         )
         if not ok:
             self._btn_gen.setEnabled(True)

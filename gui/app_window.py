@@ -1556,13 +1556,29 @@ class CAESARAnalyzer(QMainWindow):
             self.lbl_alpha_dir.setText(os.path.basename(d) or d)
             self.lbl_alpha_dir.setStyleSheet("color: #1565C0; font-weight: bold;")
 
+    @staticmethod
+    def _read_drnam_std_t(mat_path):
+        """박사님 _avg_60s.mat 에서 std_t bin 경계(st,end)를 연초기준 초 (N,2)로.
+        std_t_st/std_t_end(doy) → sec=(doy-1)*86400. 실패 시 None."""
+        try:
+            import scipy.io as sio
+            m = sio.loadmat(mat_path)
+            st = np.asarray(m['std_t_st'], dtype=float).flatten()
+            en = np.asarray(m['std_t_end'], dtype=float).flatten()
+            n = min(len(st), len(en))
+            return np.column_stack([(st[:n] - 1.0) * 86400.0, (en[:n] - 1.0) * 86400.0])
+        except Exception:
+            return None
+
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
-                           status_cb=None, done_cb=None):
+                           status_cb=None, done_cb=None, drnam_mat=None):
         """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
 
         Alpha Generator 팝업이 raw 파일목록/출력폴더/avgsec를 넘겨 호출할 수 있다.
         인자가 없으면(레거시) 메인 file_list/프롬프트/메인 avgsec를 사용.
         wavecal/핏레인지/cavity/flags 는 항상 메인 UI 설정을 재사용한다.
+        drnam_mat: 박사님 _avg_60s.mat 경로를 주면 그 std_t 그리드에 binning + 전체 2048px
+        + per-bin .dat(ch{N}_{YYYYMMDD}_NNNNNN.dat) 박사님 형식으로 출력.
         반환: True(시작됨) / False(검증 실패)."""
         flist = list(file_list) if file_list is not None else getattr(self, 'file_list', None)
         if not flist:
@@ -1589,7 +1605,21 @@ class CAESARAnalyzer(QMainWindow):
         if self._active_channel in self._channel_configs:
             self._channel_configs[self._active_channel] = self._capture_config()
 
-        configs = self._build_alpha_channel_configs(n_ch)
+        # 박사님 형식이면 전체 2048px + std_t 그리드
+        self._alpha_drnam_bins = None
+        self._alpha_drnam_date = ""
+        if drnam_mat:
+            bins = self._read_drnam_std_t(drnam_mat)
+            if bins is None or not len(bins):
+                QMessageBox.warning(self, "std_t 실패",
+                                    "박사님 _avg_60s.mat 에서 std_t_st/std_t_end 를 읽지 못했습니다.")
+                return False
+            self._alpha_drnam_bins = bins
+            import re as _re
+            m = _re.search(r'(\d{4})-(\d{2})-(\d{2})', os.path.basename(self._entry_filepath(flist[0])))
+            self._alpha_drnam_date = (m.group(1) + m.group(2) + m.group(3)) if m else ""
+
+        configs = self._build_alpha_channel_configs(n_ch, full_px=bool(drnam_mat))
         if not configs:
             QMessageBox.warning(self, "채널 설정 실패",
                                 "채널별 파장보정/픽셀 범위를 만들 수 없습니다.\n"
@@ -1655,21 +1685,25 @@ class CAESARAnalyzer(QMainWindow):
                 lo, hi = self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value()
         return (lo, hi) if lo <= hi else (hi, lo)
 
-    def _build_alpha_channel_configs(self, n_ch):
-        """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max) — 채널별 nm 핏레인지를 채널 cal로 변환."""
+    def _build_alpha_channel_configs(self, n_ch, full_px=False):
+        """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max).
+        full_px=True(박사님 형식)면 핏윈도우 무시하고 전체 2048px 사용."""
         label_for = {1: 'Cold'} if n_ch == 1 else {1: 'PNs', 2: 'ANs', 3: 'CH3'}
         configs = []
         for ch in range(1, n_ch + 1):
             wave_full = self._channel_wave_cal(n_ch, ch)
             if wave_full is None or len(wave_full) == 0:
                 continue
-            start_nm, end_nm = self._fit_nm_for_channel(ch)
-            pmin = int(np.abs(wave_full - start_nm).argmin())
-            pmax = int(np.abs(wave_full - end_nm).argmin())
-            if pmin > pmax:
-                pmin, pmax = pmax, pmin
-            if pmax <= pmin:
-                pmax = pmin + 1
+            if full_px:
+                pmin, pmax = 0, len(wave_full)
+            else:
+                start_nm, end_nm = self._fit_nm_for_channel(ch)
+                pmin = int(np.abs(wave_full - start_nm).argmin())
+                pmax = int(np.abs(wave_full - end_nm).argmin())
+                if pmin > pmax:
+                    pmin, pmax = pmax, pmin
+                if pmax <= pmin:
+                    pmax = pmin + 1
             configs.append(dict(channel=ch, label=label_for.get(ch, f'CH{ch}'),
                                 wave_nm=wave_full[pmin:pmax],
                                 pixel_min=pmin, pixel_max=pmax))
@@ -1707,6 +1741,9 @@ class CAESARAnalyzer(QMainWindow):
             channel       = cfg['channel'],
             avg_sec       = self._alpha_avgsec,
             channel_label = cfg['label'],
+            std_t_bins    = getattr(self, '_alpha_drnam_bins', None),
+            drnam_date    = getattr(self, '_alpha_drnam_date', ''),
+            drnam_chlabel = f"ch{cfg['channel']}",
         )
         self._alpha_export_worker.progress.connect(
             lambda n, lbl=cfg['label']: self._alpha_status(f"📁 [{lbl}] {n} 스캔..."))

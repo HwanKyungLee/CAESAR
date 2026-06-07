@@ -735,7 +735,10 @@ class AlphaExportWorker(QThread):
                  r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
                  r_cal_omr_max=1e-5,    # block-mean omr_d 상한 — 이보다 크면 reject
                  avg_sec=60.0,          # ambient 시간평균 창(초). 박사님 avgsec=60. 0이면 스캔별(평균 안 함)
-                 channel_label=""):     # 채널 라벨(PNs/ANs/Cold 등) — 출력 파일명·헤더에 사용
+                 channel_label="",      # 채널 라벨(PNs/ANs/Cold 등) — 출력 파일명·헤더에 사용
+                 std_t_bins=None,       # 박사님 형식: (N,2) [st_sec, end_sec] 연초기준 초 — 주면 이 그리드에 binning
+                 drnam_date="",         # 박사님 형식 폴더/파일명용 YYYYMMDD
+                 drnam_chlabel=""):     # 박사님 형식 채널 접두(ch1/ch2/ch3)
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
           기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
@@ -760,6 +763,9 @@ class AlphaExportWorker(QThread):
         self.r_cal_omr_max   = float(r_cal_omr_max)
         self.avg_sec         = float(avg_sec)
         self.channel_label   = str(channel_label)
+        self.std_t_bins      = np.asarray(std_t_bins, dtype=float) if std_t_bins is not None else None
+        self.drnam_date      = str(drnam_date)
+        self.drnam_chlabel   = str(drnam_chlabel)
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -1059,6 +1065,56 @@ class AlphaExportWorker(QThread):
                 rep_sec = float(np.nanmean([x[2] for x in grp]))
                 out.append((grp[0][0], gmean, rep_sec, T, P, I, len(grp)))
             return out
+
+        # ── 박사님 형식: 전 파일 ambient를 std_t 그리드에 binning → per-bin .dat (full 2048px) ──
+        # ch{N}_{YYYYMMDD}_000000/ch{N}_{YYYYMMDD}_{bin:06d}.dat, 2048줄 single-column %20.6e, 헤더없음.
+        if self.std_t_bins is not None and len(self.std_t_bins):
+            st = self.std_t_bins  # (N,2) [st_sec, end_sec] 연초기준 초
+            nbin = len(st)
+            bin_groups = {}
+            for (_fp, rid, g, sec, t, p, i) in amb_buffer:
+                if not np.isfinite(sec):
+                    continue
+                b = int(np.searchsorted(st[:, 0], sec, side='right') - 1)
+                if 0 <= b < nbin and sec < st[b, 1]:
+                    bin_groups.setdefault(b, []).append((g, t, p, i))
+            chp = self.drnam_chlabel or f"ch{self.channel}"
+            folder = os.path.join(self.output_dir, f"{chp}_{self.drnam_date}_000000")
+            os.makedirs(folder, exist_ok=True)
+            n_written = 0
+            for b in range(nbin):
+                grp = bin_groups.get(b)
+                if grp:
+                    I = np.nanmean(np.array([x[3] for x in grp], dtype=float), axis=0)
+                    t_am = float(np.nanmean([x[1] for x in grp]))
+                    p_am = float(np.nanmean([x[2] for x in grp]))
+                    gmean = float(np.mean([x[0] for x in grp]))
+                    if use_pchip:
+                        if gmean < za_x_min:
+                            i0_interp, t_i0, p_i0 = i0_first, t_first, p_first
+                        elif gmean > za_x_max:
+                            i0_interp, t_i0, p_i0 = i0_last, t_last, p_last
+                        else:
+                            i0_interp, t_i0, p_i0 = pchip_i0(gmean), float(pchip_t(gmean)), float(pchip_p(gmean))
+                    else:
+                        i0_interp, t_i0, p_i0 = i_za_static, t_za_static, p_za_static
+                    i_am_dc = (I - dark) if has_dark else I
+                    i0_s = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
+                    i_am_s = np.where(i_am_dc > 0, i_am_dc, 1e-9).astype(float)
+                    alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
+                    alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
+                    alpha = ((best_omr_d / self.rl_factor + alpha_ref)
+                             * ((i0_s - i_am_s) / i_am_s) - (alpha_sample - alpha_ref))
+                    n_written += 1
+                else:
+                    alpha = np.full(len(wave_nm), np.nan)   # 빈 bin
+                fn = os.path.join(folder, f"{chp}_{self.drnam_date}_{b+1:06d}.dat")
+                np.savetxt(fn, np.asarray(alpha, dtype=float).reshape(-1, 1), fmt='%20.6e')
+                if b % 200 == 0:
+                    self.progress.emit(b)
+            self.status_msg.emit(f"박사님 형식: {n_written}/{nbin} bin 채움 → {folder}")
+            self.finished.emit(folder)
+            return
 
         amb_by_fp = {}
         for e in amb_buffer:
