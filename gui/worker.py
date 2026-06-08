@@ -290,7 +290,10 @@ class AnalysisWorker(QThread):
             result = {'File': f"{os.path.basename(file_path)} [{row_idx:04d}]", 'Channel': self.channel, 'Params': {}}
             # Try to read the measurement timestamp from column 0 of the Araon row.
             # Falls back to file mtime → KST if column 0 is not a recognisable timestamp.
-            _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
+            if self._is_alpha_input(file_path):
+                _ts = DataIO.parse_alpha_row_time(file_path, row_idx)   # 알파: doy/datetime 컬럼
+            else:
+                _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
             result['Time'] = _ts.strftime('%Y-%m-%d %H:%M:%S') if _ts else f"row {row_idx:04d}"
 
             try:

@@ -649,6 +649,58 @@ class DataIO:
             return None
 
     @staticmethod
+    def parse_alpha_row_time(filepath, row_index=0):
+        """alpha_trace 한 행의 측정시각(datetime). 신포맷의 datetime 컬럼을 우선 읽고,
+        없으면 doy 컬럼→datetime(파일 연도 기준). 둘 다 없으면(구포맷) None."""
+        hdr = None
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if line.startswith('row_idx'):
+                        hdr = line.rstrip('\n').split('\t')
+                        break
+                    if not line.startswith('#') and line.strip():
+                        break
+        except Exception:
+            return None
+        if not hdr:
+            return None
+        dt_idx = hdr.index('datetime') if 'datetime' in hdr else None
+        doy_idx = hdr.index('doy') if 'doy' in hdr else None
+        if dt_idx is None and doy_idx is None:
+            return None
+        # 해당 데이터 행 읽기
+        parts = None
+        try:
+            cnt = 0
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    s = line.strip()
+                    if not s or s.startswith('#') or s.startswith('row_idx'):
+                        continue
+                    if cnt == row_index:
+                        parts = s.split('\t')
+                        break
+                    cnt += 1
+        except Exception:
+            return None
+        if not parts:
+            return None
+        if dt_idx is not None and dt_idx < len(parts):
+            for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+                try:
+                    return datetime.strptime(parts[dt_idx], fmt)
+                except (ValueError, IndexError):
+                    pass
+        if doy_idx is not None and doy_idx < len(parts):
+            try:
+                yr = DataIO._file_year(filepath) or 2026
+                return datetime(yr, 1, 1) + timedelta(days=float(parts[doy_idx]) - 1.0)
+            except (ValueError, IndexError):
+                pass
+        return None
+
+    @staticmethod
     def parse_row_doy(filepath, row_index=0):
         """행의 day-of-year(소수, 1-based) — 박사님 doy 와 동일. 실패 시 None."""
         try:
