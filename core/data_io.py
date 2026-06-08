@@ -84,29 +84,31 @@ class DataIO:
         Mega-Matrix rows). Falls back to NaN-tolerant per-value parse only when a
         token is non-numeric (rare)."""
         vals = line.strip().split('\t')
-        n = len(vals)
-        # Mega-Matrix 행이면 block0[5:META]("empty/legacy 3-ch", 어디서도 안 읽힘)는
-        # float 변환을 건너뛴다(NaN) → 행당 ~2048컬럼 파싱 절감. 시각(0,1)·플래그(4)·
-        # 채널블록(META:)·HK는 그대로 파싱.
-        META, CH = DataIO._META_COLS, DataIO._CH_PIXELS
-        if n >= META + CH:
-            try:
-                raw = np.full(n, np.nan)
-                raw[0:5] = np.array(vals[0:5], dtype=np.float64)
-                raw[META:] = np.array(vals[META:], dtype=np.float64)
-                return raw
-            except (ValueError, TypeError):
-                pass   # 비수치 토큰 → 아래 전체 안전 파싱으로 폴백
         try:
             return np.array(vals, dtype=np.float64)
         except (ValueError, TypeError):
-            raw = np.empty(n, dtype=float)
+            raw = np.empty(len(vals), dtype=float)
             for j, v in enumerate(vals):
                 try:
                     raw[j] = float(v)
                 except (ValueError, TypeError):
                     raw[j] = np.nan
             return raw
+
+    @staticmethod
+    def _parse_megamatrix_row(vals: list, keep_ranges) -> np.ndarray:
+        """Mega-Matrix 행을 '활성 컬럼 범위만' float 변환(나머지 NaN). keep_ranges =
+        [(s,e),...] = 헤더[0:5] + 활성 채널블록들 + HK. 비수치 토큰이면 전체 안전 파싱 폴백."""
+        n = len(vals)
+        try:
+            raw = np.full(n, np.nan)
+            for s, e in keep_ranges:
+                e = min(e, n)
+                if e > s:
+                    raw[s:e] = np.array(vals[s:e], dtype=np.float64)
+            return raw
+        except (ValueError, TypeError):
+            return DataIO._parse_line_to_array('\t'.join(vals))
 
     @staticmethod
     def _load_file_to_cache(filepath: str) -> list:
@@ -128,13 +130,41 @@ class DataIO:
         # Evict previous cached file to free memory
         DataIO._row_cache.clear()
 
-        rows: list = []
+        # 모든 비어있지 않은 라인 수집
         with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                rows.append(DataIO._parse_line_to_array(line))
+            lines = [s for s in (ln.strip() for ln in fh) if s]
+
+        rows: list = []
+        if lines:
+            split0 = lines[0].split('\t')
+            META, CH = DataIO._META_COLS, DataIO._CH_PIXELS
+            ncol = len(split0)
+            # Mega-Matrix면: 2048 블록들 중 '활성(신호 있는)' 것만 파싱(빈/legacy 채널 스킵).
+            # 활성 판정은 파일 전반 샘플 행들의 블록별 최대값으로(첫 행이 ZA/dark여도 견고).
+            if ncol >= META + CH:
+                nblk = (ncol - 5) // CH          # 5(헤더) 뒤 2048 블록 개수
+                hk_start = 5 + nblk * CH
+                # 샘플 행 파싱(최대 ~24개 균등)
+                step = max(1, len(lines) // 24)
+                blk_max = np.zeros(nblk)
+                for s in lines[::step][:24]:
+                    arr = DataIO._parse_line_to_array(s)
+                    for i in range(nblk):
+                        a = 5 + i * CH; b = a + CH
+                        if b <= len(arr):
+                            m = np.nanmax(arr[a:b])
+                            if np.isfinite(m) and m > blk_max[i]:
+                                blk_max[i] = m
+                active = [i for i in range(nblk) if blk_max[i] > DataIO._SIG_THRESHOLD]
+                if not active:
+                    active = [min(1, nblk - 1)]   # 안전장치: 최소 1블록(보통 ch1) 유지
+                # 보존 범위: 헤더[0:5] + 활성 블록들 + HK[hk_start:]
+                keep = [(0, 5)] + [(5 + i * CH, 5 + (i + 1) * CH) for i in active] + [(hk_start, ncol)]
+                for ln in lines:
+                    rows.append(DataIO._parse_megamatrix_row(ln.split('\t'), keep))
+            else:
+                for ln in lines:
+                    rows.append(DataIO._parse_line_to_array(ln))
 
         DataIO._row_cache[key] = rows
         DataIO._cached_key = key
@@ -216,7 +246,11 @@ class DataIO:
             end   = start + DataIO._CH_PIXELS
             if end > len(raw):
                 break
-            if float(np.nanmax(raw[start:end])) > DataIO._SIG_THRESHOLD:
+            block = raw[start:end]
+            # 활성블록 파싱 최적화로 비활성 채널은 NaN으로 채워질 수 있음 → all-NaN이면 부재
+            if np.all(np.isnan(block)):
+                break
+            if float(np.nanmax(block)) > DataIO._SIG_THRESHOLD:
                 n = i
             else:
                 break   # channel absent → no point checking further
