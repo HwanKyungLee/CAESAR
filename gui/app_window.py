@@ -2805,6 +2805,17 @@ class CAESARAnalyzer(QMainWindow):
         
         self.monitor.clear_trend()
 
+        # 농도 시계열 탭: 레퍼런스 가스(채널 union)별 플롯 구성 + 히스토리 초기화
+        conc_gases = list(getattr(self.engine, 'gas_list', []) or [])
+        for _ch, _cfg in self._channel_configs.items():
+            if _cfg:
+                for _r in _cfg.get('refs', []):
+                    _nm = _r.get('name')
+                    if _nm and _nm not in conc_gases:
+                        conc_gases.append(_nm)
+        if hasattr(self.monitor, 'setup_conc_plots'):
+            self.monitor.setup_conc_plots(conc_gases)
+
         # R-curve from a previous run is in fit-pixel-range length, not full-spectrum
         # length, so the slicing guard below would misfire. Clear it so this run
         # derives R fresh from its own He/ZA scans.
@@ -3129,6 +3140,10 @@ class CAESARAnalyzer(QMainWindow):
         gas_offset = len(self.engine.gas_list)
         self.table.setItem(row, c + 6 + gas_offset,     QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
         self.table.setItem(row, c + 6 + gas_offset + 1, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
+
+        # 농도 시계열 탭 갱신(가스별 ppb)
+        if hasattr(self.monitor, 'update_conc'):
+            self.monitor.update_conc(result_dict, row_index)
 
         # Force UI scroll to follow the latest row
         item = self.table.item(row, 0)

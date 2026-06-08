@@ -1177,6 +1177,7 @@ class MonitorWidget(QWidget):
 
         self.init_tab_components_pg()
         self.init_tab_fit_view_pg()
+        self.init_tab_conc_pg()
         self.init_tab_trend_pg()
         self.init_tab_viewer_pg()
         self.init_tab_hq_mpl()
@@ -2139,6 +2140,75 @@ class MonitorWidget(QWidget):
         self.y_sh   = self._trend_data[1]['sh']
         self.y_sq   = self._trend_data[1]['sq']
         self.y_rms  = self._trend_data[1]['rms']
+
+    # =========================================================
+    # [Tab] 농도 시계열 (가스별 ppb) — 레퍼런스 넣은 기체 전부
+    # =========================================================
+    _CONC_CH_COLORS = {1: '#1f77b4', 2: '#ff7f0e', 3: '#2ca02c'}
+
+    def init_tab_conc_pg(self):
+        """가스별 농도(ppb) 시계열 탭. 가스 플롯은 RUN 시작 시 setup_conc_plots로 구성."""
+        self.tab_conc = QWidget()
+        layout = QVBoxLayout(self.tab_conc)
+        self.glw_conc = pg.GraphicsLayoutWidget()
+        layout.addLayout(self._create_reset_toolbar(target_glw=self.glw_conc))
+        layout.addWidget(self.glw_conc)
+        # gas → PlotItem,  gas → {ch: curve},  gas → {ch: {'x':[], 'y':[]}}
+        self._conc_plots  = {}
+        self._conc_curves = {}
+        self._conc_data   = {}
+        self._conc_gases  = []
+        self.tabs.addTab(self.tab_conc, "🧪 농도 (Conc)")
+
+    def setup_conc_plots(self, gas_list):
+        """RUN 시작 시 — 레퍼런스 가스마다 농도 시계열 플롯 1개씩(채널별 곡선) 재구성."""
+        self.glw_conc.clear()
+        self._conc_plots, self._conc_curves, self._conc_data = {}, {}, {}
+        self._conc_gases = list(gas_list)
+        for r, gas in enumerate(self._conc_gases):
+            p = self.glw_conc.addPlot(row=r, col=0, title=f"{gas}  농도")
+            p.setLabel('left', f"{gas} (ppb)")
+            p.setLabel('bottom', '스캔 #')
+            p.showGrid(x=True, y=True)
+            p.setClipToView(True)
+            p.addLegend(offset=(10, 10))
+            self._conc_plots[gas] = p
+            self._conc_curves[gas] = {}
+            self._conc_data[gas] = {}
+            for ch, col in self._CONC_CH_COLORS.items():
+                pen = pg.mkPen(col, width=1.5)
+                self._conc_curves[gas][ch] = p.plot(pen=pen, symbol='o', symbolSize=4,
+                                                    symbolBrush=col, name=f"CH{ch}")
+                self._conc_data[gas][ch] = {'x': [], 'y': []}
+
+    def update_conc(self, result_dict, row_index):
+        """결과 1건(result_dict)에서 가스별 ppb를 뽑아 해당 채널 곡선에 추가."""
+        if not self._conc_gases:
+            return
+        ch = result_dict.get('Channel', 1)
+        if ch not in self._CONC_CH_COLORS:
+            ch = 1
+        for gas in self._conc_gases:
+            if gas not in result_dict:
+                continue
+            try:
+                y = float(result_dict.get(gas, 0.0))
+            except (TypeError, ValueError):
+                continue
+            d = self._conc_data[gas][ch]
+            d['x'].append(row_index)
+            d['y'].append(y)
+            self._conc_curves[gas][ch].setData(d['x'], d['y'])
+            p = self._conc_plots[gas]
+            if p.getViewBox().autoRangeEnabled():
+                p.enableAutoRange(axis='x', enable=True)
+
+    def clear_conc(self):
+        """농도 시계열 히스토리 초기화."""
+        for gas in self._conc_gases:
+            for ch in self._CONC_CH_COLORS:
+                self._conc_data[gas][ch] = {'x': [], 'y': []}
+                self._conc_curves[gas][ch].setData([], [])
 
     # =========================================================
     # [HQ Export] 
