@@ -75,6 +75,7 @@ class CAESARAnalyzer(QMainWindow):
         # 채널마다 독립 설정(references/wavecal/parameters/fit range)을 두고 병렬 피팅.
         # 겉은 탭, 속은 '현재 채널 설정 갈아끼우기'(_capture/_apply_config 재사용).
         self._channel_configs = {1: None}   # ch -> config dict(스냅샷)
+        self._channel_files = {1: []}        # ch -> 그 채널이 들고 있는 데이터 파일 리스트(자동분배 안 함)
         self._active_channel = 1
         self._switching_channel = False
         _chtab_bar = QHBoxLayout()
@@ -2536,13 +2537,17 @@ class CAESARAnalyzer(QMainWindow):
         After loading, auto-detect the channel count from the first file.
         """
         self.file_list = list(file_list)          # plain strings only — no expansion here
+        # 로드한 데이터를 '현재 활성 채널'이 소유(자동분배 X) — RUN이 채널마다 자기 리스트로 핏
+        if getattr(self, '_active_channel', None) is not None:
+            self._channel_files[self._active_channel] = list(self.file_list)
         self.table.setRowCount(len(self.file_list))
         self.table.clearContents()
 
         for i, fp in enumerate(self.file_list):
             self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(fp)))
 
-        self.status.setText(f"📁 {len(self.file_list)} file(s) loaded.")
+        ch = getattr(self, '_active_channel', 1)
+        self.status.setText(f"📁 CH{ch} — {len(self.file_list)} file(s) loaded.")
         self._auto_detect_channels()
 
     def _auto_detect_channels(self):
@@ -2752,13 +2757,23 @@ class CAESARAnalyzer(QMainWindow):
         
         self.results = []
 
-        # Multi-channel state
-        n_ch = self._detected_channels
-        # 알파trace 파일 입력이면 파일명(_PNs_/_ANs_/_CH3_)으로 채널 그룹화 →
-        # 채널별 워커로 분리해 CH1/CH2 트렌드가 섞이지 않게 한다.
-        self._alpha_groups = self._alpha_channel_groups(self.file_list)
-        if self._alpha_groups:
-            n_ch = len(self._alpha_groups)
+        # ── 채널 = 좌측 채널 탭. 각 탭이 자기 데이터를 보유(자동분배 안 함) ──
+        # 현재 활성 채널 데이터 동기화(로드 후 탭 전환 안 했을 수 있음)
+        if self._active_channel in self._channel_configs:
+            self._channel_files[self._active_channel] = list(self.file_list)
+        active_chs = sorted(c for c, v in self._channel_configs.items() if v is not None) \
+                     or [self._active_channel]
+        chs_with_data = [c for c in active_chs if self._channel_files.get(c)]
+        empty_chs = [c for c in active_chs if not self._channel_files.get(c)]
+        if not chs_with_data:
+            QMessageBox.warning(self, "데이터 없음",
+                                "어느 채널에도 데이터가 없습니다.\n채널 탭을 선택하고 데이터를 로드하세요.")
+            self._analysis_running = False
+            return
+        if empty_chs:
+            self.status.setText(f"⚠️ 데이터 없는 채널 건너뜀: {', '.join('CH'+str(c) for c in empty_chs)}")
+        self._alpha_groups = {c: list(self._channel_files[c]) for c in chs_with_data}
+        n_ch = len(chs_with_data)
         self._multi_channel_mode = (n_ch > 1)
         self._workers = []
         self._workers_done = 0
@@ -2893,32 +2908,23 @@ class CAESARAnalyzer(QMainWindow):
         flag_he  = self._parse_flags(self.txt_flag_he.text())
         flag_amb = self._parse_flags(self.txt_flag_amb.text())
 
-        # 채널 탭이 2개 이상이면 채널별 독립 엔진/설정으로 병렬 피팅(현재 탭 먼저 스냅샷).
+        # 채널 = 좌측 채널 탭. 각 탭이 자기 데이터로 병렬 피팅(현재 탭 설정 먼저 스냅샷).
         if self._active_channel in self._channel_configs:
             self._channel_configs[self._active_channel] = self._capture_config()
-        active_chs = sorted(c for c, v in self._channel_configs.items() if v is not None)
-        per_channel = len(active_chs) > 1
-
-        if per_channel:
-            # 채널별 data_label로 파일 분배(라벨 없으면 기존 _alpha_groups)
-            self._alpha_groups = self._channel_data_groups()
-            ch_list = active_chs
-            self._multi_channel_mode = True
-            self._workers_total = len(ch_list)
-            self._scan_counts = {}
-        else:
-            ch_list = sorted(self._alpha_groups) if self._alpha_groups else list(range(1, n_ch + 1))
+        ch_list = sorted(self._alpha_groups)        # 데이터 있는 채널만(early 블록에서 구성)
+        per_channel = len(ch_list) > 1
+        self._workers_total = len(ch_list)
+        self._scan_counts = {}
 
         for ch in ch_list:
-            if self._alpha_groups:
-                files_for_ch = self._alpha_groups.get(ch, self.file_list if not per_channel else None)
-                if files_for_ch is None:
-                    continue   # 이 채널에 매칭되는 데이터 없음
-            else:
-                files_for_ch = self.file_list
+            files_for_ch = self._alpha_groups.get(ch) or []
+            if not files_for_ch:
+                continue   # 데이터 없는 채널 스킵
+            # 활성+단일이면 라이브 엔진/설정, 아니면(병렬 or 비활성 채널) 채널 config로 빌드
+            use_cfg = per_channel or (ch != self._active_channel)
 
-            # 채널별 설정(per_channel) vs 공용(단일)
-            if per_channel:
+            # 채널별 설정 vs 공용(라이브)
+            if use_cfg:
                 cfg = self._channel_configs[ch]
                 eng_ch = self._build_engine_from_config(cfg)
                 rp_ch = cfg.get('ref_props', {})
@@ -3487,6 +3493,7 @@ class CAESARAnalyzer(QMainWindow):
         # 현재 채널 스냅샷 저장(단, 방금 삭제된 채널은 다시 저장하지 않음)
         if self._active_channel in self._channel_configs:
             self._channel_configs[self._active_channel] = self._capture_config()
+            self._channel_files[self._active_channel] = list(self.file_list)
         self._active_channel = ch
         cfg = self._channel_configs.get(ch)
         if cfg is not None:
@@ -3495,6 +3502,19 @@ class CAESARAnalyzer(QMainWindow):
                 self._apply_config(cfg, load_refs=True)
             finally:
                 self._switching_channel = False
+        # 표/그래프를 이 채널이 들고 있는 데이터로 교체
+        self._show_channel_files(ch)
+
+    def _show_channel_files(self, ch):
+        """선택 채널이 보유한 파일 리스트를 표에 표시(소유권은 그대로)."""
+        self.file_list = list(self._channel_files.get(ch, []))
+        self.table.setRowCount(len(self.file_list))
+        self.table.clearContents()
+        for i, fp in enumerate(self.file_list):
+            self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(self._entry_filepath(fp))))
+        self.status.setText(f"📁 CH{ch} — {len(self.file_list)} file(s)")
+        if self.file_list:
+            self._auto_detect_channels()
 
     def _add_channel_tab(self):
         """➕ — 현재 채널 설정을 복사한 새 채널 탭 생성(시작값=복사본)."""
@@ -3502,6 +3522,7 @@ class CAESARAnalyzer(QMainWindow):
         self._channel_configs[self._active_channel] = self._capture_config()
         new_ch = (max(self._channel_configs.keys()) + 1) if self._channel_configs else 1
         self._channel_configs[new_ch] = copy.deepcopy(self._channel_configs[self._active_channel])
+        self._channel_files[new_ch] = []          # 새 채널 데이터는 비어서 시작(설정만 복사)
         i = self._channel_tabbar.addTab(f"CH{new_ch}")
         self._channel_tabbar.setTabData(i, new_ch)
         self._channel_tabbar.setCurrentIndex(i)   # currentChanged → 복사본 적용
@@ -3513,6 +3534,7 @@ class CAESARAnalyzer(QMainWindow):
         idx = self._channel_tabbar.currentIndex()
         ch = self._channel_tabbar.tabData(idx)
         self._channel_configs.pop(ch, None)
+        self._channel_files.pop(ch, None)
         # 제거된 채널을 다시 저장하지 않도록 active를 무효화 후 removeTab
         # → currentChanged가 인접 채널을 로드.
         self._active_channel = None
@@ -3656,6 +3678,8 @@ class CAESARAnalyzer(QMainWindow):
             tb.setTabData(i, ch)
         self._switching_channel = False
         self._channel_configs = dict(chans)
+        # 채널 데이터 저장소: 기존 보유분 유지, 신규 채널만 빈 리스트
+        self._channel_files = {ch: self._channel_files.get(ch, []) for ch in chans}
         if active not in chans:
             active = sorted(chans)[0]
         self._active_channel = active
