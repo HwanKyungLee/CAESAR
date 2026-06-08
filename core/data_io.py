@@ -84,10 +84,23 @@ class DataIO:
         Mega-Matrix rows). Falls back to NaN-tolerant per-value parse only when a
         token is non-numeric (rare)."""
         vals = line.strip().split('\t')
+        n = len(vals)
+        # Mega-Matrix 행이면 block0[5:META]("empty/legacy 3-ch", 어디서도 안 읽힘)는
+        # float 변환을 건너뛴다(NaN) → 행당 ~2048컬럼 파싱 절감. 시각(0,1)·플래그(4)·
+        # 채널블록(META:)·HK는 그대로 파싱.
+        META, CH = DataIO._META_COLS, DataIO._CH_PIXELS
+        if n >= META + CH:
+            try:
+                raw = np.full(n, np.nan)
+                raw[0:5] = np.array(vals[0:5], dtype=np.float64)
+                raw[META:] = np.array(vals[META:], dtype=np.float64)
+                return raw
+            except (ValueError, TypeError):
+                pass   # 비수치 토큰 → 아래 전체 안전 파싱으로 폴백
         try:
             return np.array(vals, dtype=np.float64)
         except (ValueError, TypeError):
-            raw = np.empty(len(vals), dtype=float)
+            raw = np.empty(n, dtype=float)
             for j, v in enumerate(vals):
                 try:
                     raw[j] = float(v)
@@ -566,8 +579,11 @@ class DataIO:
             if len(raw_probe) >= 6175:
                 # ── Araon Mega-Matrix format ─────────────────────────────────
                 # Dynamic channel slice: CH1=2053:4101, CH2=4101:6149, CH3=6149:8197
-                n_ch_in_file = DataIO._detect_n_channels_from_row(raw_probe)
-                ch = max(1, min(channel, n_ch_in_file))   # clamp to available channels
+                # n_slots: 컬럼수 기반(구조적) — HK는 모든 슬롯 뒤 고정 위치라 신호유무와
+                # 무관하다. (구버전은 신호기반 감지를 써서 Cold[ch2 노이즈]가 n=1로 잡혀
+                # HK를 4101에서 읽어 T/P가 쓰레기였음 → 슬롯기반으로 교정.)
+                n_slots = max(1, (len(raw_probe) - DataIO._META_COLS) // DataIO._CH_PIXELS)
+                ch = max(1, min(channel, n_slots))   # clamp to available channels
                 col_start = DataIO._META_COLS + (ch - 1) * DataIO._CH_PIXELS
                 col_end   = col_start + DataIO._CH_PIXELS
                 intensity_full = raw_probe[col_start:col_end]
@@ -575,11 +591,9 @@ class DataIO:
                 state_flag = int(raw_probe[4])   # Measurement state flag (col 4)
 
                 # ── HK reading — relative offsets from the HK block start ────
-                # HK block begins immediately after all spectrum channels:
-                #   hk_start = META_COLS + n_channels × CH_PIXELS
-                # Using relative offsets makes this layout-independent so the
-                # same code works for 1-, 2- and 3-channel Araon files.
-                hk = DataIO._META_COLS + n_ch_in_file * DataIO._CH_PIXELS
+                # HK block begins immediately after all spectrum slots:
+                #   hk_start = META_COLS + n_slots × CH_PIXELS
+                hk = DataIO._META_COLS + n_slots * DataIO._CH_PIXELS
 
                 def _hk(rel):
                     c = hk + rel
