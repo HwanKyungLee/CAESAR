@@ -1108,6 +1108,10 @@ class RangeSelectorDialog(QDialog):
             # Update initial reference overlay (also calls canvas.draw())
             self.update_ref(self.combo.currentText())
 
+            # 데이터가 실제로 있는 파장대로 줌(패딩/외삽으로 생긴 0 구간 제외)
+            # → 0~500 전체가 아니라 400~500처럼 신호 있는 밴드에 맞춤
+            self._zoom_x_to_data()
+
         except Exception as e:
             # Surface the failure ON the canvas instead of silently leaving it blank
             # (the "창은 뜨는데 그래프가 안 뜸" symptom was a swallowed load error).
@@ -1121,6 +1125,22 @@ class RangeSelectorDialog(QDialog):
                 self.canvas.draw()
             except Exception:
                 pass
+
+    def _zoom_x_to_data(self):
+        """x축을 실제 데이터(유한·비0 y)가 있는 구간으로 줌. alpha 패딩/외삽 0 구간 제외.
+        SpanSelector/overlay 보존(ax 메인 x만 조정)."""
+        try:
+            xv = np.asarray(self.x, dtype=float)
+            yv = np.asarray(self.y, dtype=float)
+            valid = np.isfinite(xv) & np.isfinite(yv) & (np.abs(yv) > 0)
+            if int(valid.sum()) >= 2:
+                xlo = float(np.min(xv[valid])); xhi = float(np.max(xv[valid]))
+                if xhi > xlo:
+                    m = (xhi - xlo) * 0.02
+                    self.ax.set_xlim(xlo - m, xhi + m)
+                    self.canvas.draw_idle()
+        except Exception:
+            pass
 
     def update_ref(self, name):
         """Draws the selected reference gas spectrum on the secondary Y-axis.
