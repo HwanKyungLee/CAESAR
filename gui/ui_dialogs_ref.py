@@ -2034,11 +2034,14 @@ class MonitorWidget(QWidget):
         gas_list = self.engine.gas_list
         if not gas_list: return
 
-        # 1. Create plot frames only once (including Residual)
+        # 1. Create plot frames only when the gas SET changes (개수뿐 아니라 이름까지).
+        #    채널마다 H2O vs H2O-HITRAN처럼 이름이 달라 개수만 보면 옛 곡선키가 남아
+        #    KeyError('H2O_data')가 났음 → 가스 이름 튜플로 판정.
         current_gas_count = len(gas_list)
-        if "layout_ready" not in self.plot_items or self.plot_items["gas_count"] != current_gas_count:
+        gas_key = tuple(gas_list)
+        if "layout_ready" not in self.plot_items or self.plot_items.get("gas_key") != gas_key:
             self.glw_comp.clear()
-            self.curve_items = {} 
+            self.curve_items = {}
             cols = 2
             
             for i, name in enumerate(gas_list):
@@ -2058,12 +2061,15 @@ class MonitorWidget(QWidget):
             
             self.plot_items["layout_ready"] = True
             self.plot_items["gas_count"] = current_gas_count
+            self.plot_items["gas_key"] = gas_key
 
         # 2. Update data smoothly without recreating frames
         x_plot, _ = self.get_x_axis(pixel_idx)
         residual = intensity_raw - intensity_fit 
 
         for i, name in enumerate(gas_list):
+            if f"{name}_data" not in self.curve_items:
+                continue   # 곡선 미생성(가스셋 전환 직후 등) — 다음 갱신에서 재구성
             gas_fit = self.engine.get_individual_gas_contribution(pixel_idx, fit_params['shifts'], fit_params['squeezes'], fit_params['gas_coeffs'], i)
             self.curve_items[f"{name}_data"].setData(x_plot, residual + gas_fit)
             self.curve_items[f"{name}_fit"].setData(x_plot, gas_fit)
