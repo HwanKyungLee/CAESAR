@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
     QListWidget, QDoubleSpinBox, QMessageBox, QCheckBox, QWidget, QGroupBox,
+    QComboBox,
 )
 
 from gui.dlg_dir import dlg_dir
@@ -21,8 +22,8 @@ class AlphaGeneratorDialog(QDialog):
         self._app = parent          # CAESARAnalyzer
         self._raw_files = []
         self._out_dir = ""
-        self._ch_wavecal = {}       # {channel:int -> wavecal path} 직접 지정(비우면 자동)
-        self._wc_rows = {}          # {channel -> QLabel}
+        self._ch_tab_map = {}       # {raw 채널:int -> 사용할 채널 탭:int} 핏세팅(wavecal/범위) 출처
+        self._tab_combos = {}       # {raw 채널 -> QComboBox}
         self.setWindowTitle("🧪 Alpha Generator — Raw → Alpha 생성")
         self.resize(640, 520)
         self._build()
@@ -67,10 +68,11 @@ class AlphaGeneratorDialog(QDialog):
         opt.addStretch(1)
         root.addLayout(opt)
 
-        # 채널별 wavecal 직접 지정(선택 — 비우면 채널 탭/roi 폴더 자동)
-        self._wc_group = QGroupBox("채널별 wavecal (선택 — 비우면 채널 탭/자동)")
+        # raw 채널 → 사용할 핏세팅 탭(wavecal/범위 출처) 매핑
+        self._wc_group = QGroupBox("핏세팅 탭 선택 (raw 채널 → 어느 채널 탭 설정으로 알파 생성)")
         self._wc_layout = QVBoxLayout(self._wc_group)
-        self._wc_hint = QLabel("raw를 로드하면 채널 수만큼 표시됩니다. CH1→ch1 wavecal, CH2→ch2 …")
+        self._wc_hint = QLabel("raw를 로드하면 채널 수만큼 표시됩니다.\n"
+                               "예: 콜드 raw를 'CH3 탭'에 해둔 콜드 wavecal/범위로 만들고 싶으면 CH3 선택.")
         self._wc_hint.setStyleSheet("color:gray;")
         self._wc_layout.addWidget(self._wc_hint)
         root.addWidget(self._wc_group)
@@ -150,59 +152,55 @@ class AlphaGeneratorDialog(QDialog):
                 self._raw_files.append(f)
                 self._list.addItem(os.path.basename(f))
         self._lbl_status.setText(f"raw {len(self._raw_files)}개 선택됨")
-        # 채널 수 감지 → wavecal 행 갱신
+        # 채널 수 감지 → 핏세팅 탭 매핑 행 갱신
         if self._raw_files:
             try:
                 from core.data_io import DataIO
                 n_ch = int(DataIO.detect_channels(self._raw_files[0]) or 1)
             except Exception:
                 n_ch = 1
-            self._refresh_wavecal_rows(n_ch)
+            self._refresh_tab_rows(n_ch)
 
-    def _refresh_wavecal_rows(self, n_ch):
-        """채널 수만큼 wavecal 지정 행 구성(CH1→ch1 wavecal …)."""
+    def _available_tabs(self):
+        """부모 앱의 현재 채널 탭 번호 목록."""
+        tb = getattr(self._app, '_channel_tabbar', None)
+        if tb is not None:
+            tabs = [tb.tabData(i) for i in range(tb.count())]
+            tabs = [int(t) for t in tabs if t is not None]
+            if tabs:
+                return sorted(tabs)
+        return sorted(int(c) for c in getattr(self._app, '_channel_configs', {1: None}).keys())
+
+    def _refresh_tab_rows(self, n_ch):
+        """raw 채널 수만큼 '핏세팅 탭 선택' 행 구성. 기본: raw 채널 N → 탭 N(없으면 첫 탭)."""
         while self._wc_layout.count():
             it = self._wc_layout.takeAt(0)
             w = it.widget()
             if w:
                 w.deleteLater()
-        self._wc_rows = {}
+        self._tab_combos = {}
+        self._ch_tab_map = {}
         if n_ch <= 0:
             return
+        tabs = self._available_tabs() or [1]
         for ch in range(1, n_ch + 1):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
-            row.addWidget(QLabel(f"CH{ch}:"))
-            cur = self._ch_wavecal.get(ch)
-            lbl = QLabel(os.path.basename(cur) if cur else "(자동)")
-            lbl.setStyleSheet("color:#1565C0;")
-            btn = QPushButton("📂 선택")
-            btn.clicked.connect(lambda _=False, c=ch: self._pick_wavecal(c))
-            clr = QPushButton("✕")
-            clr.setFixedWidth(28)
-            clr.clicked.connect(lambda _=False, c=ch: self._clear_wavecal(c))
-            row.addWidget(lbl, 1)
-            row.addWidget(btn)
-            row.addWidget(clr)
+            row.addWidget(QLabel(f"raw CH{ch} →  핏세팅 탭:"))
+            cmb = QComboBox()
+            for t in tabs:
+                cmb.addItem(f"CH{t}", t)
+            default_tab = ch if ch in tabs else tabs[0]
+            cmb.setCurrentIndex(tabs.index(default_tab))
+            self._ch_tab_map[ch] = default_tab
+            cmb.currentIndexChanged.connect(
+                lambda _idx, c=ch, box=cmb: self._ch_tab_map.__setitem__(c, box.currentData()))
+            row.addWidget(cmb)
+            row.addStretch(1)
             cont = QWidget()
             cont.setLayout(row)
             self._wc_layout.addWidget(cont)
-            self._wc_rows[ch] = lbl
-
-    def _pick_wavecal(self, ch):
-        f, _ = QFileDialog.getOpenFileName(
-            self, f"CH{ch} wavecal 선택", dlg_dir("alpha_wavecal"),
-            "Wavecal (*.txt *.dat);;All Files (*)")
-        if f:
-            dlg_dir("alpha_wavecal", f)
-            self._ch_wavecal[ch] = f
-            if ch in self._wc_rows:
-                self._wc_rows[ch].setText(os.path.basename(f))
-
-    def _clear_wavecal(self, ch):
-        self._ch_wavecal.pop(ch, None)
-        if ch in self._wc_rows:
-            self._wc_rows[ch].setText("(자동)")
+            self._tab_combos[ch] = cmb
 
     def _clear(self):
         self._raw_files = []
@@ -245,7 +243,7 @@ class AlphaGeneratorDialog(QDialog):
             status_cb=self._on_status,
             done_cb=self._on_done,
             drnam_mat=drnam_mat,
-            ch_wavecal=dict(self._ch_wavecal),
+            ch_tab_map=dict(self._ch_tab_map),
         )
         if not ok:
             self._btn_gen.setEnabled(True)

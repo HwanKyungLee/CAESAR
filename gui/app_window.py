@@ -1583,7 +1583,7 @@ class CAESARAnalyzer(QMainWindow):
             return None
 
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
-                           status_cb=None, done_cb=None, drnam_mat=None, ch_wavecal=None):
+                           status_cb=None, done_cb=None, drnam_mat=None, ch_tab_map=None):
         """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
 
         Alpha Generator 팝업이 raw 파일목록/출력폴더/avgsec를 넘겨 호출할 수 있다.
@@ -1596,8 +1596,8 @@ class CAESARAnalyzer(QMainWindow):
         if not flist:
             QMessageBox.warning(self, "No Files", "먼저 측정(raw) 파일을 로드하세요.")
             return False
-        # 채널별 wavecal 직접 지정(Alpha Generator) — _channel_wave_cal이 우선 사용
-        self._alpha_ch_wavecal = {int(k): v for k, v in (ch_wavecal or {}).items() if v}
+        # raw 채널 → 핏세팅 탭 매핑(Alpha Generator). 비우면 raw 채널 N → 탭 N.
+        self._alpha_ch_tab_map = {int(k): int(v) for k, v in (ch_tab_map or {}).items()}
         if getattr(self, 'wavelengths', None) is None and self.engine._wave_axis is None:
             QMessageBox.warning(self, "No Wavelength Cal",
                                 "파장 캘리브레이션 파일을 먼저 로드하세요.")
@@ -1664,14 +1664,8 @@ class CAESARAnalyzer(QMainWindow):
         return cfg.get('wl_path', '')
 
     def _channel_wave_cal(self, n_ch, ch):
-        """채널 → per-pixel 파장 배열. 우선순위: Alpha Generator 직접지정(_alpha_ch_wavecal)
-        → 채널 탭 wavecal(wl_path) → 1ch=로드된 cal → ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
-        # 0) Alpha Generator에서 채널별로 직접 지정한 wavecal이 있으면 최우선
-        ov = getattr(self, '_alpha_ch_wavecal', {}).get(ch)
-        if ov and os.path.exists(ov):
-            arr = self._load_wavecal_array(ov)
-            if arr is not None and len(arr):
-                return np.asarray(arr, dtype=float).flatten()
+        """채널(탭) → per-pixel 파장 배열. 우선순위: 채널 탭 wavecal(wl_path) →
+        1ch=로드된 cal → ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
         wlp = self._channel_wl_path(ch)
         if wlp and os.path.exists(wlp):
             arr = self._load_wavecal_array(wlp)
@@ -1731,19 +1725,22 @@ class CAESARAnalyzer(QMainWindow):
         """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max).
         full_px=True(박사님 형식)면 핏윈도우 무시하고 전체 2048px 사용."""
         label_for = {1: 'Cold'} if n_ch == 1 else {1: 'PNs', 2: 'ANs', 3: 'CH3'}
+        tab_map = getattr(self, '_alpha_ch_tab_map', {}) or {}
         configs = []
         for ch in range(1, n_ch + 1):
-            wave_full = self._channel_wave_cal(n_ch, ch)
+            # raw 채널 ch가 어느 채널 탭 설정(wavecal/범위)을 쓸지(기본: 같은 번호 탭)
+            tab = int(tab_map.get(ch, ch))
+            wave_full = self._channel_wave_cal(n_ch, tab)
             if wave_full is None or len(wave_full) == 0:
                 continue
             if full_px:
                 pmin, pmax = 0, len(wave_full)
-            elif self._fit_unit_for_channel(ch) == 'px':
-                pmin, pmax = self._fit_px_for_channel(ch)
+            elif self._fit_unit_for_channel(tab) == 'px':
+                pmin, pmax = self._fit_px_for_channel(tab)
                 pmin = max(0, min(pmin, len(wave_full) - 1))
                 pmax = max(pmin + 1, min(pmax, len(wave_full)))
             else:
-                start_nm, end_nm = self._fit_nm_for_channel(ch)
+                start_nm, end_nm = self._fit_nm_for_channel(tab)
                 pmin = int(np.abs(wave_full - start_nm).argmin())
                 pmax = int(np.abs(wave_full - end_nm).argmin())
                 if pmin > pmax:
