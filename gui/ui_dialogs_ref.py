@@ -404,9 +404,10 @@ class ReferenceGeneratorDialog(QDialog):
         # HITRAN API Parameters
         lay_hitran = QHBoxLayout()
         lay_hitran.addWidget(QLabel("T(K):"))
-        self.spin_temp = QDoubleSpinBox(); self.spin_temp.setRange(200.0, 400.0); self.spin_temp.setValue(293.0)
+        self.spin_temp = QDoubleSpinBox(); self.spin_temp.setRange(100.0, 1500.0); self.spin_temp.setValue(293.0)
         self.spin_temp.setToolTip("HITRAN cross-section temperature in K.\n"
-                                   "Auto-filled from main window's fallback T (°C + 273.15) when this dialog opens.")
+                                   "Auto-filled from main window's fallback T (°C + 273.15) when this dialog opens.\n"
+                                   "TD 채널: PNs 180°C=453K, ANs 300°C=573K (가열 셀 가스온도 기준).")
         lay_hitran.addWidget(self.spin_temp)
         lay_hitran.addWidget(QLabel("P(atm):"))
         self.spin_press = QDoubleSpinBox(); self.spin_press.setRange(0.1, 2.0); self.spin_press.setValue(1.0)
