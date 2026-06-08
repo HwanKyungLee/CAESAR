@@ -3338,15 +3338,32 @@ class CAESARAnalyzer(QMainWindow):
                     "# ==========================================================\n"
                 ]
 
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write("\n".join(header_lines))
-                    
-                    if path.endswith('.csv'):
-                        df.to_csv(f, index=False, lineterminator='\n')
-                    else:
-                        df.to_csv(f, sep='\t', index=False, lineterminator='\n')
-                    
-                QMessageBox.information(self, "Success", f"🎉 Analysis results saved successfully!\nFile: {os.path.basename(path)}")
+                header_txt = "\n".join(header_lines)
+                is_csv = path.endswith('.csv')
+
+                def _write_df(_df, _path):
+                    with open(_path, 'w', encoding='utf-8') as f:
+                        f.write(header_txt)
+                        if is_csv:
+                            _df.to_csv(f, index=False, lineterminator='\n')
+                        else:
+                            _df.to_csv(f, sep='\t', index=False, lineterminator='\n')
+
+                # 채널 2개 이상이면 채널별 파일로 분리(파일명에 _CH{N})
+                chans = sorted(df['Channel'].dropna().unique()) if 'Channel' in df.columns else []
+                if len(chans) > 1:
+                    base, ext = os.path.splitext(path)
+                    written = []
+                    for ch in chans:
+                        sub = df[df['Channel'] == ch]
+                        cpath = f"{base}_CH{int(ch)}{ext}"
+                        _write_df(sub, cpath)
+                        written.append(f"CH{int(ch)} → {os.path.basename(cpath)} ({len(sub)}행)")
+                    QMessageBox.information(self, "Success",
+                                           "🎉 채널별 결과 저장 완료!\n\n" + "\n".join(written))
+                else:
+                    _write_df(df, path)
+                    QMessageBox.information(self, "Success", f"🎉 Analysis results saved successfully!\nFile: {os.path.basename(path)}")
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"An error occurred while saving:\n{e}")
