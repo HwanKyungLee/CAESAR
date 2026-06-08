@@ -326,6 +326,11 @@ class AnalysisWorker(QThread):
                 # Update current environment for PPB calculation
                 self.temperature = env_t
                 self.pressure = env_p
+                # TD 채널 가스온도 오버라이드: ppb 밀도(n_air) 보정에 실제 가스온도(오븐
+                # 180/300°C)를 사용. HK는 셀히터(75°C, 과냉 방지)라 밀도 기준이 아님.
+                _gt = getattr(self, 'gas_temp_override', None)
+                if _gt is not None:
+                    self.temperature = float(_gt)
 
                 # [ State Switching & R-Calibration ]
                 # Flag lists from UI: ZA=[500~503], He=[510~513], Amb=[1]

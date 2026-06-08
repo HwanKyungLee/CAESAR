@@ -108,6 +108,17 @@ class CAESARAnalyzer(QMainWindow):
             "이 채널 데이터(계기시각)의 타임존. 출력 시각(결과 Time·농도탭)을 UTC로 통일.\n"
             "KST(+9) 선택 시 결과 시각을 −9h 해서 UTC로 변환. (Cold 6월·Hot 6월=UTC, Hot 5월=KST)")
         _chtab_bar.addWidget(self.cb_input_tz)
+        _chtab_bar.addWidget(QLabel("가스T℃:"))
+        self.spin_gas_temp = QDoubleSpinBox()
+        self.spin_gas_temp.setRange(0.0, 600.0)
+        self.spin_gas_temp.setDecimals(0)
+        self.spin_gas_temp.setValue(0.0)
+        self.spin_gas_temp.setFixedWidth(int(60 * self._s))
+        self.spin_gas_temp.setToolTip(
+            "이 채널 가스의 실제 온도(°C) — ppb 밀도(n_air) 보정용.\n"
+            "0 = 자동(알파 HK 온도 사용). TD 채널은 오븐 가스온도 입력: PNs=180, ANs=300.\n"
+            "(HK 75°C는 셀히터=과냉방지용이라 밀도 기준 아님 → Hot이 NO2 과소평가되던 원인)")
+        _chtab_bar.addWidget(self.spin_gas_temp)
         left_layout.addLayout(_chtab_bar)
 
         # --- 1. Reference Management Section ---
@@ -2984,6 +2995,7 @@ class CAESARAnalyzer(QMainWindow):
                 fnm_lo_ch = float(cfg.get('fit_start_nm', 435.0))
                 fnm_hi_ch = float(cfg.get('fit_end_nm', 480.0))
                 tz_ch = cfg.get('input_tz', 'UTC')
+                gtemp_ch = float(cfg.get('gas_temp', 0.0) or 0.0)
                 if funit_ch == 'px':
                     # 박사님 시나리오: 픽셀 인덱스를 그대로 사용(예 Cold 775-1550)
                     try:
@@ -3013,6 +3025,7 @@ class CAESARAnalyzer(QMainWindow):
                 funit_ch = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
                 fnm_lo_ch = self.spin_fit_start_nm.value(); fnm_hi_ch = self.spin_fit_end_nm.value()
                 tz_ch = self.cb_input_tz.currentText() if hasattr(self, 'cb_input_tz') else 'UTC'
+                gtemp_ch = float(self.spin_gas_temp.value()) if hasattr(self, 'spin_gas_temp') else 0.0
                 pmin, pmax = pixel_min, pixel_max
                 cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
                 lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
@@ -3050,6 +3063,8 @@ class CAESARAnalyzer(QMainWindow):
             w.fit_hi_nm = fnm_hi_ch
             # 입력 TZ → UTC 변환(KST면 결과 시각 −9h)
             w.tz_offset_sec = -9 * 3600 if str(tz_ch).upper().startswith('KST') else 0
+            # 가스온도 오버라이드(>0이면 ppb 밀도보정에 그 온도 사용; 0=자동 HK)
+            w.gas_temp_override = gtemp_ch if gtemp_ch > 0 else None
             w.temperature = self.spin_temp.value()
             w.pressure = self.spin_pres.value()
             w.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
@@ -3624,6 +3639,7 @@ class CAESARAnalyzer(QMainWindow):
             "refs": refs_data,
             "data_label": self._ed_ch_datalabel.text().strip() if hasattr(self, '_ed_ch_datalabel') else "",
             "input_tz": self.cb_input_tz.currentText() if hasattr(self, 'cb_input_tz') else "UTC",
+            "gas_temp": self.spin_gas_temp.value() if hasattr(self, 'spin_gas_temp') else 0.0,
             "f_min": self.txt_min.text(),
             "f_max": self.txt_max.text(),
             "fit_start_nm": self.spin_fit_start_nm.value(),
@@ -3648,6 +3664,8 @@ class CAESARAnalyzer(QMainWindow):
             self._ed_ch_datalabel.setText(scenario.get("data_label", ""))
         if hasattr(self, 'cb_input_tz'):
             self.cb_input_tz.setCurrentText(scenario.get("input_tz", "UTC"))
+        if hasattr(self, 'spin_gas_temp'):
+            self.spin_gas_temp.setValue(scenario.get("gas_temp", 0.0))
         if "fit_start_nm" in scenario:
             self.spin_fit_start_nm.setValue(scenario["fit_start_nm"])
         if "fit_end_nm" in scenario:
