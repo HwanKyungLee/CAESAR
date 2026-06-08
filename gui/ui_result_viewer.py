@@ -99,6 +99,12 @@ class ResultViewerWidget(QWidget):
                                 "NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs 유도농도 플롯")
         self._btn_td.clicked.connect(self._derive_no2_pns_ans)
         fbar.addWidget(self._btn_td)
+        self._btn_td_save = QPushButton("💾 유도농도 저장")
+        self._btn_td_save.setFixedWidth(130)
+        self._btn_td_save.setToolTip("계산한 NO2/PNs/ANs(+원시 채널 NO2)를 TSV로 저장")
+        self._btn_td_save.setEnabled(False)
+        self._btn_td_save.clicked.connect(self._save_td_result)
+        fbar.addWidget(self._btn_td_save)
         self._stats_lbl = QLabel("")
         self._stats_lbl.setStyleSheet("color:#444;")
         fbar.addWidget(self._stats_lbl, 1)
@@ -186,6 +192,12 @@ class ResultViewerWidget(QWidget):
         pns = pn_i - cn
         ans = an_i - pn_i
 
+        # 저장용 보관(시각 epoch + 유도농도 + 원시 채널 NO2)
+        self._td_data = {'epoch': ct, 'NO2': no2, 'PNs': pns, 'ANs': ans,
+                         'Cold_NO2': cn, 'PNsCh_NO2': pn_i, 'ANsCh_NO2': an_i}
+        if hasattr(self, '_btn_td_save'):
+            self._btn_td_save.setEnabled(True)
+
         # 위: 유도농도(NO2/PNs/ANs), 아래: 원시 채널 NO2
         ax1 = pg.DateAxisItem(orientation='bottom')
         self._pw_top.setAxisItems({'bottom': ax1})
@@ -209,6 +221,39 @@ class ResultViewerWidget(QWidget):
         self._lbl.setText("🧪 유도농도: NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs (Cold 시각격자에 정렬). "
                           "음수는 노이즈/시간불일치.")
         self._lbl.setStyleSheet("color:#1565C0;")
+
+    def _save_td_result(self):
+        """유도농도(NO2/PNs/ANs) + 원시 채널 NO2를 TSV로 저장."""
+        from PyQt6.QtWidgets import QMessageBox
+        from gui.dlg_dir import dlg_dir
+        from datetime import datetime
+        d = getattr(self, '_td_data', None)
+        if not d:
+            QMessageBox.warning(self, "데이터 없음", "먼저 NO2/PNs/ANs를 계산하세요."); return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "유도농도 저장", os.path.join(dlg_dir("result") or "", "NO2_PNs_ANs.dat"),
+            "데이터 (*.dat *.csv *.tsv);;모든 파일 (*)")
+        if not path:
+            return
+        dlg_dir("result", path)
+        sep = ',' if path.lower().endswith('.csv') else '\t'
+        cols = ['datetime', 'NO2', 'PNs', 'ANs', 'Cold_NO2', 'PNsCh_NO2', 'ANsCh_NO2']
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write("# CAESAR Pro 유도농도 (ppb)\n")
+                f.write("# NO2=Cold, PNs=PNsCh-Cold, ANs=ANsCh-PNsCh (Cold 시각격자 정렬)\n")
+                f.write(sep.join(cols) + "\n")
+                ep = d['epoch']
+                for i in range(len(ep)):
+                    try:
+                        dt = datetime.fromtimestamp(float(ep[i])).strftime('%Y-%m-%d %H:%M:%S')
+                    except (OSError, ValueError, OverflowError):
+                        dt = str(ep[i])
+                    row = [dt] + [f"{d[c][i]:.4f}" if np.isfinite(d[c][i]) else "" for c in cols[1:]]
+                    f.write(sep.join(row) + "\n")
+            QMessageBox.information(self, "저장 완료", f"유도농도 저장:\n{os.path.basename(path)}  ({len(d['epoch'])}행)")
+        except Exception as e:
+            QMessageBox.critical(self, "저장 실패", str(e))
 
     # ──────────────────────────────────────────────────────────────
     def _open(self):
