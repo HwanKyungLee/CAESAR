@@ -1583,7 +1583,7 @@ class CAESARAnalyzer(QMainWindow):
             return None
 
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
-                           status_cb=None, done_cb=None, drnam_mat=None):
+                           status_cb=None, done_cb=None, drnam_mat=None, ch_wavecal=None):
         """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
 
         Alpha Generator 팝업이 raw 파일목록/출력폴더/avgsec를 넘겨 호출할 수 있다.
@@ -1596,6 +1596,8 @@ class CAESARAnalyzer(QMainWindow):
         if not flist:
             QMessageBox.warning(self, "No Files", "먼저 측정(raw) 파일을 로드하세요.")
             return False
+        # 채널별 wavecal 직접 지정(Alpha Generator) — _channel_wave_cal이 우선 사용
+        self._alpha_ch_wavecal = {int(k): v for k, v in (ch_wavecal or {}).items() if v}
         if getattr(self, 'wavelengths', None) is None and self.engine._wave_axis is None:
             QMessageBox.warning(self, "No Wavelength Cal",
                                 "파장 캘리브레이션 파일을 먼저 로드하세요.")
@@ -1662,8 +1664,14 @@ class CAESARAnalyzer(QMainWindow):
         return cfg.get('wl_path', '')
 
     def _channel_wave_cal(self, n_ch, ch):
-        """채널 → per-pixel 파장 배열. 우선순위: 채널 탭 wavecal(wl_path) →
-        1ch=로드된 cal → ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
+        """채널 → per-pixel 파장 배열. 우선순위: Alpha Generator 직접지정(_alpha_ch_wavecal)
+        → 채널 탭 wavecal(wl_path) → 1ch=로드된 cal → ≥2ch=Output\\wv_cal\\{roi1,roi2,..} 최신 Calib."""
+        # 0) Alpha Generator에서 채널별로 직접 지정한 wavecal이 있으면 최우선
+        ov = getattr(self, '_alpha_ch_wavecal', {}).get(ch)
+        if ov and os.path.exists(ov):
+            arr = self._load_wavecal_array(ov)
+            if arr is not None and len(arr):
+                return np.asarray(arr, dtype=float).flatten()
         wlp = self._channel_wl_path(ch)
         if wlp and os.path.exists(wlp):
             arr = self._load_wavecal_array(wlp)

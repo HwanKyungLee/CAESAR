@@ -9,7 +9,7 @@ import os
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
-    QListWidget, QDoubleSpinBox, QMessageBox, QCheckBox, QWidget,
+    QListWidget, QDoubleSpinBox, QMessageBox, QCheckBox, QWidget, QGroupBox,
 )
 
 from gui.dlg_dir import dlg_dir
@@ -21,6 +21,8 @@ class AlphaGeneratorDialog(QDialog):
         self._app = parent          # CAESARAnalyzer
         self._raw_files = []
         self._out_dir = ""
+        self._ch_wavecal = {}       # {channel:int -> wavecal path} 직접 지정(비우면 자동)
+        self._wc_rows = {}          # {channel -> QLabel}
         self.setWindowTitle("🧪 Alpha Generator — Raw → Alpha 생성")
         self.resize(640, 520)
         self._build()
@@ -64,6 +66,14 @@ class AlphaGeneratorDialog(QDialog):
         opt.addWidget(self._spin_avg)
         opt.addStretch(1)
         root.addLayout(opt)
+
+        # 채널별 wavecal 직접 지정(선택 — 비우면 채널 탭/roi 폴더 자동)
+        self._wc_group = QGroupBox("채널별 wavecal (선택 — 비우면 채널 탭/자동)")
+        self._wc_layout = QVBoxLayout(self._wc_group)
+        self._wc_hint = QLabel("raw를 로드하면 채널 수만큼 표시됩니다. CH1→ch1 wavecal, CH2→ch2 …")
+        self._wc_hint.setStyleSheet("color:gray;")
+        self._wc_layout.addWidget(self._wc_hint)
+        root.addWidget(self._wc_group)
 
         # 저장 폴더
         sav = QHBoxLayout()
@@ -140,6 +150,59 @@ class AlphaGeneratorDialog(QDialog):
                 self._raw_files.append(f)
                 self._list.addItem(os.path.basename(f))
         self._lbl_status.setText(f"raw {len(self._raw_files)}개 선택됨")
+        # 채널 수 감지 → wavecal 행 갱신
+        if self._raw_files:
+            try:
+                from core.data_io import DataIO
+                n_ch = int(DataIO.detect_channels(self._raw_files[0]) or 1)
+            except Exception:
+                n_ch = 1
+            self._refresh_wavecal_rows(n_ch)
+
+    def _refresh_wavecal_rows(self, n_ch):
+        """채널 수만큼 wavecal 지정 행 구성(CH1→ch1 wavecal …)."""
+        while self._wc_layout.count():
+            it = self._wc_layout.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        self._wc_rows = {}
+        if n_ch <= 0:
+            return
+        for ch in range(1, n_ch + 1):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(QLabel(f"CH{ch}:"))
+            cur = self._ch_wavecal.get(ch)
+            lbl = QLabel(os.path.basename(cur) if cur else "(자동)")
+            lbl.setStyleSheet("color:#1565C0;")
+            btn = QPushButton("📂 선택")
+            btn.clicked.connect(lambda _=False, c=ch: self._pick_wavecal(c))
+            clr = QPushButton("✕")
+            clr.setFixedWidth(28)
+            clr.clicked.connect(lambda _=False, c=ch: self._clear_wavecal(c))
+            row.addWidget(lbl, 1)
+            row.addWidget(btn)
+            row.addWidget(clr)
+            cont = QWidget()
+            cont.setLayout(row)
+            self._wc_layout.addWidget(cont)
+            self._wc_rows[ch] = lbl
+
+    def _pick_wavecal(self, ch):
+        f, _ = QFileDialog.getOpenFileName(
+            self, f"CH{ch} wavecal 선택", dlg_dir("alpha_wavecal"),
+            "Wavecal (*.txt *.dat);;All Files (*)")
+        if f:
+            dlg_dir("alpha_wavecal", f)
+            self._ch_wavecal[ch] = f
+            if ch in self._wc_rows:
+                self._wc_rows[ch].setText(os.path.basename(f))
+
+    def _clear_wavecal(self, ch):
+        self._ch_wavecal.pop(ch, None)
+        if ch in self._wc_rows:
+            self._wc_rows[ch].setText("(자동)")
 
     def _clear(self):
         self._raw_files = []
@@ -182,6 +245,7 @@ class AlphaGeneratorDialog(QDialog):
             status_cb=self._on_status,
             done_cb=self._on_done,
             drnam_mat=drnam_mat,
+            ch_wavecal=dict(self._ch_wavecal),
         )
         if not ok:
             self._btn_gen.setEnabled(True)
