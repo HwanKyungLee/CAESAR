@@ -1583,7 +1583,8 @@ class CAESARAnalyzer(QMainWindow):
             return None
 
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
-                           status_cb=None, done_cb=None, drnam_mat=None, ch_tab_map=None):
+                           status_cb=None, done_cb=None, drnam_mat=None, ch_tab_map=None,
+                           progress_cb=None):
         """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
 
         Alpha Generator 팝업이 raw 파일목록/출력폴더/avgsec를 넘겨 호출할 수 있다.
@@ -1649,6 +1650,10 @@ class CAESARAnalyzer(QMainWindow):
         self._alpha_done_msgs  = []
         self._alpha_status_cb  = status_cb   # 팝업 진행표시(옵션)
         self._alpha_user_done_cb = done_cb   # 팝업 완료콜백(옵션)
+        self._alpha_progress_cb = progress_cb  # 팝업 진행바(done, total) 콜백(옵션)
+        self._alpha_total       = 0
+        self._alpha_ch_done     = 0          # 완료된 채널 수(멀티채널 진행 표시용)
+        self._alpha_n_ch        = n_ch
         self.status.setText(f"📁 Alpha 내보내기 시작 ({n_ch}채널)...")
         self._start_next_alpha_export()
         return True
@@ -1790,8 +1795,11 @@ class CAESARAnalyzer(QMainWindow):
             # wide 형식: 멀티채널이면 ch{N}/ 하위폴더로 분리(단일이면 평면)
             channel_subdir = (f"ch{cfg['channel']}" if int(getattr(self, '_detected_channels', 1) or 1) > 1 else ""),
         )
+        n_ch_tot = max(1, int(getattr(self, '_alpha_n_ch', 1) or 1))
+        self._alpha_export_worker.total_ready.connect(
+            lambda tot: setattr(self, '_alpha_total', max(1, int(tot))))
         self._alpha_export_worker.progress.connect(
-            lambda n, lbl=cfg['label']: self._alpha_status(f"📁 [{lbl}] {n} 스캔..."))
+            lambda n, lbl=cfg['label']: self._alpha_on_progress(n, lbl, n_ch_tot))
         self._alpha_export_worker.status_msg.connect(lambda m: print(f"[AlphaExport] {m}"))
         self._alpha_export_worker.finished.connect(
             lambda res, lbl=cfg['label']: self._on_alpha_channel_done(res, lbl))
@@ -1821,12 +1829,25 @@ class CAESARAnalyzer(QMainWindow):
         dlg = PeakTrendDialog(self, default_dir=self._dlg_dir('data'))
         dlg.exec()
 
+    def _alpha_on_progress(self, done, lbl, n_ch_tot):
+        """알파 생성 진행을 %로 표시(채널 내 비율 + 채널 진척 합산) + 팝업 진행바 콜백."""
+        tot = max(1, int(getattr(self, '_alpha_total', 1)))
+        frac = min(1.0, done / tot)
+        ch_done = int(getattr(self, '_alpha_ch_done', 0))
+        pct = int(((ch_done + frac) / max(1, n_ch_tot)) * 100)
+        self._alpha_status(f"📁 [{lbl}] {pct}%  ({done:,}/{tot:,} 스캔)")
+        cb = getattr(self, '_alpha_progress_cb', None)
+        if cb:
+            cb(pct, 100)
+
     def _on_alpha_channel_done(self, result, label):
         if str(result).startswith("ERROR"):
             self._alpha_done_msgs.append(f"  [{label}] 실패: {result}")
             self.status.setText(f"❌ Alpha [{label}] 실패")
         else:
             self._alpha_done_msgs.append(f"  [{label}] ✅")
+        self._alpha_ch_done = int(getattr(self, '_alpha_ch_done', 0)) + 1
+        self._alpha_total = 0   # 다음 채널 total 재설정 대기
         self._start_next_alpha_export()
 
     def run_alpha_fit(self):

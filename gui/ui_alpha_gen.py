@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
     QListWidget, QDoubleSpinBox, QMessageBox, QCheckBox, QWidget, QGroupBox,
-    QComboBox,
+    QComboBox, QProgressBar,
 )
 
 from gui.dlg_dir import dlg_dir
@@ -109,10 +109,17 @@ class AlphaGeneratorDialog(QDialog):
         self._drnam_mat = ""
         root.addWidget(self._mat_row)
 
-        # 상태 + 실행
+        # 상태 + 진행바 + 실행
         self._lbl_status = QLabel("")
         self._lbl_status.setStyleSheet("color:#1565C0;")
         root.addWidget(self._lbl_status)
+
+        self._pbar = QProgressBar()
+        self._pbar.setRange(0, 100)
+        self._pbar.setValue(0)
+        self._pbar.setTextVisible(True)
+        self._pbar.setFormat("%p%")
+        root.addWidget(self._pbar)
 
         run = QHBoxLayout()
         self._btn_gen = QPushButton("🧪 Generate Alpha")
@@ -235,6 +242,7 @@ class AlphaGeneratorDialog(QDialog):
             QMessageBox.warning(self, "std_t 필요", "박사님 형식은 _avg_60s.mat(std_t)을 지정하세요.")
             return
         self._btn_gen.setEnabled(False)
+        self._pbar.setValue(0)
         self._lbl_status.setText("α 생성 시작…")
         ok = self._app.export_alpha_files(
             file_list=self._raw_files,
@@ -244,6 +252,7 @@ class AlphaGeneratorDialog(QDialog):
             done_cb=self._on_done,
             drnam_mat=drnam_mat,
             ch_tab_map=dict(self._ch_tab_map),
+            progress_cb=self._on_progress,
         )
         if not ok:
             self._btn_gen.setEnabled(True)
@@ -251,8 +260,13 @@ class AlphaGeneratorDialog(QDialog):
     def _on_status(self, msg):
         self._lbl_status.setText(msg)
 
+    def _on_progress(self, pct, total):
+        """알파 생성 진행바(%). app가 (pct, 100)으로 호출."""
+        self._pbar.setValue(max(0, min(100, int(pct))))
+
     def _on_done(self, out_dir, msgs):
         self._btn_gen.setEnabled(True)
+        self._pbar.setValue(100)
         self._lbl_status.setText("✅ 완료")
         QMessageBox.information(
             self, "Alpha 생성 완료",

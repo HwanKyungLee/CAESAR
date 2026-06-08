@@ -887,6 +887,7 @@ class AlphaExportWorker(QThread):
                 break
             fp, row_idx = entry
             global_idx += 1
+            self.progress.emit(global_idx)   # 전체 스캔 기준 진행(%용)
 
             try:
                 _, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(
@@ -921,7 +922,6 @@ class AlphaExportWorker(QThread):
                                    env_t, env_p,
                                    intensity_raw.copy()))   # raw 저장, Pass 2에서 보정
                 done_scans += 1
-                self.progress.emit(done_scans)
 
         if not self.is_running:
             self.finished.emit("ERROR: 중단됨")
