@@ -1782,6 +1782,8 @@ class CAESARAnalyzer(QMainWindow):
             std_t_bins    = getattr(self, '_alpha_drnam_bins', None),
             drnam_date    = getattr(self, '_alpha_drnam_date', ''),
             drnam_chlabel = f"ch{cfg['channel']}",
+            # wide 형식: 멀티채널이면 ch{N}/ 하위폴더로 분리(단일이면 평면)
+            channel_subdir = (f"ch{cfg['channel']}" if int(getattr(self, '_detected_channels', 1) or 1) > 1 else ""),
         )
         self._alpha_export_worker.progress.connect(
             lambda n, lbl=cfg['label']: self._alpha_status(f"📁 [{lbl}] {n} 스캔..."))

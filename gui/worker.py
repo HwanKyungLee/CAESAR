@@ -767,7 +767,8 @@ class AlphaExportWorker(QThread):
                  channel_label="",      # 채널 라벨(PNs/ANs/Cold 등) — 출력 파일명·헤더에 사용
                  std_t_bins=None,       # 박사님 형식: (N,2) [st_sec, end_sec] 연초기준 초 — 주면 이 그리드에 binning
                  drnam_date="",         # 박사님 형식 폴더/파일명용 YYYYMMDD
-                 drnam_chlabel=""):     # 박사님 형식 채널 접두(ch1/ch2/ch3)
+                 drnam_chlabel="",      # 박사님 형식 채널 접두(ch1/ch2/ch3)
+                 channel_subdir=""):    # wide 형식: 멀티채널 시 출력 하위폴더(ch1/ch2/…), 단일이면 ""
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
           기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
@@ -795,6 +796,7 @@ class AlphaExportWorker(QThread):
         self.std_t_bins      = np.asarray(std_t_bins, dtype=float) if std_t_bins is not None else None
         self.drnam_date      = str(drnam_date)
         self.drnam_chlabel   = str(drnam_chlabel)
+        self.channel_subdir  = str(channel_subdir)
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -1195,9 +1197,12 @@ class AlphaExportWorker(QThread):
 
         from datetime import datetime as _dt, timedelta as _td
         lbl_tag = f"_{self.channel_label}" if self.channel_label else ""
+        # 멀티채널이면 채널별 하위폴더(ch1/ch2/…)로 분리(단일이면 그대로)
+        base_dir = os.path.join(self.output_dir, self.channel_subdir) if self.channel_subdir else self.output_dir
+        os.makedirs(base_dir, exist_ok=True)
         for fp, rows in alpha_buffer.items():
             stem     = os.path.splitext(os.path.basename(fp))[0]
-            out_path = os.path.join(self.output_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
+            out_path = os.path.join(base_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
             _yr = DataIO._file_year(fp) or 2026
             def _doy_iso(sec):
                 if not np.isfinite(sec):
