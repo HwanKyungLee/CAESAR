@@ -100,6 +100,14 @@ class CAESARAnalyzer(QMainWindow):
             "기본은 알파 헤더의 채널번호(# channel=N)로 자동 분배 → 비워두면 됨(캠페인 무관).\n"
             "특수 케이스만 라벨 override: 파일명/헤더 label/'ch{N}' 중 매칭되는 알파를 이 채널로.")
         _chtab_bar.addWidget(self._ed_ch_datalabel)
+        _chtab_bar.addWidget(QLabel("입력TZ:"))
+        self.cb_input_tz = QComboBox()
+        self.cb_input_tz.addItems(["UTC", "KST(+9)"])
+        self.cb_input_tz.setFixedWidth(int(80 * self._s))
+        self.cb_input_tz.setToolTip(
+            "이 채널 데이터(계기시각)의 타임존. 출력 시각(결과 Time·농도탭)을 UTC로 통일.\n"
+            "KST(+9) 선택 시 결과 시각을 −9h 해서 UTC로 변환. (Cold 6월·Hot 6월=UTC, Hot 5월=KST)")
+        _chtab_bar.addWidget(self.cb_input_tz)
         left_layout.addLayout(_chtab_bar)
 
         # --- 1. Reference Management Section ---
@@ -2975,6 +2983,7 @@ class CAESARAnalyzer(QMainWindow):
                 funit_ch = cfg.get('fit_unit', 'nm')
                 fnm_lo_ch = float(cfg.get('fit_start_nm', 435.0))
                 fnm_hi_ch = float(cfg.get('fit_end_nm', 480.0))
+                tz_ch = cfg.get('input_tz', 'UTC')
                 if funit_ch == 'px':
                     # 박사님 시나리오: 픽셀 인덱스를 그대로 사용(예 Cold 775-1550)
                     try:
@@ -3003,6 +3012,7 @@ class CAESARAnalyzer(QMainWindow):
                 p0_ch, lo_ch, hi_ch = p0, bounds_low, bounds_high
                 funit_ch = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
                 fnm_lo_ch = self.spin_fit_start_nm.value(); fnm_hi_ch = self.spin_fit_end_nm.value()
+                tz_ch = self.cb_input_tz.currentText() if hasattr(self, 'cb_input_tz') else 'UTC'
                 pmin, pmax = pixel_min, pixel_max
                 cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
                 lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
@@ -3038,6 +3048,8 @@ class CAESARAnalyzer(QMainWindow):
             w.fit_unit = funit_ch
             w.fit_lo_nm = fnm_lo_ch
             w.fit_hi_nm = fnm_hi_ch
+            # 입력 TZ → UTC 변환(KST면 결과 시각 −9h)
+            w.tz_offset_sec = -9 * 3600 if str(tz_ch).upper().startswith('KST') else 0
             w.temperature = self.spin_temp.value()
             w.pressure = self.spin_pres.value()
             w.ok_rms_threshold = self.spin_rms_thresh.value() / 100.0
@@ -3611,6 +3623,7 @@ class CAESARAnalyzer(QMainWindow):
             "wl_path": getattr(self, 'loaded_wl_path', ""),
             "refs": refs_data,
             "data_label": self._ed_ch_datalabel.text().strip() if hasattr(self, '_ed_ch_datalabel') else "",
+            "input_tz": self.cb_input_tz.currentText() if hasattr(self, 'cb_input_tz') else "UTC",
             "f_min": self.txt_min.text(),
             "f_max": self.txt_max.text(),
             "fit_start_nm": self.spin_fit_start_nm.value(),
@@ -3633,6 +3646,8 @@ class CAESARAnalyzer(QMainWindow):
         self.txt_max.setText(str(scenario.get("f_max", "")))
         if hasattr(self, '_ed_ch_datalabel'):
             self._ed_ch_datalabel.setText(scenario.get("data_label", ""))
+        if hasattr(self, 'cb_input_tz'):
+            self.cb_input_tz.setCurrentText(scenario.get("input_tz", "UTC"))
         if "fit_start_nm" in scenario:
             self.spin_fit_start_nm.setValue(scenario["fit_start_nm"])
         if "fit_end_nm" in scenario:

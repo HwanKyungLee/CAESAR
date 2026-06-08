@@ -294,6 +294,11 @@ class AnalysisWorker(QThread):
                 _ts = DataIO.parse_alpha_row_time(file_path, row_idx)   # 알파: doy/datetime 컬럼
             else:
                 _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
+            # 채널 입력 TZ → UTC 변환(KST면 −9h). 계기시각을 출력 시각으로만 보정.
+            _off = getattr(self, 'tz_offset_sec', 0)
+            if _ts is not None and _off:
+                from datetime import timedelta as _td_tz
+                _ts = _ts + _td_tz(seconds=_off)
             result['Time'] = _ts.strftime('%Y-%m-%d %H:%M:%S') if _ts else f"row {row_idx:04d}"
 
             try:
