@@ -93,6 +93,12 @@ class ResultViewerWidget(QWidget):
         self._btn_compare.setFixedWidth(150)
         self._btn_compare.clicked.connect(self._overlay_compare)
         fbar.addWidget(self._btn_compare)
+        self._btn_td = QPushButton("🧪 NO2/PNs/ANs")
+        self._btn_td.setFixedWidth(150)
+        self._btn_td.setToolTip("Cold/PNs(ROI1)/ANs(ROI2) 결과 3개 선택 → 시간정렬·차분으로\n"
+                                "NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs 유도농도 플롯")
+        self._btn_td.clicked.connect(self._derive_no2_pns_ans)
+        fbar.addWidget(self._btn_td)
         self._stats_lbl = QLabel("")
         self._stats_lbl.setStyleSheet("color:#444;")
         fbar.addWidget(self._stats_lbl, 1)
@@ -122,6 +128,87 @@ class ResultViewerWidget(QWidget):
         hsplit.addWidget(psplit)
         hsplit.setSizes([240, 780])
         root.addWidget(hsplit, 1)
+
+    # ── NO2 / PNs / ANs 유도 농도 (TD-CEAS) ──────────────────────────
+    @staticmethod
+    def _load_result_time_gas(path, gas='NO2'):
+        """결과파일(_fit/_CH*.dat 등)에서 (시각 epoch[], gas 농도[])를 정렬해 반환."""
+        import pandas as pd
+        from datetime import datetime
+        df = pd.read_csv(path, sep=None, engine='python', comment='#')
+        df.columns = [str(c).strip() for c in df.columns]
+        gcol = next((c for c in df.columns if c.lower() == gas.lower()), None)
+        tcol = next((c for c in df.columns if c.lower() == 'time'), None)
+        if gcol is None:
+            raise RuntimeError(f"{os.path.basename(path)}: '{gas}' 컬럼 없음 (컬럼: {list(df.columns)[:8]})")
+        gv = pd.to_numeric(df[gcol], errors='coerce').to_numpy(dtype=float)
+        if tcol is None:
+            t = np.arange(len(gv), dtype=float)
+        else:
+            t = np.full(len(gv), np.nan)
+            for i, s in enumerate(df[tcol].astype(str)):
+                for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+                    try:
+                        t[i] = datetime.strptime(s, fmt).timestamp(); break
+                    except ValueError:
+                        pass
+        m = np.isfinite(t) & np.isfinite(gv)
+        t, gv = t[m], gv[m]
+        o = np.argsort(t)
+        return t[o], gv[o]
+
+    def _derive_no2_pns_ans(self):
+        """Cold/PNs/ANs 결과 3개 → 시간정렬·차분 → NO2/PNs/ANs 유도농도 플롯.
+        NO2=Cold, PNs=PNs채널−Cold, ANs=ANs채널−PNs채널."""
+        from PyQt6.QtWidgets import QMessageBox
+        from gui.dlg_dir import dlg_dir
+        paths = {}
+        for role, title in (('Cold', "① Cold 결과 선택 (NO2)"),
+                            ('PNs', "② PNs(ROI1, 180°C) 결과 선택"),
+                            ('ANs', "③ ANs(ROI2, 300°C) 결과 선택")):
+            p, _ = QFileDialog.getOpenFileName(self, title, dlg_dir("result"),
+                                               "결과 (*.dat *.csv *.tsv *.txt);;모든 파일 (*)")
+            if not p:
+                return
+            dlg_dir("result", p); paths[role] = p
+        try:
+            ct, cn = self._load_result_time_gas(paths['Cold'])
+            pt, pn = self._load_result_time_gas(paths['PNs'])
+            at, an = self._load_result_time_gas(paths['ANs'])
+        except Exception as e:
+            QMessageBox.warning(self, "로드 실패", str(e)); return
+        if ct is None or len(ct) < 2:
+            QMessageBox.warning(self, "데이터 부족", "Cold 결과에 Time/NO2가 부족합니다."); return
+        # 시간정렬: PNs/ANs 채널 NO2를 Cold 시각격자에 보간(범위 밖은 NaN)
+        pn_i = np.interp(ct, pt, pn, left=np.nan, right=np.nan) if len(pt) >= 2 else np.full_like(ct, np.nan)
+        an_i = np.interp(ct, at, an, left=np.nan, right=np.nan) if len(at) >= 2 else np.full_like(ct, np.nan)
+        no2 = cn
+        pns = pn_i - cn
+        ans = an_i - pn_i
+
+        # 위: 유도농도(NO2/PNs/ANs), 아래: 원시 채널 NO2
+        ax1 = pg.DateAxisItem(orientation='bottom')
+        self._pw_top.setAxisItems({'bottom': ax1})
+        self._pw_top.clear()
+        self._pw_top.addLegend(offset=(10, 10))
+        self._pw_top.plot(ct, no2, pen=pg.mkPen('#1f77b4', width=2), name='NO2 (Cold)')
+        self._pw_top.plot(ct, pns, pen=pg.mkPen('#ff7f0e', width=2), name='PNs (=PNs−Cold)')
+        self._pw_top.plot(ct, ans, pen=pg.mkPen('#2ca02c', width=2), name='ANs (=ANs−PNs)')
+        self._pw_top.setLabel('left', '농도 (ppb)')
+        self._pw_top.setLabel('bottom', '시간')
+
+        ax2 = pg.DateAxisItem(orientation='bottom')
+        self._pw_bot.setAxisItems({'bottom': ax2})
+        self._pw_bot.clear()
+        self._pw_bot.addLegend(offset=(10, 10))
+        self._pw_bot.plot(ct, cn, pen=pg.mkPen('#1f77b4'), name='Cold NO2')
+        self._pw_bot.plot(ct, pn_i, pen=pg.mkPen('#ff7f0e'), name='PNs채널 NO2')
+        self._pw_bot.plot(ct, an_i, pen=pg.mkPen('#2ca02c'), name='ANs채널 NO2')
+        self._pw_bot.setLabel('left', '채널 NO2 (ppb)')
+        self._pw_bot.setLabel('bottom', '시간')
+        self._lbl.setText("🧪 유도농도: NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs (Cold 시각격자에 정렬). "
+                          "음수는 노이즈/시간불일치.")
+        self._lbl.setStyleSheet("color:#1565C0;")
 
     # ──────────────────────────────────────────────────────────────
     def _open(self):
