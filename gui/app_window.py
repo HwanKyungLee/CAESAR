@@ -2567,23 +2567,23 @@ class CAESARAnalyzer(QMainWindow):
             self._update_file_table(sorted(files))
 
     def _load_folder(self):
-        """Scans a selected folder and loads all valid measurement files."""
-        folder_path = QFileDialog.getExistingDirectory(self, "Select Measurement Folder", self._dlg_dir('data'))
+        """Scans a selected folder (하위폴더 재귀) and loads all valid measurement files.
+        날짜별 폴더(예: out/ch1/2026-05-18/...)에 흩어진 알파도 폴더 하나만 고르면 다 로드."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Measurement Folder (하위폴더 포함)", self._dlg_dir('data'))
         if folder_path:
             self._dlg_dir('data', folder_path)
-            # Filter files by valid extensions (.dat, .txt, .csv)
+            import glob as _glob
             valid_extensions = ('.dat', '.txt', '.csv')
-            files = [
-                os.path.join(folder_path, f) 
-                for f in os.listdir(folder_path) 
-                if f.lower().endswith(valid_extensions)
-            ]
-            
+            files = []
+            for ext in valid_extensions:
+                files += _glob.glob(os.path.join(folder_path, f'*{ext}'))
+                files += _glob.glob(os.path.join(folder_path, '**', f'*{ext}'), recursive=True)
+            files = sorted(set(files))
             if files:
-                self._update_file_table(sorted(files))
+                self._update_file_table(files)
             else:
-                QMessageBox.warning(self
-                                    , "No Data", "No analyzable files (.dat, .txt, .csv) found in the selected folder.")
+                QMessageBox.warning(self, "No Data",
+                                    "선택한 폴더(하위폴더 포함)에 .dat/.txt/.csv 파일이 없습니다.")
 
     # ── file_list entry helpers ──────────────────────────────────────────────
     def _entry_filepath(self, entry):
