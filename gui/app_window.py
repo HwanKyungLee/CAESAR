@@ -338,6 +338,13 @@ class CAESARAnalyzer(QMainWindow):
         self.chk_robust.setChecked(False)
         lay_calib.addWidget(self.chk_robust)
 
+        self.chk_allow_neg = QCheckBox("± 가스 음수 허용")
+        self.chk_allow_neg.setToolTip(
+            "체크: 가스 계수 하한 0→−∞ (NNLS 해제). 0 근처 가스의 노이즈가 음수로도 나와\n"
+            "양의 정류(rectification) 편향이 사라짐 → PNs 차분 비편향. 기본=꺼짐(≥0 강제).")
+        self.chk_allow_neg.setChecked(False)
+        lay_calib.addWidget(self.chk_allow_neg)
+
         self.ref_props = {}
         btn_props = QPushButton("⚙️ Properties")
         btn_props.setStyleSheet("font-weight: bold;")
@@ -3055,6 +3062,7 @@ class CAESARAnalyzer(QMainWindow):
             w.step_limit = step_ch
             w.tikhonov_lambda = lam_ch
             w.use_robust_fitting = rob_ch
+            w.allow_negative_gas = self.chk_allow_neg.isChecked() if hasattr(self, 'chk_allow_neg') else False
             w.kalman_q = kq_ch
             w.kalman_r = kr_ch
             # 알파 피팅 핏범위(px면 알파를 픽셀구간으로 슬라이스)

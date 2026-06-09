@@ -194,7 +194,8 @@ class AnalysisWorker(QThread):
             self.ref_properties, self.temperature,
             getattr(self, 'tikhonov_lambda', 0.0),
             getattr(self, 'use_robust_fitting', False),
-            override_lam, override_robust)
+            override_lam, override_robust,
+            allow_negative_gas=getattr(self, 'allow_negative_gas', False))
     
     # ==========================================
     # 🌟 Main Orchestrator
@@ -1502,7 +1503,8 @@ class AlphaFitWorker(QThread):
                         vp_pixel, alpha, _W, active, fixed, linked, t0, lb, ub,
                         self.poly_deg, vp_efreq, vp_center, 1.0,
                         self._default_ref_properties(), T_C,
-                        self.tikhonov_lambda, self.use_robust)
+                        self.tikhonov_lambda, self.use_robust,
+                        allow_negative_gas=getattr(self, 'allow_negative_gas', False))
                     opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, _perr = out
                     # 모델 재구성(rms in α 단위)
                     full_model, *_ = engine.get_model_components(

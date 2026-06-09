@@ -156,8 +156,10 @@ class DoasFitter:
                            theta0, theta_lb, theta_ub, poly_order, fixed_e_f,
                            absolute_center, fit_sign, ref_properties, temperature,
                            tikhonov_lambda, use_robust,
-                           override_lam=None, override_robust=None):
-        """VarPro + NNLS + Tikhonov + Robust(IRLS) 엔진. AnalysisWorker에서 verbatim 이식."""
+                           override_lam=None, override_robust=None, allow_negative_gas=False):
+        """VarPro + NNLS + Tikhonov + Robust(IRLS) 엔진. AnalysisWorker에서 verbatim 이식.
+        allow_negative_gas=True면 가스 계수 하한을 0→−∞로 풀어 음수 농도 허용(0근처 비편향)."""
+        gas_lb = -np.inf if allow_negative_gas else 0.0
         x_min, x_max = pixel_idx[0], pixel_idx[-1]
         x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
         T = chebyshev.chebvander(x_mapped, poly_order) if poly_order >= 0 else np.zeros((len(pixel_idx), 0))
@@ -216,7 +218,7 @@ class DoasFitter:
                 else:
                     A_aug, y_aug = A_weighted, y_weighted
 
-                lb_inner = [0.0] * num_gases + [-np.inf] * (num_cols - num_gases)
+                lb_inner = [gas_lb] * num_gases + [-np.inf] * (num_cols - num_gases)
                 ub_inner = [np.inf] * num_cols
 
                 res_temp = lsq_linear(A_aug, y_aug, bounds=(lb_inner, ub_inner))
@@ -258,7 +260,7 @@ class DoasFitter:
             else:
                 A_aug, y_aug = A_f_w, y_w
 
-            lb_final = [0.0] * num_gases + [-np.inf] * (num_cols_final - num_gases)
+            lb_final = [gas_lb] * num_gases + [-np.inf] * (num_cols_final - num_gases)
             res_lin_final = lsq_linear(A_aug, y_aug, bounds=(lb_final, [np.inf] * num_cols_final))
             c_opt = res_lin_final.x
 
