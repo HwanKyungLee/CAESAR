@@ -1766,7 +1766,6 @@ class CAESARAnalyzer(QMainWindow):
     def _build_alpha_channel_configs(self, n_ch, full_px=False):
         """채널마다 (채널idx, 라벨, 파장슬라이스, pixel_min/max).
         full_px=True(박사님 형식)면 핏윈도우 무시하고 전체 2048px 사용."""
-        label_for = {1: 'Cold'} if n_ch == 1 else {1: 'PNs', 2: 'ANs', 3: 'CH3'}
         tab_map = getattr(self, '_alpha_ch_tab_map', {}) or {}
         sel = getattr(self, '_alpha_sel_channels', None)
         configs = []
@@ -1792,7 +1791,10 @@ class CAESARAnalyzer(QMainWindow):
                     pmin, pmax = pmax, pmin
                 if pmax <= pmin:
                     pmax = pmin + 1
-            configs.append(dict(channel=ch, label=label_for.get(ch, f'CH{ch}'),
+            # 라벨: 매핑된 탭의 data_label(사용자 지정) 있으면 그걸, 없으면 CH{ch}
+            _tcfg = self._channel_configs.get(tab) or {}
+            lbl = (_tcfg.get('data_label') or '').strip() or f'CH{ch}'
+            configs.append(dict(channel=ch, label=lbl,
                                 wave_nm=wave_full[pmin:pmax],
                                 pixel_min=pmin, pixel_max=pmax))
         return configs
@@ -3331,7 +3333,7 @@ class CAESARAnalyzer(QMainWindow):
     def _channel_settings_tag(self, ch):
         """채널 ch 세팅 → (라벨, 파일명용 짧은 태그). 채널별 윈도우/poly/shift/가스T 인코딩."""
         cfg = self._channel_configs.get(ch) or {}
-        lbl = (cfg.get('data_label') or '').strip() or {1: 'PNs', 2: 'ANs', 3: 'CH3'}.get(ch, f'CH{ch}')
+        lbl = (cfg.get('data_label') or '').strip() or f'CH{ch}'
         if cfg.get('fit_unit') == 'px':
             win = f"px{cfg.get('f_min', '?')}-{cfg.get('f_max', '?')}"
         else:
