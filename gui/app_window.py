@@ -3879,7 +3879,7 @@ class CAESARAnalyzer(QMainWindow):
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(scenario, f, indent=4)
-                QMessageBox.information(self, "Success", f"{nch}채널 설정 저장!\nFile: {os.path.basename(path)}")
+                QMessageBox.information(self, "Success", f"{len(chans)}채널 설정 저장!\nFile: {os.path.basename(path)}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Save Failed:\n{e}")
 
