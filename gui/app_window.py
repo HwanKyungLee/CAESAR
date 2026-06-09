@@ -2579,11 +2579,53 @@ class CAESARAnalyzer(QMainWindow):
                 files += _glob.glob(os.path.join(folder_path, f'*{ext}'))
                 files += _glob.glob(os.path.join(folder_path, '**', f'*{ext}'), recursive=True)
             files = sorted(set(files))
-            if files:
-                self._update_file_table(files)
-            else:
+            if not files:
                 QMessageBox.warning(self, "No Data",
                                     "선택한 폴더(하위폴더 포함)에 .dat/.txt/.csv 파일이 없습니다.")
+                return
+            # 날짜가 여러 개면 다중선택(특정 날짜만 피팅 가능)
+            import re as _re
+            def _date_of(f):
+                m = _re.search(r'(\d{4})[-_](\d{2})[-_](\d{2})', os.path.basename(f))
+                return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else "(날짜없음)"
+            dates = sorted(set(_date_of(f) for f in files))
+            if len(dates) > 1:
+                sel = self._pick_dates(dates)
+                if sel is None:
+                    return   # 취소
+                files = [f for f in files if _date_of(f) in sel]
+                if not files:
+                    QMessageBox.warning(self, "선택 없음", "선택한 날짜가 없습니다.")
+                    return
+            self._update_file_table(files)
+
+    def _pick_dates(self, dates):
+        """날짜 다중선택 다이얼로그. 반환: 선택 날짜 set, None=취소. 기본 전체 선택."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
+                                     QPushButton, QLabel, QAbstractItemView)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("피팅할 날짜 선택")
+        dlg.resize(int(280 * self._s), int(420 * self._s))
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(f"날짜 {len(dates)}개 발견 — 피팅할 날짜 선택(다중):"))
+        lw = QListWidget()
+        lw.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        for d in dates:
+            lw.addItem(d)
+        lw.selectAll()
+        lay.addWidget(lw)
+        bar = QHBoxLayout()
+        b_all = QPushButton("전체"); b_all.clicked.connect(lw.selectAll)
+        b_none = QPushButton("해제"); b_none.clicked.connect(lw.clearSelection)
+        b_ok = QPushButton("확인"); b_ok.clicked.connect(dlg.accept)
+        b_cancel = QPushButton("취소"); b_cancel.clicked.connect(dlg.reject)
+        for b in (b_all, b_none, b_ok, b_cancel):
+            bar.addWidget(b)
+        lay.addLayout(bar)
+        from PyQt6.QtWidgets import QDialog as _QD
+        if dlg.exec() != _QD.DialogCode.Accepted:
+            return None
+        return set(i.text() for i in lw.selectedItems())
 
     # ── file_list entry helpers ──────────────────────────────────────────────
     def _entry_filepath(self, entry):
