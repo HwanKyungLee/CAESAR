@@ -1214,9 +1214,14 @@ class AlphaExportWorker(QThread):
         # 멀티채널이면 채널별 하위폴더(ch1/ch2/…)로 분리(단일이면 그대로)
         base_dir = os.path.join(self.output_dir, self.channel_subdir) if self.channel_subdir else self.output_dir
         os.makedirs(base_dir, exist_ok=True)
+        import re as _re_date
         for fp, rows in alpha_buffer.items():
             stem     = os.path.splitext(os.path.basename(fp))[0]
-            out_path = os.path.join(base_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
+            # 파일명에서 날짜(YYYY-MM-DD) 추출 → 날짜별 하위폴더에 저장(없으면 base_dir)
+            _md = _re_date.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', stem)
+            _file_dir = os.path.join(base_dir, f"{_md.group(1)}-{_md.group(2)}-{_md.group(3)}") if _md else base_dir
+            os.makedirs(_file_dir, exist_ok=True)
+            out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
             _yr = DataIO._file_year(fp) or 2026
             def _doy_iso(sec):
                 if not np.isfinite(sec):
