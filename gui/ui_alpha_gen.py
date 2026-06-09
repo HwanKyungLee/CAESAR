@@ -24,6 +24,7 @@ class AlphaGeneratorDialog(QDialog):
         self._out_dir = ""
         self._ch_tab_map = {}       # {raw 채널:int -> 사용할 채널 탭:int} 핏세팅(wavecal/범위) 출처
         self._tab_combos = {}       # {raw 채널 -> QComboBox}
+        self._ch_enable = {}        # {raw 채널 -> QCheckBox} 생성 여부
         self.setWindowTitle("🧪 Alpha Generator — Raw → Alpha 생성")
         self.resize(640, 520)
         self._build()
@@ -187,12 +188,18 @@ class AlphaGeneratorDialog(QDialog):
                 w.deleteLater()
         self._tab_combos = {}
         self._ch_tab_map = {}
+        self._ch_enable = {}
         if n_ch <= 0:
             return
         tabs = self._available_tabs() or [1]
         for ch in range(1, n_ch + 1):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
+            chk = QCheckBox(f"생성")
+            chk.setChecked(True)
+            chk.setToolTip("이 채널 알파를 생성할지. 끄면 건너뜀(이미 만든 채널 재생성 방지).")
+            row.addWidget(chk)
+            self._ch_enable[ch] = chk
             row.addWidget(QLabel(f"raw CH{ch} →  핏세팅 탭:"))
             cmb = QComboBox()
             for t in tabs:
@@ -252,6 +259,7 @@ class AlphaGeneratorDialog(QDialog):
             done_cb=self._on_done,
             drnam_mat=drnam_mat,
             ch_tab_map=dict(self._ch_tab_map),
+            channels=[ch for ch, c in self._ch_enable.items() if c.isChecked()] or None,
             progress_cb=self._on_progress,
         )
         if not ok:

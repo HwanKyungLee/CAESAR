@@ -1610,7 +1610,7 @@ class CAESARAnalyzer(QMainWindow):
 
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
                            status_cb=None, done_cb=None, drnam_mat=None, ch_tab_map=None,
-                           progress_cb=None):
+                           progress_cb=None, channels=None):
         """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
 
         Alpha Generator 팝업이 raw 파일목록/출력폴더/avgsec를 넘겨 호출할 수 있다.
@@ -1625,6 +1625,8 @@ class CAESARAnalyzer(QMainWindow):
             return False
         # raw 채널 → 핏세팅 탭 매핑(Alpha Generator). 비우면 raw 채널 N → 탭 N.
         self._alpha_ch_tab_map = {int(k): int(v) for k, v in (ch_tab_map or {}).items()}
+        # 생성할 채널 선택(None=전체). 이미 만든 채널 재생성 방지용.
+        self._alpha_sel_channels = set(int(c) for c in channels) if channels else None
         if getattr(self, 'wavelengths', None) is None and self.engine._wave_axis is None:
             QMessageBox.warning(self, "No Wavelength Cal",
                                 "파장 캘리브레이션 파일을 먼저 로드하세요.")
@@ -1666,10 +1668,13 @@ class CAESARAnalyzer(QMainWindow):
                                 "채널별 파장보정/픽셀 범위를 만들 수 없습니다.\n"
                                 f"Hot(≥2ch)은 {self._WV_CAL_BASE}\\roi1,roi2 의 Calib 파일이 필요합니다.")
             return False
-        if len(configs) < n_ch:
-            got = sorted(c['channel'] for c in configs)
+        _sel = getattr(self, '_alpha_sel_channels', None)
+        _want = _sel if _sel is not None else set(range(1, n_ch + 1))
+        got = set(c['channel'] for c in configs)
+        _missing = sorted(_want - got)
+        if _missing:
             QMessageBox.warning(self, "일부 채널 wavecal 없음",
-                                f"감지 {n_ch}채널 중 {len(configs)}개만 생성됩니다(채널 {got}).\n"
+                                f"선택한 채널 중 {sorted(got)}만 생성됩니다. 빠진 채널: {_missing}.\n"
                                 f"빠진 채널은 wavecal(채널 탭 또는 {self._WV_CAL_BASE}\\roiN)이 없어 건너뜁니다.\n"
                                 "계속 진행합니다.")
 
@@ -1763,8 +1768,11 @@ class CAESARAnalyzer(QMainWindow):
         full_px=True(박사님 형식)면 핏윈도우 무시하고 전체 2048px 사용."""
         label_for = {1: 'Cold'} if n_ch == 1 else {1: 'PNs', 2: 'ANs', 3: 'CH3'}
         tab_map = getattr(self, '_alpha_ch_tab_map', {}) or {}
+        sel = getattr(self, '_alpha_sel_channels', None)
         configs = []
         for ch in range(1, n_ch + 1):
+            if sel is not None and ch not in sel:
+                continue   # 사용자가 선택 안 한 채널은 생성 안 함(이미 만든 채널 재생성 방지)
             # raw 채널 ch가 어느 채널 탭 설정(wavecal/범위)을 쓸지(기본: 같은 번호 탭)
             tab = int(tab_map.get(ch, ch))
             wave_full = self._channel_wave_cal(n_ch, tab)
