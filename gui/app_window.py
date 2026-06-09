@@ -3850,12 +3850,26 @@ class CAESARAnalyzer(QMainWindow):
             "channels": {str(c): cfg for c, cfg in chans.items()},
         }
         cfg = chans.get(scenario["active"], next(iter(chans.values())))
-        nch = len(chans)
-        gas_list_str = "_".join(self.engine.gas_list) if (hasattr(self, 'engine') and self.engine.gas_list) else "NoRefs"
-        robust_str = "Robust" if cfg["use_robust"] else "Std"
-        ch_tag = f"{nch}CH_" if nch > 1 else ""
-        default_fname = (f"FitSet_{ch_tag}{gas_list_str}_{cfg['fit_start_nm']:.0f}-{cfg['fit_end_nm']:.0f}nm_"
-                         f"Poly{cfg['poly_deg']}_L{cfg['tikhonov_lambda']:g}_{robust_str}.json")
+        robust_str = "Robust" if cfg.get("use_robust") else "Std"
+
+        # 파일명: 채널별 특징(라벨[윈도우_Ppoly_가스T]) 나열 → 한눈에 시나리오 구분
+        def _ch_short(c, cc):
+            lbl = (cc.get('data_label') or '').strip() or f"CH{c}"
+            if cc.get('fit_unit') == 'px':
+                win = f"{cc.get('f_min', '?')}-{cc.get('f_max', '?')}px"
+            else:
+                try:
+                    win = f"{float(cc.get('fit_start_nm', 0)):.0f}-{float(cc.get('fit_end_nm', 0)):.0f}nm"
+                except Exception:
+                    win = "win?"
+            try:
+                gt = float(cc.get('gas_temp', 0) or 0)
+            except Exception:
+                gt = 0
+            gtag = f"_gT{int(gt)}" if gt > 0 else ""
+            return f"{lbl}[{win}_P{cc.get('poly_deg', '?')}{gtag}]"
+        parts = [_ch_short(c, chans[c]) for c in sorted(chans)]
+        default_fname = f"FitSet_{'_'.join(parts)}_{robust_str}.json"
         _start = os.path.join(self._dlg_dir('scenario'), default_fname) if self._dlg_dir('scenario') else default_fname
         path, _ = QFileDialog.getSaveFileName(self, "Save Fit Scenario", _start, "JSON Files (*.json)")
         self._dlg_dir('scenario', path)
