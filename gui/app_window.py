@@ -1666,6 +1666,12 @@ class CAESARAnalyzer(QMainWindow):
                                 "채널별 파장보정/픽셀 범위를 만들 수 없습니다.\n"
                                 f"Hot(≥2ch)은 {self._WV_CAL_BASE}\\roi1,roi2 의 Calib 파일이 필요합니다.")
             return False
+        if len(configs) < n_ch:
+            got = sorted(c['channel'] for c in configs)
+            QMessageBox.warning(self, "일부 채널 wavecal 없음",
+                                f"감지 {n_ch}채널 중 {len(configs)}개만 생성됩니다(채널 {got}).\n"
+                                f"빠진 채널은 wavecal(채널 탭 또는 {self._WV_CAL_BASE}\\roiN)이 없어 건너뜁니다.\n"
+                                "계속 진행합니다.")
 
         # 채널별 워커를 순차 실행(큐). Hot=2채널 → PNs, ANs 각각 생성.
         self._alpha_queue      = list(configs)
@@ -1874,6 +1880,18 @@ class CAESARAnalyzer(QMainWindow):
             self._alpha_done_msgs.append(f"  [{label}] ✅")
         self._alpha_ch_done = int(getattr(self, '_alpha_ch_done', 0)) + 1
         self._alpha_total = 0   # 다음 채널 total 재설정 대기
+        # 끝난 워커를 wait()로 완전 종료시키고 참조 보관 — 다음 채널 워커로 덮어쓸 때
+        # 실행 중인 QThread가 GC돼 "Destroyed while thread is still running"으로
+        # 다음 채널이 시작 못 하던 버그 수정.
+        w = getattr(self, '_alpha_export_worker', None)
+        if w is not None:
+            try:
+                w.wait(10000)
+            except Exception:
+                pass
+            self._alpha_finished_workers = getattr(self, '_alpha_finished_workers', [])
+            self._alpha_finished_workers.append(w)
+            self._alpha_export_worker = None
         self._start_next_alpha_export()
 
     def run_alpha_fit(self):
