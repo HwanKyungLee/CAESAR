@@ -3315,6 +3315,45 @@ class CAESARAnalyzer(QMainWindow):
         self.status.setStyleSheet("color: green; font-weight: bold;")
         QMessageBox.information(self, "Done", f"All files analyzed successfully ({n_ch} channel(s)).")
 
+    def _results_date_range(self):
+        """결과 Time에서 데이터(raw) 날짜범위 'YYMMDD' 또는 'YYMMDD-YYMMDD'. 없으면 ''."""
+        import re as _re
+        ds = set()
+        for r in getattr(self, 'results', []):
+            m = _re.search(r'(\d{2})(\d{2})-(\d{2})-(\d{2})', str(r.get('Time', '')))
+            if m:
+                ds.add(m.group(2) + m.group(3) + m.group(4))   # YYMMDD
+        if not ds:
+            return ''
+        lo, hi = min(ds), max(ds)
+        return lo if lo == hi else f"{lo}-{hi}"
+
+    def _channel_settings_tag(self, ch):
+        """채널 ch 세팅 → (라벨, 파일명용 짧은 태그). 채널별 윈도우/poly/shift/가스T 인코딩."""
+        cfg = self._channel_configs.get(ch) or {}
+        lbl = (cfg.get('data_label') or '').strip() or {1: 'PNs', 2: 'ANs', 3: 'CH3'}.get(ch, f'CH{ch}')
+        if cfg.get('fit_unit') == 'px':
+            win = f"px{cfg.get('f_min', '?')}-{cfg.get('f_max', '?')}"
+        else:
+            try:
+                win = f"{float(cfg.get('fit_start_nm', 0)):.0f}-{float(cfg.get('fit_end_nm', 0)):.0f}nm"
+            except Exception:
+                win = "win?"
+        poly = cfg.get('poly_deg', '?')
+        rp = cfg.get('ref_props', {}) or {}
+        pg = next((r.get('name') for r in cfg.get('refs', []) if r.get('name')), None)
+        sh = "Sh?"
+        if pg and pg in rp:
+            m = rp[pg].get('sh_mode', '')
+            v = str(rp[pg].get('sh_val', '')).replace(' ', '')
+            sh = f"Sh[{v}]" if m == 'Limit' else f"Sh{m}"
+        try:
+            gasT = float(cfg.get('gas_temp', 0) or 0)
+        except Exception:
+            gasT = 0
+        gtag = f"_gT{int(gasT)}" if gasT > 0 else ""
+        return lbl, f"{win}_Poly{poly}_{sh}{gtag}"
+
     def save(self):
         """
         Exports all analysis results to a tab-separated .dat or .csv file.
@@ -3392,12 +3431,13 @@ class CAESARAnalyzer(QMainWindow):
         lam_val = self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0
         robust_str = "Robust" if hasattr(self, 'chk_robust') and self.chk_robust.isChecked() else "Std"
 
-        _nact = len([c for c, v in getattr(self, '_channel_configs', {}).items() if v is not None])
-        ch_tag = f"{_nact}CH_" if _nact > 1 else ""
-        default_fname = f"{now_str}_Result_{ch_tag}{gas_list_str}_{wl_str}_Poly{poly_deg}_L{lam_val:g}_{robust_str}_Step[{step_val}]_{sh_str}_{sq_str}.dat"
-        
+        # 파일명: 데이터(raw) 날짜범위 + 채널라벨 + 핵심세팅 (실행날짜 X)
+        _drange = self._results_date_range() or now_str
+        _albl, _atag = self._channel_settings_tag(self._active_channel)
+        default_fname = f"{_drange}_{_albl}_{_atag}.dat"
+
         _start = os.path.join(self._dlg_dir('save'), default_fname) if self._dlg_dir('save') else default_fname
-        path, _ = QFileDialog.getSaveFileName(self, "Save Data", _start, "Data Files (*.dat);;CSV Files (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Data (멀티채널이면 채널별 자동명)", _start, "Data Files (*.dat);;CSV Files (*.csv)")
         self._dlg_dir('save', path)
 
         if path:
@@ -3443,25 +3483,37 @@ class CAESARAnalyzer(QMainWindow):
 
                 header_txt = "\n".join(header_lines)
                 is_csv = path.endswith('.csv')
+                ext = '.csv' if is_csv else '.dat'
 
-                def _write_df(_df, _path):
+                def _write_df(_df, _path, _ch_hdr=""):
                     with open(_path, 'w', encoding='utf-8') as f:
+                        if _ch_hdr:
+                            f.write(_ch_hdr + "\n")
                         f.write(header_txt)
                         if is_csv:
                             _df.to_csv(f, index=False, lineterminator='\n')
                         else:
                             _df.to_csv(f, sep='\t', index=False, lineterminator='\n')
 
-                # 채널 2개 이상이면 채널별 파일로 분리(파일명에 _CH{N})
+                def _ch_header(ch):
+                    """채널별 세팅 헤더 한 줄(파일 상단)."""
+                    lbl, tag = self._channel_settings_tag(int(ch))
+                    cfg = self._channel_configs.get(int(ch)) or {}
+                    return (f"# Channel {int(ch)} ({lbl}) settings: {tag}  "
+                            f"gas_temp={cfg.get('gas_temp', 0)}°C  refs={','.join(g for g in self.engine.gas_list)}")
+
+                # 채널 2개 이상이면 채널별 파일로 — 파일명=날짜범위_채널라벨_세팅
                 chans = sorted(df['Channel'].dropna().unique()) if 'Channel' in df.columns else []
+                out_dir = os.path.dirname(path) or (self._dlg_dir('save') or '.')
                 if len(chans) > 1:
-                    base, ext = os.path.splitext(path)
                     written = []
                     for ch in chans:
                         sub = df[df['Channel'] == ch]
-                        cpath = f"{base}_CH{int(ch)}{ext}"
-                        _write_df(sub, cpath)
-                        written.append(f"CH{int(ch)} → {os.path.basename(cpath)} ({len(sub)}행)")
+                        lbl, tag = self._channel_settings_tag(int(ch))
+                        fname = f"{_drange}_{lbl}_{tag}{ext}".lstrip('_')
+                        cpath = os.path.join(out_dir, fname)
+                        _write_df(sub, cpath, _ch_header(ch))
+                        written.append(f"CH{int(ch)} → {fname} ({len(sub)}행)")
                     QMessageBox.information(self, "Success",
                                            "🎉 채널별 결과 저장 완료!\n\n" + "\n".join(written))
                 else:
