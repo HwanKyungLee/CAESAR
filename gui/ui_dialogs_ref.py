@@ -1350,7 +1350,8 @@ class MonitorWidget(QWidget):
         h_stat.addWidget(self.lbl_max); h_stat.addWidget(self.lbl_min); h_stat.addWidget(self.lbl_mean); h_stat.addWidget(self.lbl_sat)
         l_view.addWidget(grp_stat)
         
-        self.tabs.addTab(self.tab_view, "🔎 빠른보기 (raw)")
+        # 탭 제거(2026-06-12, 미사용 확인): 위젯은 update 경로 의존성 때문에 생성 유지
+        # self.tabs.addTab(self.tab_view, "Quick View (raw)")
 
     # =========================================================
     # [Tab 5] HQ Export
@@ -1375,7 +1376,8 @@ class MonitorWidget(QWidget):
         l_hq.addWidget(self.tb_hq)
         l_hq.addWidget(self.cv_hq)
         
-        self.tabs.addTab(self.tab_hq, "📸 HQ Export (Pro)")
+        # 탭 제거(2026-06-12, 미사용 확인 — 고해상도 내보내기는 결과뷰어 📷 PNG로 대체)
+        # self.tabs.addTab(self.tab_hq, "HQ Export")
 
 
     # [Tab 6] R Viewer — 거울 반사율 시계열 + 스펙트럼 뷰어
@@ -2183,7 +2185,7 @@ class MonitorWidget(QWidget):
         self._conc_curves = {}
         self._conc_data   = {}
         self._conc_gases  = []
-        self.tabs.addTab(self.tab_conc, "🧪 농도 (Conc)")
+        self.tabs.addTab(self.tab_conc, "🧪 Conc")
 
     @staticmethod
     def _conc_time_x(result_dict, row_index):
@@ -2273,6 +2275,37 @@ class MonitorWidget(QWidget):
             for ch in self._CONC_CH_COLORS:
                 self._conc_data[gas][ch] = {'x': [], 'y': []}
                 self._conc_curves[gas][ch].setData([], [])
+
+    def rebuild_conc(self, results):
+        """결과 리스트 전체로 농도 시계열을 한 번에 재구성(벌크).
+        update_conc를 행마다 호출하면 매번 전체 배열을 setData해 O(n²)로 멈춘다.
+        여기선 데이터를 모은 뒤 곡선당 setData를 1회만 호출한다(자동 QC 후 사용)."""
+        if not getattr(self, '_conc_gases', None):
+            return
+        for gas in self._conc_gases:
+            for ch in self._CONC_CH_COLORS:
+                self._conc_data[gas][ch] = {'x': [], 'y': []}
+        for i, r in enumerate(results):
+            ch = r.get('Channel', 1)
+            if ch not in self._CONC_CH_COLORS:
+                ch = 1
+            x = self._conc_time_x(r, i)
+            if x is None:
+                x = float(i)
+            for gas in self._conc_gases:
+                if gas not in r:
+                    continue
+                try:
+                    y = float(r.get(gas, 0.0))
+                except (TypeError, ValueError):
+                    continue
+                d = self._conc_data[gas][ch]
+                d['x'].append(x)
+                d['y'].append(y)
+        for gas in self._conc_gases:
+            for ch in self._CONC_CH_COLORS:
+                d = self._conc_data[gas][ch]
+                self._conc_curves[gas][ch].setData(d['x'], d['y'])
 
     def _export_conc_png(self):
         """현재 농도 그래프(보이는 레이아웃)를 PNG로 저장."""

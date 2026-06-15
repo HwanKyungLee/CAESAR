@@ -1,5 +1,30 @@
 import sys
 import time
+import os
+
+# ── 크래시 로그 ──────────────────────────────────────────────────────────────
+# 밤샘 런 중 프로세스가 소리없이 죽으면(OOM/액세스 위반/미처리 예외) 원인을 알 수
+# 없으므로, 하드크래시는 faulthandler가, 파이썬 예외는 excepthook이 logs/에 남긴다.
+import faulthandler
+import traceback
+import datetime as _dt
+
+_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(_LOG_DIR, exist_ok=True)
+_crash_fh = open(os.path.join(_LOG_DIR, 'crash.log'), 'a', encoding='utf-8')
+_crash_fh.write(f"\n===== 세션 시작 {_dt.datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+_crash_fh.flush()
+faulthandler.enable(file=_crash_fh, all_threads=True)
+
+def _excepthook(etype, value, tb):
+    try:
+        _crash_fh.write(f"\n[미처리 예외 {_dt.datetime.now():%Y-%m-%d %H:%M:%S}]\n")
+        traceback.print_exception(etype, value, tb, file=_crash_fh)
+        _crash_fh.flush()
+    except Exception:
+        pass
+    sys.__excepthook__(etype, value, tb)
+sys.excepthook = _excepthook
 
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt

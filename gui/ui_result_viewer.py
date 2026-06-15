@@ -19,29 +19,30 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
+    QCheckBox, QMessageBox, QDialog, QPlainTextEdit,
 )
 from PyQt6.QtCore import Qt
 
 
 # 수동 선택 콤보 라벨 ↔ 내부 kind 매핑
 _KIND_BY_LABEL = {
-    "자동 판별": "auto",
-    "fit 결과 (가스별 ppb·RMS)": "fit",
-    "R 트렌드 (시계열)": "r_trend",
-    "R(λ) 곡선": "r_curve",
-    "α trace (평균 스펙트럼)": "alpha_trace",
-    "배열 스펙트럼": "array",
-    "레퍼런스 스펙트럼": "reference",
-    "농도·fit 시계열": "concentration",
+    "Auto": "auto",
+    "Fit (gas ppb / RMS)": "fit",
+    "R trend": "r_trend",
+    "R(λ) curve": "r_curve",
+    "α trace": "alpha_trace",
+    "Array": "array",
+    "Reference": "reference",
+    "Concentration": "concentration",
 }
 _KIND_KO = {
-    "fit": "fit 결과 (가스별 ppb·RMS)",
-    "r_trend": "R 트렌드 (시계열)",
-    "r_curve": "R(λ) 곡선",
-    "alpha_trace": "α trace (평균 스펙트럼)",
-    "array": "배열 스펙트럼",
-    "reference": "레퍼런스 스펙트럼",
-    "concentration": "농도·fit 시계열",
+    "fit": "Fit (gas ppb / RMS)",
+    "r_trend": "R trend",
+    "r_curve": "R(λ) curve",
+    "alpha_trace": "α trace",
+    "array": "Array",
+    "reference": "Reference",
+    "concentration": "Concentration",
 }
 _PALETTE = ["#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
             "#0097A7", "#C2185B", "#5D4037"]
@@ -53,70 +54,161 @@ class ResultViewerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._path = None
+        self._region = None      # pg.LinearRegionItem (구간선택)
         self._init_ui()
 
     # ──────────────────────────────────────────────────────────────
     def _init_ui(self):
         root = QVBoxLayout(self)
 
-        # 상단 바: 파일/폴더 열기 + 종류 콤보 + 상태 라벨
+        # ── 툴바 1줄: [열기] | [보기] ────────────────────────────────────
+        def _sep():
+            s = QLabel("|")
+            s.setStyleSheet("color:#bbb; padding:0 4px;")
+            return s
+
+        def _grp(text):
+            l = QLabel(text)
+            l.setStyleSheet("color:#888; font-weight:bold;")
+            return l
+
         bar = QHBoxLayout()
-        self._btn = QPushButton("📂 파일 열기")
-        self._btn.setFixedWidth(110)
+        bar.addWidget(_grp("Open"))
+        self._btn = QPushButton("📂 File")
         self._btn.clicked.connect(self._open)
         bar.addWidget(self._btn)
-        self._btn_folder = QPushButton("📁 폴더 열기")
-        self._btn_folder.setFixedWidth(110)
+        self._btn_folder = QPushButton("📁 Folder")
         self._btn_folder.clicked.connect(self._open_folder)
         bar.addWidget(self._btn_folder)
-
-        bar.addWidget(QLabel("종류:"))
+        bar.addWidget(QLabel("Type:"))
         self._combo = QComboBox()
         self._combo.addItems(list(_KIND_BY_LABEL.keys()))
-        self._combo.setFixedWidth(160)
+        self._combo.setFixedWidth(150)
         self._combo.currentIndexChanged.connect(self._reload)
         bar.addWidget(self._combo)
 
-        self._lbl = QLabel("결과 파일/폴더를 열어보세요 (fit / R트렌드 / R(λ) / α / 레퍼런스).")
+        bar.addWidget(_sep())
+        bar.addWidget(_grp("View"))
+        bar.addWidget(QLabel("Gas:"))
+        self._gas_combo = QComboBox()
+        self._gas_combo.setFixedWidth(110)
+        self._gas_combo.currentIndexChanged.connect(self._on_gas_changed)
+        bar.addWidget(self._gas_combo)
+        self._chk_hide_qc = QCheckBox("Hide QC")
+        self._chk_hide_qc.setToolTip(
+            "Hide rows with Status QC-* (auto quality filter) from plots and stats.\n"
+            "Works by Status even for older files where values are not NaN.")
+        self._chk_hide_qc.setChecked(True)
+        self._chk_hide_qc.toggled.connect(self._on_gas_changed)
+        bar.addWidget(self._chk_hide_qc)
+        self._chk_err = QCheckBox("Err bars")
+        self._chk_err.setToolTip("Show ±Error bars when a single gas is selected (report format only)")
+        self._chk_err.toggled.connect(self._on_gas_changed)
+        bar.addWidget(self._chk_err)
+        # 사후 QC: 결과파일의 RMS 분포에서 K로 robust 임계를 다시 잡아 이상치 제외.
+        # 메인 GUI _apply_auto_qc와 동일 식. QC 적용/미적용 어떤 파일에든 RMS만 있으면 동작.
+        from PyQt6.QtWidgets import QDoubleSpinBox
+        bar.addWidget(QLabel("QC K:"))
+        self._spin_qc_k = QDoubleSpinBox()
+        self._spin_qc_k.setRange(0.0, 30.0)
+        self._spin_qc_k.setDecimals(1)
+        self._spin_qc_k.setSingleStep(1.0)
+        self._spin_qc_k.setValue(0.0)
+        self._spin_qc_k.setFixedWidth(56)
+        self._spin_qc_k.setToolTip(
+            "Post-hoc QC sensitivity (0 = off). Recomputes threshold from this file's RMS:\n"
+            "  thr = 10^(median(log10 RMS) + K·MAD), per channel.\n"
+            "Rows above thr are excluded from plots/stats/export. Lower K = stricter.\n"
+            "Works on any result (QC-applied or not) — RMS column is always original.")
+        self._spin_qc_k.valueChanged.connect(self._on_gas_changed)
+        bar.addWidget(self._spin_qc_k)
+
+        self._lbl = QLabel("Open a result file or folder.")
         self._lbl.setStyleSheet("color:#666;")
+        # 긴 상태문구가 툴바 최소폭을 강제(→그래프 잘림)하지 않게 가로 Ignored
+        from PyQt6.QtWidgets import QSizePolicy
+        self._lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         bar.addWidget(self._lbl, 1)
         root.addLayout(bar)
 
-        # fit 분석 컨트롤 바: 가스 선택 + 다중파일 비교 + 통계 라벨
+        # ── 툴바 2줄: [분석] | [내보내기] ───────────────────────────────
         fbar = QHBoxLayout()
-        fbar.addWidget(QLabel("가스:"))
-        self._gas_combo = QComboBox()
-        self._gas_combo.setFixedWidth(140)
-        self._gas_combo.currentIndexChanged.connect(self._on_gas_changed)
-        fbar.addWidget(self._gas_combo)
-        self._btn_compare = QPushButton("📊 선택파일 겹쳐비교")
-        self._btn_compare.setFixedWidth(150)
+        fbar.addWidget(_grp("Analyze"))
+        self._btn_compare = QPushButton("📊 Overlay")
+        self._btn_compare.setToolTip("Overlay same gas from multiple selected fit files")
         self._btn_compare.clicked.connect(self._overlay_compare)
         fbar.addWidget(self._btn_compare)
         self._btn_td = QPushButton("🧪 NO2/PNs/ANs")
-        self._btn_td.setFixedWidth(150)
-        self._btn_td.setToolTip("Cold/PNs(ROI1)/ANs(ROI2) 결과 3개 선택 → 시간정렬·차분으로\n"
-                                "NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs 유도농도 플롯")
+        self._btn_td.setToolTip("Select 3 results (Cold / PNs ROI1 / ANs ROI2) → time-align & difference:\n"
+                                "NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs")
         self._btn_td.clicked.connect(self._derive_no2_pns_ans)
         fbar.addWidget(self._btn_td)
-        self._btn_td_save = QPushButton("💾 유도농도 저장")
-        self._btn_td_save.setFixedWidth(130)
-        self._btn_td_save.setToolTip("계산한 NO2/PNs/ANs(+원시 채널 NO2)를 TSV로 저장")
+        self._btn_stats = QPushButton("Σ Stats")
+        self._btn_stats.setToolTip("Per-gas mean/median/σ/n for current fit (range-aware)")
+        self._btn_stats.clicked.connect(self._show_stats)
+        fbar.addWidget(self._btn_stats)
+        self._btn_diurnal = QPushButton("🕐 Diurnal")
+        self._btn_diurnal.setToolTip("Hour-of-day mean curve of selected gas (bottom plot)")
+        self._btn_diurnal.clicked.connect(self._plot_diurnal)
+        fbar.addWidget(self._btn_diurnal)
+
+        fbar.addStretch(1)
+        root.addLayout(fbar)
+
+        # ── 툴바 3줄: [Export] — DateTimeEdit 포함이라 별도 줄(가로폭 폭발 방지) ──
+        ebar = QHBoxLayout()
+        ebar.addWidget(_grp("Export"))
+        self._btn_region = QPushButton("⏱ Range")
+        self._btn_region.setCheckable(True)
+        self._btn_region.setToolTip("Show draggable time-range handles on the plot")
+        self._btn_region.toggled.connect(self._toggle_region)
+        ebar.addWidget(self._btn_region)
+        # 정확한 시각 직접 입력 — 드래그와 양방향 동기 (Export/Stats의 기준값)
+        from PyQt6.QtWidgets import QDateTimeEdit
+        self._dt_from = QDateTimeEdit()
+        self._dt_to = QDateTimeEdit()
+        for de in (self._dt_from, self._dt_to):
+            de.setDisplayFormat("MM-dd HH:mm")
+            de.setFixedWidth(110)
+            de.setCalendarPopup(True)
+            de.setToolTip("Export/Stats time range (synced with drag handles)")
+            de.editingFinished.connect(self._on_range_edited)
+            ebar.addWidget(de)
+        self._btn_slice = QPushButton("✂ Export")
+        self._btn_slice.setToolTip("Save the time range (or all) as a new result file.\n"
+                                   "Multiple selected files in the list are merged first.")
+        self._btn_slice.clicked.connect(self._export_region)
+        ebar.addWidget(self._btn_slice)
+        self._btn_merge = QPushButton("🔗 Merge")
+        self._btn_merge.setToolTip("Merge selected same-format result files in time order")
+        self._btn_merge.clicked.connect(self._merge_files)
+        ebar.addWidget(self._btn_merge)
+        self._btn_td_save = QPushButton("💾 Save TD")
+        self._btn_td_save.setToolTip("Save computed NO2/PNs/ANs (+raw channel NO2) as TSV")
         self._btn_td_save.setEnabled(False)
         self._btn_td_save.clicked.connect(self._save_td_result)
-        fbar.addWidget(self._btn_td_save)
+        ebar.addWidget(self._btn_td_save)
+        self._btn_png = QPushButton("📷 PNG")
+        self._btn_png.setToolTip("Export current plots as high-resolution PNG (2400 px wide,\n"
+                                 "top+bottom combined). For papers/reports.")
+        self._btn_png.clicked.connect(self._export_png)
+        ebar.addWidget(self._btn_png)
+
         self._stats_lbl = QLabel("")
         self._stats_lbl.setStyleSheet("color:#444;")
-        fbar.addWidget(self._stats_lbl, 1)
-        root.addLayout(fbar)
+        from PyQt6.QtWidgets import QSizePolicy as _QSP
+        self._stats_lbl.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Preferred)
+        ebar.addWidget(self._stats_lbl, 1)
+        root.addLayout(ebar)
 
         # 좌: 폴더 파일목록(형태별 그룹) / 우: 플롯 2단(위=주, 아래=보조)
         hsplit = QSplitter(Qt.Orientation.Horizontal)
         self._list = QListWidget()
-        self._list.setMinimumWidth(230)
+        self._list.setMinimumWidth(180)
         # 다중 선택 → 여러 fit 파일 겹쳐비교 가능
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.itemClicked.connect(self._on_list_item)
+        self._list.itemDoubleClicked.connect(self._on_list_double)
         hsplit.addWidget(self._list)
 
         self._fit_cache = None   # 최근 로드한 fit 테이블(포인트클릭 α 팝업용)
@@ -194,7 +286,8 @@ class ResultViewerWidget(QWidget):
 
         # 저장용 보관(시각 epoch + 유도농도 + 원시 채널 NO2)
         self._td_data = {'epoch': ct, 'NO2': no2, 'PNs': pns, 'ANs': ans,
-                         'Cold_NO2': cn, 'PNsCh_NO2': pn_i, 'ANsCh_NO2': an_i}
+                         'Cold_NO2': cn, 'PNsCh_NO2': pn_i, 'ANsCh_NO2': an_i,
+                         'sources': {k: os.path.basename(v) for k, v in paths.items()}}
         if hasattr(self, '_btn_td_save'):
             self._btn_td_save.setEnabled(True)
 
@@ -218,9 +311,15 @@ class ResultViewerWidget(QWidget):
         self._pw_bot.plot(ct, an_i, pen=pg.mkPen('#2ca02c'), name='ANs채널 NO2')
         self._pw_bot.setLabel('left', '채널 NO2 (ppb)')
         self._pw_bot.setLabel('bottom', '시간')
-        self._lbl.setText("🧪 유도농도: NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs (Cold 시각격자에 정렬). "
-                          "음수는 노이즈/시간불일치.")
+        self._lbl.setText("🧪 NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs (aligned to Cold time grid). "
+                          "Negatives = noise/time mismatch.")
         self._lbl.setStyleSheet("color:#1565C0;")
+        # 계산 직후 저장까지 한 흐름으로 (별도 버튼 클릭 불필요)
+        if QMessageBox.question(self, "Save TD result",
+                                "NO2/PNs/ANs computed. Save to TSV now?",
+                                QMessageBox.StandardButton.Yes
+                                | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            self._save_td_result()
 
     def _save_td_result(self):
         """유도농도(NO2/PNs/ANs) + 원시 채널 NO2를 TSV로 저장."""
@@ -229,10 +328,27 @@ class ResultViewerWidget(QWidget):
         from datetime import datetime
         d = getattr(self, '_td_data', None)
         if not d:
-            QMessageBox.warning(self, "데이터 없음", "먼저 NO2/PNs/ANs를 계산하세요."); return
+            QMessageBox.warning(self, "No data", "Compute NO2/PNs/ANs first."); return
+        # 자동 파일명: NO2-PNs-ANs_{날짜범위}_[소스라벨].dat
+        ep = d['epoch']
+        from datetime import datetime as _dt
+        rng = ""
+        try:
+            t0, t1 = _dt.fromtimestamp(float(ep[0])), _dt.fromtimestamp(float(ep[-1]))
+            rng = f"{t0:%y%m%d}-{t1:%y%m%d}" if t0.date() != t1.date() else f"{t0:%y%m%d}"
+        except Exception:
+            pass
+        import re as _re
+        srcs = d.get('sources', {})
+        def _chan(fn, role):
+            m = _re.search(r'(cold|CH[123]|PNs|ANs|roi[123])', fn, _re.I)
+            return m.group(1) if m else role
+        slab = "+".join(_chan(srcs[k], k) for k in ('Cold', 'PNs', 'ANs') if k in srcs)
+        auto = f"NO2-PNs-ANs_{rng}_[{slab}].dat" if rng else "NO2-PNs-ANs.dat"
         path, _ = QFileDialog.getSaveFileName(
-            self, "유도농도 저장", os.path.join(dlg_dir("result") or "", "NO2_PNs_ANs.dat"),
-            "데이터 (*.dat *.csv *.tsv);;모든 파일 (*)")
+            self, "Save derived concentrations",
+            os.path.join(dlg_dir("result") or "", auto),
+            "Data (*.dat *.csv *.tsv);;All (*)")
         if not path:
             return
         dlg_dir("result", path)
@@ -240,8 +356,9 @@ class ResultViewerWidget(QWidget):
         cols = ['datetime', 'NO2', 'PNs', 'ANs', 'Cold_NO2', 'PNsCh_NO2', 'ANsCh_NO2']
         try:
             with open(path, 'w', encoding='utf-8') as f:
-                f.write("# CAESAR Pro 유도농도 (ppb)\n")
-                f.write("# NO2=Cold, PNs=PNsCh-Cold, ANs=ANsCh-PNsCh (Cold 시각격자 정렬)\n")
+                f.write("# CAESAR Pro derived concentrations (ppb)\n")
+                f.write("# NO2=Cold, PNs=PNsCh-Cold, ANs=ANsCh-PNsCh (aligned to Cold time grid)\n")
+                f.write(f"# sources: Cold={srcs.get('Cold','?')}  PNs={srcs.get('PNs','?')}  ANs={srcs.get('ANs','?')}\n")
                 f.write(sep.join(cols) + "\n")
                 ep = d['epoch']
                 for i in range(len(ep)):
@@ -275,38 +392,66 @@ class ResultViewerWidget(QWidget):
             dlg_dir("result_folder", d)
         if not d:
             return
-        files = []
-        for ext in ("*.dat", "*.csv", "*.txt", "*.tsv"):
-            files += glob.glob(os.path.join(d, ext))
-            files += glob.glob(os.path.join(d, "**", ext), recursive=True)
-        files = sorted(set(files))
-        groups = {}
+        self._browse_dir(d)
+
+    # ── 미니 파일탐색기 ───────────────────────────────────────────────
+    _RESULT_EXTS = ('.dat', '.csv', '.txt', '.tsv')
+
+    def _browse_dir(self, d):
+        """현재 폴더의 '하위 폴더 + 이 폴더 직속 결과파일'만 보여준다(재귀 X).
+        폴더는 더블클릭으로 진입, '..'로 상위. 파일은 클릭하면 표시."""
+        import glob
+        self._browse_cwd = d
+        self._list.clear()
+        # 상위로 가기
+        parent = os.path.dirname(d.rstrip('\\/'))
+        if parent and parent != d:
+            up = QListWidgetItem("📁  ..")
+            up.setData(Qt.ItemDataRole.UserRole, ("dir", parent))
+            self._list.addItem(up)
+        # 하위 폴더 (결과파일을 품은 것만 — 빈 트리 숨김)
+        subdirs = sorted(p for p in glob.glob(os.path.join(d, '*')) if os.path.isdir(p))
+        for p in subdirs:
+            has = any(glob.glob(os.path.join(p, '**', '*' + e), recursive=True)
+                      for e in self._RESULT_EXTS)
+            if not has:
+                continue
+            nfile = sum(len(glob.glob(os.path.join(p, '**', '*' + e), recursive=True))
+                        for e in self._RESULT_EXTS)
+            it = QListWidgetItem(f"📁  {os.path.basename(p)}/   ({nfile})")
+            it.setData(Qt.ItemDataRole.UserRole, ("dir", p))
+            self._list.addItem(it)
+        # 이 폴더 직속 결과파일 (재귀 X)
+        files = sorted(f for e in self._RESULT_EXTS
+                       for f in glob.glob(os.path.join(d, '*' + e)) if os.path.isfile(f))
         for f in files:
             try:
                 k = self._detect(f)
             except Exception:
                 k = "array"
-            groups.setdefault(k, []).append(f)
-        self._list.clear()
-        order = ["r_trend", "concentration", "r_curve", "array", "reference"]
-        n = 0
-        for k in order + [g for g in groups if g not in order]:
-            for f in groups.get(k, []):
-                it = QListWidgetItem(f"[{_KIND_KO.get(k, k)}] {os.path.basename(f)}")
-                it.setData(Qt.ItemDataRole.UserRole, f)
-                self._list.addItem(it)
-                n += 1
-        if n:
-            self._lbl.setText(f"📁 {os.path.basename(d)} — 결과파일 {n}개. 왼쪽 목록에서 선택.")
-            self._lbl.setStyleSheet("color:#1565C0;")
-        else:
-            self._lbl.setText(f"📁 {os.path.basename(d)} — 결과파일(.dat/.csv/.txt/.tsv) 없음.")
-            self._lbl.setStyleSheet("color:#C62828;")
+            it = QListWidgetItem(f"📄  {os.path.basename(f)}   [{_KIND_KO.get(k, k)}]")
+            it.setData(Qt.ItemDataRole.UserRole, ("file", f))
+            self._list.addItem(it)
+        self._lbl.setText(f"📁 {os.path.basename(d) or d}  —  {len(subdirs)} folders · {len(files)} files"
+                          + ("  (double-click folder to enter)" if subdirs else ""))
+        self._lbl.setStyleSheet("color:#1565C0;")
 
     def _on_list_item(self, item):
-        f = item.data(Qt.ItemDataRole.UserRole)
-        if f:
-            self._path = f
+        """단일클릭: 파일이면 표시. 폴더면 무시(더블클릭으로 진입)."""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(data, tuple) and data[0] == "file":
+            self._path = data[1]
+            self._reload()
+
+    def _on_list_double(self, item):
+        """더블클릭: 폴더면 진입, 파일이면 표시."""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(data, tuple):
+            return
+        if data[0] == "dir":
+            self._browse_dir(data[1])
+        else:
+            self._path = data[1]
             self._reload()
 
     def _reload(self):
@@ -332,7 +477,7 @@ class ResultViewerWidget(QWidget):
             self._lbl.setText(f"✅ {os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}")
             self._lbl.setStyleSheet("color:#1565C0;")
         except Exception as e:
-            self._lbl.setText(f"❌ 표시 실패: {e}  (종류를 수동 선택해 보세요)")
+            self._lbl.setText(f"❌ Failed to display: {e}  (try selecting Type manually)")
             self._lbl.setStyleSheet("color:#C62828;")
 
     # ── 자동 판별 ──────────────────────────────────────────────────
@@ -361,6 +506,10 @@ class ResultViewerWidget(QWidget):
             return "alpha_trace"
         # fit 결과: 헤더 row_idx … rms_cm-1 (가스별 ppb 컬럼)
         if name.endswith("_fit.tsv") or ("row_idx" in head and "rms_cm" in head):
+            return "fit"
+        # GUI 분석 리포트(File/Time/RMS/…/Chi2/DOF/SNR/Status) — fit으로 취급해
+        # 가스선택·QC필터·통계·구간내보내기 등 fit 기능을 전부 사용 가능하게.
+        if "file\t" in head and "\tstatus" in head and "\tchi2" in head:
             return "fit"
         if name.endswith(".tsv") or "rms_cm" in head:
             return "concentration"
@@ -531,7 +680,8 @@ class ResultViewerWidget(QWidget):
         xcol = df.columns[0]
         x_dt = pd.to_datetime(df[xcol], errors="coerce")
         if x_dt.notna().mean() > 0.5:
-            x = x_dt.view("int64") / 1e9   # ns → s (epoch)
+            # ns→s epoch. Series.view는 최신 pandas에서 제거됨 → numpy로 안전 변환.
+            x = x_dt.to_numpy(dtype="datetime64[ns]").astype("int64") / 1e9
             self._set_time_axis(self._pw_top, True)
             self._pw_top.setLabel("bottom", "Date / Time")
             ycols = df.columns[1:]
@@ -550,9 +700,9 @@ class ResultViewerWidget(QWidget):
                               name=str(c))
             n += 1
         if n == 0:
-            raise ValueError("숫자 농도 컬럼을 찾지 못했습니다")
+            raise ValueError("No numeric concentration columns found")
         self._pw_top.setLabel("left", "Concentration")
-        self._pw_top.setTitle(f"농도 시계열 — {os.path.basename(path)} ({n} columns)")
+        self._pw_top.setTitle(f"Concentration — {os.path.basename(path)} ({n} columns)")
         self._pw_bot.hide()
 
     # ── α/일반 숫자 배열 → vs 픽셀(또는 1열 vs 2열) ───────────────
@@ -580,24 +730,72 @@ class ResultViewerWidget(QWidget):
     # ── fit 결과 (_fit.tsv) → 가스별 ppb + RMS + 통계 ────────────────
     @staticmethod
     def _load_fit_table(path):
-        """헤더 위치 기반 파싱(구·신 포맷). 구: row_idx T_C P_mbar <gases> rms_cm-1.
-        신: row_idx doy datetime T_C P_mbar <gases> rms_cm-1.
-        반환: {'row_idx','T','P','rms','doy','time'(epoch초),'gases':{name:ndarray}}."""
+        """fit 표 파싱 — 3가지 포맷 지원.
+        ① 구 alpha-fit: row_idx T_C P_mbar <gases> rms_cm-1
+        ② 신 alpha-fit: row_idx doy datetime T_C P_mbar <gases> rms_cm-1
+        ③ GUI 분석 리포트: File [Ch] Time RMS … Status <gas blocks> Shift Squeeze
+        반환: {'row_idx','T','P','rms','doy','time'(epoch초),'gases':{name:ndarray},
+               'errs':{name:ndarray|None},'status':list|None,'path'}."""
         import datetime as _dt
         hdr, rows = None, []
+        is_report = False
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for ln in f:
                 s = ln.rstrip("\n")
                 if not s.strip() or s.startswith("#"):
                     continue
-                if s.lower().startswith("row_idx"):
+                if hdr is None and s.lower().startswith("row_idx"):
                     hdr = s.split("\t")
+                    continue
+                if hdr is None and s.startswith("File\t"):
+                    hdr = s.split("\t")
+                    is_report = True
                     continue
                 if hdr is None:
                     continue
                 rows.append(s.split("\t"))
         if hdr is None or not rows:
             raise ValueError("fit 결과 헤더/데이터 행을 찾지 못했습니다")
+
+        if is_report:
+            # ── GUI 리포트 포맷 ───────────────────────────────────────
+            idx = {n: i for i, n in enumerate(hdr)}
+            gases = [c for c in hdr if (c + "_Smooth") in idx]   # 주 가스 컬럼
+
+            def colf_r(j):
+                out = np.full(len(rows), np.nan)
+                for k, r in enumerate(rows):
+                    if j is not None and j < len(r):
+                        try:
+                            out[k] = float(r[j])
+                        except ValueError:
+                            pass
+                return out
+
+            ts = np.full(len(rows), np.nan)
+            ti = idx.get("Time")
+            for k, r in enumerate(rows):
+                if ti is not None and ti < len(r) and r[ti].strip():
+                    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                        try:
+                            ts[k] = _dt.datetime.strptime(r[ti].strip()[:26], fmt).timestamp()
+                            break
+                        except ValueError:
+                            pass
+            si = idx.get("Status")
+            status = [r[si] if (si is not None and si < len(r)) else "" for r in rows]
+            chi = idx.get("Channel")
+            channel = ([r[chi] if (chi is not None and chi < len(r)) else "1" for r in rows]
+                       if chi is not None else None)
+            out = {"row_idx": np.arange(len(rows), dtype=float),
+                   "T": np.full(len(rows), np.nan), "P": np.full(len(rows), np.nan),
+                   "rms": colf_r(idx.get("RMS")), "doy": np.full(len(rows), np.nan),
+                   "time": ts if np.isfinite(ts).any() else None,
+                   "gases": {g: colf_r(idx[g]) for g in gases},
+                   "errs": {g: (colf_r(idx[g + "_Error"]) if (g + "_Error") in idx else None)
+                            for g in gases},
+                   "status": status, "channel": channel, "path": path}
+            return out
         idx = {n: i for i, n in enumerate(hdr)}
         rms_i = idx.get("rms_cm-1", len(hdr) - 1)
         p_i = idx.get("P_mbar", 2)
@@ -615,7 +813,8 @@ class ResultViewerWidget(QWidget):
 
         out = {"row_idx": colf(idx.get("row_idx", 0)), "T": colf(idx.get("T_C")),
                "P": colf(p_i), "rms": colf(rms_i), "doy": colf(idx.get("doy")),
-               "time": None, "gases": {}, "path": path}
+               "time": None, "gases": {}, "errs": {}, "status": None,
+               "channel": None, "path": path}
         for j in gas_cols:
             out["gases"][hdr[j]] = colf(j)
 
@@ -655,6 +854,41 @@ class ResultViewerWidget(QWidget):
             self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
             self._plot_fit(self._path)
 
+    def _qc_mask(self, t):
+        """숨길/제외할 행 마스크(True) — 두 기준의 OR:
+          (1) Hide QC 체크 시 Status가 QC-* 인 행
+          (2) Post-hoc QC: K>0이면 RMS 분포에서 robust 임계 초과 행 (채널별)."""
+        n = len(t["row_idx"])
+        mask = np.zeros(n, bool)
+        # (1) Status 기반
+        if getattr(self, '_chk_hide_qc', None) and self._chk_hide_qc.isChecked():
+            st = t.get("status")
+            if st:
+                mask |= np.array([s.startswith("QC") for s in st])
+        # (2) RMS robust 임계 (사후 QC)
+        K = self._spin_qc_k.value() if hasattr(self, '_spin_qc_k') else 0.0
+        if K > 0:
+            rms = t.get("rms")
+            if rms is not None:
+                ch = t.get("channel")   # 채널 배열(없으면 전체 한 그룹)
+                groups = {}
+                for i in range(n):
+                    g = ch[i] if (ch is not None and i < len(ch)) else 0
+                    groups.setdefault(g, []).append(i)
+                for g, idxs in groups.items():
+                    r = rms[idxs]
+                    fin = np.isfinite(r) & (r > 0)
+                    if fin.sum() < 5:
+                        continue
+                    la = np.log10(r[fin]); med = np.median(la); mad = np.median(np.abs(la - med))
+                    if mad <= 0:
+                        continue
+                    thr = 10 ** (med + K * mad)
+                    for i in idxs:
+                        if np.isfinite(rms[i]) and rms[i] > thr:
+                            mask[i] = True
+        return mask
+
     def _plot_fit(self, path):
         t = self._load_fit_table(path)
         self._fit_cache = t
@@ -667,37 +901,60 @@ class ResultViewerWidget(QWidget):
         x = t["time"] if has_time else t["row_idx"]
         self._set_time_axis(self._pw_top, has_time)
         self._set_time_axis(self._pw_bot, has_time)
-        xlabel = "Date / Time" if has_time else "row_idx (≈시간)"
+        xlabel = "Date / Time" if has_time else "row_idx (≈time)"
+
+        hide = self._qc_mask(t)
+        n_hidden = int(hide.sum())
+
+        # 시각 입력칸 초기화: 데이터 전체 범위 (파일 바뀔 때만)
+        if has_time and getattr(self, '_range_init_path', None) != path:
+            fin_t = x[np.isfinite(x)]
+            if fin_t.size:
+                self._set_range_edits(fin_t.min(), fin_t.max())
+                self._range_init_path = path
 
         stats = []
         for i, g in enumerate(names):
             y = t["gases"].get(g)
             if y is None:
                 continue
+            y = y.copy()
+            y[hide] = np.nan          # QC행 숨김(시각적 + 통계)
             col = _PALETTE[i % len(_PALETTE)]
+            # 오차 표시(단일 가스 + Error 컬럼 있을 때) — NaN 구간을 가로지르는
+            # fill 폴리곤이 깨져 보이던 것을 ErrorBar(유한 점만·데시메이션)로 교체.
+            if (len(names) == 1 and getattr(self, '_chk_err', None)
+                    and self._chk_err.isChecked()):
+                err = (t.get("errs") or {}).get(g)
+                if err is not None:
+                    ok = np.isfinite(y) & np.isfinite(err) & np.isfinite(x)
+                    xs, ys, es = x[ok], y[ok], err[ok]
+                    if xs.size:
+                        step = max(1, xs.size // 1500)
+                        eb = pg.ErrorBarItem(x=xs[::step], y=ys[::step],
+                                             height=2 * es[::step],
+                                             pen=pg.mkPen(col, width=1))
+                        self._pw_top.addItem(eb)
             self._pw_top.plot(x, y, pen=pg.mkPen(col, width=2), symbol="o",
                               symbolSize=4, symbolBrush=col, name=f"{g} (ppb)")
+            # (±3σ X마커 제거 — QC와 무관한데 혼동만 줬음. 이상치는 Σ Stats에서 확인)
             fin = y[np.isfinite(y)]
             if fin.size:
                 mu, sd = float(np.mean(fin)), float(np.std(fin))
-                if sd > 0:
-                    om = np.abs(y - mu) > 3 * sd
-                    nout = int(np.sum(om))
-                    if om.any():
-                        self._pw_top.plot(x[om], y[om], pen=None, symbol="x",
-                                          symbolSize=11, symbolBrush=(211, 47, 47))
-                else:
-                    nout = 0
-                stats.append(f"{g}: μ={mu:.3g}±{sd:.2g} ppb · ±3σ이상치 {nout}")
-        self._pw_top.setLabel("left", "농도 (ppb)")
+                stats.append(f"{g}: μ={mu:.3g}±{sd:.2g} ppb")
+        self._pw_top.setLabel("left", "Conc (ppb)")
         self._pw_top.setLabel("bottom", xlabel)
-        self._pw_top.setTitle(f"fit 결과 — {os.path.basename(path)} ({len(x)} scans)")
+        qc_tag = f" · QC hidden {n_hidden}" if n_hidden else ""
+        self._pw_top.setTitle(f"Fit — {os.path.basename(path)} ({len(x)} scans{qc_tag})")
+        # 구간선택이 켜져 있었으면 새 플롯에도 다시 부착
+        if getattr(self, '_btn_region', None) and self._btn_region.isChecked():
+            self._attach_region()
 
         self._pw_bot.show()
         self._pw_bot.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=2), name="RMS")
         self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
         self._pw_bot.setLabel("bottom", xlabel)
-        self._pw_bot.setTitle("RMS 시계열")
+        self._pw_bot.setTitle("RMS")
 
         self._stats_lbl.setText("   |   ".join(stats))
         # 포인트 클릭 → 해당 scan의 α 스펙트럼 팝업(형제 alpha_trace.dat 있으면)
@@ -709,14 +966,15 @@ class ResultViewerWidget(QWidget):
 
     def _overlay_compare(self):
         """목록에서 다중 선택된 fit 파일들의 현재 가스 ppb·RMS를 겹쳐 비교."""
-        items = self._list.selectedItems()
         paths = []
-        for it in items:
-            p = it.data(Qt.ItemDataRole.UserRole)
-            if p and (p.lower().endswith("_fit.tsv") or self._detect(p) == "fit"):
-                paths.append(p)
+        for it in self._list.selectedItems():
+            data = it.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, tuple) and data[0] == "file":
+                p = data[1]
+                if p.lower().endswith("_fit.tsv") or self._detect(p) == "fit":
+                    paths.append(p)
         if not paths:
-            self._stats_lbl.setText("⚠️ 비교하려면 목록에서 fit 파일을 2개 이상 선택하세요.")
+            self._stats_lbl.setText("⚠️ Select 2+ fit files in the list to overlay.")
             return
         gas = self._gas_combo.currentText()
         self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
@@ -741,8 +999,8 @@ class ResultViewerWidget(QWidget):
             fin = y[np.isfinite(y)]
             if fin.size:
                 summ.append(f"{lbl}: μ={float(np.mean(fin)):.3g}±{float(np.std(fin)):.2g}")
-        self._pw_top.setLabel("left", "농도 (ppb)")
-        self._pw_top.setLabel("bottom", "row_idx (≈시간)")
+        self._pw_top.setLabel("left", "Conc (ppb)")
+        self._pw_top.setLabel("bottom", "row_idx (≈time)")
         self._pw_top.setTitle(f"비교 — {gas} ({len(paths)} files)")
         self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
         self._stats_lbl.setText("   |   ".join(summ))
@@ -830,3 +1088,342 @@ class ResultViewerWidget(QWidget):
         pw.setTitle(f"α — row {row_idx}")
         lay.addWidget(pw)
         dlg.show()
+
+    # ══════════════════════════════════════════════════════════════════
+    # 구간선택 / 구간저장 / 병합 / 통계 / 일주기  (core.result_io 공용 로직)
+    # ══════════════════════════════════════════════════════════════════
+    def _attach_region(self):
+        """현재 상단 플롯 x범위 가운데 1/3에 드래그 가능한 구간 핸들 부착."""
+        if self._region is not None:
+            try:
+                self._pw_top.removeItem(self._region)
+            except Exception:
+                pass
+            self._region = None
+        vb = self._pw_top.getViewBox()
+        (x0, x1), _ = vb.viewRange()
+        a = x0 + (x1 - x0) / 3.0
+        b = x0 + 2.0 * (x1 - x0) / 3.0
+        # 시각 입력칸에 유효 범위가 있으면 그 위치로 핸들 시작
+        try:
+            ea = self._dt_from.dateTime().toSecsSinceEpoch()
+            eb = self._dt_to.dateTime().toSecsSinceEpoch()
+            if x0 <= ea < eb <= x1:
+                a, b = ea, eb
+        except Exception:
+            pass
+        self._region = pg.LinearRegionItem(values=(a, b), movable=True,
+                                           brush=pg.mkBrush(33, 150, 243, 30))
+        self._region.setZValue(50)
+        self._region.sigRegionChanged.connect(self._on_region_dragged)
+        self._pw_top.addItem(self._region)
+        self._on_region_dragged()   # 입력칸 즉시 동기
+
+    def _toggle_region(self, on):
+        if on:
+            self._attach_region()
+            self._stats_lbl.setText("Drag handles or type exact times, then [✂ Export] / [Σ Stats]")
+        elif self._region is not None:
+            try:
+                self._pw_top.removeItem(self._region)
+            except Exception:
+                pass
+            self._region = None
+
+    def _set_range_edits(self, t0_epoch, t1_epoch, block=True):
+        """시각 입력칸을 epoch초로 설정(신호 차단 옵션)."""
+        from PyQt6.QtCore import QDateTime
+        for de, ep in ((self._dt_from, t0_epoch), (self._dt_to, t1_epoch)):
+            if not np.isfinite(ep):
+                continue
+            if block:
+                de.blockSignals(True)
+            de.setDateTime(QDateTime.fromSecsSinceEpoch(int(ep)))
+            if block:
+                de.blockSignals(False)
+
+    def _on_range_edited(self):
+        """시각 직접 입력 → 드래그 핸들 동기."""
+        if self._region is not None:
+            a = self._dt_from.dateTime().toSecsSinceEpoch()
+            b = self._dt_to.dateTime().toSecsSinceEpoch()
+            if a < b:
+                self._region.blockSignals(True)
+                self._region.setRegion((a, b))
+                self._region.blockSignals(False)
+
+    def _on_region_dragged(self):
+        """드래그 핸들 → 시각 입력칸 동기."""
+        if self._region is not None:
+            a, b = self._region.getRegion()
+            self._set_range_edits(min(a, b), max(a, b))
+
+    def _region_times(self):
+        """Export/Stats 기준 시간범위 → (datetime t0, t1).
+        시각 입력칸이 진실원(드래그와 동기). 전체범위와 같으면 (None,None)=전체."""
+        t = self._fit_cache
+        if not t or t.get("time") is None:
+            return None, None
+        try:
+            a = self._dt_from.dateTime().toSecsSinceEpoch()
+            b = self._dt_to.dateTime().toSecsSinceEpoch()
+        except Exception:
+            return None, None
+        if a >= b:
+            return None, None
+        tt = t["time"]
+        fin = tt[np.isfinite(tt)]
+        if fin.size and a <= fin.min() and b >= fin.max():
+            return None, None     # 전체 범위 = 슬라이스 불필요
+        try:
+            return datetime.fromtimestamp(a), datetime.fromtimestamp(b)
+        except (OSError, OverflowError, ValueError):
+            return None, None
+
+    def _selected_paths(self):
+        """목록에서 선택된 파일 경로들(없으면 현재 파일)."""
+        paths = []
+        for it in self._list.selectedItems():
+            data = it.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, tuple) and data[0] == "file" and os.path.isfile(data[1]):
+                paths.append(data[1])
+        if not paths and self._path:
+            paths = [self._path]
+        return paths
+
+    def _bake_qc_into_rows(self, colhdr, rows):
+        """현재 K>0이면 rows(텍스트 행)의 RMS 분포로 robust 임계를 잡아 초과 행의
+        가스 컬럼을 nan + Status=QC-Auto로 바꾼다. 반환: (rows, 제외수). K=0이면 그대로."""
+        K = self._spin_qc_k.value() if hasattr(self, '_spin_qc_k') else 0.0
+        if K <= 0 or not rows:
+            return rows, 0
+        cols = colhdr.split('\t')
+        idx = {c: i for i, c in enumerate(cols)}
+        if 'RMS' not in idx:
+            return rows, 0
+        ri = idx['RMS']; ci = idx.get('Channel'); si = idx.get('Status')
+        gases = [c for c in cols if (c + '_Smooth') in idx] or \
+                [c for c in cols if c in ('NO2', 'CHOCHO', 'H2O', 'O4', 'HONO', 'HCHO')]
+        gidx = [idx[g] for g in gases] + [idx[g + '_Smooth'] for g in gases if (g + '_Smooth') in idx]
+        # 채널별 임계
+        import numpy as _np
+        grp = {}
+        for k, (_t, line) in enumerate(rows):
+            p = line.split('\t')
+            ch = p[ci] if (ci is not None and ci < len(p)) else '0'
+            try:
+                rv = float(p[ri])
+            except Exception:
+                rv = _np.nan
+            grp.setdefault(ch, []).append((k, rv))
+        thr = {}
+        for ch, lst in grp.items():
+            r = _np.array([v for _, v in lst]); fin = _np.isfinite(r) & (r > 0)
+            if fin.sum() < 5:
+                thr[ch] = _np.inf; continue
+            la = _np.log10(r[fin]); med = _np.median(la); mad = _np.median(_np.abs(la - med))
+            thr[ch] = 10 ** (med + K * mad) if mad > 0 else _np.inf
+        out = []; nq = 0
+        for k, (t, line) in enumerate(rows):
+            p = line.split('\t')
+            ch = p[ci] if (ci is not None and ci < len(p)) else '0'
+            try:
+                rv = float(p[ri])
+            except Exception:
+                rv = float('nan')
+            if _np.isfinite(rv) and rv > thr.get(ch, _np.inf):
+                for j in gidx:
+                    if j < len(p):
+                        p[j] = 'nan'
+                if si is not None and si < len(p):
+                    p[si] = f'QC-Auto(K={K:g})'
+                nq += 1
+                out.append((t, '\t'.join(p)))
+            else:
+                out.append((t, line))
+        return out, nq
+
+    def _export_region(self):
+        """선택구간(없으면 전체)을 result_io로 잘라 새 파일로 저장.
+        목록에서 여러 파일 선택 시 병합 후 자름."""
+        from core.result_io import merge_results, slice_rows, write_result, auto_out_name
+        paths = self._selected_paths()
+        if not paths:
+            QMessageBox.information(self, "Export", "Open a result file first.")
+            return
+        try:
+            comments, colhdr, rows, _ndup = merge_results(paths)
+        except ValueError as e:
+            QMessageBox.warning(self, "Export", str(e))
+            return
+        t0, t1 = self._region_times()
+        n_in = len(rows)
+        rows = slice_rows(rows, t0, t1)
+        if not rows:
+            QMessageBox.warning(self, "Export", "No data in the selected range.")
+            return
+        rows, nq = self._bake_qc_into_rows(colhdr, rows)   # 사후 QC(K>0) 반영
+        qctag = f"_QCk{self._spin_qc_k.value():g}" if nq else ""
+        suggest = auto_out_name(paths[0], rows, os.path.splitext(paths[0])[1] or '.dat')
+        if qctag:
+            suggest = suggest.replace('_slice_', f'{qctag}_slice_')
+        out, _ = QFileDialog.getSaveFileName(self, "Export range", suggest,
+                                             "Data (*.dat *.tsv);;All (*)")
+        if not out:
+            return
+        write_result(out, comments, colhdr, rows,
+                     note=f"{len(paths)} file(s), {n_in}→{len(rows)} rows, QC-excluded {nq} (viewer export)")
+        qmsg = f" · QC excluded {nq}" if nq else ""
+        self._stats_lbl.setText(
+            f"Saved: {os.path.basename(out)}  ({len(rows)} rows{qmsg}, "
+            f"{rows[0][0]:%m-%d %H:%M} ~ {rows[-1][0]:%m-%d %H:%M})")
+
+    def _merge_files(self):
+        """목록에서 선택한 같은 형식 결과파일들을 시간순 병합 저장."""
+        from core.result_io import merge_results, write_result
+        paths = self._selected_paths()
+        if len(paths) < 2:
+            QMessageBox.information(self, "Merge",
+                                    "Select 2+ result files in the list (Ctrl+click).")
+            return
+        try:
+            comments, colhdr, rows, ndup = merge_results(paths)
+        except ValueError as e:
+            QMessageBox.warning(self, "Merge", str(e))
+            return
+        rows, nq = self._bake_qc_into_rows(colhdr, rows)   # 사후 QC(K>0) 반영
+        from core.result_io import merge_out_name
+        ext = os.path.splitext(paths[0])[1] or '.dat'
+        sug = merge_out_name(paths[0], rows, len(paths), ext)
+        if nq:
+            sug = sug.replace('_merge', f'_QCk{self._spin_qc_k.value():g}_merge')
+        out, _ = QFileDialog.getSaveFileName(self, "Merge save", sug,
+                                             "Data (*.dat *.tsv);;All (*)")
+        if not out:
+            return
+        write_result(out, comments, colhdr, rows,
+                     note=f"merged {len(paths)} files, {ndup} dups removed, QC-excluded {nq} (viewer)")
+        dmsg = (f" · {ndup} dups" if ndup else "") + (f" · QC {nq}" if nq else "")
+        self._stats_lbl.setText(f"Merged: {os.path.basename(out)} ({len(rows)} rows{dmsg})")
+
+    def _stats_arrays(self):
+        """현재 fit 캐시에서 (QC숨김·구간 반영) 선택마스크 반환."""
+        t = self._fit_cache
+        if not t:
+            return None, None
+        hide = self._qc_mask(t)
+        sel = np.ones(len(t["row_idx"]), bool) & ~hide
+        t0, t1 = self._region_times()
+        if t0 is not None and t.get("time") is not None:
+            tt = t["time"]
+            sel &= np.isfinite(tt) & (tt >= t0.timestamp()) & (tt <= t1.timestamp())
+        return t, sel
+
+    def _show_stats(self):
+        t, sel = self._stats_arrays()
+        if t is None:
+            QMessageBox.information(self, "Stats", "Open a fit result first.")
+            return
+        t0, t1 = self._region_times()
+        rng = (f"{t0:%Y-%m-%d %H:%M} ~ {t1:%Y-%m-%d %H:%M}" if t0 else "all")
+        lines = [f"File: {os.path.basename(t['path'])}",
+                 f"Range: {rng}   (Hide QC {'ON' if self._chk_hide_qc.isChecked() else 'OFF'})",
+                 "",
+                 f"{'gas':<10} {'n':>6} {'mean':>9} {'median':>9} {'σ':>8} {'min':>8} {'max':>8}"]
+        for g, y in t["gases"].items():
+            v = y[sel]
+            v = v[np.isfinite(v)]
+            if v.size == 0:
+                lines.append(f"{g:<10} {0:>6}")
+                continue
+            lines.append(f"{g:<10} {v.size:>6} {np.mean(v):>9.3f} {np.median(v):>9.3f} "
+                         f"{np.std(v):>8.3f} {np.min(v):>8.2f} {np.max(v):>8.2f}")
+        r = t["rms"][sel]
+        r = r[np.isfinite(r)]
+        if r.size:
+            lines.append("")
+            lines.append(f"RMS median {np.median(r):.3e} / p95 {np.percentile(r, 95):.3e}")
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Stats (ppb)")
+        dlg.resize(560, 340)
+        lay = QVBoxLayout(dlg)
+        ed = QPlainTextEdit("\n".join(lines))
+        ed.setReadOnly(True)
+        ed.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
+        lay.addWidget(ed)
+        dlg.show()
+
+    def _export_png(self):
+        """현재 위/아래 그래프를 고해상도(폭 2400px) PNG 합본으로 저장."""
+        import pyqtgraph.exporters as pgex
+        from PyQt6.QtGui import QImage, QPainter
+        base = os.path.splitext(os.path.basename(self._path or 'plot'))[0]
+        out, _ = QFileDialog.getSaveFileName(self, "Export high-res PNG",
+                                             f"{base}.png", "PNG (*.png)")
+        if not out:
+            return
+        if not out.lower().endswith('.png'):
+            out += '.png'
+        try:
+            imgs = []
+            for pw in (self._pw_top, self._pw_bot):
+                if not pw.isVisible() and pw is self._pw_bot:
+                    continue
+                ex = pgex.ImageExporter(pw.plotItem)
+                ex.parameters()['width'] = 2400
+                imgs.append(ex.export(toBytes=True))   # QImage
+            if not imgs:
+                return
+            if len(imgs) == 1:
+                imgs[0].save(out)
+            else:
+                wmax = max(im.width() for im in imgs)
+                htot = sum(im.height() for im in imgs)
+                combo = QImage(wmax, htot, QImage.Format.Format_ARGB32)
+                combo.fill(0xFFFFFFFF)
+                p = QPainter(combo)
+                y = 0
+                for im in imgs:
+                    p.drawImage(0, y, im)
+                    y += im.height()
+                p.end()
+                combo.save(out)
+            self._stats_lbl.setText(f"PNG saved: {os.path.basename(out)} (2400px)")
+        except Exception as e:
+            QMessageBox.warning(self, "PNG export", f"Failed: {e}")
+
+    def _plot_diurnal(self):
+        """선택 가스의 시(hour)별 평균±σ 곡선을 아래 그래프에 표시."""
+        t, sel = self._stats_arrays()
+        if t is None or t.get("time") is None:
+            QMessageBox.information(self, "Diurnal", "Open a fit result with a time axis first.")
+            return
+        gsel = self._gas_combo.currentText()
+        if gsel in ("", "전체"):
+            gsel = next(iter(t["gases"]), None)
+        y = t["gases"].get(gsel)
+        if y is None:
+            return
+        tt = t["time"]
+        ok = sel & np.isfinite(tt) & np.isfinite(y)
+        hrs = np.array([datetime.fromtimestamp(v).hour for v in tt[ok]])
+        vals = y[ok]
+        mu = np.full(24, np.nan)
+        sd = np.full(24, np.nan)
+        for h in range(24):
+            m = hrs == h
+            if m.any():
+                mu[h] = np.mean(vals[m])
+                sd[h] = np.std(vals[m])
+        self._pw_bot.clear()
+        self._pw_bot.show()
+        self._set_time_axis(self._pw_bot, False)
+        xs = np.arange(24)
+        lo = self._pw_bot.plot(xs, mu - sd, pen=pg.mkPen(_PALETTE[0], width=0))
+        hi = self._pw_bot.plot(xs, mu + sd, pen=pg.mkPen(_PALETTE[0], width=0))
+        self._pw_bot.addItem(pg.FillBetweenItem(lo, hi, brush=pg.mkBrush(33, 150, 243, 40)))
+        self._pw_bot.plot(xs, mu, pen=pg.mkPen(_PALETTE[0], width=2), symbol="o",
+                          symbolSize=6, symbolBrush=_PALETTE[0], name=f"{gsel} hourly mean")
+        self._pw_bot.setLabel("left", f"{gsel} (ppb)")
+        self._pw_bot.setLabel("bottom", "Hour of day")
+        self._pw_bot.setTitle(f"Diurnal — {gsel} mean±σ")

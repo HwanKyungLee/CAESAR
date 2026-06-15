@@ -662,6 +662,34 @@ class AnalysisWorker(QThread):
                         if attempt == max_retries - 1: raise e
                         self.needs_pre_calibration = True
 
+                # 6.5 ── 자동 품질필터(QC): 불량 핏 행의 가스 농도를 NaN으로 제외 ──
+                # 구름/저광량 등으로 핏이 실패하면(RMS가 신호의 임계% 초과 → Status=Unstable),
+                # NNLS/음수허용 하에서 NO2가 −로 폭주하고 CHOCHO·H2O가 상쇄상승하는 가짜값이
+                # 출력된다. 이 행들의 가스값을 NaN으로 빼서 시계열·통계·내보내기에서 제외한다.
+                # (Status·RMS·SNR 컬럼은 사유 추적용으로 유지.) 표준 DOAS QA/QC.
+                if getattr(self, 'qc_enabled', True):
+                    _qc_reason = ''
+                    _rms = float(result.get('RMS', 0.0) or 0.0)
+                    # (1) 절대 RMS 상한 — 핵심 기준. 구름/저광량 때 알파 신호가 부풀어
+                    #     상대 RMS(Unstable)는 통과하지만 절대 RMS는 정상의 ~100배로 튄다.
+                    _rms_abs = float(getattr(self, 'qc_rms_abs', 0.0) or 0.0)
+                    if _rms_abs > 0 and _rms > _rms_abs:
+                        _qc_reason = f"rms={_rms:.1e}>{_rms_abs:.1e}"
+                    # (2) 상대 RMS(Unstable) — 보조
+                    _st = result.get('Status', '')
+                    if (not _qc_reason) and isinstance(_st, str) and _st.startswith('Unstable'):
+                        _qc_reason = f"rms>{getattr(self,'ok_rms_threshold',0.10)*100:.0f}%"
+                    # (3) SNR 하한 — 보조
+                    _snr_min = float(getattr(self, 'qc_snr_min', 0.0) or 0.0)
+                    if (not _qc_reason) and _snr_min > 0 and float(result.get('SNR', np.inf)) < _snr_min:
+                        _qc_reason = f"snr<{_snr_min:.0f}"
+                    if _qc_reason:
+                        for _nm in self.engine.gas_list:
+                            result[_nm] = float('nan')
+                            if f"{_nm}_Smooth" in result:
+                                result[f"{_nm}_Smooth"] = float('nan')
+                        result['Status'] = f"QC-Excluded ({_qc_reason})"
+
                 # 7. Send to UI
                 should_update = (self.update_interval > 0) and (i % self.update_interval == 0)
                 if should_update or i == total_files - 1:
@@ -862,9 +890,32 @@ class AlphaExportWorker(QThread):
         # R-calibration candidates (He/ZA pairs)
         calib_candidates = []   # list of (1-R)/d arrays — take median later
 
-        # Ambient rows buffered for Pass 2
-        # (fp, row_idx, global_idx, t_amb, p_amb, intensity array)
-        amb_buffer = []
+        # Ambient rows — LIGHT index + 임시 바이너리 스풀.
+        # RAM 버퍼링(수 GB)도, Pass 2 텍스트 재파싱(2배 느림)도 피하려고:
+        #  Pass 1에서 ambient 스펙트럼을 임시 .bin(float32, raw 카운트=정수라 무손실)에
+        #  순차로 흘려쓰고, Pass 2는 memmap으로 바로 읽는다 → 저메모리 + 빠름.
+        # amb_index[fp] = [(row_idx, global_idx, sec, env_t, env_p, spool_idx), ...]
+        amb_index = {}
+        amb_count = 0
+        import tempfile as _tf
+        _amb_spool = _tf.NamedTemporaryFile(prefix='caesar_amb_', suffix='.bin', delete=False)
+        _amb_spool_path = _amb_spool.name
+        _amb_spool_n = 0   # 기록된 스펙트럼 수
+        _amb_mm = None     # Pass 2에서 memmap 할당
+        def _cleanup_spool():
+            """임시 ambient 스풀(.bin, 최대 GB급) 정리 — 어느 종료 경로에서도 호출."""
+            nonlocal _amb_mm
+            _amb_mm = None
+            import gc as _g; _g.collect()
+            try:
+                if not _amb_spool.closed:
+                    _amb_spool.close()
+            except Exception:
+                pass
+            try:
+                os.remove(_amb_spool_path)
+            except OSError:
+                pass
 
         # Per-file calibration header info
         calib_info_per_file = {}   # fp → string describing first good R-cal in file
@@ -929,12 +980,16 @@ class AlphaExportWorker(QThread):
                 za_p_list.append(env_p)
 
             elif is_amb:
-                amb_buffer.append((fp, row_idx, global_idx, _row_sec(fp, row_idx),
-                                   env_t, env_p,
-                                   intensity_raw.copy()))   # raw 저장, Pass 2에서 보정
+                # 스펙트럼을 임시 바이너리에 흘려쓰고(메모리 X), 인덱스만 RAM에.
+                _amb_spool.write(np.ascontiguousarray(intensity_raw, dtype=np.float32).tobytes())
+                amb_index.setdefault(fp, []).append(
+                    (row_idx, global_idx, _row_sec(fp, row_idx), env_t, env_p, _amb_spool_n))
+                _amb_spool_n += 1
+                amb_count += 1
                 done_scans += 1
 
         if not self.is_running:
+            _cleanup_spool()
             self.finished.emit("ERROR: 중단됨")
             return
 
@@ -1024,8 +1079,36 @@ class AlphaExportWorker(QThread):
                 if calib_candidates:
                     calib_str = (f"Leff={np.mean(1.0/np.median(np.array(calib_candidates),axis=0))*1e-5:.2f}"
                                  f" km (fallback)")
-            for fp_amb in {e[0] for e in amb_buffer}:
+            for fp_amb in amb_index:
                 calib_info_per_file[fp_amb] = calib_str
+
+        # Pass 1 스풀(임시 바이너리) 닫기. Pass 2는 파일별 '연속 블록'만 seek+read.
+        # (한 파일의 ambient 스캔은 Pass 1에서 연속 기록되므로 한 블록으로 읽힌다.)
+        _amb_spool.flush(); _amb_spool.close()
+        _row_bytes = n_pix * 4   # float32
+
+        def _reread_amb(fp):
+            """파일의 ambient 스펙트럼을 임시 스풀에서 '한 블록'만 읽어 반환.
+            한 파일분(~수MB)만 RAM에 → 저메모리 + 텍스트 재파싱 없음(빠름).
+            float32 raw 카운트(정수)라 무손실 = 버퍼 방식과 바이트 동일."""
+            ents = amb_index.get(fp, [])
+            if not ents:
+                return []
+            seqs = [e[5] for e in ents]
+            s0, s1 = min(seqs), max(seqs)
+            cnt = s1 - s0 + 1
+            try:
+                with open(_amb_spool_path, 'rb') as fh:
+                    fh.seek(s0 * _row_bytes)
+                    block = np.frombuffer(fh.read(cnt * _row_bytes),
+                                          dtype=np.float32).reshape(cnt, n_pix)
+            except Exception:
+                return []
+            out = []
+            for e in ents:
+                inten = np.asarray(block[e[5] - s0], dtype=float)
+                out.append((fp, e[0], e[1], e[2], e[3], e[4], inten))
+            return out
 
         # ── Build PCHIP I₀ interpolator ───────────────────────────────────────
         if len(za_gidx) < 2:
@@ -1066,6 +1149,7 @@ class AlphaExportWorker(QThread):
             self.status_msg.emit("[경고] 유효 R-calibration 없음 → alpha 계산 불가")
 
         if best_omr_d is None or (not use_pchip and i_za_static is None):
+            _cleanup_spool()
             self.finished.emit("ERROR: R-calibration 또는 ZA 스펙트럼 없음")
             return
 
@@ -1117,12 +1201,16 @@ class AlphaExportWorker(QThread):
             st = self.std_t_bins  # (N,2) [st_sec, end_sec] 연초기준 초
             nbin = len(st)
             bin_groups = {}
-            for (_fp, rid, g, sec, t, p, i) in amb_buffer:
-                if not np.isfinite(sec):
-                    continue
-                b = int(np.searchsorted(st[:, 0], sec, side='right') - 1)
-                if 0 <= b < nbin and sec < st[b, 1]:
-                    bin_groups.setdefault(b, []).append((g, t, p, i))
+            # 파일별로 재읽기(스트리밍) — 박사님 형식은 보통 하루 단위라 부담 적음
+            for _fp in amb_index:
+                if not self.is_running:
+                    break
+                for (_fp2, rid, g, sec, t, p, i) in _reread_amb(_fp):
+                    if not np.isfinite(sec):
+                        continue
+                    b = int(np.searchsorted(st[:, 0], sec, side='right') - 1)
+                    if 0 <= b < nbin and sec < st[b, 1]:
+                        bin_groups.setdefault(b, []).append((g, t, p, i))
             chp = self.drnam_chlabel or f"ch{self.channel}"
             folder = os.path.join(self.output_dir, f"{chp}_{self.drnam_date}_000000")
             os.makedirs(folder, exist_ok=True)
@@ -1158,19 +1246,29 @@ class AlphaExportWorker(QThread):
                 if b % 200 == 0:
                     self.progress.emit(b)
             self.status_msg.emit(f"박사님 형식: {n_written}/{nbin} bin 채움 → {folder}")
+            _cleanup_spool()
             self.finished.emit(folder)
             return
 
-        amb_by_fp = {}
-        for e in amb_buffer:
-            amb_by_fp.setdefault(e[0], []).append(e)
-
-        alpha_buffer = {}   # fp → list of (row_idx, T, P, alpha_array, n_avg)
+        # ── 스트리밍 Pass 2: 파일 1개씩 재읽기 → alpha 계산 → 즉시 저장 → 메모리 해제 ──
         n_bins_total = 0
-        for fp, entries in amb_by_fp.items():
+        n_saved  = 0
+        pix_min  = self.pixel_min
+        i0_mode  = "PCHIP" if use_pchip else "static"
+        n_za     = len(za_gidx)
+
+        from datetime import datetime as _dt, timedelta as _td
+        lbl_tag = f"_{self.channel_label}" if self.channel_label else ""
+        base_dir = os.path.join(self.output_dir, self.channel_subdir) if self.channel_subdir else self.output_dir
+        os.makedirs(base_dir, exist_ok=True)
+        import re as _re_date
+
+        for fp in amb_index:
             if not self.is_running:
                 break
-            for (row_idx, gmean, rep_sec, t_am, p_am, i_am, n_avg) in _avg_ambient(entries):
+            # 이 파일의 ambient를 재읽기 → 60s 평균 → alpha 계산(파일 1개분만 RAM에)
+            rows = []
+            for (row_idx, gmean, rep_sec, t_am, p_am, i_am, n_avg) in _avg_ambient(_reread_amb(fp)):
                 if use_pchip:
                     g = float(gmean)
                     if g < za_x_min:
@@ -1186,7 +1284,6 @@ class AlphaExportWorker(QThread):
                     t_i0      = t_za_static
                     p_i0      = p_za_static
 
-                # i0_interp: PCHIP I₀ (이미 dark-corrected). i_am: 평균 ambient.
                 i_am_dc = (i_am - dark) if has_dark else i_am
                 i0_s   = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
                 i_am_s = np.where(i_am_dc   > 0, i_am_dc,   1e-9).astype(float)
@@ -1198,24 +1295,11 @@ class AlphaExportWorker(QThread):
                          * ((i0_s - i_am_s) / i_am_s)
                          - (alpha_sample - alpha_ref))
 
-                alpha_buffer.setdefault(fp, []).append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
+                rows.append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
                 n_bins_total += 1
-        self.status_msg.emit(
-            f"Pass 2: ambient {len(amb_buffer)}행 → {avg_sec:.0f}초 평균 {n_bins_total}개 bin 으로 alpha 계산")
 
-        # ── Write one alpha_trace file per source file ─────────────────────────
-        n_saved  = 0
-        pix_min  = self.pixel_min
-        i0_mode  = "PCHIP" if use_pchip else "static"
-        n_za     = len(za_gidx)
-
-        from datetime import datetime as _dt, timedelta as _td
-        lbl_tag = f"_{self.channel_label}" if self.channel_label else ""
-        # 멀티채널이면 채널별 하위폴더(ch1/ch2/…)로 분리(단일이면 그대로)
-        base_dir = os.path.join(self.output_dir, self.channel_subdir) if self.channel_subdir else self.output_dir
-        os.makedirs(base_dir, exist_ok=True)
-        import re as _re_date
-        for fp, rows in alpha_buffer.items():
+            if not rows:
+                continue
             stem     = os.path.splitext(os.path.basename(fp))[0]
             # 파일명에서 날짜(YYYY-MM-DD) 추출 → 날짜별 하위폴더에 저장(없으면 base_dir)
             _md = _re_date.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', stem)
@@ -1248,9 +1332,15 @@ class AlphaExportWorker(QThread):
                     vals = '\t'.join(f"{v:.6e}" for v in alpha)
                     f.write(f"{rid}\t{doy:.6f}\t{iso}\t{T:.2f}\t{P:.2f}\t{vals}\n")
             n_saved += 1
+            # 파일별 진행상황 emit — UI가 주기적으로 숨 쉬어 '응답없음' 완화
+            self.progress.emit(global_idx)
             self.status_msg.emit(
-                f"저장: {out_path}  ({len(rows)}개 bin = {self.avg_sec:.0f}초 평균, {i0_mode} I₀)")
+                f"[{n_saved}/{len(amb_index)}] 저장: {os.path.basename(out_path)}  "
+                f"({len(rows)} bin, {i0_mode} I₀)")
 
+        _cleanup_spool()
+        self.status_msg.emit(
+            f"완료: ambient {amb_count}행 → {n_bins_total} bin → {n_saved} 파일 (스트리밍, 저메모리)")
         self.finished.emit(self.output_dir if n_saved > 0 else "ERROR: 저장된 파일 없음")
 
 

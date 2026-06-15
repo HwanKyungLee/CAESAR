@@ -66,6 +66,29 @@ class AlphaGeneratorDialog(QDialog):
         self._spin_avg.setFixedWidth(90)
         self._spin_avg.setToolTip("α 계산 전 ambient를 이 초만큼 시간평균(박사님 기본 60s). 0=평균 없음.")
         opt.addWidget(self._spin_avg)
+        # 생성 px범위 — 알파 파일에는 이 구간만 저장됨(밖 픽셀은 파일에 없어
+        # 나중에 더 넓게 피팅하려면 재생성 필요). 핏 윈도우보다 넉넉하게 두면
+        # 이후 핏범위 실험을 알파 재생성 없이 할 수 있다.
+        from PyQt6.QtWidgets import QSpinBox
+        opt.addWidget(QLabel("  생성 px:"))
+        self._spin_px0 = QSpinBox()
+        self._spin_px0.setRange(0, 2047); self._spin_px0.setValue(0)
+        self._spin_px0.setFixedWidth(70)
+        opt.addWidget(self._spin_px0)
+        opt.addWidget(QLabel("~"))
+        self._spin_px1 = QSpinBox()
+        self._spin_px1.setRange(1, 2048); self._spin_px1.setValue(2048)
+        self._spin_px1.setFixedWidth(70)
+        opt.addWidget(self._spin_px1)
+        self._chk_px_fit = QCheckBox("핏범위 사용")
+        self._chk_px_fit.setChecked(False)
+        self._chk_px_fit.setToolTip(
+            "체크: 생성구간 = 현재 채널 탭의 핏레인지(이전 동작).\n"
+            "해제(기본): 왼쪽의 '생성 px' 범위 사용 — 핏 윈도우와 독립적으로 넉넉하게 생성.\n"
+            "(박사님 per-bin 형식은 항상 전체 2048px이라 이 설정과 무관)")
+        self._chk_px_fit.toggled.connect(
+            lambda on: (self._spin_px0.setEnabled(not on), self._spin_px1.setEnabled(not on)))
+        opt.addWidget(self._chk_px_fit)
         opt.addStretch(1)
         root.addLayout(opt)
 
@@ -142,17 +165,45 @@ class AlphaGeneratorDialog(QDialog):
             self._add(files)
 
     def _pick_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Raw 폴더 선택", dlg_dir("alpha_gen_raw"))
+        """raw 폴더 선택 — 하위 폴더(월별: 2026-05/2026-06 등)까지 재귀로 모은 뒤,
+        파일명 날짜가 여러 개면 날짜 다중선택 다이얼로그로 골라 추가한다.
+        (상위 폴더 하나만 찍으면 월 경계를 넘는 기간도 한 번에 로드 가능.)"""
+        d = QFileDialog.getExistingDirectory(self, "Raw 폴더 선택(하위폴더 포함)", dlg_dir("alpha_gen_raw"))
         if not d:
             return
         dlg_dir("alpha_gen_raw", d)
+        import glob as _glob
+        import re as _re
         exts = (".dat", ".txt", ".csv")
-        files = [os.path.join(d, f) for f in sorted(os.listdir(d))
-                 if f.lower().endswith(exts)]
+        def _is_raw(f):
+            if not (f.lower().endswith(exts) and os.path.isfile(f)):
+                return False
+            rel = os.path.relpath(f, d).lower()
+            # 알파 산출물 폴더/파일은 raw가 아님 — 재귀 수집에서 제외
+            if (os.sep + 'alpha') in (os.sep + rel) or '_alpha_trace' in rel:
+                return False
+            return True
+        # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지(전체경로 정렬 X)
+        files = sorted((f for f in _glob.glob(os.path.join(d, "**", "*"), recursive=True)
+                        if _is_raw(f)), key=lambda f: os.path.basename(f))
+        if not files:
+            QMessageBox.warning(self, "없음", "폴더(하위 포함)에 raw 파일(.dat/.txt/.csv)이 없습니다.")
+            return
+        # 파일명에서 날짜 추출 → 여러 날짜면 메인 창의 날짜선택 다이얼로그 재사용
+        by_date = {}
+        for f in files:
+            m = _re.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', os.path.basename(f))
+            by_date.setdefault(f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else "(날짜없음)", []).append(f)
+        dates = sorted(by_date)
+        if len(dates) > 1 and hasattr(self._app, '_pick_dates'):
+            sel = self._app._pick_dates(dates)
+            if sel is None:
+                return
+            # sel은 순서없는 set → 날짜 정렬 후, 날짜 내 파일도 파일명순으로
+            files = [f for dt in sorted(sel)
+                     for f in sorted(by_date.get(dt, []), key=lambda f: os.path.basename(f))]
         if files:
             self._add(files)
-        else:
-            QMessageBox.warning(self, "없음", "폴더에 raw 파일(.dat/.txt/.csv)이 없습니다.")
 
     def _add(self, files):
         for f in files:
@@ -261,6 +312,8 @@ class AlphaGeneratorDialog(QDialog):
             ch_tab_map=dict(self._ch_tab_map),
             channels=[ch for ch, c in self._ch_enable.items() if c.isChecked()] or None,
             progress_cb=self._on_progress,
+            gen_px_range=(None if self._chk_px_fit.isChecked()
+                          else (self._spin_px0.value(), self._spin_px1.value())),
         )
         if not ok:
             self._btn_gen.setEnabled(True)

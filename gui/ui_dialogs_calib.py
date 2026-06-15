@@ -880,7 +880,8 @@ class RangeSelectorDialog(QDialog):
     apply_range = pyqtSignal(int, int)
     apply_channel = pyqtSignal(int, float, float, bool)   # (channel, lo, hi, is_nm)
 
-    def __init__(self, data_path, pixel_min, pixel_max, engine, channels=None):
+    def __init__(self, data_path, pixel_min, pixel_max, engine, channels=None,
+                 channel_paths=None, active_channel=None):
         super().__init__()
         self.setWindowTitle("🔍 Fit Range Selector")
         _s = _ui_scale()
@@ -892,6 +893,8 @@ class RangeSelectorDialog(QDialog):
         self.min_sel = int(pixel_min)
         self.max_sel = int(pixel_max)
         self._channels = channels or []   # [(ch, label), ...] — 채널별 적용 시
+        self._channel_paths = channel_paths or {}   # {ch: 대표 스펙트럼 경로}
+        self._active_channel = active_channel
         self._sel_lo = self._sel_hi = None
         self._sel_is_nm = False
 
@@ -919,10 +922,17 @@ class RangeSelectorDialog(QDialog):
         self.combo_ch = None
         if self._channels:
             top_layout.addSpacing(12)
-            top_layout.addWidget(QLabel("적용 채널:"))
+            top_layout.addWidget(QLabel("Channel:"))
             self.combo_ch = QComboBox()
             for ch, lbl in self._channels:
                 self.combo_ch.addItem(lbl, ch)
+            # 기본값 = 활성 채널
+            if self._active_channel is not None:
+                for i in range(self.combo_ch.count()):
+                    if self.combo_ch.itemData(i) == self._active_channel:
+                        self.combo_ch.setCurrentIndex(i); break
+            # 채널 바꾸면 그 채널 대표 스펙트럼으로 그래프 갱신
+            self.combo_ch.currentIndexChanged.connect(self._on_channel_combo)
             top_layout.addWidget(self.combo_ch)
 
         top_layout.addStretch(1)
@@ -1058,6 +1068,16 @@ class RangeSelectorDialog(QDialog):
         else:
             eng_px = np.arange(len(alpha), dtype=float)
         return eng_px, alpha, wave
+
+    def _on_channel_combo(self, _idx):
+        """'적용 채널' 변경 → 그 채널의 대표 스펙트럼으로 그래프 재로딩."""
+        if not self.combo_ch:
+            return
+        ch = self.combo_ch.currentData()
+        p = self._channel_paths.get(int(ch)) if ch is not None else None
+        if p and p != self.data_path:
+            self.data_path = p
+            self.load_plot()
 
     def load_plot(self):
         """Loads selected data, plots it on a nm axis (if calibration available), and activates SpanSelector."""

@@ -224,11 +224,16 @@ class DataIO:
     # shift cold-file HK reads — out of scope for a constants-only merge.
     _HK_REL = {
         'cold_p':   11,   # Cold inlet pressure raw count → ×0.6895 = mbar
-        'hot_p':    13,   # Hot inlet pressure  raw count → ×0.6895 = mbar
-        'hot_cav_t': 6,   # Heated cavity temperature    → /100 = °C (~75°C)
+        'hot_p':    13,   # Hot CH1(PNs) pressure raw count → ×0.6895 = mbar (abs 6162)
+        'hot_p_ans':15,   # Hot CH2(ANs) pressure raw count → ×0.6895 = mbar (abs 6164)
+        'hot_cav_t': 6,   # Cell-heater SETPOINT (~75°C) — 가스온도 아님(과냉방지용)
         'cold_cav_t':24,  # Unheated cavity temperature  → /100 = °C (~24°C)
         'oven_pns': 5,    # PNs oven setpoint             → /100 = °C (~180°C)
         'oven_ans': 2,    # ANs oven setpoint             → /100 = °C (~300°C)
+        # 셀 통과 가스의 실측 온도(tempcell, 박사님 확인 2026-06-10). ppb 밀도보정(n_air)
+        # 기준은 설정값(hot_cav_t 75°C)이 아니라 이 실측값이다 (CH1≈34, CH2≈31.5°C).
+        'tempcell1': 25,  # CH1(PNs) cell gas temperature → /100 = °C
+        'tempcell2': 26,  # CH2(ANs) cell gas temperature → /100 = °C
     }
     _P_SCALE = _RP_P_SCALE                 # raw count → mbar (~0.6895), shared
     _P_LO, _P_HI = _RP_P_LO, _RP_P_HI      # plausible atmospheric pressure range, shared
@@ -636,9 +641,10 @@ class DataIO:
 
                 raw_p_count = np.nan
                 _t_rel = DataIO._HK_REL['cold_cav_t']   # default: cold cavity T
-                for p_rel, t_rel in (
-                    (DataIO._HK_REL['cold_p'], DataIO._HK_REL['cold_cav_t']),
-                    (DataIO._HK_REL['hot_p'],  DataIO._HK_REL['hot_cav_t']),
+                _is_hot = False
+                for p_rel, t_rel, is_hot in (
+                    (DataIO._HK_REL['cold_p'], DataIO._HK_REL['cold_cav_t'], False),
+                    (DataIO._HK_REL['hot_p'],  DataIO._HK_REL['hot_cav_t'],  True),
                 ):
                     pv = _hk(p_rel)
                     if np.isfinite(pv):
@@ -646,10 +652,25 @@ class DataIO:
                         if DataIO._P_LO <= pm <= DataIO._P_HI:
                             raw_p_count = pv
                             _t_rel = t_rel
+                            _is_hot = is_hot
                             break
 
                 if np.isfinite(raw_p_count):
                     env_p = float(raw_p_count) * DataIO._P_SCALE
+                # Hot: 채널별 실측 가스온도(tempcell)를 우선 사용. hot_cav_t(75°C)는
+                # 셀히터 설정값이라 ppb 밀도보정에 쓰면 NO2 과소평가(폴백으로만 유지).
+                if _is_hot:
+                    tc_rel = DataIO._HK_REL['tempcell1' if ch == 1 else 'tempcell2']
+                    tc = _hk(tc_rel)
+                    if np.isfinite(tc) and 0.0 < float(tc) / 100.0 < 100.0:
+                        _t_rel = tc_rel
+                    # CH2(ANs)는 전용 압력 컬럼(hot_p_ans, abs 6164) 사용
+                    if ch == 2:
+                        pv2 = _hk(DataIO._HK_REL['hot_p_ans'])
+                        if np.isfinite(pv2):
+                            pm2 = float(pv2) * DataIO._P_SCALE
+                            if DataIO._P_LO <= pm2 <= DataIO._P_HI:
+                                env_p = pm2
                 tv = _hk(_t_rel)
                 if np.isfinite(tv):
                     env_t = float(tv) / 100.0
