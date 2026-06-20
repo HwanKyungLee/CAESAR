@@ -89,7 +89,7 @@ class PeakTrendWorker(QThread):
                 year = int(date_str[:4])
                 files = _find_files(self.raw_dir, prefix)
                 if not files:
-                    self.progress.emit(f"{prefix}: 파일 없음"); continue
+                    self.progress.emit(f"{prefix}: no files"); continue
                 for fi, path in enumerate(files):
                     self.progress.emit(f"{prefix}: {fi+1}/{len(files)} {os.path.basename(path)}")
                     try:
@@ -134,7 +134,7 @@ class PeakTrendWorker(QThread):
 class PeakTrendDialog(QDialog):
     def __init__(self, parent=None, default_dir=""):
         super().__init__(parent)
-        self.setWindowTitle("📈 피크 트렌드 (He / ZA / Sampling)")
+        self.setWindowTitle("📈 Peak Trend (He / ZA / Sampling)")
         self.resize(980, 600)
         self._worker = None
         self._build(default_dir)
@@ -144,7 +144,7 @@ class PeakTrendDialog(QDialog):
 
         # raw 폴더
         r1 = QHBoxLayout()
-        r1.addWidget(QLabel("Raw 폴더:"))
+        r1.addWidget(QLabel("Raw folder:"))
         self._ed_dir = QLineEdit(default_dir or dlg_dir("peaktrend_raw"))
         r1.addWidget(self._ed_dir, 1)
         b = QPushButton("…"); b.setFixedWidth(34); b.clicked.connect(self._pick_dir)
@@ -153,11 +153,11 @@ class PeakTrendDialog(QDialog):
 
         # 날짜/채널/flag/bin
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("날짜(YYYYMMDD, 공백구분):"))
+        r2.addWidget(QLabel("Dates (YYYYMMDD, space-sep):"))
         self._ed_dates = QLineEdit()
-        self._ed_dates.setPlaceholderText("예: 20260601 20260602")
+        self._ed_dates.setPlaceholderText("e.g. 20260601 20260602")
         r2.addWidget(self._ed_dates, 1)
-        r2.addWidget(QLabel("채널:"))
+        r2.addWidget(QLabel("Channel:"))
         self._cb_ch = QComboBox(); self._cb_ch.addItems(["PNs/Cold (primary)", "ANs (secondary)"])
         r2.addWidget(self._cb_ch)
         root.addLayout(r2)
@@ -169,10 +169,10 @@ class PeakTrendDialog(QDialog):
         for c in (self._ck_za, self._ck_he, self._ck_amb):
             r3.addWidget(c)
         r3.addSpacing(16)
-        r3.addWidget(QLabel("Sampling bin(분):"))
+        r3.addWidget(QLabel("Sampling bin (min):"))
         self._sp_bin = QDoubleSpinBox(); self._sp_bin.setRange(0.1, 120); self._sp_bin.setValue(1.0); self._sp_bin.setDecimals(1)
         r3.addWidget(self._sp_bin)
-        r3.addWidget(QLabel("cycle gap(분):"))
+        r3.addWidget(QLabel("cycle gap (min):"))
         self._sp_gap = QDoubleSpinBox(); self._sp_gap.setRange(0.5, 120); self._sp_gap.setValue(5.0); self._sp_gap.setDecimals(1)
         r3.addWidget(self._sp_gap)
         r3.addWidget(QLabel("peak px:"))
@@ -191,7 +191,7 @@ class PeakTrendDialog(QDialog):
 
         # 실행/상태
         run = QHBoxLayout()
-        self._btn_run = QPushButton("▶ 그리기")
+        self._btn_run = QPushButton("▶ Plot")
         self._btn_run.setStyleSheet("font-weight:bold; padding:6px;")
         self._btn_run.clicked.connect(self._run)
         run.addWidget(self._btn_run, 1)
@@ -200,24 +200,24 @@ class PeakTrendDialog(QDialog):
         root.addLayout(run)
 
     def _pick_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "Raw 폴더", self._ed_dir.text() or dlg_dir("peaktrend_raw"))
+        d = QFileDialog.getExistingDirectory(self, "Raw folder", self._ed_dir.text() or dlg_dir("peaktrend_raw"))
         if d:
             dlg_dir("peaktrend_raw", d); self._ed_dir.setText(d)
 
     def _run(self):
         raw_dir = self._ed_dir.text().strip()
         if not os.path.isdir(raw_dir):
-            QMessageBox.warning(self, "폴더", "유효한 Raw 폴더를 지정하세요."); return
+            QMessageBox.warning(self, "Folder", "Specify a valid Raw folder."); return
         dates = self._ed_dates.text().split()
         if not dates:
-            QMessageBox.warning(self, "날짜", "YYYYMMDD 날짜를 1개 이상 입력하세요."); return
+            QMessageBox.warning(self, "Dates", "Enter at least one YYYYMMDD date."); return
         dlg_dir("peaktrend_raw", raw_dir)
         flags = []
         if self._ck_za.isChecked(): flags.append(FLAG_ZA)
         if self._ck_he.isChecked(): flags.append(FLAG_HE)
         if self._ck_amb.isChecked(): flags.append(FLAG_AMBIENT)
         if not flags:
-            QMessageBox.warning(self, "Flag", "ZA/He/Sampling 중 하나 이상 선택."); return
+            QMessageBox.warning(self, "Flag", "Select at least one of ZA/He/Sampling."); return
         ch_block = SPEC_SECONDARY if self._cb_ch.currentIndex() == 1 else SPEC_PRIMARY
         self._btn_run.setEnabled(False); self._pw.clear()
         self._worker = PeakTrendWorker(
@@ -231,14 +231,14 @@ class PeakTrendDialog(QDialog):
 
     def _on_fail(self, msg):
         self._btn_run.setEnabled(True)
-        self._lbl.setText("❌ 실패")
-        QMessageBox.warning(self, "실패", msg)
+        self._lbl.setText("❌ Failed")
+        QMessageBox.warning(self, "Failed", msg)
 
     def _plot(self, out):
         self._btn_run.setEnabled(True)
         self._pw.clear()
         if not out:
-            self._lbl.setText("데이터 없음"); return
+            self._lbl.setText("No data"); return
         for flag in (FLAG_ZA, FLAG_HE, FLAG_AMBIENT):
             d = out.get(flag)
             if not d or len(d["T"]) == 0:
@@ -248,5 +248,5 @@ class PeakTrendDialog(QDialog):
             self._pw.plot(T, d["HI"], pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DotLine))
             self._pw.plot(T, d["LO"], pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DotLine))
             self._pw.plot(T, d["A"], pen=pg.mkPen(col, width=1.5), symbol="o", symbolSize=5,
-                          symbolBrush=col, name=f"{_LABEL[flag]} (avg·min/max, {d['n']}행)")
-        self._lbl.setText("✅ 완료 (avg 점 + min/max 점선)")
+                          symbolBrush=col, name=f"{_LABEL[flag]} (avg·min/max, {d['n']} rows)")
+        self._lbl.setText("✅ Done (avg points + min/max dotted)")
