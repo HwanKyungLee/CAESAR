@@ -12,13 +12,13 @@ import datetime as _dt
 _LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(_LOG_DIR, exist_ok=True)
 _crash_fh = open(os.path.join(_LOG_DIR, 'crash.log'), 'a', encoding='utf-8')
-_crash_fh.write(f"\n===== 세션 시작 {_dt.datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+_crash_fh.write(f"\n===== session start {_dt.datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
 _crash_fh.flush()
 faulthandler.enable(file=_crash_fh, all_threads=True)
 
 def _excepthook(etype, value, tb):
     try:
-        _crash_fh.write(f"\n[미처리 예외 {_dt.datetime.now():%Y-%m-%d %H:%M:%S}]\n")
+        _crash_fh.write(f"\n[uncaught exception {_dt.datetime.now():%Y-%m-%d %H:%M:%S}]\n")
         traceback.print_exception(etype, value, tb, file=_crash_fh)
         _crash_fh.flush()
     except Exception:

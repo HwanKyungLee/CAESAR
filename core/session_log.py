@@ -67,7 +67,7 @@ def install(keep: int = 30) -> str | None:
         os.makedirs(_LOG_DIR, exist_ok=True)
         path = os.path.join(_LOG_DIR, f"session_{_dt.datetime.now():%Y%m%d_%H%M%S}.log")
         fh = open(path, 'a', encoding='utf-8')
-        fh.write(f"===== 세션 시작 {_dt.datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+        fh.write(f"===== session start {_dt.datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
         fh.flush()
         sys.stdout = _Tee(sys.stdout, fh)
         sys.stderr = _Tee(sys.stderr, fh)

@@ -1056,7 +1056,7 @@ class RangeSelectorDialog(QDialog):
                     except ValueError:
                         continue
         if alpha is None:
-            raise RuntimeError("alpha_trace 데이터 행을 찾지 못했습니다")
+            raise RuntimeError("No alpha_trace data rows found")
         if wave is None or len(wave) != len(alpha):
             wave = np.arange(len(alpha), dtype=float)
         wax = getattr(self.engine, "_wave_axis", None)
@@ -1139,7 +1139,7 @@ class RangeSelectorDialog(QDialog):
             traceback.print_exc()
             try:
                 self.ax.clear()
-                self.ax.text(0.5, 0.5, f"데이터 로드 실패:\n{e}",
+                self.ax.text(0.5, 0.5, f"Data load failed:\n{e}",
                              ha='center', va='center', transform=self.ax.transAxes,
                              color='red', fontsize=10, wrap=True)
                 self.canvas.draw()

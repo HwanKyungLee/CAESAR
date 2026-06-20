@@ -22,7 +22,7 @@ def parse_when(s: str | None, end: bool = False):
             return d
         except ValueError:
             continue
-    raise ValueError(f"시간 형식 인식 불가: {s!r}  (예: 2026-05-20 또는 '2026-05-20 06:00')")
+    raise ValueError(f"Unrecognized time format: {s!r}  (e.g. 2026-05-20 or '2026-05-20 06:00')")
 
 
 def parse_row_time(ts: str):
@@ -57,7 +57,7 @@ def read_result(fp: str):
                         ti = cols.index(cand)
                         break
                 if ti is None:
-                    raise ValueError(f"{os.path.basename(fp)}: Time/datetime 컬럼을 찾을 수 없습니다.")
+                    raise ValueError(f"{os.path.basename(fp)}: Time/datetime column not found.")
                 colhdr = line
                 continue
             r = line.split('\t')
@@ -65,7 +65,7 @@ def read_result(fp: str):
             if t is not None:
                 rows.append((t, line))
     if colhdr is None:
-        raise ValueError(f"{os.path.basename(fp)}: 데이터 헤더가 없습니다.")
+        raise ValueError(f"{os.path.basename(fp)}: no data header.")
     return comments, colhdr, rows
 
 
@@ -114,10 +114,10 @@ def write_result(out: str, comments, colhdr, rows, note: str = ''):
     with open(out, 'w', encoding='utf-8') as fh:
         for c in comments:
             fh.write(c + '\n')
-        info = f"# [result_io] {len(rows)}행"
+        info = f"# [result_io] {len(rows)} rows"
         if rows:
-            info += f" | 범위 {rows[0][0]:%Y-%m-%d %H:%M} ~ {rows[-1][0]:%Y-%m-%d %H:%M}"
-        info += f" | 생성 {datetime.now():%Y-%m-%d %H:%M}"
+            info += f" | range {rows[0][0]:%Y-%m-%d %H:%M} ~ {rows[-1][0]:%Y-%m-%d %H:%M}"
+        info += f" | generated {datetime.now():%Y-%m-%d %H:%M}"
         if note:
             info += f" | {note}"
         fh.write(info + '\n')

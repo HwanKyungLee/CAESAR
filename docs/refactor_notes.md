@@ -13,7 +13,11 @@
   "Per-bin format"). 외부 사용자가 봐도 이해되게. 한글 주석엔 `박사님` 그대로 둬도 됨.
 - **이모지(🧪📂💾📈) 유지** — 가독성. 더 나은 이모지로 개선은 OK.
 - 톤 = 간결한 명령형 ("Select raw files first.")
+- **UI 폴리시(저위험만 적용)**: 라벨/버튼 문구 일관성, 간격·정렬, 툴팁 명료화,
+  이모지 일관성. **큰 레이아웃 재배치는 직접 안 하고 여기 '제안'으로 기록** 후 확인받기.
 - 모듈 분리는 보수적으로(저위험만), 분리 지점은 여기 기록
+- 진행 방식 = 작은~중간 파일 묶음 처리, 큰 파일(ui_result_viewer/ui_dialogs_r/
+  ui_dialogs_ref/app_window)은 개별 신중히.
 
 ---
 
@@ -41,3 +45,14 @@
 |------|:--:|:--:|:--:|
 | gui/ui_alpha_gen.py | ✅ | ✅ | 분리불필요(독립) |
 | gui/ui_peak_trend.py | ✅ | ✅ | 분리불필요(독립, 252줄) |
+| core/* (data_io·doas_fit·engine·raw_parser 등) | — (한글=docstring/주석뿐) | — | — |
+| core/result_io.py | ✅ (예외·헤더문자열) | ✅ | OK |
+| core/session_log.py·main.py | ✅ (로그문자열) | — | — |
+| gui/worker.py | ✅ (status/로그 26개) | 검토完 | ★분리후보 아래 |
+| gui/dr_nam_alpha_worker.py | ✅ (3개) | ✅ | OK |
+| gui/ui_dialogs_calib.py | ✅ (2개) | 대기(전체검토 미完) | 대기 |
+| **gui/app_window.py** | ⏳ 141 | ⏳ | ★최대 분리대상 |
+| **gui/ui_dialogs_r.py** | ⏳ 112 | ⏳ | ⏳ |
+| **gui/ui_dialogs_ref.py** | ⏳ 37 | ⏳ | ⏳ |
+| **gui/ui_result_viewer.py** | ⏳ 37 | ⏳ | ⏳ |
+| tools/* (r_trend_monitor·alpha_wide_to_perbin 등) | ⏳ (CLI문자열 ~60) | ⏳ | 별도 배치 |

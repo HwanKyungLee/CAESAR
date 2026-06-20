@@ -274,7 +274,7 @@ class DrNamAlphaWorker(QThread):
         date_dashed = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
 
         # 1. Load 박사님 Rs and Zs
-        self._emit_status(f"Loading 박사님 Rs/Zs .mat for {date_dashed}…")
+        self._emit_status(f"Loading reference Rs/Zs .mat for {date_dashed}…")
         rs = self._load_dr_nam_rs_mat(
             os.path.join(self.drnam_rszs_dir, f"Rs_{date_dashed}.mat")
         )
@@ -289,13 +289,13 @@ class DrNamAlphaWorker(QThread):
                 ref = self._load_dr_nam_alpha_mat(ref_alpha_path)
                 std_t = ref["std_t"]
                 self._emit_status(
-                    f"Using 박사님 std_t bin grid: {len(std_t)} bins "
+                    f"Using reference std_t bin grid: {len(std_t)} bins "
                     f"(DOY {std_t[0]:.4f} ~ {std_t[-1]:.4f})"
                 )
             else:
                 std_t = self._build_std_t_from_rs_zs(rs["doy_R"], zs["doy_z"])
                 self._emit_status(
-                    f"박사님 _avg_60s.mat not found, built std_t locally: "
+                    f"reference _avg_60s.mat not found, built std_t locally: "
                     f"{len(std_t)} bins"
                 )
         else:

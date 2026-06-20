@@ -1386,9 +1386,9 @@ class AlphaExportWorker(QThread):
         dark = self.dark   # None or 1-D array (n_pix,)
         has_dark = dark is not None
         if has_dark:
-            self.status_msg.emit(f"[다크보정] dark spectrum 적용  mean={dark.mean():.1f} counts")
+            self.status_msg.emit(f"[dark] dark spectrum applied  mean={dark.mean():.1f} counts")
         else:
-            self.status_msg.emit("Pass 1: 전체 스캔 읽기 중 (ZA 수집)…")
+            self.status_msg.emit("Pass 1: reading all scans (collecting ZA)…")
 
         # ── 스캔 처리 본체 (순차·병렬 공통) — 분류/스풀/수집 로직은 여기 한 곳만 ──
         # 병렬 경로는 '파싱'만 워커로 돌리고, 데이터는 이 함수로 메인에서 처리한다.
@@ -1434,7 +1434,7 @@ class AlphaExportWorker(QThread):
             _nproc = min((os.cpu_count() or 4), 6)
             _win = max(2, _nproc * 2)
             self.status_msg.emit(
-                f"Pass 1(병렬 {_nproc}코어): {len(_files)}파일 파싱 중…")
+                f"Pass 1 (parallel {_nproc} cores): parsing {len(_files)} files…")
             try:
                 with _cf.ProcessPoolExecutor(max_workers=_nproc) as _ex:
                     _futs = deque(); _ti = 0
@@ -1469,7 +1469,7 @@ class AlphaExportWorker(QThread):
                 # 병렬 인프라 자체가 죽은 경우: 부분 스풀로 순차 폴백하면 이중기록되어
                 # 위험 → 깨끗이 중단(알파 미작성). 사용자가 재실행(또는 use_parallel=False).
                 _cleanup_spool()
-                self.finished.emit(f"ERROR: 병렬 파싱 실패(재실행 권장): {e}")
+                self.finished.emit(f"ERROR: parallel parsing failed (please rerun): {e}")
                 return
         else:
             # ── 순차 Pass 1 (폴백/검증용; 기존 로직 보존) ──
@@ -1489,14 +1489,14 @@ class AlphaExportWorker(QThread):
 
         if not self.is_running:
             _cleanup_spool()
-            self.finished.emit("ERROR: 중단됨")
+            self.finished.emit("ERROR: aborted")
             return
 
         if n_default_tp:
             self.status_msg.emit(
-                f"[경고] HK 미복구로 T/P 기본값(25.0℃/1013.25mbar) 사용 스캔 "
-                f"{n_default_tp}/{global_idx}개 — 해당 스캔 alpha는 Rayleigh 보정이 "
-                f"부정확할 수 있음(대개 bin 워밍업행).")
+                f"[WARN] HK not recovered → default T/P (25.0℃/1013.25mbar) used for "
+                f"{n_default_tp}/{global_idx} scans — their alpha may have inaccurate "
+                f"Rayleigh correction (usually bin warmup rows).")
 
         # ── Block-average each ZA / He injection into one clean spectrum ──────
         # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.
@@ -1524,7 +1524,7 @@ class AlphaExportWorker(QThread):
         he_gidx, he_spectra, he_t_list, he_p_list = _block_average(
             he_gidx, he_spectra, he_t_list, he_p_list)
         self.status_msg.emit(
-            f"[I0] ZA {n_za_raw}스캔→{len(za_gidx)}블록, He {n_he_raw}스캔→{len(he_gidx)}블록 평균")
+            f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
 
         # dark 보정 (블록평균 후 한 번만)
         if has_dark:
@@ -1560,12 +1560,12 @@ class AlphaExportWorker(QThread):
                 calib_str = (f"Leff={leff:.2f} km  R={rmean:.6f}  "
                              f"contrast={getattr(rc, 'he_za_contrast', float('nan')):.3f}")
                 self.status_msg.emit(
-                    f"[R-CAL 통일/reflectance_calc] {calib_str}  "
-                    f"(ZA {len(za_spectra)}블록, He {len(he_spectra)}블록)")
+                    f"[R-CAL unified/reflectance_calc] {calib_str}  "
+                    f"(ZA {len(za_spectra)} blocks, He {len(he_spectra)} blocks)")
             except Exception as e:
                 # 폴백: 기존 per-block median 방식 (전환플래그 오염 등은 위 필터가
                 # 없으므로 R Trend 와 다를 수 있음 — 어디까지나 비상용)
-                self.status_msg.emit(f"[R-CAL] reflectance_calc 실패 → 기존 방식 폴백: {e}")
+                self.status_msg.emit(f"[R-CAL] reflectance_calc failed → fallback to legacy method: {e}")
                 i_he_clean   = np.nanmean(np.array(he_spectra), axis=0)
                 t_he_clean   = float(np.nanmean(he_t_list))
                 p_he_clean   = float(np.nanmean(he_p_list))
@@ -1651,7 +1651,7 @@ class AlphaExportWorker(QThread):
                                    f"(median {np.median(_leff_k):.2f}, {_n_rej} rej)")
                         for _fp in amb_index:
                             calib_info_per_file[_fp] = _rt_str
-                        self.status_msg.emit(f"[R-CAL 시간보간] {_rt_str}")
+                        self.status_msg.emit(f"[R-CAL time-interp] {_rt_str}")
 
         # Pass 1 스풀(임시 바이너리) 닫기. Pass 2는 파일별 '연속 블록'만 seek+read.
         # (한 파일의 ambient 스캔은 Pass 1에서 연속 기록되므로 한 블록으로 읽힌다.)
@@ -1684,7 +1684,7 @@ class AlphaExportWorker(QThread):
         # ── Build PCHIP I₀ interpolator ───────────────────────────────────────
         if len(za_gidx) < 2:
             # Fallback: single static ZA (original behaviour)
-            self.status_msg.emit(f"[경고] ZA 측정 {len(za_gidx)}개 → 정적 I₀ 사용")
+            self.status_msg.emit(f"[WARN] {len(za_gidx)} ZA measurements → using static I₀")
             use_pchip = False
             i_za_static = za_spectra[0] if za_spectra else None
             t_za_static = za_t_list[0]  if za_t_list  else 25.0
@@ -1704,7 +1704,7 @@ class AlphaExportWorker(QThread):
             t_first,  t_last   = float(za_t[0]),  float(za_t[-1])
             p_first,  p_last   = float(za_p[0]),  float(za_p[-1])
             self.status_msg.emit(
-                f"[PCHIP] ZA 측정 {len(za_gidx)}개로 I₀ 보간기 구성  "
+                f"[PCHIP] built I₀ interpolator from {len(za_gidx)} ZA measurements  "
                 f"(global idx {za_gidx[0]}~{za_gidx[-1]})")
 
         # ── Best R-calibration: median across all valid candidates ─────────────
@@ -1713,11 +1713,11 @@ class AlphaExportWorker(QThread):
             leff_med   = np.mean(1.0 / best_omr_d) * 1e-5
             r_med      = 1.0 - np.mean(best_omr_d) * self.cavity_len
             self.status_msg.emit(
-                f"[R-CAL 확정] {len(calib_candidates)}개 평균  "
+                f"[R-CAL final] averaged {len(calib_candidates)}  "
                 f"Leff={leff_med:.2f} km  R={r_med:.6f}")
         else:
             best_omr_d = None
-            self.status_msg.emit("[경고] 유효 R-calibration 없음 → alpha 계산 불가")
+            self.status_msg.emit("[WARN] no valid R-calibration → cannot compute alpha")
 
         # ── R(t) 외부 로드(rt_path): R_trend(scan_directory)로 미리 뽑은 채널 R(t)를
         #    읽어 '시각(rep_sec)'으로 시간보간. 있으면 워커 자체 R보다 우선(단일 진실원천).
@@ -1759,20 +1759,20 @@ class AlphaExportWorker(QThread):
                     rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} "
                                      f"({len(_ks)} knots)")
                     self.status_msg.emit(
-                        f"[R(t) 로드] {len(_ks)} knots ({os.path.basename(self.rt_path)})")
+                        f"[R(t) load] {len(_ks)} knots ({os.path.basename(self.rt_path)})")
                 elif len(_ks) == 1:
                     _only = _od[0]
                     def rt_omr_interp(sec, _o=_only):
                         return _o
                     rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} (1 knot)")
             except Exception as e:
-                self.status_msg.emit(f"[R(t) 로드 실패 → 자체 R 사용] {e}")
+                self.status_msg.emit(f"[R(t) load failed → using self R] {e}")
                 rt_omr_interp = None
 
         if ((best_omr_d is None and omr_interp is None and rt_omr_interp is None)
                 or (not use_pchip and i_za_static is None)):
             _cleanup_spool()
-            self.finished.emit("ERROR: R-calibration 또는 ZA 스펙트럼 없음")
+            self.finished.emit("ERROR: no R-calibration or ZA spectrum")
             return
 
         # bin의 (1-R)/d: rt_path 로드면 시각(sec) 시간보간 우선, 아니면 gidx 보간/단일값.
@@ -1877,7 +1877,7 @@ class AlphaExportWorker(QThread):
                 np.savetxt(fn, np.asarray(alpha, dtype=float).reshape(-1, 1), fmt='%20.6e')
                 if b % 200 == 0:
                     self.progress.emit(b)
-            self.status_msg.emit(f"박사님 형식: {n_written}/{nbin} bin 채움 → {folder}")
+            self.status_msg.emit(f"Per-bin format: filled {n_written}/{nbin} bins → {folder}")
             _cleanup_spool()
             self.finished.emit(folder)
             return
@@ -1952,13 +1952,13 @@ class AlphaExportWorker(QThread):
                 f.write(f"# channel={self.channel}  label={self.channel_label or 'single'}\n")
                 f.write(f"# RL_factor={self.rl_factor}  d={self.cavity_len} cm\n")
                 f.write(f"# I0_mode={i0_mode}  ZA_count={n_za}\n")
-                f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (ambient {self.avg_sec:.0f}초 시간평균 후 alpha)\n")
+                f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (alpha after {self.avg_sec:.0f}s time-average of ambient)\n")
                 dark_note = f"mean={dark.mean():.1f}" if has_dark else "None"
                 f.write(f"# dark_correction={dark_note}\n")
                 f.write(f"# Calibration: {rt_calib_note or calib_info_per_file.get(fp, 'unknown')}\n")
                 wv_str = '\t'.join(f"{w:.4f}" for w in wave_nm)
                 f.write(f"# wavelength_nm:\t{wv_str}\n")
-                f.write("# time = bytepack(col0,col1)/100 (박사님 doy와 동일, 타임존 변환 없음)\n")
+                f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
                 f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
                         '\t'.join(f"px{pix_min+j}" for j in range(n_pix)) + "\n")
                 for rid, rep_sec, T, P, alpha, n_avg in rows:
@@ -1969,11 +1969,11 @@ class AlphaExportWorker(QThread):
             # 파일별 진행상황 emit — UI가 주기적으로 숨 쉬어 '응답없음' 완화
             self.progress.emit(global_idx)
             self.status_msg.emit(
-                f"[{n_saved}/{len(amb_index)}] 저장: {os.path.basename(out_path)}  "
+                f"[{n_saved}/{len(amb_index)}] saved: {os.path.basename(out_path)}  "
                 f"({len(rows)} bin, {i0_mode} I₀)")
 
         _cleanup_spool()
         self.status_msg.emit(
-            f"완료: ambient {amb_count}행 → {n_bins_total} bin → {n_saved} 파일 (스트리밍, 저메모리)")
-        self.finished.emit(self.output_dir if n_saved > 0 else "ERROR: 저장된 파일 없음")
+            f"Done: ambient {amb_count} rows → {n_bins_total} bins → {n_saved} files (streaming, low-memory)")
+        self.finished.emit(self.output_dir if n_saved > 0 else "ERROR: no files saved")
 
