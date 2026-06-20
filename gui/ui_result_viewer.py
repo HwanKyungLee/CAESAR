@@ -1246,7 +1246,7 @@ class ResultViewerWidget(QWidget):
     def _export_region(self):
         """선택구간(없으면 전체)을 result_io로 잘라 새 파일로 저장.
         목록에서 여러 파일 선택 시 병합 후 자름."""
-        from core.result_io import merge_results, slice_rows, write_result, auto_out_name
+        from core.result_io import merge_results, slice_rows, write_result, bucketed_out_name
         paths = self._selected_paths()
         if not paths:
             QMessageBox.information(self, "Export", "Open a result file first.")
@@ -1263,14 +1263,20 @@ class ResultViewerWidget(QWidget):
             QMessageBox.warning(self, "Export", "No data in the selected range.")
             return
         rows, nq = self._bake_qc_into_rows(colhdr, rows)   # 사후 QC(K>0) 반영
-        qctag = f"_QCk{self._spin_qc_k.value():g}" if nq else ""
-        suggest = auto_out_name(paths[0], rows, os.path.splitext(paths[0])[1] or '.dat')
-        if qctag:
-            suggest = suggest.replace('_slice_', f'{qctag}_slice_')
+        # 자동 저장경로: 날짜/neg/QC 버킷(GUI save와 동일). neg·QC는 입력 # 헤더에서 상속,
+        # 뷰어가 사후 QC 재적용(K>0)했으면 그 K로 QC 버킷 덮어씀.
+        _kv = self._spin_qc_k.value()
+        qc_override = f"QCk{_kv:g}" if _kv > 0 else None
+        suggest = bucketed_out_name(paths[0], rows, comments, kind='slice',
+                                    ext=os.path.splitext(paths[0])[1] or '.dat',
+                                    qc_override=qc_override)
         out, _ = QFileDialog.getSaveFileName(self, "Export range", suggest,
                                              "Data (*.dat *.tsv);;All (*)")
         if not out:
             return
+        _d = os.path.dirname(out)
+        if _d:
+            os.makedirs(_d, exist_ok=True)
         write_result(out, comments, colhdr, rows,
                      note=f"{len(paths)} file(s), {n_in}→{len(rows)} rows, QC-excluded {nq} (viewer export)")
         qmsg = f" · QC excluded {nq}" if nq else ""
@@ -1292,15 +1298,21 @@ class ResultViewerWidget(QWidget):
             QMessageBox.warning(self, "Merge", str(e))
             return
         rows, nq = self._bake_qc_into_rows(colhdr, rows)   # 사후 QC(K>0) 반영
-        from core.result_io import merge_out_name
+        from core.result_io import bucketed_out_name
         ext = os.path.splitext(paths[0])[1] or '.dat'
-        sug = merge_out_name(paths[0], rows, len(paths), ext)
-        if nq:
-            sug = sug.replace('_merge', f'_QCk{self._spin_qc_k.value():g}_merge')
+        # 자동 저장경로: 날짜/neg/QC 버킷(GUI save와 동일). neg·QC는 첫 입력 # 헤더에서 상속,
+        # 뷰어가 사후 QC 재적용(K>0)했으면 그 K로 QC 버킷 덮어씀.
+        _kv = self._spin_qc_k.value()
+        qc_override = f"QCk{_kv:g}" if _kv > 0 else None
+        sug = bucketed_out_name(paths[0], rows, comments, kind='merge', nfiles=len(paths),
+                                ext=ext, qc_override=qc_override)
         out, _ = QFileDialog.getSaveFileName(self, "Merge save", sug,
                                              "Data (*.dat *.tsv);;All (*)")
         if not out:
             return
+        _d = os.path.dirname(out)
+        if _d:
+            os.makedirs(_d, exist_ok=True)
         write_result(out, comments, colhdr, rows,
                      note=f"merged {len(paths)} files, {ndup} dups removed, QC-excluded {nq} (viewer)")
         dmsg = (f" · {ndup} dups" if ndup else "") + (f" · QC {nq}" if nq else "")

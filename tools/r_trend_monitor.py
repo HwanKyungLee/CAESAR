@@ -71,7 +71,7 @@ HAS_MPL = True
 try:
     from reflectance_calc import ReflectanceCalculator
     from r_batch_calculator import (
-        read_all_scans, FLAG_ZA, FLAG_HE,
+        FLAG_ZA, FLAG_HE,
         CAVITY_LEN, RL_FACTOR, PIXEL_MIN, PIXEL_MAX,
         COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT, COL_TEMP_HOT,
         COL_PRESS_HOT_PNS, COL_PRESS_HOT_ANS,
@@ -254,7 +254,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                    col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                    ts_tz=None,
                    spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
-                   fit_window_nm: tuple | None = None) -> list[dict]:
+                   fit_window_nm: tuple | None = None,
+                   parallel: bool = True, progress_cb=None) -> list[dict]:
     """파일마다 R을 계산해 결과 목록을 **타임스탬프 순**으로 반환한다.
 
     수정 내역
@@ -263,6 +264,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     * valid_fraction = 0 (완전 보정 실패, R=1.0 dummy) 결과는 저장하지 않음.
     * 보정 실패 파일에서 He 스캔이 나와도 last_he를 오염시키지 않음.
     * quality_ok 기준을 실측 valid_fraction(~44 %)에 맞게 0.30으로 완화.
+    * 스캔 읽기를 data_io(hk_shift T/P, 트렁케이트 정확)로 + 병렬 파싱(6코어).
+      스펙트럼·스캔선택은 read_all_scans와 동일(검증), 핫 온도만 실측 tempcell로 교정.
     """
     files = _resolve_files(directory, file_list)
 
@@ -270,7 +273,29 @@ def scan_directory(directory: str, wave_nm, file_list=None,
         print(f"  .dat 파일 없음: {directory}")
         return []
 
-    print(f"  {len(files)}개 파일 연속 처리 시작...\n")
+    print(f"  {len(files)}개 파일 처리 시작...\n")
+
+    # ── 스캔 읽기: data_io 단일파스(+병렬). read_all_scans 대체. ──
+    from core.data_io import (read_scans_via_dataio as _rsd,
+                              scans_worker_for_parallel as _sw)
+    _dio_ch = 2 if int(spec_start) == int(SPEC_START_ANS) else 1   # ANS=ch2, 그 외 ch1
+    _parsed = None
+    if parallel and len(files) > 1:
+        import concurrent.futures as _cf
+        _nproc = min((os.cpu_count() or 4), 6)
+        try:
+            _parsed = {}
+            _ndone = 0
+            _ntot = len(files)
+            with _cf.ProcessPoolExecutor(max_workers=_nproc) as _ex:
+                for _fp, _za, _he in _ex.map(_sw, [(f, _dio_ch, 1000.0) for f in files]):
+                    _parsed[_fp] = (_za, _he)
+                    _ndone += 1
+                    if progress_cb and (_ndone % 5 == 0 or _ndone == _ntot):
+                        progress_cb(_ndone, _ntot)
+        except Exception as _e:
+            print(f"  [병렬 파싱 실패 → 순차] {_e}")
+            _parsed = None
 
     results = []
     last_he = []          # 가장 최근 양질의 He 스캔 (파일 간 유지)
@@ -278,8 +303,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
 
     for fp in files:
         fname = os.path.basename(fp)
-        za, he = read_all_scans(fp, col_press, col_temp,
-                                spec_start, spec_end)
+        za, he = (_parsed.get(fp, ([], [])) if _parsed is not None
+                  else _rsd(fp, _dio_ch, 1000.0))
 
         # ── 타임스탬프: bytepack 실제 스캔시각(박사님 doy와 동일) → KST 정규화 ──
         # col0(상위)+col1(하위)을 합친 bytepack centisecond. 채널 tz(Cold=UTC/Hot=KST)

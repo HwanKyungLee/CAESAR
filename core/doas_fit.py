@@ -5,9 +5,8 @@ CAESAR의 비선형 DOAS 핏(Variable Projection + NNLS + Tikhonov + IRLS)을
 worker.AnalysisWorker에서 **그대로 추출**한 단일 구현.
 
 - AnalysisWorker는 기존 메서드명을 유지하되 이 클래스로 위임한다(동작 보존,
-  raw 경로 회귀 바이트동일 게이트로 검증).
-- AlphaFitWorker(배치 alpha)는 이 클래스를 직접 사용해 동일한 VarPro로 피팅한다
-  → raw↔alpha 일치.
+  raw 경로 회귀 바이트동일 게이트로 검증). raw·alpha 입력 모두 이 경로로 핏하므로
+  raw↔alpha VarPro가 일치한다.
 
 설계 원칙
 ---------
@@ -117,11 +116,16 @@ class DoasFitter:
                 active_vars.append(sh_name)
                 theta_lb.append(-np.inf); theta_ub.append(np.inf); theta0.append(initial_shift_center)
             elif props["sh_mode"] == "Fix":
+                # Fix = hold the shift at the ABSOLUTE value (same units as the Limit
+                # window). Previously this was `initial_shift_center + val`, which —
+                # because initial_shift_center carries last_valid_shift across scans —
+                # made any non-zero Fix value drift by `val` every scan (e.g. Fix -0.5
+                # ran away to -120). Fix 0 happened to be safe (no accumulation).
                 try:
                     val = float(props["sh_val"])
                 except Exception:
                     val = 0.0
-                fixed_vars[sh_name] = initial_shift_center + val if abs(val) < 100 else val
+                fixed_vars[sh_name] = val
             elif props["sh_mode"] == "Link":
                 linked_vars[sh_name] = f"{props['sh_val'].strip()}_sh"
 

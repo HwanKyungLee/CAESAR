@@ -186,17 +186,30 @@ class DataIO:
             return rows[row_index]
         raise ValueError(f"Row {row_index} not found in {os.path.basename(filepath)} ({len(rows)} rows)")
 
+    # Mega-Matrix detection threshold: META block (2053) + one full spectrum
+    # channel (2048) = 4101 columns. A row this wide is unambiguously an Araon
+    # multi-scan file (a plain 1D spectrum has ~1 col; a 2-col reference has 2).
+    # NOTE: must be ≤ the *truncated* cold width (6174). LabVIEW time-error +
+    # Continue can drop the trailing HK columns, leaving the first row at 6174
+    # (normal cold = 6179). The old ≥6175 threshold mis-classified those files
+    # as single-scan, so expand_to_scan_list() returned only [(fp, 0)] and alpha
+    # generation emitted just one trace per bin. 4101 keeps normal 6179/6177
+    # files detected while also catching the 6174 truncated files. See
+    # cold-alpha-6175-threshold-bug-2026-06.
+    _MEGA_MATRIX_MIN_COLS = _RP_META_COLS + _RP_CH_PIXELS   # 4101
+
     @staticmethod
     def is_araon_mega_matrix(filepath):
         """
-        Returns True when the first non-empty row has ≥6175 tab-separated
-        columns — the signature of the Araon LabVIEW Mega-Matrix format.
+        Returns True when the first non-empty row has ≥4101 tab-separated
+        columns (META + ≥1 spectrum channel) — the signature of the Araon
+        LabVIEW Mega-Matrix format, tolerant of trailing-HK truncation.
         """
         try:
             with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
                 for line in fh:
                     if line.strip():
-                        return len(line.strip().split('\t')) >= 6175
+                        return len(line.strip().split('\t')) >= DataIO._MEGA_MATRIX_MIN_COLS
         except Exception:
             pass
         return False
@@ -615,7 +628,13 @@ class DataIO:
             env_t = 25.0
             env_p = 1013.25
 
-            if len(raw_probe) >= 6175:
+            # Araon row gate: a single full channel (META + CH1 = 4101 cols) is
+            # enough to parse spectrum + HK. The old 6175 floor mis-routed rows
+            # that were truncated by a few tail-HK columns (e.g. a LabVIEW write
+            # cut short) into the 1D fallback below, which re-reads the *entire*
+            # multi-MB file per row → O(n²) hang. Spectrum/P/T live well before
+            # 4101, and missing tail HK is already guarded as NaN in _hk().
+            if len(raw_probe) >= DataIO._META_COLS + DataIO._CH_PIXELS:
                 # ── Araon Mega-Matrix format ─────────────────────────────────
                 # Dynamic channel slice: CH1=2053:4101, CH2=4101:6149, CH3=6149:8197
                 # n_slots: 컬럼수 기반(구조적) — HK는 모든 슬롯 뒤 고정 위치라 신호유무와
@@ -634,9 +653,25 @@ class DataIO:
                 #   hk_start = META_COLS + n_slots × CH_PIXELS
                 hk = DataIO._META_COLS + n_slots * DataIO._CH_PIXELS
 
+                # HK-block truncation guard: an interrupted LabVIEW write can drop
+                # the *leading* few HK columns, shifting every HK reading left
+                # while leaving the spectrum (before `hk`) and the HK *tail*
+                # intact (observed on cold 2026-06-11-020: 6174 cols vs 6179, with
+                # the tail values still aligned). If this row is a little shorter
+                # than the standard cold/hot width we infer how many leading HK
+                # cols were lost and shift reads left to match. Bounded to a few
+                # cols so genuinely short / 1-channel rows aren't touched; the
+                # pressure-plausibility scan below independently validates the
+                # result (a wrong shift simply fails the 800–1200 mbar gate and
+                # falls back to the default, i.e. no worse than before).
+                hk_shift = 0
+                _std = next((s for s in (6179, 6181) if s >= len(raw_probe)), None)
+                if _std is not None and 0 < (_std - len(raw_probe)) <= 64:
+                    hk_shift = _std - len(raw_probe)
+
                 def _hk(rel):
-                    c = hk + rel
-                    v = raw_probe[c] if c < len(raw_probe) else np.nan
+                    c = hk + rel - hk_shift
+                    v = raw_probe[c] if 0 <= c < len(raw_probe) else np.nan
                     return v if (np.isfinite(v) and v not in (0, 65535)) else np.nan
 
                 raw_p_count = np.nan
@@ -820,3 +855,90 @@ class DataIO:
         """Returns the gas species name by stripping the path and extension from a filename."""
         base = os.path.basename(filepath)
         return os.path.splitext(base)[0]
+
+
+# ── 병렬 파싱 워커 (모듈 최상위) ───────────────────────────────────────────────
+# multiprocessing 'spawn'(Windows 기본) 자식이 임포트하는 모듈은 이 함수가 사는
+# core.data_io 뿐 — Qt 비의존이라 자식 기동이 가볍다. 알파생성 Pass1의 행별
+# load_measurement_with_hk 호출을 그대로 워커에서 수행해 '동일 결과'를 보장하고,
+# 메인은 결과 배열만 받아 분류/스풀/계산을 한다(로직 이동 0).
+RAW_LOAD_FAIL = -999999   # flags[i]가 이 값이면 그 행 로드 실패 → 메인이 SKIP
+
+def extract_raw_file_for_parallel(task):
+    """한 raw 파일을 행별로 파싱·추출해 compact 배열로 반환(순수함수, 부작용 없음).
+
+    task = (path, pixel_min, pixel_max, channel)
+    반환: (path, flags[int64,(n,)], T[f64,(n,)], P[f64,(n,)],
+           specs[f32,(n,npix)], secs[f64,(n,)])
+
+    각 행은 순차 경로와 '같은' DataIO.load_measurement_with_hk 로 추출하므로
+    raw 카운트(정수)는 f32에 무손실 → 순차 결과와 바이트 동일.
+    """
+    path, pixel_min, pixel_max, channel = task
+    try:
+        n = len(DataIO.expand_to_scan_list(path))
+    except Exception:
+        n = 0
+    flags = np.full(n, RAW_LOAD_FAIL, dtype=np.int64)
+    Ts = np.full(n, np.nan, dtype=np.float64)
+    Ps = np.full(n, np.nan, dtype=np.float64)
+    specs = None
+    for i in range(n):
+        try:
+            _, spec, flag, t, p = DataIO.load_measurement_with_hk(
+                path, pixel_min, pixel_max, row_index=i, channel=channel)
+        except Exception:
+            continue   # 로드 실패 행 → flags[i]=RAW_LOAD_FAIL 유지(메인 SKIP)
+        s = np.asarray(spec, dtype=np.float32)
+        if specs is None:
+            specs = np.zeros((n, len(s)), dtype=np.float32)
+        if len(s) != specs.shape[1]:
+            continue   # 길이 불일치 행은 skip(정렬 안전, 순차도 spool 깨지는 케이스)
+        specs[i] = s
+        flags[i] = int(flag)
+        Ts[i] = float(t)
+        Ps[i] = float(p)
+    if specs is None:
+        specs = np.zeros((n, 0), dtype=np.float32)
+    secs = DataIO.all_row_seconds(path)
+    secs = (np.asarray(secs, dtype=np.float64)
+            if secs is not None else np.full(n, np.nan, dtype=np.float64))
+    return path, flags, Ts, Ps, specs, secs
+
+
+def read_scans_via_dataio(fp, channel, min_peak=1000.0):
+    """data_io 단일파스로 (za, he) 블록 반환 — r_batch_calculator.read_all_scans 대체.
+
+    스펙트럼·스캔선택(MIN_PEAK·플래그 500/510·NaN드롭)은 read_all_scans와 동일,
+    T/P는 hk_shift라 트렁케이트(6174)도 실측. 채널 스펙트럼=data_io 채널인덱스
+    (1=2053:4101, 2=4101:6149 — read_all_scans SPEC_DEFAULT/ANS와 일치 확인됨).
+    중립 모듈(data_io, Qt·r_trend 비의존)에 둬 R Trend·알파 둘 다 순환없이 공유.
+    반환: (za, he), 각 원소 (intensity[f64], T_c, P_mbar). 순수함수."""
+    _, flags, Ts, Ps, specs, _ = extract_raw_file_for_parallel((fp, 0, _RP_CH_PIXELS, channel))
+    za = []
+    he = []
+    for i in range(len(flags)):
+        f = int(flags[i])
+        if f == RAW_LOAD_FAIL:
+            continue
+        sp = np.asarray(specs[i], dtype=float)
+        sp = sp[np.isfinite(sp)]
+        if sp.size == 0 or float(np.max(sp)) < min_peak:
+            continue
+        rec = (sp, float(Ts[i]), float(Ps[i]))
+        if f == 500:
+            za.append(rec)
+        elif f == 510:
+            he.append(rec)
+    return za, he
+
+
+def scans_worker_for_parallel(task):
+    """병렬 파싱 워커(모듈 최상위 — spawn 자식이 Qt 없이 임포트).
+    task=(fp, channel, min_peak) → (fp, za, he). 순수함수."""
+    fp, channel, min_peak = task
+    try:
+        za, he = read_scans_via_dataio(fp, channel, min_peak)
+    except Exception:
+        za, he = [], []
+    return fp, za, he

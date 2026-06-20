@@ -190,95 +190,11 @@ def save_r_dat(out_path: str, wave, r_raw, r_fit, omr_d, fname, n_za, n_he) -> N
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Scan reader — flag-aware, channel-aware
+# Scan reader — RETIRED 2026-06-17.
+# read_all_scans()는 core.data_io.read_scans_via_dataio 로 대체됨(data_io 단일파스+
+# hk_shift T/P, 트렁케이트 정확 + 핫 실측 tempcell 온도). scan_directory·rt_precompute
+# 모두 그쪽을 씀. 스펙트럼·스캔선택(MIN_PEAK·플래그 500/510)은 동일(검증 완료).
 # ─────────────────────────────────────────────────────────────────────────────
-
-def read_all_scans(
-    filepath: str,
-    col_press: int = COL_PRESS_COLD,
-    col_temp: int  = COL_TEMP_COLD,
-    spec_start: int = SPEC_START_DEFAULT,
-    spec_end: int   = SPEC_END_DEFAULT,
-) -> tuple[list, list]:
-    """Read every ZA (flag=500) and He (flag=510) row in one file.
-
-    Returns ``(za_scans, he_scans)`` where each scan is the tuple
-    ``(intensity_array, T_celsius, P_mbar)`` that
-    :class:`ReflectanceCalculator` consumes.
-
-    Parameters
-    ----------
-    filepath : str
-        Path to a Mega-Matrix .dat file.
-    col_press, col_temp : int
-        Absolute column indices for the pressure and temperature
-        sensors. Callers (Cold vs Hot, PNs vs ANs) pass the appropriate
-        constants from above.
-    spec_start, spec_end : int
-        Spectrum slice (exclusive end). Defaults select the primary
-        block (Cold NO2 / Hot PNs). Pass ``SPEC_START_ANS`` /
-        ``SPEC_END_ANS`` for Hot ANs.
-
-    Notes
-    -----
-    This function previously read flags **502 / 512** (transitional
-    wait), which produced slightly biased ZA/He spectra. It now reads
-    **500 / 510** — the stable measurement windows.
-    """
-    za: list = []
-    he: list = []
-
-    with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            s = line.strip()
-            if not s or s.startswith("#"):
-                continue
-            tokens = s.split("\t") if "\t" in s else s.split()
-            if len(tokens) <= max(col_press, col_temp, spec_end - 1):
-                continue
-            try:
-                flag = int(float(tokens[4]))
-            except (ValueError, IndexError):
-                continue
-            if flag not in FLAG_ZA and flag not in FLAG_HE:
-                continue
-
-            # Spectrum
-            try:
-                intensity = np.fromiter(
-                    (_safe_float(t) for t in tokens[spec_start:spec_end]),
-                    dtype=float, count=spec_end - spec_start,
-                )
-            except ValueError:
-                continue
-            intensity = intensity[np.isfinite(intensity)]
-            if intensity.size == 0:
-                continue
-
-            # near-0 dropout 스캔 제외 (램프 off/셔터/취득 실패 → peak≈0).
-            # 이런 스캔이 ZA/He 평균에 들어가면 ratio가 깨져 R이 비물리값이 된다.
-            if float(np.max(intensity)) < MIN_PEAK_INTENSITY:
-                continue
-
-            # T (°C) — fall back to 25.0 if sentinel
-            t_raw = _safe_float(tokens[col_temp])
-            t_c = t_raw / 100.0 if (np.isfinite(t_raw) and t_raw not in (0.0, 65535.0)) else 25.0
-
-            # P (mbar) — fall back to 1013.25 if sentinel
-            p_raw = _safe_float(tokens[col_press])
-            p_mbar = (
-                p_raw * P_SCALE
-                if (np.isfinite(p_raw) and p_raw not in (0.0, 65535.0))
-                else 1013.25
-            )
-
-            scan = (intensity, t_c, p_mbar)
-            if flag in FLAG_ZA:
-                za.append(scan)
-            else:
-                he.append(scan)
-
-    return za, he
 
 
 def _safe_float(s: str) -> float:
@@ -305,6 +221,6 @@ __all__ = [
     "SPEC_START_DEFAULT", "SPEC_END_DEFAULT",
     "SPEC_START_ANS",     "SPEC_END_ANS",
     # functions
-    "save_r_dat", "read_all_scans",
+    "save_r_dat",
     "ReflectanceCalculator",
 ]

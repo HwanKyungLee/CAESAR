@@ -220,6 +220,45 @@ class AnalysisWorker(QThread):
         print(f"[Temporal I0] Pre-scan complete: {len(za_list)} ZA scans found.")
         return za_list
 
+    def _prescan_injection_indices(self, expanded_scans):
+        """청크+워밍업 병렬화용(터보 모드). 스펙트럼 처리·핏 없이 **플래그만** 빠르게
+        읽어, 펼친 스캔(expanded_scans) 기준 주입 스캔의 index를 수집한다.
+
+        반환: dict(za=[index...], he=[index...], amb=[index...])
+          za = I0/R 기준이 갱신되는 ZA-injecting(flag 500; 500 미설정이면 모든 ZA),
+          he = R 기준 He-injecting(flag 510; 510 미설정이면 모든 He),
+          amb = ambient 스캔 index(핏 대상).
+        각 청크는 본체 앞 '마지막 za·he index'까지 워밍업으로 replay해 I0/R/shift를
+        복원한다(ZA/He는 핏 없이 상태만 갱신 → 워밍업 비용 작음). [[EXISTING_FIT_LOGIC]]
+        """
+        za_i, he_i, amb_i = [], [], []
+        za_inj = 500 if 500 in self.flag_za else None
+        he_inj = 510 if 510 in self.flag_he else None
+        for idx, entry in enumerate(expanded_scans):
+            fp, row_idx = (entry[0], entry[1]) if isinstance(entry, tuple) else (entry, 0)
+            # 알파 입력은 플래그가 없어 항상 ambient.
+            if self._is_alpha_input(fp):
+                amb_i.append(idx); continue
+            try:
+                _, _raw, flag, _, _ = DataIO.load_measurement_with_hk(
+                    fp, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
+            except Exception:
+                amb_i.append(idx); continue   # 못 읽으면 본체에서 동일하게 skip 처리됨
+            is_za = flag in self.flag_za
+            is_he = flag in self.flag_he
+            if is_za:
+                if za_inj is None or flag == za_inj:
+                    za_i.append(idx)
+            elif is_he:
+                if he_inj is None or flag == he_inj:
+                    he_i.append(idx)
+            elif flag == 0 or (self.flag_amb and flag in self.flag_amb) or \
+                 (not self.flag_amb and not is_za and not is_he):
+                amb_i.append(idx)
+            # 그 외(미지 플래그)는 본체에서 skip continue 되므로 어디에도 안 넣음
+        print(f"[Chunk prescan] za_inj={len(za_i)} he_inj={len(he_i)} ambient={len(amb_i)}")
+        return {'za': za_i, 'he': he_i, 'amb': amb_i}
+
     def _interpolate_i0(self, za_list, current_idx):
         """
         Returns an I0 array for the file at current_idx by linearly interpolating
@@ -244,6 +283,16 @@ class AnalysisWorker(QThread):
             return after[0][1]
 
     def run(self):
+        # Fast mode: dispatch alpha scans to a process pool (see _run_parallel).
+        # Falls back to nothing on failure (no double-processing) — user re-runs.
+        if getattr(self, 'parallel', False):
+            try:
+                self._run_parallel()
+            except Exception as e:
+                import traceback
+                print(f"[ParallelFit] failed: {e}\n{traceback.format_exc()}")
+                self.finished.emit()
+            return
         try: current_params = [ float(np.atleast_1d(p)[ 0 ]) for p in self.params ]
         except Exception: current_params = [ 0.0, 1.0 ] + [ 0.1 ] * len(self.engine.gas_list) + [ 0.0 ] * 10
 
@@ -633,11 +682,13 @@ class AnalysisWorker(QThread):
 
                         ok_thresh = getattr(self, 'ok_rms_threshold', 0.10)
                         # threshold is a fraction of the mean signal amplitude, in the same units as rms
-                        threshold = np.mean(abs(signal_for_stats)) * ok_thresh
+                        _sig_mean = float(np.mean(abs(signal_for_stats)))
+                        threshold = _sig_mean * ok_thresh
+                        result['_signal_mean'] = _sig_mean
 
                         if rms < threshold:
                             status = "OK"
-                            if attempt == 1: status = "Recovered" 
+                            if attempt == 1: status = "Recovered"
                         else:
                             status = "Unstable"
 
@@ -713,6 +764,336 @@ class AnalysisWorker(QThread):
         self.scan_count_ready.emit(i + 1)   # final actual count (in case estimate differed)
         self.finished.emit()
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # 청크+워밍업 병렬화용 알파 핏 (터보 모드). run()의 ambient/linear 경로를
+    # emit 없이 [범위] 로 도는 순수 함수. 알파-only라 I0/R/ZA·He 캐리오버 없음 —
+    # 스캔간 캐리오버는 last_valid_shift(+current_params·needs_pre_calibration)뿐.
+    # run()의 라이브 경로는 건드리지 않는다(무회귀). 검증=run() 순차결과와 per-scan 대조.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _fit_alpha_range(self, scans, body_start, init_shift=0.0, etalon_freq=None):
+        """scans = [(global_i, file_path, row_idx), …] (워밍업+본체, 시간순).
+        body_start = scans 내에서 본체가 시작하는 위치(앞쪽 [0:body_start]=워밍업, shift만
+        정착시키고 결과 버림). init_shift = 워밍업 시작 last_valid_shift.
+        반환: (results[(global_i, result_dict)…] 본체만, shift_traj[전체], etalon_freq)."""
+        try:
+            current_params = [float(np.atleast_1d(p)[0]) for p in self.params]
+        except Exception:
+            current_params = [0.0, 1.0] + [0.1] * len(self.engine.gas_list) + [0.0] * 10
+        last_valid_shift = float(init_shift)
+        self.etalon_freq = etalon_freq            # None이면 첫 스캔에서 1회 검출
+        self.needs_pre_calibration = False
+
+        results = []
+        shift_traj = []
+        for pos, (gi_scan, file_path, row_idx) in enumerate(scans):
+            is_body = pos >= body_start
+            initial_shift_center = last_valid_shift
+            result = {'File': f"{os.path.basename(file_path)} [{row_idx:04d}]",
+                      'Channel': self.channel, 'Params': {}}
+            try:
+                _ts = DataIO.parse_alpha_row_time(file_path, row_idx)
+                _off = getattr(self, 'tz_offset_sec', 0)
+                if _ts is not None and _off:
+                    from datetime import timedelta as _td_tz
+                    _ts = _ts + _td_tz(seconds=_off)
+                result['Time'] = _ts.strftime('%Y-%m-%d %H:%M:%S') if _ts else f"row {row_idx:04d}"
+
+                # 알파 로드(채널 자체 파장축) + 핏범위 슬라이스
+                wave_nm, intensity_raw, env_t, env_p = DataIO.load_alpha_trace_row_full(file_path, row_idx)
+                sl = self._alpha_fit_slice(wave_nm)
+                if sl is not None:
+                    wave_nm = wave_nm[sl]; intensity_raw = intensity_raw[sl]
+                pixel_idx = self._alpha_pixels(wave_nm)
+                self.temperature = env_t; self.pressure = env_p
+                _gt = getattr(self, 'gas_temp_override', None)
+                if _gt is not None:
+                    self.temperature = float(_gt)
+
+                if np.max(np.abs(intensity_raw)) == 0:
+                    result['Status'] = "Skip: All-Zero"
+                    if is_body:
+                        results.append((gi_scan, result))
+                    shift_traj.append(last_valid_shift)
+                    continue
+
+                # 알파 = linear mode (optical depth 그대로). raw 경로 없음.
+                avg_raw = np.mean(intensity_raw)
+                scale_factor = (10 ** (-np.floor(np.log10(abs(avg_raw))))
+                                if (abs(avg_raw) < 1e-4 and avg_raw != 0) else 1.0)
+                intensity_processed = intensity_raw * scale_factor
+                optical_depth = intensity_processed
+                fit_sign = 1.0
+
+                poly_start_idx = 2 + len(self.engine.gas_list)
+                poly_order = len(current_params) - poly_start_idx - 1
+                absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw) / 2.0
+
+                if self.etalon_freq is None:
+                    self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
+
+                max_retries = 2
+                for attempt in range(max_retries):
+                    current_lam = self.tikhonov_lambda
+                    current_robust = self.use_robust_fitting
+                    if self.needs_pre_calibration:
+                        best_sh, best_sq = self.auto_pre_calibrate(pixel_idx, optical_depth, poly_order)
+                        current_params[0] = best_sh; current_params[1] = best_sq
+                        self.needs_pre_calibration = False
+                    if len(current_params) > poly_start_idx:
+                        current_params[poly_start_idx] = np.mean(optical_depth)
+                        current_params[poly_start_idx + 1: poly_start_idx + 1 + poly_order] = [0.0] * poly_order
+
+                    active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = \
+                        self._setup_fit_parameters(initial_shift_center, current_params)
+                    fixed_e_f = self.etalon_freq
+                    theta0.append(0.0); theta_lb.append(-np.pi); theta_ub.append(np.pi)
+                    try:
+                        weights = np.ones_like(intensity_processed)
+                        weights = weights / np.mean(weights)
+                        W = np.diag(weights)
+                        opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = \
+                            self._execute_varpro_fit(
+                                pixel_idx, optical_depth, W, active_vars, fixed_vars, linked_vars,
+                                theta0, theta_lb, theta_ub, poly_order, fixed_e_f, absolute_center, fit_sign,
+                                override_lam=current_lam, override_robust=current_robust)
+                        _, abs_val_scaled, poly_val_scaled, _, _ = self.engine.get_model_components(
+                            pixel_idx, opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled)
+                        abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
+                        etalon_part_orig = (etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                        y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
+                        residual = intensity_raw - y_fit_model_orig
+                        rms = np.sqrt(np.mean(residual ** 2))
+
+                        result['RMS'] = rms
+                        result['Shift'] = opt_shifts[0] if len(opt_shifts) > 0 else 0
+                        result['Squeeze'] = opt_squeezes[0] if len(opt_squeezes) > 0 else 1
+                        result['Params'] = {
+                            'shifts': opt_shifts, 'squeezes': opt_squeezes,
+                            'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
+                            'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
+                            'etalon_amp': etalon_amp_scaled / scale_factor,
+                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f),
+                            'channel': self.channel}
+
+                        raw_concentrations, real_errors = [], []
+                        for gj, nm in enumerate(self.engine.gas_list):
+                            scale_div = self.engine.scaling_factors[nm]
+                            mult_i = self.engine.multipliers.get(nm, 1.0)
+                            real_conc = (gas_coeffs_scaled[gj] / scale_factor) / scale_div * mult_i
+                            real_err = (gas_errs[gj] / scale_factor) / scale_div * mult_i
+                            raw_concentrations.append(real_conc); real_errors.append(real_err)
+
+                        n_air = 2.68678e19 * (self.pressure / 1013.25) * (273.15 / (self.temperature + 273.15))
+                        dn_air_dT = -n_air / (self.temperature + 273.15)
+                        dn_air_dP = n_air / self.pressure
+                        rel_err_n = np.sqrt((dn_air_dT * 1.0) ** 2 + (dn_air_dP * 1.0) ** 2) / n_air
+                        for gj, nm in enumerate(self.engine.gas_list):
+                            ppb_raw = (raw_concentrations[gj] / n_air) * 1e9
+                            ppb_err = (real_errors[gj] / n_air) * 1e9
+                            ppb_total_err = abs(ppb_raw) * np.sqrt(
+                                (ppb_err / max(abs(ppb_raw), 1e-30)) ** 2 + rel_err_n ** 2)
+                            result[nm] = ppb_raw
+                            result[f"{nm}_Error"] = ppb_err
+                            result[f"{nm}_TotalError"] = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
+                            result[f"{nm}_MDL"] = 3.0 * ppb_err
+                            result[f"{nm}_Shift"] = opt_shifts[gj]
+                            result[f"{nm}_Squeeze"] = opt_squeezes[gj]
+
+                        n_pts = len(pixel_idx); n_gases = len(self.engine.gas_list)
+                        n_params = len(theta0) + n_gases + (poly_order + 1) + 1
+                        dof = max(n_pts - n_params, 1)
+                        sigma_pix = np.std(np.diff(intensity_raw)) / np.sqrt(2)
+                        if sigma_pix < 1e-30:
+                            sigma_pix = rms if rms > 1e-30 else 1.0
+                        result['Chi2'] = float(np.sum(residual ** 2 / sigma_pix ** 2) / dof)
+                        result['DOF'] = dof
+                        result['SNR'] = float(np.mean(np.abs(optical_depth)) / (rms + 1e-30))
+
+                        ok_thresh = getattr(self, 'ok_rms_threshold', 0.10)
+                        _sig_mean = float(np.mean(abs(intensity_raw)))
+                        threshold = _sig_mean * ok_thresh
+                        result['_signal_mean'] = _sig_mean
+                        if rms < threshold:
+                            status = "OK"
+                            if attempt == 1: status = "Recovered"
+                        else:
+                            status = "Unstable"
+                        result['Status'] = status
+                        if len(opt_shifts) > 0:
+                            last_valid_shift = opt_shifts[0]
+                        if status in ["OK", "Recovered"] or attempt == max_retries - 1:
+                            break
+                        else:
+                            self.needs_pre_calibration = True
+                    except Exception as e:
+                        if attempt == max_retries - 1: raise e
+                        self.needs_pre_calibration = True
+
+                # QC (run()과 동일)
+                if getattr(self, 'qc_enabled', True):
+                    _qc_reason = ''
+                    _rms = float(result.get('RMS', 0.0) or 0.0)
+                    _rms_abs = float(getattr(self, 'qc_rms_abs', 0.0) or 0.0)
+                    if _rms_abs > 0 and _rms > _rms_abs:
+                        _qc_reason = f"rms={_rms:.1e}>{_rms_abs:.1e}"
+                    _st = result.get('Status', '')
+                    if (not _qc_reason) and isinstance(_st, str) and _st.startswith('Unstable'):
+                        _qc_reason = f"rms>{getattr(self,'ok_rms_threshold',0.10)*100:.0f}%"
+                    _snr_min = float(getattr(self, 'qc_snr_min', 0.0) or 0.0)
+                    if (not _qc_reason) and _snr_min > 0 and float(result.get('SNR', np.inf)) < _snr_min:
+                        _qc_reason = f"snr<{_snr_min:.0f}"
+                    if _qc_reason:
+                        for _nm in self.engine.gas_list:
+                            result[_nm] = float('nan')
+                        result['Status'] = f"QC-Excluded ({_qc_reason})"
+
+            except Exception as e:
+                result['Status'] = f"Skip: {str(e)}"
+                result['RMS'] = 0
+                result['Params'] = {}
+                self.needs_pre_calibration = True
+
+            shift_traj.append(last_valid_shift)
+            if is_body:
+                results.append((gi_scan, result))
+
+        return results, shift_traj, self.etalon_freq
+
+    def _chunk_cfg(self):
+        """Picklable config sent to each pool worker (see _chunk_init)."""
+        nparam = len(self.params)
+        return {
+            'pixel_min': self.pixel_min, 'pixel_max': self.pixel_max,
+            'params': list(self.params),
+            'bounds': ([-np.inf] * nparam, [np.inf] * nparam),  # unused by _fit_alpha_range
+            'channel': self.channel,
+            'ref_properties': self.ref_properties,
+            'step_limit': getattr(self, 'step_limit', 0.5),
+            'tikhonov_lambda': getattr(self, 'tikhonov_lambda', 0.0),
+            'use_robust_fitting': getattr(self, 'use_robust_fitting', False),
+            'allow_negative_gas': getattr(self, 'allow_negative_gas', False),
+            'fit_unit': getattr(self, 'fit_unit', 'nm'),
+            'fit_lo_nm': getattr(self, 'fit_lo_nm', None),
+            'fit_hi_nm': getattr(self, 'fit_hi_nm', None),
+            'qc_enabled': getattr(self, 'qc_enabled', True),
+            'qc_rms_abs': getattr(self, 'qc_rms_abs', 0.0),
+            'qc_snr_min': getattr(self, 'qc_snr_min', 0.0),
+            'ok_rms_threshold': getattr(self, 'ok_rms_threshold', 0.10),
+            'gas_temp_override': getattr(self, 'gas_temp_override', None),
+            'tz_offset_sec': getattr(self, 'tz_offset_sec', 0),
+            'etalon_freq_min': getattr(self, 'etalon_freq_min', 0.02),
+            'etalon_freq_max': getattr(self, 'etalon_freq_max', 0.40),
+        }
+
+    def _run_parallel(self):
+        """Fast mode: fit alpha scans across a process pool, chunk + warmup.
+
+        Each chunk re-settles last_valid_shift over a short warmup, then fits its
+        body — validated to reproduce the sequential fit to ~1e-6 ppb. Results are
+        emitted in scan order (buffered) as chunks complete, so the table/plots fill
+        in progressively. Alpha-only, so there is no I0/R/ZA/He carryover.
+
+        NOTE (v1): the Kalman _Smooth columns are not produced here (they are a
+        trend-monitor-only secondary). Primary ppb is identical to sequential.
+        """
+        import concurrent.futures as cf
+
+        # Expand to individual scans (alpha rows). Same expansion as the sequential run.
+        expanded = []
+        for entry in self.file_list:
+            if isinstance(entry, tuple):
+                expanded.append(entry)
+            else:
+                expanded.extend(DataIO.expand_to_scan_list(entry))
+        scans = [(i, fp, r) for i, (fp, r) in enumerate(expanded)]
+        n = len(scans)
+        self.scan_count_ready.emit(max(n, 1))
+        if n == 0:
+            self.finished.emit()
+            return
+
+        # Detect the etalon frequency once (on the first scan) and share it with all
+        # chunks, exactly as the sequential run detects it once and reuses it.
+        _, _, etalon = self._fit_alpha_range(scans[:1], body_start=0,
+                                             init_shift=0.0, etalon_freq=None)
+
+        # Use about half the logical cores by default: full saturation pins the CPU
+        # at ~100% and starves the GUI process (lag / 'Not Responding'), even with
+        # BLAS threads capped. Half keeps the machine usable while still ~Nx faster.
+        # Override via self.fit_nproc (set from the UI) if the user wants more/less.
+        _cpu = os.cpu_count() or 4
+        nproc = int(getattr(self, 'fit_nproc', 0) or max(2, min(8, _cpu // 2)))
+        nproc = max(1, min(nproc, _cpu))
+        warmup = 40
+        # Cap chunk size so each chunk finishes in a bounded time even for a whole
+        # campaign (tens of thousands of scans). Big chunks (e.g. 1600 scans ≈ 7 min)
+        # mean no results/graphs appear for minutes AND the dispatch loop blocks
+        # between completions so Stop can't interrupt and the pool isn't torn down on
+        # close (orphan processes). Small-ish chunks → first results in ~1 min,
+        # frequent completions → responsive Stop. Floor keeps warmup overhead modest.
+        chunk_size = max(150, min(400, -(-n // (nproc * 6))))     # ceil, clamped
+        cfg = self._chunk_cfg()
+
+        tasks = []
+        bs = 0
+        while bs < n:
+            be = min(bs + chunk_size, n)
+            ws = max(0, bs - warmup)
+            tasks.append((scans[ws:be], bs - ws, 0.0, etalon))
+            bs = be
+
+        # Cap BLAS threads to 1 PER worker process BEFORE the pool is spawned, so the
+        # children inherit it at import time (setting it inside the worker is too late —
+        # numpy/scipy have already initialised their thread pools). Without this, each
+        # of the N processes spawns its own BLAS threads → N×threads ≫ cores →
+        # oversubscription, ~100% CPU thrash, and a starved/unresponsive GUI.
+        for _ev in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
+                    'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS'):
+            os.environ[_ev] = '1'
+
+        done = {}
+        nxt = 0
+        self.progress.emit(0)
+        try:
+            with cf.ProcessPoolExecutor(max_workers=nproc, initializer=_chunk_init,
+                                        initargs=(self.engine, cfg)) as ex:
+                pending = {ex.submit(_chunk_entry, t) for t in tasks}
+                while pending:
+                    if not self.is_running:
+                        for _f in pending:
+                            _f.cancel()
+                        ex.shutdown(wait=False, cancel_futures=True)
+                        break
+                    # Wait briefly so Stop (is_running) is checked ~2×/s even while a
+                    # chunk is still running — otherwise the loop blocks until a chunk
+                    # completes (minutes on big runs) and Stop/close can't interrupt.
+                    finished_set, pending = cf.wait(pending, timeout=0.5,
+                                                    return_when=cf.FIRST_COMPLETED)
+                    for fut in finished_set:
+                        try:
+                            for gi, r in fut.result():
+                                done[gi] = r
+                        except Exception as e:
+                            print(f"[ParallelFit] chunk error: {e}")
+                    # Emit results in scan order. Fast mode collects them (table/plots
+                    # are rendered once at the end), so we only emit result_ready +
+                    # progress here — NO per-scan trend/plot signals (those don't keep
+                    # up at scale). Pace emission (msleep every ~25) so a large unblocked
+                    # prefix doesn't flood the GUI event queue.
+                    _since_yield = 0
+                    while nxt in done:
+                        r = done.pop(nxt)
+                        self.result_ready.emit(r, nxt)
+                        self.progress.emit(nxt + 1)
+                        nxt += 1
+                        _since_yield += 1
+                        if _since_yield >= 25:
+                            _since_yield = 0
+                            self.msleep(3)   # yield so the GUI can process queued updates
+        finally:
+            self.scan_count_ready.emit(max(nxt, 1))
+            self.finished.emit()
+
     def update_mirror_reflectivity(self, wave_nm, t, p):
         """
         Derives (1-R(λ))/d from the ratio of Zero-Air and Helium intensities.
@@ -786,6 +1167,69 @@ class AnalysisWorker(QThread):
         self.is_running = False
 
 
+# ─── Parallel chunk fitting (Fast mode) ───────────────────────────────────────
+# A ProcessPoolExecutor runs AnalysisWorker._fit_alpha_range over contiguous scan
+# chunks. Each chunk replays a short warmup to re-settle last_valid_shift, then
+# fits its body. Validated to reproduce the sequential fit to ~1e-6 ppb on real
+# cold alpha (see diagnostics/parallel_shift_bench/validate_chunk.py).
+# Fit is alpha-only, so the only cross-scan state is last_valid_shift — no I0/R/
+# ZA/He carryover — which makes chunking safe.
+_CHUNK_WORKER = None
+
+
+def _chunk_init(engine, cfg):
+    """Pool initializer: build one AnalysisWorker fit-context per worker process.
+
+    The engine is sent once per process via initargs (picklable). A throwaway
+    AnalysisWorker is constructed so _fit_alpha_range can reuse all existing fit
+    methods; the per-run config overrides the relevant attributes.
+    """
+    global _CHUNK_WORKER
+    # Cap BLAS to 1 thread PER worker process. scipy bundles its own OpenBLAS
+    # (libscipy_openblas) that ignores OPENBLAS_NUM_THREADS, so the env var alone
+    # leaves it at 12 threads → 6 procs × 12 = oversubscription → ~100% CPU + GUI
+    # freeze. threadpoolctl sets it at runtime on the already-loaded library.
+    try:
+        from threadpoolctl import threadpool_limits
+        globals()['_CHUNK_TPL'] = threadpool_limits(1)   # keep ref so limit isn't reverted
+    except Exception:
+        os.environ.setdefault('OMP_NUM_THREADS', '1')   # fallback
+    from PyQt6.QtCore import QCoreApplication
+    import sys as _sys
+    if QCoreApplication.instance() is None:
+        QCoreApplication(_sys.argv)                 # QThread needs an app object
+    w = AnalysisWorker(engine, [], cfg['pixel_min'], cfg['pixel_max'],
+                       cfg['params'], cfg['bounds'], -1, channel=cfg['channel'])
+    for k in ('ref_properties', 'step_limit', 'tikhonov_lambda', 'use_robust_fitting',
+              'allow_negative_gas', 'fit_unit', 'fit_lo_nm', 'fit_hi_nm',
+              'qc_enabled', 'qc_rms_abs', 'qc_snr_min', 'ok_rms_threshold',
+              'gas_temp_override', 'tz_offset_sec', 'etalon_freq_min', 'etalon_freq_max'):
+        if k in cfg:
+            setattr(w, k, cfg[k])
+    _CHUNK_WORKER = w
+
+
+def _chunk_entry(task):
+    """Fit one chunk in a worker process.
+
+    task = (scans, body_start, init_shift, etalon_freq)
+    Returns the body results as a list of (global_scan_index, result_dict).
+
+    The fit is wrapped in threadpool_limits(1) so BLAS stays single-threaded DURING
+    the matrix ops regardless of init-time state — N processes × 1 thread, not ×12.
+    """
+    scans, body_start, init_shift, etalon = task
+    try:
+        from threadpoolctl import threadpool_limits
+        with threadpool_limits(limits=1):
+            results, _shift_traj, _etal = _CHUNK_WORKER._fit_alpha_range(
+                scans, body_start, init_shift, etalon)
+    except Exception:
+        results, _shift_traj, _etal = _CHUNK_WORKER._fit_alpha_range(
+            scans, body_start, init_shift, etalon)
+    return results
+
+
 class AlphaExportWorker(QThread):
     """
     Alpha-only export: He/ZA 캘리브레이션 → ambient 행마다 alpha(cm-1) 계산 → 파일 저장.
@@ -810,7 +1254,8 @@ class AlphaExportWorker(QThread):
                  std_t_bins=None,       # 박사님 형식: (N,2) [st_sec, end_sec] 연초기준 초 — 주면 이 그리드에 binning
                  drnam_date="",         # 박사님 형식 폴더/파일명용 YYYYMMDD
                  drnam_chlabel="",      # 박사님 형식 채널 접두(ch1/ch2/ch3)
-                 channel_subdir=""):    # wide 형식: 멀티채널 시 출력 하위폴더(ch1/ch2/…), 단일이면 ""
+                 channel_subdir="",     # wide 형식: 멀티채널 시 출력 하위폴더(ch1/ch2/…), 단일이면 ""
+                 rt_path=None):         # R(t) npz 경로(rt_precompute). 주면 자체 R 대신 이걸 시간보간해 사용
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
           기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
@@ -839,6 +1284,7 @@ class AlphaExportWorker(QThread):
         self.drnam_date      = str(drnam_date)
         self.drnam_chlabel   = str(drnam_chlabel)
         self.channel_subdir  = str(channel_subdir)
+        self.rt_path         = rt_path
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -920,11 +1366,11 @@ class AlphaExportWorker(QThread):
         # Per-file calibration header info
         calib_info_per_file = {}   # fp → string describing first good R-cal in file
 
-        i_he_last   = None
-        t_he_last   = 25.0
-        p_he_last   = 1013.25
+        # (R/I0는 Pass 1 종료 후 블록평균으로 계산 — 옛 'last He' 러닝값은 알파생성에서
+        #  쓰지 않는다. self.i_he_last 등은 라이브-R 핏 워커 전용이라 여기선 없음.)
         done_scans  = 0
         global_idx  = 0
+        n_default_tp = 0   # HK 읽기 실패로 T/P가 기본값(25.0/1013.25)으로 떨어진 스캔 수
 
         # 행별 실제 시각(연초기준 초) — 박사님 doy와 동일한 bytepack 시각.
         # row_idx×0.97 합성 대신 실측값으로 60s 평균 binning/출력 시간축에 사용.
@@ -944,54 +1390,113 @@ class AlphaExportWorker(QThread):
         else:
             self.status_msg.emit("Pass 1: 전체 스캔 읽기 중 (ZA 수집)…")
 
-        for entry in expanded:
-            if not self.is_running:
-                break
-            fp, row_idx = entry
-            global_idx += 1
-            self.progress.emit(global_idx)   # 전체 스캔 기준 진행(%용)
-
-            try:
-                _, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(
-                    fp, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
-            except Exception as e:
-                self.status_msg.emit(f"SKIP {os.path.basename(fp)}[{row_idx}]: {e}")
-                continue
-
+        # ── 스캔 처리 본체 (순차·병렬 공통) — 분류/스풀/수집 로직은 여기 한 곳만 ──
+        # 병렬 경로는 '파싱'만 워커로 돌리고, 데이터는 이 함수로 메인에서 처리한다.
+        # 따라서 분류/스풀/R수집 로직은 한 글자도 이동하지 않는다(무회귀 보장).
+        def _process_scan(fp, row_idx, intensity_raw, state_flag, env_t, env_p, gidx):
+            nonlocal n_default_tp, _amb_spool_n, amb_count, done_scans
+            # HK 미복구 폴백 감지: 실측 P는 raw_count×0.6895라 정확히 1013.25가 될 수
+            # 없으므로 env_p==1013.25는 'HK 읽기 실패→기본값' 신호. 가시화용 카운트.
+            if env_p == 1013.25:
+                n_default_tp += 1
             is_za  = state_flag in self.flag_za
             is_he  = state_flag in self.flag_he
             is_amb = (state_flag == 0 or
                       (self.flag_amb and state_flag in self.flag_amb) or
                       (not self.flag_amb and not is_za and not is_he))
-
-            # ── 단순 수집만 (R/I0는 Pass 1 종료 후 injection 블록평균으로 계산) ──
-            # 개별 단일 스캔은 noise(~1%)가 커서 I0에 그대로 실리면 alpha가 망가진다.
-            # 한 injection의 모든 ZA/He 스캔을 모아 두었다가 블록평균한다.
+            # 단순 수집만(R/I0는 Pass1 후 블록평균). 단일스캔 noise 커서 그대로 안 씀.
             if is_he:
-                he_gidx.append(global_idx)
-                he_spectra.append(intensity_raw.copy())
-                he_t_list.append(env_t)
-                he_p_list.append(env_p)
-
+                he_gidx.append(gidx); he_spectra.append(intensity_raw.copy())
+                he_t_list.append(env_t); he_p_list.append(env_p)
             elif is_za:
-                za_gidx.append(global_idx)
-                za_spectra.append(intensity_raw.copy())
-                za_t_list.append(env_t)
-                za_p_list.append(env_p)
-
+                za_gidx.append(gidx); za_spectra.append(intensity_raw.copy())
+                za_t_list.append(env_t); za_p_list.append(env_p)
             elif is_amb:
-                # 스펙트럼을 임시 바이너리에 흘려쓰고(메모리 X), 인덱스만 RAM에.
                 _amb_spool.write(np.ascontiguousarray(intensity_raw, dtype=np.float32).tobytes())
                 amb_index.setdefault(fp, []).append(
-                    (row_idx, global_idx, _row_sec(fp, row_idx), env_t, env_p, _amb_spool_n))
-                _amb_spool_n += 1
-                amb_count += 1
-                done_scans += 1
+                    (row_idx, gidx, _row_sec(fp, row_idx), env_t, env_p, _amb_spool_n))
+                _amb_spool_n += 1; amb_count += 1; done_scans += 1
+
+        if getattr(self, 'use_parallel', True) and len(expanded) > 1:
+            # ── 병렬 Pass 1: 파싱(CPU 병목)만 프로세스풀로. gidx는 파일·행 순서 그대로
+            #    라 순차와 동일 결과(extract 등가성 바이트검증 완료). 분류/스풀은 메인. ──
+            from collections import OrderedDict, deque
+            import concurrent.futures as _cf
+            from core.data_io import (extract_raw_file_for_parallel as _xtr,
+                                      RAW_LOAD_FAIL as _LF)
+            _files = []
+            _rpf = OrderedDict()
+            for _fp, _ri in expanded:
+                if _fp not in _rpf:
+                    _rpf[_fp] = []; _files.append(_fp)
+                _rpf[_fp].append(_ri)
+            _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _files]
+            _nproc = min((os.cpu_count() or 4), 6)
+            _win = max(2, _nproc * 2)
+            self.status_msg.emit(
+                f"Pass 1(병렬 {_nproc}코어): {len(_files)}파일 파싱 중…")
+            try:
+                with _cf.ProcessPoolExecutor(max_workers=_nproc) as _ex:
+                    _futs = deque(); _ti = 0
+                    while _ti < len(_tasks) and len(_futs) < _win:
+                        _futs.append((_files[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+                    while _futs:
+                        if not self.is_running:
+                            break
+                        _fp, _fut = _futs.popleft()
+                        try:
+                            _, _flags, _Ts, _Ps, _specs, _secs = _fut.result()
+                        except Exception as e:
+                            self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
+                            _flags = None
+                        if _ti < len(_tasks):
+                            _futs.append((_files[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+                        if _flags is None:
+                            for _ri in _rpf[_fp]:
+                                global_idx += 1; self.progress.emit(global_idx)
+                            continue
+                        _sec_cache[_fp] = _secs
+                        for _ri in _rpf[_fp]:
+                            global_idx += 1
+                            self.progress.emit(global_idx)
+                            if _ri >= len(_flags) or _flags[_ri] == _LF:
+                                continue
+                            _process_scan(_fp, _ri,
+                                          np.asarray(_specs[_ri], dtype=float),
+                                          int(_flags[_ri]), float(_Ts[_ri]), float(_Ps[_ri]),
+                                          global_idx)
+            except Exception as e:
+                # 병렬 인프라 자체가 죽은 경우: 부분 스풀로 순차 폴백하면 이중기록되어
+                # 위험 → 깨끗이 중단(알파 미작성). 사용자가 재실행(또는 use_parallel=False).
+                _cleanup_spool()
+                self.finished.emit(f"ERROR: 병렬 파싱 실패(재실행 권장): {e}")
+                return
+        else:
+            # ── 순차 Pass 1 (폴백/검증용; 기존 로직 보존) ──
+            for entry in expanded:
+                if not self.is_running:
+                    break
+                fp, row_idx = entry
+                global_idx += 1
+                self.progress.emit(global_idx)
+                try:
+                    _, intensity_raw, state_flag, env_t, env_p = DataIO.load_measurement_with_hk(
+                        fp, self.pixel_min, self.pixel_max, row_index=row_idx, channel=self.channel)
+                except Exception as e:
+                    self.status_msg.emit(f"SKIP {os.path.basename(fp)}[{row_idx}]: {e}")
+                    continue
+                _process_scan(fp, row_idx, intensity_raw, state_flag, env_t, env_p, global_idx)
 
         if not self.is_running:
             _cleanup_spool()
             self.finished.emit("ERROR: 중단됨")
             return
+
+        if n_default_tp:
+            self.status_msg.emit(
+                f"[경고] HK 미복구로 T/P 기본값(25.0℃/1013.25mbar) 사용 스캔 "
+                f"{n_default_tp}/{global_idx}개 — 해당 스캔 alpha는 Rayleigh 보정이 "
+                f"부정확할 수 있음(대개 bin 워밍업행).")
 
         # ── Block-average each ZA / He injection into one clean spectrum ──────
         # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.
@@ -1082,6 +1587,72 @@ class AlphaExportWorker(QThread):
             for fp_amb in amb_index:
                 calib_info_per_file[fp_amb] = calib_str
 
+        # ── R(t): ZA마다 최근접 He 페어 → 인젝션별 (1-R)/d → gidx 시간보간 ──────────
+        # I0(PCHIP)와 대칭. He(3h)·ZA(1h) 인젝션의 R 시간변화를 보존한다. 기존엔 전
+        # 인젝션을 풀링해 런당 단일 R로 뭉갰고(런 경계마다 Leff 점프, 시간정보 소실).
+        # 여기서는 각 ZA 블록을 gidx 최근접 He 블록과 페어해 reflectance_calc(동일
+        # 품질필터·5차피팅)로 omr_d를 구하고 za_gidx 위에서 보간한다. 유효 knot<2면
+        # omr_interp=None → 기존 단일 best_omr_d 로 폴백(무회귀).
+        omr_interp = None
+        if za_spectra and he_spectra and len(za_gidx) >= 2:
+            try:
+                from reflectance_calc import ReflectanceCalculator as _RC
+            except Exception:
+                _RC = None
+            if _RC is not None:
+                _he_g = np.asarray(he_gidx, dtype=float)
+                _roi_lo, _roi_hi = float(np.nanmin(wave_nm)), float(np.nanmax(wave_nm))
+                _knots = []
+                for _i, _gz in enumerate(za_gidx):
+                    _j = int(np.argmin(np.abs(_he_g - _gz)))   # 최근접 He 블록
+                    _rc1 = _RC(cavity_len=self.cavity_len, rl_factor=self.rl_factor)
+                    _rc1.add_za_spectrum(za_spectra[_i], za_t_list[_i], za_p_list[_i])
+                    _rc1.add_he_spectrum(he_spectra[_j], he_t_list[_j], he_p_list[_j])
+                    try:
+                        _, _, _, _od = _rc1.calculate(
+                            wave_nm, min_valid_fraction=0.30,
+                            roi_min=_roi_lo, roi_max=_roi_hi)
+                    except Exception:
+                        continue   # 품질 미달 페어 skip (전환스캔·dropout 등)
+                    _od = np.maximum(np.asarray(_od, dtype=float), 1e-12)
+                    _knots.append((float(_gz), _od))
+                if len(_knots) >= 2:
+                    _knots.sort(key=lambda k: k[0])
+                    _kg = np.array([k[0] for k in _knots], dtype=float)
+                    _kd = np.array([k[1] for k in _knots], dtype=float)   # (N, n_pix)
+                    _uniq = np.concatenate(([True], np.diff(_kg) > 0))     # PCHIP: 단조 x
+                    _kg, _kd = _kg[_uniq], _kd[_uniq]
+                    # 인젝션별 robust 이상치 제거 — pooled median이 자동으로 누르던
+                    # 비물리 knot(전환오염·near-0/음수→floor 클램프로 R≈1, Leff→∞, 또는
+                    # 과소 Leff)을 per-injection에선 직접 걸러야 PCHIP 보간이 폭주하지
+                    # 않는다. knot 평균 Leff가 중앙값의 [0.5×,2×] 밖이면 제외(R 드리프트는
+                    # 작아 이 밴드 안. 4e6 km 같은 floor-clamp knot가 여기서 잘린다).
+                    _n_rej = 0
+                    if len(_kg) >= 2:
+                        _leff_k = np.array([float(np.mean(1.0 / d) * 1e-5) for d in _kd])
+                        _med = float(np.median(_leff_k))
+                        _ok = (np.isfinite(_leff_k)
+                               & (_leff_k >= 0.5 * _med) & (_leff_k <= 2.0 * _med))
+                        _n_rej = int((~_ok).sum())
+                        _kg, _kd, _leff_k = _kg[_ok], _kd[_ok], _leff_k[_ok]
+                    if len(_kg) >= 2:
+                        _pchip_omr = PchipInterpolator(_kg, _kd, extrapolate=False)
+                        _g0, _g1 = _kg[0], _kg[-1]
+                        _d0, _d1 = _kd[0], _kd[-1]
+                        # 경계 밖은 최근접 인젝션 R을 상수로(I0 PCHIP과 동일 정책)
+                        def omr_interp(g, _p=_pchip_omr, _a=_g0, _b=_g1, _ed0=_d0, _ed1=_d1):
+                            if g <= _a:
+                                return _ed0
+                            if g >= _b:
+                                return _ed1
+                            return np.asarray(_p(g), dtype=float)
+                        _rt_str = (f"R(t) {len(_kg)} knots  "
+                                   f"Leff={_leff_k.min():.2f}~{_leff_k.max():.2f} km "
+                                   f"(median {np.median(_leff_k):.2f}, {_n_rej} rej)")
+                        for _fp in amb_index:
+                            calib_info_per_file[_fp] = _rt_str
+                        self.status_msg.emit(f"[R-CAL 시간보간] {_rt_str}")
+
         # Pass 1 스풀(임시 바이너리) 닫기. Pass 2는 파일별 '연속 블록'만 seek+read.
         # (한 파일의 ambient 스캔은 Pass 1에서 연속 기록되므로 한 블록으로 읽힌다.)
         _amb_spool.flush(); _amb_spool.close()
@@ -1148,10 +1719,71 @@ class AlphaExportWorker(QThread):
             best_omr_d = None
             self.status_msg.emit("[경고] 유효 R-calibration 없음 → alpha 계산 불가")
 
-        if best_omr_d is None or (not use_pchip and i_za_static is None):
+        # ── R(t) 외부 로드(rt_path): R_trend(scan_directory)로 미리 뽑은 채널 R(t)를
+        #    읽어 '시각(rep_sec)'으로 시간보간. 있으면 워커 자체 R보다 우선(단일 진실원천).
+        #    채널창 기반이라 핫도 정상(자체 전체범위 R은 핫 98% 탈락·Leff 2배 오차). ──
+        rt_omr_interp = None
+        rt_calib_note = None   # rt_path 적용 시 헤더에 박을 출처(없으면 자체 R)
+        if getattr(self, 'rt_path', None):
+            try:
+                import sys as _sys
+                _tdir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools')
+                if _tdir not in _sys.path:
+                    _sys.path.insert(0, _tdir)
+                from rt_precompute import load_rt as _load_rt
+                _rt = _load_rt(self.rt_path)
+                _ks = np.asarray(_rt['knot_sec'], dtype=float)
+                _od = np.asarray(_rt['omr_d'], dtype=float)
+                _rw = np.asarray(_rt['wave_nm'], dtype=float)
+                # 픽셀축 정합: 저장 omr_d(보통 full 2048) → 현재 wave_nm.
+                if _od.shape[1] == n_pix and np.allclose(_rw[:n_pix], wave_nm, atol=1e-3):
+                    pass
+                elif _od.shape[1] >= self.pixel_max and np.allclose(
+                        _rw[self.pixel_min:self.pixel_max], wave_nm, atol=1e-3):
+                    _od = _od[:, self.pixel_min:self.pixel_max]
+                else:
+                    _od = np.array([np.interp(wave_nm, _rw, row) for row in _od])
+                _od = np.maximum(_od, 1e-12)
+                if len(_ks) >= 2:
+                    _prt = PchipInterpolator(_ks, _od, extrapolate=False)
+                    _s0, _s1, _e0, _e1 = _ks[0], _ks[-1], _od[0], _od[-1]
+                    def rt_omr_interp(sec, _p=_prt, _a=_s0, _b=_s1, _x0=_e0, _x1=_e1):
+                        if not np.isfinite(sec):
+                            return None
+                        if sec <= _a:
+                            return _x0
+                        if sec >= _b:
+                            return _x1
+                        return np.asarray(_p(sec), dtype=float)
+                    rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} "
+                                     f"({len(_ks)} knots)")
+                    self.status_msg.emit(
+                        f"[R(t) 로드] {len(_ks)} knots ({os.path.basename(self.rt_path)})")
+                elif len(_ks) == 1:
+                    _only = _od[0]
+                    def rt_omr_interp(sec, _o=_only):
+                        return _o
+                    rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} (1 knot)")
+            except Exception as e:
+                self.status_msg.emit(f"[R(t) 로드 실패 → 자체 R 사용] {e}")
+                rt_omr_interp = None
+
+        if ((best_omr_d is None and omr_interp is None and rt_omr_interp is None)
+                or (not use_pchip and i_za_static is None)):
             _cleanup_spool()
             self.finished.emit("ERROR: R-calibration 또는 ZA 스펙트럼 없음")
             return
+
+        # bin의 (1-R)/d: rt_path 로드면 시각(sec) 시간보간 우선, 아니면 gidx 보간/단일값.
+        def _omr_d_at(g, sec=None):
+            if rt_omr_interp is not None and sec is not None:
+                _v = rt_omr_interp(sec)
+                if _v is not None:
+                    return _v
+            if omr_interp is not None:
+                return omr_interp(float(g))
+            return best_omr_d
 
         # ── Pass 2: ambient 를 avg_sec(기본 60초) 시간평균 후 alpha 계산 ────────
         # 박사님 Alpha 파이프라인(Step2 avgsec=60)과 동일. 단일 스캔(~1초)은
@@ -1236,7 +1868,7 @@ class AlphaExportWorker(QThread):
                     i_am_s = np.where(i_am_dc > 0, i_am_dc, 1e-9).astype(float)
                     alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
                     alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
-                    alpha = ((best_omr_d / self.rl_factor + alpha_ref)
+                    alpha = ((_omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)) / self.rl_factor + alpha_ref)
                              * ((i0_s - i_am_s) / i_am_s) - (alpha_sample - alpha_ref))
                     n_written += 1
                 else:
@@ -1291,7 +1923,7 @@ class AlphaExportWorker(QThread):
                 alpha_ref    = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
                 alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
 
-                alpha = ((best_omr_d / self.rl_factor + alpha_ref)
+                alpha = ((_omr_d_at(gmean, rep_sec) / self.rl_factor + alpha_ref)
                          * ((i0_s - i_am_s) / i_am_s)
                          - (alpha_sample - alpha_ref))
 
@@ -1314,14 +1946,16 @@ class AlphaExportWorker(QThread):
                 iso = (_dt(_yr, 1, 1) + _td(seconds=float(sec))).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 return doy, iso
             with open(out_path, 'w', encoding='utf-8') as f:
+                from core.provenance import code_version as _codever
                 f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
+                f.write(f"# code={_codever()}\n")
                 f.write(f"# channel={self.channel}  label={self.channel_label or 'single'}\n")
                 f.write(f"# RL_factor={self.rl_factor}  d={self.cavity_len} cm\n")
                 f.write(f"# I0_mode={i0_mode}  ZA_count={n_za}\n")
                 f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (ambient {self.avg_sec:.0f}초 시간평균 후 alpha)\n")
                 dark_note = f"mean={dark.mean():.1f}" if has_dark else "None"
                 f.write(f"# dark_correction={dark_note}\n")
-                f.write(f"# Calibration: {calib_info_per_file.get(fp, 'unknown')}\n")
+                f.write(f"# Calibration: {rt_calib_note or calib_info_per_file.get(fp, 'unknown')}\n")
                 wv_str = '\t'.join(f"{w:.4f}" for w in wave_nm)
                 f.write(f"# wavelength_nm:\t{wv_str}\n")
                 f.write("# time = bytepack(col0,col1)/100 (박사님 doy와 동일, 타임존 변환 없음)\n")
@@ -1343,324 +1977,3 @@ class AlphaExportWorker(QThread):
             f"완료: ambient {amb_count}행 → {n_bins_total} bin → {n_saved} 파일 (스트리밍, 저메모리)")
         self.finished.emit(self.output_dir if n_saved > 0 else "ERROR: 저장된 파일 없음")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-class AlphaFitWorker(QThread):
-    """
-    Stage 2: 저장된 alpha_trace.dat 파일을 읽어 DOAS 피팅 후 ppb 결과 저장.
-    AlphaExportWorker로 생성한 파일을 입력으로 받는다.
-
-    출력 포맷 (TSV):
-        row_idx  T_C  P_mbar  CHOCHO_ppb  H2O_ppb  NO2_ppb  rms  ...
-    """
-    progress    = pyqtSignal(int)
-    total_ready = pyqtSignal(int)
-    status_msg  = pyqtSignal(str)
-    finished    = pyqtSignal(str)
-
-    def __init__(self, alpha_files, engine, poly_deg, output_dir,
-                 pixel_min=0, pixel_max=None,
-                 ref_properties=None, step_limit=0.5,
-                 etalon_freq_min=0.02, etalon_freq_max=0.40,
-                 tikhonov_lambda=0.0, use_robust=False,
-                 use_varpro=True, fit_etalon=True):
-        """
-        alpha_files : list of str — alpha_trace.dat 경로 목록
-        engine      : UniversalEngine 인스턴스 (레퍼런스 & 파장 포함)
-        poly_deg    : int — Chebyshev 다항식 차수 (baseline)
-        output_dir  : str — 결과 저장 디렉터리
-        pixel_min   : int — 피팅 윈도우 시작 픽셀
-        pixel_max   : int — 피팅 윈도우 끝 픽셀 (None이면 전체 파장 축 사용)
-
-        VarPro 통일(raw↔alpha 일치):
-        ref_properties : 가스별 shift/squeeze 모드(없으면 shift Limit±0.5 / squeeze Fix).
-        step_limit, etalon_freq_min/max, tikhonov_lambda, use_robust : raw 핏과 동일한 설정.
-        use_varpro : True면 raw와 동일한 VarPro, False면 구형 선형 lstsq(빠른 폴백).
-        fit_etalon : etalon fringe 항 포함 여부(첫 행에서 1회 검출 후 재사용).
-        """
-        super().__init__()
-        self.alpha_files = alpha_files
-        self.engine      = engine
-        self.poly_deg    = poly_deg
-        self.output_dir  = output_dir
-        self.pixel_min   = pixel_min
-        self.pixel_max   = pixel_max
-        self.ref_properties  = ref_properties
-        self.step_limit      = step_limit
-        self.etalon_freq_min = etalon_freq_min
-        self.etalon_freq_max = etalon_freq_max
-        self.tikhonov_lambda = tikhonov_lambda
-        self.use_robust      = use_robust
-        self.use_varpro      = use_varpro
-        self.fit_etalon      = fit_etalon
-        self.is_running  = True
-
-    def _default_ref_properties(self):
-        """ref_properties 미지정 시 합리적 기본값: shift Limit±0.5, squeeze Fix 1.0."""
-        if self.ref_properties:
-            return self.ref_properties
-        return {g: {"sh_mode": "Limit", "sh_val": "-0.5, 0.5",
-                    "sq_mode": "Fix", "sq_val": "1.0",
-                    "t_ref": 25.0, "t_coeff": 0.0, "active_bands_nm": ""}
-                for g in self.engine.gas_list}
-
-    def stop(self):
-        self.is_running = False
-
-    def run(self):
-        try:
-            self._run_inner()
-        except Exception as e:
-            import traceback
-            self.finished.emit(f"ERROR: {e}\n{traceback.format_exc()}")
-
-    def _run_inner(self):
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        engine   = self.engine
-        gas_list = engine.gas_list
-        n_gas    = len(gas_list)
-
-        # 전체 행 수 추정 (progress bar용)
-        total_est = sum(
-            max(0, sum(1 for l in open(f, encoding='utf-8', errors='replace')
-                       if l.strip() and not l.startswith('#') and not l.startswith('row_idx')))
-            for f in self.alpha_files
-        )
-        self.total_ready.emit(max(total_est, 1))
-
-        done = 0
-
-        for fpath in self.alpha_files:
-            if not self.is_running:
-                break
-
-            fname = os.path.basename(fpath)
-            stem  = os.path.splitext(fname)[0].replace('_alpha_trace', '')
-            out_path = os.path.join(self.output_dir, f"{stem}_fit.tsv")
-
-            # ── 파일 읽기 ────────────────────────────────────────────────────
-            try:
-                with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-                    lines = f.readlines()
-            except Exception as e:
-                self.status_msg.emit(f"SKIP {fname}: {e}")
-                continue
-
-            # ── 헤더에서 파장축 추출 (# wavelength_nm: 라인) ────────────────
-            wave_nm_file = None
-            for l in lines:
-                if l.startswith('# wavelength_nm:'):
-                    try:
-                        vals = l.split(':', 1)[1].strip().split('\t')
-                        wave_nm_file = np.array([float(v) for v in vals if v.strip()],
-                                                dtype=float)
-                    except Exception:
-                        pass
-                    break
-
-            # ── 데이터 행 추출 ────────────────────────────────────────────────
-            data_lines = [l for l in lines
-                          if l.strip() and not l.startswith('#')
-                          and not l.startswith('row_idx')]
-
-            if not data_lines:
-                self.status_msg.emit(f"SKIP {fname}: 데이터 없음")
-                continue
-
-            # ── 컬럼 헤더(row_idx …) 파싱 → 메타/alpha 위치(구·신 포맷 모두 지원) ──
-            # 구: row_idx, T_C, P_mbar, px…   신: row_idx, doy, datetime, T_C, P_mbar, px…
-            hdr_cols = next((l.rstrip('\n').split('\t')
-                             for l in lines if l.startswith('row_idx')), None)
-            def _mi(name, default=None):
-                return hdr_cols.index(name) if (hdr_cols and name in hdr_cols) else default
-            first_px = None
-            if hdr_cols:
-                first_px = next((i for i, c in enumerate(hdr_cols) if c.startswith('px')), None)
-            idx_doy = _mi('doy')
-            idx_dt  = _mi('datetime')
-            idx_T   = _mi('T_C', 1)
-            idx_P   = _mi('P_mbar', 2)
-            alpha_start = first_px if first_px is not None else 3
-
-            # ── n_pix: 헤더 파장 수 우선, 없으면 컬럼 수로 감지 ────────────────
-            first_parts = data_lines[0].strip().split('\t')
-            n_cols = len(first_parts)
-
-            if wave_nm_file is not None:
-                n_pix = len(wave_nm_file)
-            elif n_cols > alpha_start:
-                n_pix = n_cols - alpha_start
-                if engine._wave_axis is not None:
-                    full_wave = np.asarray(engine._wave_axis, dtype=float)
-                    px_min = self.pixel_min
-                    wave_nm_file = full_wave[px_min: px_min + n_pix]
-                else:
-                    wave_nm_file = np.arange(n_pix, dtype=float)
-            else:
-                self.status_msg.emit(f"SKIP {fname}: 형식 인식 불가 (컬럼 수={n_cols})")
-                continue
-
-            if n_pix == 0:
-                self.status_msg.emit(f"SKIP {fname}: n_pix=0")
-                continue
-
-            self.status_msg.emit(
-                f"[{fname}] n_pix={n_pix}  wave={wave_nm_file[0]:.2f}–{wave_nm_file[-1]:.2f} nm")
-
-            # ── 레퍼런스 행렬 구성 (파일 파장축으로 interpolation) ────────────
-            ref_cols = []
-            for name in gas_list:
-                if name in engine.interpolators:
-                    ref_interp = engine.interpolators[name](wave_nm_file)
-                else:
-                    # interpolator 없으면 raw_references 픽셀 슬라이스 폴백
-                    ref_raw = np.asarray(engine.raw_references[name], dtype=float)
-                    if len(ref_raw) >= n_pix:
-                        ref_interp = ref_raw[:n_pix]
-                    else:
-                        ref_interp = np.pad(ref_raw, (0, n_pix - len(ref_raw)))
-                scale = engine.scaling_factors.get(name, 1.0)
-                ref_cols.append(ref_interp / scale)
-
-            x_norm = 2.0 * (np.arange(n_pix) / max(n_pix - 1, 1)) - 1.0
-            poly_basis = np.column_stack([
-                np.polynomial.chebyshev.chebval(x_norm, np.eye(self.poly_deg + 1)[k])
-                for k in range(self.poly_deg + 1)
-            ])
-            A_ref = np.column_stack(ref_cols)
-            A     = np.column_stack([A_ref, poly_basis])
-
-            # ── VarPro 셋업(raw와 동일한 핏) ─────────────────────────────────
-            # interpolators는 픽셀-인덱스 → alpha 파일 헤더 파장(nm)을 engine 픽셀로
-            # 매핑해 raw와 동일한 픽셀 공간에서 평가한다(nm-into-pixel 버그 제거).
-            varpro = bool(self.use_varpro)
-            fitter = None
-            vp_pixel = None
-            vp_setup = None
-            vp_center = None
-            vp_efreq = 0.0
-            if varpro:
-                from core.doas_fit import DoasFitter
-                fitter = DoasFitter(engine)
-                if engine._wave_axis is not None:
-                    wax = np.asarray(engine._wave_axis, dtype=float).flatten()
-                    from scipy.interpolate import interp1d as _i1d
-                    _px_of = _i1d(wax, np.arange(len(wax)), bounds_error=False,
-                                 fill_value='extrapolate')
-                    vp_pixel = np.asarray(_px_of(wave_nm_file), dtype=float)
-                else:
-                    vp_pixel = np.arange(n_pix, dtype=float) + self.pixel_min
-                vp_center = vp_pixel[len(vp_pixel) // 2]
-                refprops = self._default_ref_properties()
-                vp_setup = fitter.setup_fit_parameters(refprops, 0.0, [0.0, 1.0],
-                                                       self.step_limit)
-
-            # ── 행별 파싱 & 피팅 ─────────────────────────────────────────────
-            result_rows = []
-            _W = np.eye(n_pix)
-
-            for line in data_lines:
-                if not self.is_running:
-                    break
-
-                parts = line.strip().split('\t')
-                if len(parts) < alpha_start + n_pix:
-                    self.status_msg.emit(
-                        f"  행 스킵: 컬럼 {len(parts)} < 필요 {alpha_start+n_pix} "
-                        f"(파일 n_pix={n_pix}와 행 컬럼 수 불일치)")
-                    done += 1
-                    self.progress.emit(done)
-                    continue
-
-                try:
-                    row_idx = int(float(parts[0]))
-                    T_C     = float(parts[idx_T])
-                    P_mbar  = float(parts[idx_P])
-                    row_doy = float(parts[idx_doy]) if idx_doy is not None else float('nan')
-                    row_dt  = parts[idx_dt] if idx_dt is not None else ''
-                    alpha   = np.array([float(v) for v in parts[alpha_start:alpha_start + n_pix]], dtype=float)
-                except (ValueError, IndexError) as e:
-                    self.status_msg.emit(f"  행 파싱 오류: {e}")
-                    done += 1
-                    self.progress.emit(done)
-                    continue
-
-                if varpro:
-                    # raw와 동일한 VarPro(shift/squeeze/etalon/robust/Tikhonov).
-                    # etalon 주파수는 첫 유효행에서 1회 검출 후 파일 내 재사용.
-                    if self.fit_etalon and vp_efreq == 0.0:
-                        vp_efreq = fitter.detect_etalon_frequency(
-                            vp_pixel, alpha, self.poly_deg,
-                            self.etalon_freq_min, self.etalon_freq_max)
-                    active, fixed, linked, t0, lb, ub = vp_setup
-                    out = fitter.execute_varpro_fit(
-                        vp_pixel, alpha, _W, active, fixed, linked, t0, lb, ub,
-                        self.poly_deg, vp_efreq, vp_center, 1.0,
-                        self._default_ref_properties(), T_C,
-                        self.tikhonov_lambda, self.use_robust,
-                        allow_negative_gas=getattr(self, 'allow_negative_gas', False))
-                    opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, _perr = out
-                    # 모델 재구성(rms in α 단위)
-                    full_model, *_ = engine.get_model_components(
-                        vp_pixel, opt_shifts, opt_squeezes, gas_coeffs, poly_c,
-                        etalon_amp=etal_amp, etalon_freq=vp_efreq, etalon_phase=best_ep)
-                    rms = float(np.sqrt(np.mean((alpha - full_model) ** 2)))
-                else:
-                    coeffs, _, _, _ = scipy_lstsq(A, alpha)
-                    gas_coeffs = coeffs[:n_gas]
-                    fitted = A @ coeffs
-                    rms = float(np.sqrt(np.mean((alpha - fitted) ** 2)))
-
-                n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
-                ppb_vals = {}
-                for gi, name in enumerate(gas_list):
-                    scale = engine.scaling_factors.get(name, 1.0)
-                    mult  = engine.multipliers.get(name, 1.0)
-                    N_cm3 = gas_coeffs[gi] * mult / scale
-                    ppb_vals[name] = (N_cm3 / n_air) * 1e9
-
-                result_rows.append((row_idx, row_doy, row_dt, T_C, P_mbar, ppb_vals, rms))
-                done += 1
-                self.progress.emit(done)
-
-            # ── 결과 저장 ─────────────────────────────────────────────────────
-            if not result_rows:
-                self.status_msg.emit(f"SKIP {fname}: 피팅된 행 없음")
-                continue
-
-            # 출처/단위 명시 헤더 — raw→alpha→fit 전체 사슬을 추적 가능하게.
-            from datetime import datetime as _dt
-            src_chan = next((l.strip().lstrip('#').strip()
-                             for l in lines if l.startswith('# channel=')), '')
-            # alpha 헤더의 '# CAESAR Pro Alpha Export — {raw}' 에서 원본 raw 파일명 추출
-            raw_src = next((l.split('—', 1)[1].strip()
-                            for l in lines if l.startswith('# CAESAR Pro Alpha Export')
-                            and '—' in l), '')
-            header_lines = [
-                "# CAESAR Pro Fit Result",
-                f"# raw_source={raw_src}" if raw_src else "# raw_source=unknown",
-                f"# source_alpha={fname}",
-                f"# fit_range_nm={wave_nm_file[0]:.1f}-{wave_nm_file[-1]:.1f}",
-            ]
-            if src_chan:
-                header_lines.append(f"# {src_chan}")
-            # alpha 에 시각 컬럼이 있었으면 fit 결과에도 그대로 통과(실시간 시계열용).
-            has_time = any(np.isfinite(r[1]) or r[2] for r in result_rows)
-            time_hdr = "doy\tdatetime\t" if has_time else ""
-            header_lines += [
-                f"# conc_unit=ppb  rms_unit=cm-1  poly_deg={self.poly_deg}",
-                f"# generated={_dt.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                "row_idx\t" + time_hdr + "T_C\tP_mbar\t" + '\t'.join(gas_list) + '\trms_cm-1',
-            ]
-            header = '\n'.join(header_lines) + '\n'
-            with open(out_path, 'w', encoding='utf-8') as f:
-                f.write(header)
-                for row_idx, row_doy, row_dt, T, P, ppb_vals, rms in result_rows:
-                    vals = '\t'.join(f"{ppb_vals.get(g, 0):.4f}" for g in gas_list)
-                    tcol = (f"{row_doy:.6f}\t{row_dt}\t" if has_time else "")
-                    f.write(f"{row_idx}\t{tcol}{T:.2f}\t{P:.2f}\t{vals}\t{rms:.4e}\n")
-
-            self.status_msg.emit(f"저장: {out_path}  ({len(result_rows)}행, {n_gas}가스)")
-
-        self.finished.emit(self.output_dir)

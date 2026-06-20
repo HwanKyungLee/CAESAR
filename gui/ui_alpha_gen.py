@@ -132,6 +132,7 @@ class AlphaGeneratorDialog(QDialog):
         self._mat_row.setVisible(False)
         self._drnam_mat = ""
         root.addWidget(self._mat_row)
+        # (R(t)는 위 '핏세팅 탭 선택' 채널 행마다 개별 지정 — 핫 2채널도 한 번에 정확히.)
 
         # 상태 + 진행바 + 실행
         self._lbl_status = QLabel("")
@@ -240,6 +241,7 @@ class AlphaGeneratorDialog(QDialog):
         self._tab_combos = {}
         self._ch_tab_map = {}
         self._ch_enable = {}
+        self._ch_rt = {}          # {raw 채널 -> R(t) npz 경로} 채널별 R
         if n_ch <= 0:
             return
         tabs = self._available_tabs() or [1]
@@ -261,11 +263,41 @@ class AlphaGeneratorDialog(QDialog):
             cmb.currentIndexChanged.connect(
                 lambda _idx, c=ch, box=cmb: self._ch_tab_map.__setitem__(c, box.currentData()))
             row.addWidget(cmb)
+            # 이 채널의 R(t) npz — R Trend의 'α용 R(t) 저장'으로 만든 R_<채널>.npz.
+            # 지정하면 이 채널 알파에 채널창 기반 R 적용(핫 정상). 비우면 자체 R.
+            row.addWidget(QLabel("   R(t):"))
+            btn_rt = QPushButton("📈")
+            btn_rt.setFixedWidth(30)
+            btn_rt.setToolTip(f"raw CH{ch}의 R(t) npz 선택 (없으면 자체 R)")
+            rt_lbl = QLabel("자체 R")
+            rt_lbl.setStyleSheet("color:gray;")
+            btn_rtx = QPushButton("✕")
+            btn_rtx.setFixedWidth(24)
+            btn_rtx.setToolTip("R(t) 해제")
+            btn_rt.clicked.connect(lambda _x, c=ch, lb=rt_lbl: self._pick_ch_rt(c, lb))
+            btn_rtx.clicked.connect(
+                lambda _x, c=ch, lb=rt_lbl: (self._ch_rt.pop(c, None),
+                                             lb.setText("자체 R"), lb.setStyleSheet("color:gray;")))
+            row.addWidget(btn_rt)
+            row.addWidget(rt_lbl, 1)
+            row.addWidget(btn_rtx)
             row.addStretch(1)
             cont = QWidget()
             cont.setLayout(row)
             self._wc_layout.addWidget(cont)
             self._tab_combos[ch] = cmb
+
+    def _pick_ch_rt(self, ch, lbl):
+        """raw 채널 ch의 R(t) npz 선택 → self._ch_rt[ch]."""
+        f, _ = QFileDialog.getOpenFileName(
+            self, f"raw CH{ch} R(t) npz (R_<채널>.npz)", dlg_dir("rt_path"),
+            "R(t) npz (*.npz);;All Files (*)")
+        if f:
+            dlg_dir("rt_path", f)
+            self._ch_rt[ch] = f
+            lbl.setText(os.path.basename(f))
+            lbl.setStyleSheet("color:#1565C0;")
+            lbl.setToolTip(f)
 
     def _clear(self):
         self._raw_files = []
@@ -314,6 +346,7 @@ class AlphaGeneratorDialog(QDialog):
             progress_cb=self._on_progress,
             gen_px_range=(None if self._chk_px_fit.isChecked()
                           else (self._spin_px0.value(), self._spin_px1.value())),
+            rt_map={c: p for c, p in getattr(self, '_ch_rt', {}).items() if p},
         )
         if not ok:
             self._btn_gen.setEnabled(True)

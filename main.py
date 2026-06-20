@@ -26,6 +26,10 @@ def _excepthook(etype, value, tb):
     sys.__excepthook__(etype, value, tb)
 sys.excepthook = _excepthook
 
+# stdout/stderr를 logs/session_*.log 로도 남긴다(진단 print 사후 추적용).
+from core.session_log import install as _install_session_log
+_install_session_log()
+
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap

@@ -2114,25 +2114,42 @@ class MonitorWidget(QWidget):
         td['sq'].append(squeeze)
         td['rms'].append(rms)
 
+        # Redraw throttle: in Fast mode results arrive in bursts; calling setData()
+        # (which re-uploads the whole array) per scan is O(n²) and freezes the GUI.
+        # Append every point but only redraw every ~150ms; flush_plots() forces a
+        # final draw at the end. (Harmless in Step mode — scans are slower than 150ms.)
+        import time as _t
+        if (_t.monotonic() - getattr(self, '_last_trend_draw', 0.0)) < 0.15:
+            return
+        self._last_trend_draw = _t.monotonic()
+        self._redraw_trend(ch)
+
+    def _redraw_trend(self, ch):
+        td = self._trend_data[ch]
         tc = self._trend_curves[ch]
         tc['sh'].setData(td['x'], td['sh'])
         tc['sq'].setData(td['x'], td['sq'])
-
         rms_arr = np.array(td['rms'])
         rms_arr[rms_arr <= 0] = 1e-9
         tc['rms'].setData(td['x'], rms_arr)
-
-        # Update Shift graph if in auto-range mode
         if self.p_sh.getViewBox().autoRangeEnabled():
             self.p_sh.enableAutoRange(axis='x', enable=True)
-
-        # Update Squeeze graph if in auto-range mode
         if self.p_sq.getViewBox().autoRangeEnabled():
             self.p_sq.enableAutoRange(axis='x', enable=True)
-
-        # Update RMS graph if in auto-range mode
         if self.p_rms.getViewBox().autoRangeEnabled():
             self.p_rms.enableAutoRange(axis='x', enable=True)
+
+    def flush_plots(self):
+        """Force a final redraw of trend + concentration curves (call when a run
+        finishes) so the last throttled-out points are drawn."""
+        for ch in list(self._trend_data.keys()):
+            if self._trend_data[ch]['x']:
+                self._redraw_trend(ch)
+        for gas in getattr(self, '_conc_gases', []) or []:
+            for ch in self._CONC_CH_COLORS:
+                d = self._conc_data[gas][ch]
+                if d['x']:
+                    self._conc_curves[gas][ch].setData(d['x'], d['y'])
 
     def clear_trend(self):
         """Clears trend history for all channels."""
@@ -2254,6 +2271,8 @@ class MonitorWidget(QWidget):
         x = self._conc_time_x(result_dict, row_index)
         if x is None:
             x = float(row_index)     # 시각 파싱 실패 시 스캔 # 폴백
+        # Append every point; throttle the (O(n)) setData redraw to ~150ms so Fast-mode
+        # bursts don't trigger O(n²) freezes. flush_plots() forces a final draw.
         for gas in self._conc_gases:
             if gas not in result_dict:
                 continue
@@ -2264,10 +2283,45 @@ class MonitorWidget(QWidget):
             d = self._conc_data[gas][ch]
             d['x'].append(x)
             d['y'].append(y)
-            self._conc_curves[gas][ch].setData(d['x'], d['y'])
+        import time as _t
+        if (_t.monotonic() - getattr(self, '_last_conc_draw', 0.0)) < 0.15:
+            return
+        self._last_conc_draw = _t.monotonic()
+        for gas in self._conc_gases:
+            for cch in self._CONC_CH_COLORS:
+                d = self._conc_data[gas][cch]
+                if d['x']:
+                    self._conc_curves[gas][cch].setData(d['x'], d['y'])
             p = self._conc_plots[gas]
             if p.getViewBox().autoRangeEnabled():
                 p.enableAutoRange(axis='x', enable=True)
+
+    def rebuild_trend(self, results):
+        """Rebuild shift/squeeze/RMS trend curves from the full results list in one
+        pass (bulk), for Fast mode which renders once at the end instead of per scan."""
+        if not getattr(self, '_trend_data', None):
+            return
+        for ch in self._trend_data:
+            td = self._trend_data[ch]
+            for k in ('x', 'sh', 'sq', 'rms'):
+                td[k].clear()
+            td['sh_ref'] = None
+        for i, r in enumerate(results):
+            ch = r.get('Channel', 1)
+            if ch not in self._trend_data:
+                ch = 1
+            td = self._trend_data[ch]
+            sh = float(r.get('Shift', 0.0)); sq = float(r.get('Squeeze', 1.0))
+            rms = float(r.get('RMS', 0.0) or 0.0)
+            td['x'].append(i)
+            if td['sh_ref'] is None:
+                td['sh_ref'] = sh
+            td['sh'].append(sh - td['sh_ref'])
+            td['sq'].append(sq)
+            td['rms'].append(rms)
+        for ch in list(self._trend_data.keys()):
+            if self._trend_data[ch]['x']:
+                self._redraw_trend(ch)
 
     def clear_conc(self):
         """농도 시계열 히스토리 초기화."""

@@ -161,3 +161,64 @@ def merge_out_name(first_input: str, rows, nfiles: int, ext: str = '.dat') -> st
     """병합 자동 파일명: {핵심이름}_merge{N}_{전체시간범위}.dat."""
     folder = os.path.dirname(os.path.abspath(first_input))
     return os.path.join(folder, f'{clean_stem(first_input)}_merge{nfiles}_{_span_tag(rows)}{ext}')
+
+
+# ── 세팅 버킷 경로(날짜/neg/QC) — GUI save()와 동일 규칙을 머지/슬라이스에도 적용 ──
+
+def _date_bucket(rows) -> str:
+    """rows 시간범위 → 날짜 버킷 'YYMMDD' 또는 'YYMMDD-YYMMDD' (GUI _drange와 동일 형식)."""
+    if not rows:
+        return 'nodate'
+    a, b = rows[0][0], rows[-1][0]
+    return f"{a:%y%m%d}" if a.date() == b.date() else f"{a:%y%m%d}-{b:%y%m%d}"
+
+
+def neg_qc_from_comments(comments) -> tuple[str | None, str | None]:
+    """결과 # 헤더 주석에서 (neg_bucket, qc_bucket) 추출. 못 찾으면 (None, None).
+    인식 줄: '# Allow Negative Gas (±Neg): ON/OFF', '# Auto QC: ON (... K=6 ...) / OFF'.
+    (구버전 파일엔 이 줄이 없을 수 있음 → None 반환, 호출부에서 기본값 처리.)"""
+    neg = qc = None
+    for c in comments or []:
+        cu = c.upper()
+        if 'ALLOW NEGATIVE' in cu or '±NEG' in c:
+            m = _re.search(r':\s*(ON|OFF)', cu)
+            neg = 'neg_o' if (m and m.group(1) == 'ON') else 'neg_x'
+        if 'AUTO QC' in cu:
+            if _re.search(r':\s*OFF', cu):
+                qc = 'QCoff'
+            else:
+                m = _re.search(r'K=\s*([\d.]+)', c)
+                qc = f"QCk{float(m.group(1)):g}" if m else 'QCmanual'
+    return neg, qc
+
+
+def detect_fitting_base(path: str) -> str:
+    """path가 .../{날짜}/{neg_o|neg_x}/{QC*}/파일 버킷 구조 안이면 그 최상위 base를,
+    아니면 파일이 있는 폴더를 반환(버킷 못 찾음 → 제자리 저장)."""
+    ap = os.path.abspath(path)
+    qc_dir = os.path.dirname(ap)
+    neg_dir = os.path.dirname(qc_dir)
+    date_dir = os.path.dirname(neg_dir)
+    if (os.path.basename(neg_dir) in ('neg_o', 'neg_x')
+            and os.path.basename(qc_dir).startswith('QC')):
+        return os.path.dirname(date_dir)
+    return qc_dir
+
+
+def bucketed_out_name(first_input: str, rows, comments, kind: str = 'slice',
+                      nfiles: int = 1, ext: str = '.dat',
+                      qc_override: str | None = None) -> str:
+    """머지/슬라이스 결과의 자동 저장경로: {base}/{날짜}/{neg}/{QC}/{이름}.
+    neg·QC는 입력파일 # 헤더에서 상속(qc_override 있으면 그게 우선 — 뷰어 사후 QC 재적용),
+    날짜는 출력 rows의 실제 범위. base는 입력이 버킷 안이면 그 최상위, 아니면 입력 폴더."""
+    base = detect_fitting_base(first_input)
+    neg, qc = neg_qc_from_comments(comments)
+    if qc_override:
+        qc = qc_override
+    folder = os.path.join(base, _date_bucket(rows), neg or 'neg_x', qc or 'QCoff')
+    stem = clean_stem(first_input)
+    if kind == 'merge':
+        name = f'{stem}_merge{nfiles}_{_span_tag(rows)}{ext}'
+    else:
+        name = f'{stem}_slice_{_span_tag(rows)}{ext}'
+    return os.path.join(folder, name)
