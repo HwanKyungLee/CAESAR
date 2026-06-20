@@ -29,6 +29,14 @@
 
 ---
 
+## 분리 지점 — gui/ui_result_viewer.py (1441줄, ResultViewerWidget 단일)
+- UI(_init_ui)는 이미 영어·잘 정리됨(툴바 Open|View/Analyze/Export 그룹). 폴리시 불필요.
+- 저위험 분리 후보(나중): ①정적 파서들(`_load_result_time_gas`,`_read_numeric`,
+  `_detect_sep`,`_load_fit_table`,`_detect`)을 `result_viewer_io.py`로 → 순수함수라 안전.
+  ②플롯 메서드군(`_plot_r_trend/_r_curve/_alpha_trace/_reference/_concentration/_array/
+  _fit/_diurnal`)을 Mixin으로. 단 self._pw_top/_bot 공유라 Mixin 형태여야.
+- 지금은 분리 안 함(테스트 부재). 위 ①이 가장 안전한 첫 후보.
+
 ## 개선 후보 (improvements)
 
 ### gui/ui_alpha_gen.py
@@ -54,5 +62,5 @@
 | **gui/app_window.py** | ⏳ 141 | ⏳ | ★최대 분리대상 |
 | **gui/ui_dialogs_r.py** | ⏳ 112 | ⏳ | ⏳ |
 | **gui/ui_dialogs_ref.py** | ⏳ 37 | ⏳ | ⏳ |
-| **gui/ui_result_viewer.py** | ⏳ 37 | ⏳ | ⏳ |
+| gui/ui_result_viewer.py | ✅ 38→0 | ✅ (UI 이미 정리됨) | 노트기록(파서 추출 후보) |
 | tools/* (r_trend_monitor·alpha_wide_to_perbin 등) | ⏳ (CLI문자열 ~60) | ⏳ | 별도 배치 |

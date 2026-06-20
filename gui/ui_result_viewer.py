@@ -238,7 +238,7 @@ class ResultViewerWidget(QWidget):
         gcol = next((c for c in df.columns if c.lower() == gas.lower()), None)
         tcol = next((c for c in df.columns if c.lower() == 'time'), None)
         if gcol is None:
-            raise RuntimeError(f"{os.path.basename(path)}: '{gas}' 컬럼 없음 (컬럼: {list(df.columns)[:8]})")
+            raise RuntimeError(f"{os.path.basename(path)}: '{gas}' column not found (columns: {list(df.columns)[:8]})")
         gv = pd.to_numeric(df[gcol], errors='coerce').to_numpy(dtype=float)
         if tcol is None:
             t = np.arange(len(gv), dtype=float)
@@ -261,11 +261,11 @@ class ResultViewerWidget(QWidget):
         from PyQt6.QtWidgets import QMessageBox
         from gui.dlg_dir import dlg_dir
         paths = {}
-        for role, title in (('Cold', "① Cold 결과 선택 (NO2)"),
-                            ('PNs', "② PNs(ROI1, 180°C) 결과 선택"),
-                            ('ANs', "③ ANs(ROI2, 300°C) 결과 선택")):
+        for role, title in (('Cold', "① Select Cold result (NO2)"),
+                            ('PNs', "② Select PNs (ROI1, 180°C) result"),
+                            ('ANs', "③ Select ANs (ROI2, 300°C) result")):
             p, _ = QFileDialog.getOpenFileName(self, title, dlg_dir("result"),
-                                               "결과 (*.dat *.csv *.tsv *.txt);;모든 파일 (*)")
+                                               "Results (*.dat *.csv *.tsv *.txt);;All Files (*)")
             if not p:
                 return
             dlg_dir("result", p); paths[role] = p
@@ -274,9 +274,9 @@ class ResultViewerWidget(QWidget):
             pt, pn = self._load_result_time_gas(paths['PNs'])
             at, an = self._load_result_time_gas(paths['ANs'])
         except Exception as e:
-            QMessageBox.warning(self, "로드 실패", str(e)); return
+            QMessageBox.warning(self, "Load failed", str(e)); return
         if ct is None or len(ct) < 2:
-            QMessageBox.warning(self, "데이터 부족", "Cold 결과에 Time/NO2가 부족합니다."); return
+            QMessageBox.warning(self, "Insufficient data", "Cold result lacks Time/NO2."); return
         # 시간정렬: PNs/ANs 채널 NO2를 Cold 시각격자에 보간(범위 밖은 NaN)
         pn_i = np.interp(ct, pt, pn, left=np.nan, right=np.nan) if len(pt) >= 2 else np.full_like(ct, np.nan)
         an_i = np.interp(ct, at, an, left=np.nan, right=np.nan) if len(at) >= 2 else np.full_like(ct, np.nan)
@@ -299,18 +299,18 @@ class ResultViewerWidget(QWidget):
         self._pw_top.plot(ct, no2, pen=pg.mkPen('#1f77b4', width=2), name='NO2 (Cold)')
         self._pw_top.plot(ct, pns, pen=pg.mkPen('#ff7f0e', width=2), name='PNs (=PNs−Cold)')
         self._pw_top.plot(ct, ans, pen=pg.mkPen('#2ca02c', width=2), name='ANs (=ANs−PNs)')
-        self._pw_top.setLabel('left', '농도 (ppb)')
-        self._pw_top.setLabel('bottom', '시간')
+        self._pw_top.setLabel('left', 'Concentration (ppb)')
+        self._pw_top.setLabel('bottom', 'Time')
 
         ax2 = pg.DateAxisItem(orientation='bottom')
         self._pw_bot.setAxisItems({'bottom': ax2})
         self._pw_bot.clear()
         self._pw_bot.addLegend(offset=(10, 10))
         self._pw_bot.plot(ct, cn, pen=pg.mkPen('#1f77b4'), name='Cold NO2')
-        self._pw_bot.plot(ct, pn_i, pen=pg.mkPen('#ff7f0e'), name='PNs채널 NO2')
-        self._pw_bot.plot(ct, an_i, pen=pg.mkPen('#2ca02c'), name='ANs채널 NO2')
-        self._pw_bot.setLabel('left', '채널 NO2 (ppb)')
-        self._pw_bot.setLabel('bottom', '시간')
+        self._pw_bot.plot(ct, pn_i, pen=pg.mkPen('#ff7f0e'), name='PNs channel NO2')
+        self._pw_bot.plot(ct, an_i, pen=pg.mkPen('#2ca02c'), name='ANs channel NO2')
+        self._pw_bot.setLabel('left', 'Channel NO2 (ppb)')
+        self._pw_bot.setLabel('bottom', 'Time')
         self._lbl.setText("🧪 NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs (aligned to Cold time grid). "
                           "Negatives = noise/time mismatch.")
         self._lbl.setStyleSheet("color:#1565C0;")
@@ -368,16 +368,16 @@ class ResultViewerWidget(QWidget):
                         dt = str(ep[i])
                     row = [dt] + [f"{d[c][i]:.4f}" if np.isfinite(d[c][i]) else "" for c in cols[1:]]
                     f.write(sep.join(row) + "\n")
-            QMessageBox.information(self, "저장 완료", f"유도농도 저장:\n{os.path.basename(path)}  ({len(d['epoch'])}행)")
+            QMessageBox.information(self, "Saved", f"Derived concentration saved:\n{os.path.basename(path)}  ({len(d['epoch'])} rows)")
         except Exception as e:
-            QMessageBox.critical(self, "저장 실패", str(e))
+            QMessageBox.critical(self, "Save failed", str(e))
 
     # ──────────────────────────────────────────────────────────────
     def _open(self):
         from gui.dlg_dir import dlg_dir
         path, _ = QFileDialog.getOpenFileName(
-            self, "결과 파일 선택", dlg_dir("result"),
-            "결과 파일 (*.dat *.csv *.txt *.tsv);;모든 파일 (*)")
+            self, "Select result file", dlg_dir("result"),
+            "Result files (*.dat *.csv *.txt *.tsv);;All Files (*)")
         if path:
             dlg_dir("result", path)
             self._path = path
@@ -387,7 +387,7 @@ class ResultViewerWidget(QWidget):
         """폴더를 받아 내부 결과파일을 형태별로 그룹·목록화. 항목 클릭 → 표시."""
         import glob
         from gui.dlg_dir import dlg_dir
-        d = QFileDialog.getExistingDirectory(self, "결과 폴더 선택", dlg_dir("result_folder"))
+        d = QFileDialog.getExistingDirectory(self, "Select result folder", dlg_dir("result_folder"))
         if d:
             dlg_dir("result_folder", d)
         if not d:
@@ -473,7 +473,7 @@ class ResultViewerWidget(QWidget):
                 "array": self._plot_array,
             }.get(kind, self._plot_array)
             handler(self._path)
-            auto = "" if forced != "auto" else " (자동판별)"
+            auto = "" if forced != "auto" else " (auto-detected)"
             self._lbl.setText(f"✅ {os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}")
             self._lbl.setStyleSheet("color:#1565C0;")
         except Exception as e:
@@ -564,7 +564,7 @@ class ResultViewerWidget(QWidget):
                 except (ValueError, IndexError):
                     continue
         if not ts:
-            raise ValueError("R 트렌드 데이터 행을 찾지 못했습니다")
+            raise ValueError("No R-trend data rows found")
         ts = np.array(ts); rmean = np.array(rmean); rstd = np.array(rstd); leff = np.array(leff)
         self._set_time_axis(self._pw_top, True)
         self._set_time_axis(self._pw_bot, True)
@@ -575,7 +575,7 @@ class ResultViewerWidget(QWidget):
                               pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DotLine))
         self._pw_top.addItem(err)
         self._pw_top.setLabel("left", "R (%)")
-        self._pw_top.setTitle(f"R 시계열 — {len(ts)} cycles")
+        self._pw_top.setTitle(f"R time-series — {len(ts)} cycles")
         # 0.9999 근처 변동 보이게 타이트 줌
         med = float(np.median(rmean)); sd = float(np.std(rmean))
         margin = max(sd * 4.0, 0.0015)
@@ -585,13 +585,13 @@ class ResultViewerWidget(QWidget):
                           symbolSize=5, symbolBrush=col, name="Leff (km)")
         self._pw_bot.setLabel("left", "Leff (km)")
         self._pw_bot.setLabel("bottom", "Date / Time")
-        self._pw_bot.setTitle("Leff 시계열")
+        self._pw_bot.setTitle("Leff time-series")
 
     # ── 파일별 R(λ) (_R.dat) → R(λ) + Leff(λ) ─────────────────────
     def _plot_r_curve(self, path):
         d = np.loadtxt(path, comments="#", ndmin=2)
         if d.shape[1] < 3:
-            raise ValueError("R(λ) 컬럼이 부족합니다 (wave, R_raw, R_fit 필요)")
+            raise ValueError("R(λ) columns missing (need wave, R_raw, R_fit)")
         wave, r_raw, r_fit = d[:, 0], d[:, 1], d[:, 2]
         self._set_time_axis(self._pw_top, False)
         self._set_time_axis(self._pw_bot, False)
@@ -642,7 +642,7 @@ class ResultViewerWidget(QWidget):
                     except ValueError:
                         pass
         if not rows:
-            raise ValueError("alpha 데이터 행이 없습니다")
+            raise ValueError("No alpha data rows")
         a = np.array(rows, dtype=float)
         if wave is None or len(wave) != a.shape[1]:
             wave = np.arange(a.shape[1], dtype=float)
@@ -653,7 +653,7 @@ class ResultViewerWidget(QWidget):
         self._pw_top.plot(wave, m, pen=pg.mkPen(_PALETTE[1], width=2), name="mean α")
         self._pw_top.setLabel("left", "α (cm⁻¹)")
         self._pw_top.setLabel("bottom", "Wavelength (nm)")
-        self._pw_top.setTitle(f"α 평균 스펙트럼 — {os.path.basename(path)} ({a.shape[0]} scans, ±1σ)")
+        self._pw_top.setTitle(f"α mean spectrum — {os.path.basename(path)} ({a.shape[0]} scans, ±1σ)")
         self._pw_bot.hide()
 
     # ── 레퍼런스 스펙트럼 (.csv) ───────────────────────────────────
@@ -668,7 +668,7 @@ class ResultViewerWidget(QWidget):
         self._pw_top.plot(x, y, pen=pg.mkPen(_PALETTE[4], width=2), name="reference")
         self._pw_top.setLabel("left", "Value")
         self._pw_top.setLabel("bottom", "Wavelength (nm)")
-        self._pw_top.setTitle(f"레퍼런스 — {os.path.basename(path)}")
+        self._pw_top.setTitle(f"Reference — {os.path.basename(path)}")
         self._pw_bot.hide()
 
     # ── 농도 시계열 (.csv) ─────────────────────────────────────────
@@ -723,8 +723,8 @@ class ResultViewerWidget(QWidget):
                                   pen=pg.mkPen(_PALETTE[(j - 1) % len(_PALETTE)], width=1.5),
                                   name=f"col{j}")
             self._pw_top.setLabel("bottom", "col0 (x)")
-        self._pw_top.setLabel("left", "Value (α / optical depth 등)")
-        self._pw_top.setTitle(f"배열 — {os.path.basename(path)}  shape={d.shape}")
+        self._pw_top.setLabel("left", "Value (α / optical depth etc.)")
+        self._pw_top.setTitle(f"Array — {os.path.basename(path)}  shape={d.shape}")
         self._pw_bot.hide()
 
     # ── fit 결과 (_fit.tsv) → 가스별 ppb + RMS + 통계 ────────────────
@@ -755,7 +755,7 @@ class ResultViewerWidget(QWidget):
                     continue
                 rows.append(s.split("\t"))
         if hdr is None or not rows:
-            raise ValueError("fit 결과 헤더/데이터 행을 찾지 못했습니다")
+            raise ValueError("No fit-result header/data rows found")
 
         if is_report:
             # ── GUI 리포트 포맷 ───────────────────────────────────────
@@ -836,7 +836,7 @@ class ResultViewerWidget(QWidget):
 
     def _sync_gas_combo(self, names):
         """가스 콤보를 fit 파일의 가스목록으로 (선택 유지하며) 갱신."""
-        want = ["전체"] + list(names)
+        want = ["All"] + list(names)
         cur = self._gas_combo.currentText()
         have = [self._gas_combo.itemText(i) for i in range(self._gas_combo.count())]
         if have == want:
@@ -893,8 +893,8 @@ class ResultViewerWidget(QWidget):
         t = self._load_fit_table(path)
         self._fit_cache = t
         self._sync_gas_combo(list(t["gases"].keys()))
-        sel = self._gas_combo.currentText() or "전체"
-        names = list(t["gases"].keys()) if sel in ("전체", "") else [sel]
+        sel = self._gas_combo.currentText() or "All"
+        names = list(t["gases"].keys()) if sel in ("All", "") else [sel]
 
         # x축: 실제 시각(datetime)이 있으면 그걸로(실시간 시계열), 없으면 row_idx
         has_time = t.get("time") is not None and np.isfinite(t["time"]).any()
@@ -1001,7 +1001,7 @@ class ResultViewerWidget(QWidget):
                 summ.append(f"{lbl}: μ={float(np.mean(fin)):.3g}±{float(np.std(fin)):.2g}")
         self._pw_top.setLabel("left", "Conc (ppb)")
         self._pw_top.setLabel("bottom", "row_idx (≈time)")
-        self._pw_top.setTitle(f"비교 — {gas} ({len(paths)} files)")
+        self._pw_top.setTitle(f"Compare — {gas} ({len(paths)} files)")
         self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
         self._stats_lbl.setText("   |   ".join(summ))
 
@@ -1022,7 +1022,7 @@ class ResultViewerWidget(QWidget):
         row_idx = int(t["row_idx"][j])
         alpha_path = self._sibling_alpha(self._path)
         if not alpha_path:
-            self._stats_lbl.setText(f"row {row_idx}: 형제 alpha_trace.dat을 못 찾아 α 팝업 불가")
+            self._stats_lbl.setText(f"row {row_idx}: sibling alpha_trace.dat not found → cannot open α popup")
             return
         self._show_alpha_popup(alpha_path, row_idx)
 
@@ -1072,13 +1072,13 @@ class ResultViewerWidget(QWidget):
                     except ValueError:
                         continue
         if target is None:
-            self._stats_lbl.setText(f"alpha_trace에 row {row_idx} 없음")
+            self._stats_lbl.setText(f"row {row_idx} not in alpha_trace")
             return
         if wave is None or len(wave) != len(target):
             wave = np.arange(len(target), dtype=float)
         from PyQt6.QtWidgets import QDialog, QVBoxLayout
         dlg = QDialog(self)
-        dlg.setWindowTitle(f"α 스펙트럼 — row {row_idx} ({os.path.basename(alpha_path)})")
+        dlg.setWindowTitle(f"α spectrum — row {row_idx} ({os.path.basename(alpha_path)})")
         dlg.resize(720, 460)
         lay = QVBoxLayout(dlg)
         pw = pg.PlotWidget()
@@ -1411,7 +1411,7 @@ class ResultViewerWidget(QWidget):
             QMessageBox.information(self, "Diurnal", "Open a fit result with a time axis first.")
             return
         gsel = self._gas_combo.currentText()
-        if gsel in ("", "전체"):
+        if gsel in ("", "All"):
             gsel = next(iter(t["gases"]), None)
         y = t["gases"].get(gsel)
         if y is None:
