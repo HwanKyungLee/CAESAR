@@ -37,6 +37,20 @@
   _fit/_diurnal`)을 Mixin으로. 단 self._pw_top/_bot 공유라 Mixin 형태여야.
 - 지금은 분리 안 함(테스트 부재). 위 ①이 가장 안전한 첫 후보.
 
+## ★분리 계획 — gui/ui_dialogs_ref.py (2433줄, 4개 독립 클래스)
+**4개 클래스가 서로 참조 안 함(독립) → 클래스별 파일 분리 안전성 높음.** 가장 가치 큰 정리.
+- MaskDialog (50~156, ~107줄) — 소형 config 다이얼로그
+- RefPropertiesDialog (157~327, ~170줄) — Shift/Squeeze bounds
+- ReferenceGeneratorDialog (328~1135, ~807줄) — HITRAN·ILS·FWHM (scipy/matplotlib 무거움)
+- **MonitorWidget (1137~2433, ~1300줄)** — 라이브 플롯(fit/trend/viewer/R/conc 탭). ★최대 분리이득
+- import 경로: `app_window → gui.ui_dialogs(import *) → ui_dialogs_ref`. app_window가
+  MonitorWidget·Ref*·Mask 직접 사용(669·2360·2369·2824). 분리시 ui_dialogs_ref.py에
+  `from .xxx import YYY` 재노출 추가하면 `import *` 무회귀.
+- **위험**: 메서드 내부 scipy/pg/plt 호출은 import-time에 안 잡힘 → 헤드리스 import만으론
+  부족, **GUI 실행 테스트 필요**. 각 새 파일에 상단 import 블록 복제 정확히 해야.
+- **권장 순서**: ① MonitorWidget(이득 최대) → ② ReferenceGeneratorDialog → ③ 소형 2개.
+  각 단계 후 GUI 기동 확인. (이번 세션은 번역만, 분리는 사용자 확인 후 별도 실행)
+
 ## 개선 후보 (improvements)
 
 ### gui/ui_alpha_gen.py
@@ -61,6 +75,6 @@
 | gui/ui_dialogs_calib.py | ✅ (2개) | 대기(전체검토 미完) | 대기 |
 | **gui/app_window.py** | ⏳ 141 | ⏳ | ★최대 분리대상 |
 | **gui/ui_dialogs_r.py** | ⏳ 112 | ⏳ | ⏳ |
-| **gui/ui_dialogs_ref.py** | ⏳ 37 | ⏳ | ⏳ |
+| gui/ui_dialogs_ref.py | ✅ 39→0 | ✅ | ★분리계획 기록(4클래스→4파일) |
 | gui/ui_result_viewer.py | ✅ 38→0 | ✅ (UI 이미 정리됨) | 노트기록(파서 추출 후보) |
 | tools/* (r_trend_monitor·alpha_wide_to_perbin 등) | ⏳ (CLI문자열 ~60) | ⏳ | 별도 배치 |

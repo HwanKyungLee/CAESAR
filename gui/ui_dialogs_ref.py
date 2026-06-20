@@ -407,7 +407,7 @@ class ReferenceGeneratorDialog(QDialog):
         self.spin_temp = QDoubleSpinBox(); self.spin_temp.setRange(100.0, 1500.0); self.spin_temp.setValue(293.0)
         self.spin_temp.setToolTip("HITRAN cross-section temperature in K.\n"
                                    "Auto-filled from main window's fallback T (°C + 273.15) when this dialog opens.\n"
-                                   "TD 채널: PNs 180°C=453K, ANs 300°C=573K (가열 셀 가스온도 기준).")
+                                   "TD channel: PNs 180°C=453K, ANs 300°C=573K (heated-cell gas temperature).")
         lay_hitran.addWidget(self.spin_temp)
         lay_hitran.addWidget(QLabel("P(atm):"))
         self.spin_press = QDoubleSpinBox(); self.spin_press.setRange(0.1, 2.0); self.spin_press.setValue(1.0)
@@ -681,7 +681,7 @@ class ReferenceGeneratorDialog(QDialog):
             if table_name not in hapi.LOCAL_TABLE_CACHE:
                 hapi.fetch(table_name, gas_id, 1, 1e7/w_max, 1e7/w_min)
             else:
-                print(f"[HITRAN] '{table_name}' 로컬 캐시 사용 (다운로드 생략)")
+                print(f"[HITRAN] '{table_name}' using local cache (skip download)")
 
             nu, coef = hapi.absorptionCoefficient_Voigt(
                 SourceTables=table_name, Environment={'p': P, 'T': T}, 
@@ -1164,7 +1164,7 @@ class MonitorWidget(QWidget):
         self._view_channel = 1
         self._latest_by_channel = {}
         _chbar = QHBoxLayout()
-        _chbar.addWidget(QLabel("표시 채널:"))
+        _chbar.addWidget(QLabel("Show channel:"))
         self.cb_fit_channel = QComboBox()
         self.cb_fit_channel.addItems(["CH1", "CH2", "CH3"])
         self.cb_fit_channel.setFixedWidth(80)
@@ -1255,7 +1255,7 @@ class MonitorWidget(QWidget):
         self.glw_trend = pg.GraphicsLayoutWidget()
         layout.addLayout(self._create_reset_toolbar(target_glw=self.glw_trend))
         
-        self.p_sh = self.glw_trend.addPlot(row=0, col=0, title="Δ Shift Trend (기준: 첫 스캔)")
+        self.p_sh = self.glw_trend.addPlot(row=0, col=0, title="Δ Shift Trend (ref: first scan)")
         self.p_sq = self.glw_trend.addPlot(row=1, col=0, title="Squeeze Trend")
         self.p_rms = self.glw_trend.addPlot(row=2, col=0, title="RMS Error Trend")
         self.p_rms.setLogMode(y=True)
@@ -1391,39 +1391,39 @@ class MonitorWidget(QWidget):
         # ── 행1: R 결과 폴더 ──────────────────────────────────
         row1 = QHBoxLayout()
         self._r_dir_edit = QLineEdit()
-        self._r_dir_edit.setPlaceholderText("R 결과 폴더  (R_Cold / R_Hot_PNs / R_Hot_ANs 포함)")
+        self._r_dir_edit.setPlaceholderText("R result folder  (contains R_Cold / R_Hot_PNs / R_Hot_ANs)")
         btn_r = QPushButton("📂"); btn_r.setFixedWidth(30)
         btn_r.clicked.connect(lambda: self._r_pick(self._r_dir_edit))
-        row1.addWidget(QLabel("결과 폴더:")); row1.addWidget(self._r_dir_edit, 4); row1.addWidget(btn_r)
+        row1.addWidget(QLabel("Result folder:")); row1.addWidget(self._r_dir_edit, 4); row1.addWidget(btn_r)
         lay.addLayout(row1)
 
         # ── 행2: 원본 Cold .dat 폴더 ──────────────────────────
         row2 = QHBoxLayout()
         self._r_cold_edit = QLineEdit()
-        self._r_cold_edit.setPlaceholderText("Cold 원본 폴더  (타임스탬프용, 없으면 파일명 날짜로 추정)")
+        self._r_cold_edit.setPlaceholderText("Cold raw folder  (for timestamps; if absent, inferred from filename date)")
         btn_c = QPushButton("📂"); btn_c.setFixedWidth(30)
         btn_c.clicked.connect(lambda: self._r_pick(self._r_cold_edit))
-        row2.addWidget(QLabel("Cold 원본:")); row2.addWidget(self._r_cold_edit, 4); row2.addWidget(btn_c)
+        row2.addWidget(QLabel("Cold raw:")); row2.addWidget(self._r_cold_edit, 4); row2.addWidget(btn_c)
         lay.addLayout(row2)
 
         # ── 행3: 원본 Hot .dat 폴더 ───────────────────────────
         row3 = QHBoxLayout()
         self._r_hot_edit = QLineEdit()
-        self._r_hot_edit.setPlaceholderText("Hot 원본 폴더  (타임스탬프용, 없으면 파일명 날짜로 추정)")
+        self._r_hot_edit.setPlaceholderText("Hot raw folder  (for timestamps; if absent, inferred from filename date)")
         btn_h = QPushButton("📂"); btn_h.setFixedWidth(30)
         btn_h.clicked.connect(lambda: self._r_pick(self._r_hot_edit))
-        row3.addWidget(QLabel("Hot 원본:")); row3.addWidget(self._r_hot_edit, 4); row3.addWidget(btn_h)
+        row3.addWidget(QLabel("Hot raw:")); row3.addWidget(self._r_hot_edit, 4); row3.addWidget(btn_h)
         lay.addLayout(row3)
 
         # ── 행4: 컨트롤 ───────────────────────────────────────
         row4 = QHBoxLayout()
-        btn_load = QPushButton("▶ 불러오기")
+        btn_load = QPushButton("▶ Load")
         btn_load.setStyleSheet("background-color:#4CAF50;color:white;font-weight:bold;")
         btn_load.clicked.connect(self._r_load_all)
 
         # 자동갱신 토글 버튼
         from PyQt6.QtWidgets import QSpinBox
-        self._r_auto_btn = QPushButton("🔄 자동갱신 OFF")
+        self._r_auto_btn = QPushButton("🔄 Auto-refresh OFF")
         self._r_auto_btn.setCheckable(True)
         self._r_auto_btn.setFixedWidth(130)
         self._r_auto_btn.setStyleSheet(
@@ -1435,9 +1435,9 @@ class MonitorWidget(QWidget):
         self._r_interval_spin = QSpinBox()
         self._r_interval_spin.setRange(1, 60)
         self._r_interval_spin.setValue(5)
-        self._r_interval_spin.setSuffix(" 분")
+        self._r_interval_spin.setSuffix(" min")
         self._r_interval_spin.setFixedWidth(65)
-        self._r_interval_spin.setToolTip("자동갱신 간격 (분)")
+        self._r_interval_spin.setToolTip("Auto-refresh interval (min)")
         self._r_interval_spin.valueChanged.connect(self._r_update_interval)
 
         self._r_last_lbl = QLabel("")
@@ -1456,15 +1456,15 @@ class MonitorWidget(QWidget):
         # 표시 단위 콤보박스 (R % / Leff km)
         self._r_mode_cb = QComboBox()
         self._r_mode_cb.addItems(["R (%)", "Leff (km)"])
-        self._r_mode_cb.setToolTip("시계열·스펙트럼을 반사율(R) 또는 유효경로(Leff)로 전환")
+        self._r_mode_cb.setToolTip("Switch time-series/spectrum between reflectance (R) and effective path (Leff)")
         self._r_mode_cb.currentIndexChanged.connect(self._r_on_display_change)
         row4.addWidget(btn_load)
         row4.addWidget(self._r_auto_btn)
         row4.addWidget(self._r_interval_spin)
         row4.addWidget(self._r_last_lbl)
-        row4.addWidget(QLabel("  채널:"))
+        row4.addWidget(QLabel("  Channel:"))
         for chk in self._r_chk.values(): row4.addWidget(chk)
-        row4.addWidget(QLabel("  단위:"))
+        row4.addWidget(QLabel("  Unit:"))
         row4.addWidget(self._r_mode_cb)
         row4.addWidget(self._r_info_lbl, 1)
         lay.addLayout(row4)
@@ -1477,7 +1477,7 @@ class MonitorWidget(QWidget):
         _date_ax = pg.DateAxisItem(orientation='bottom', utcOffset=9*3600)
         self._r_p_ts = self._r_glw.addPlot(
             row=0, col=0,
-            title="R 시계열  |  휠: Y줌  Ctrl+휠: X줌  우클릭: 이동  점 클릭: 스펙트럼",
+            title="R time-series  |  Wheel: Y-zoom  Ctrl+Wheel: X-zoom  Right-click: pan  Click point: spectrum",
             axisItems={'bottom': _date_ax})
         self._r_p_ts.setLabel('left',   'R (%)')
         self._r_p_ts.setLabel('bottom', 'Time (KST)')
@@ -1508,7 +1508,7 @@ class MonitorWidget(QWidget):
         # 스펙트럼 플롯
         self._r_glw.nextRow()
         self._r_p_sp = self._r_glw.addPlot(row=1, col=0,
-                                             title="R 스펙트럼  (시계열 점 클릭 시 표시)")
+                                             title="R spectrum  (shown when a time-series point is clicked)")
         self._r_p_sp.setLabel('left',   'R (%)')
         self._r_p_sp.setLabel('bottom', 'Wavelength (nm)')
         self._r_p_sp.showGrid(x=True, y=True, alpha=0.4)
@@ -1559,10 +1559,10 @@ class MonitorWidget(QWidget):
         if checked:
             interval_ms = self._r_interval_spin.value() * 60 * 1000
             self._r_auto_timer.start(interval_ms)
-            self._r_auto_btn.setText(f"🔄 자동갱신 ON")
+            self._r_auto_btn.setText("🔄 Auto-refresh ON")
         else:
             self._r_auto_timer.stop()
-            self._r_auto_btn.setText("🔄 자동갱신 OFF")
+            self._r_auto_btn.setText("🔄 Auto-refresh OFF")
             self._r_last_lbl.setText("")
 
     def _r_update_interval(self, value: int):
@@ -1575,11 +1575,11 @@ class MonitorWidget(QWidget):
         self._r_load_all()
         import datetime
         now = datetime.datetime.now().strftime("%H:%M:%S")
-        self._r_last_lbl.setText(f"갱신: {now}")
+        self._r_last_lbl.setText(f"Updated: {now}")
 
     def _r_pick(self, line_edit):
         from PyQt6.QtWidgets import QFileDialog
-        d = QFileDialog.getExistingDirectory(self, "폴더 선택", dlg_dir("ref_folder"))
+        d = QFileDialog.getExistingDirectory(self, "Select folder", dlg_dir("ref_folder"))
         dlg_dir("ref_folder", d)
         if d: line_edit.setText(d)
 
@@ -1703,7 +1703,7 @@ class MonitorWidget(QWidget):
         hot_raw  = self._r_hot_edit.text().strip()  or None
         if not base or not os.path.isdir(base):
             from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "경고", "R 결과 폴더를 선택하세요."); return
+            QMessageBox.warning(self, "Warning", "Select an R result folder."); return
 
         sub = {
             "Cold":    (os.path.join(base, "R_Cold"),    cold_raw),
@@ -1720,7 +1720,7 @@ class MonitorWidget(QWidget):
 
         has_real = cold_raw or hot_raw
         self._r_info_lbl.setText(
-            f"총 {total}개 파일  ({'실제 시각' if has_real else '추정 시각 — 원본 폴더 지정 시 정확해짐'})")
+            f"{total} files total  ({'actual time' if has_real else 'estimated time — set raw folder for accuracy'})")
         self._r_draw_all()
 
     def _r_draw_all(self):
@@ -1801,7 +1801,7 @@ class MonitorWidget(QWidget):
         else:
             val_str = f"R={self._r_mean_r(r)*100:.5f}%"
         self._r_p_ts.setTitle(
-            f"R 시계열  |  커서 근처: [{ch}] {lbl}  "
+            f"R time-series  |  near cursor: [{ch}] {lbl}  "
             f"{kst.strftime('%m-%d %H:%M')} KST  {val_str}"
         )
 
@@ -2183,13 +2183,13 @@ class MonitorWidget(QWidget):
         btn_reset.setStyleSheet("background-color:#f5f5f5; font-weight:bold; border:1px solid #ccc; padding:4px;")
         btn_reset.clicked.connect(lambda: self._reset_glw_views(self.glw_conc))
         bar.addWidget(btn_reset)
-        bar.addWidget(QLabel("표시 기체:"))
+        bar.addWidget(QLabel("Show gas:"))
         self.cb_conc_gas = QComboBox()
-        self.cb_conc_gas.addItem("전체")
+        self.cb_conc_gas.addItem("All")
         self.cb_conc_gas.setFixedWidth(140)
         self.cb_conc_gas.currentIndexChanged.connect(lambda *_: self._relayout_conc())
         bar.addWidget(self.cb_conc_gas)
-        btn_png = QPushButton("📷 PNG 저장")
+        btn_png = QPushButton("📷 Save PNG")
         btn_png.clicked.connect(self._export_conc_png)
         bar.addWidget(btn_png)
         bar.addStretch(1)
@@ -2225,9 +2225,9 @@ class MonitorWidget(QWidget):
         for gas in self._conc_gases:
             ax = pg.DateAxisItem(orientation='bottom')
             p = pg.PlotItem(axisItems={'bottom': ax})
-            p.setTitle(f"{gas}  농도")
+            p.setTitle(f"{gas}  concentration")
             p.setLabel('left', f"{gas} (ppb)")
-            p.setLabel('bottom', '시간')
+            p.setLabel('bottom', 'Time')
             p.showGrid(x=True, y=True)
             p.setClipToView(True)
             p.addLegend(offset=(10, 10))
@@ -2243,7 +2243,7 @@ class MonitorWidget(QWidget):
         if hasattr(self, 'cb_conc_gas'):
             self.cb_conc_gas.blockSignals(True)
             self.cb_conc_gas.clear()
-            self.cb_conc_gas.addItem("전체")
+            self.cb_conc_gas.addItem("All")
             for gas in self._conc_gases:
                 self.cb_conc_gas.addItem(gas)
             self.cb_conc_gas.setCurrentIndex(0)
@@ -2254,8 +2254,8 @@ class MonitorWidget(QWidget):
         """가스 선택(전체/개별)에 따라 보이는 플롯 레이아웃 재배치(데이터 유지)."""
         if not hasattr(self, 'glw_conc'):
             return
-        sel = self.cb_conc_gas.currentText() if hasattr(self, 'cb_conc_gas') else "전체"
-        gases = self._conc_gases if sel in ("전체", "") else [sel]
+        sel = self.cb_conc_gas.currentText() if hasattr(self, 'cb_conc_gas') else "All"
+        gases = self._conc_gases if sel in ("All", "") else [sel]
         self.glw_conc.clear()
         for r, gas in enumerate(gases):
             if gas in self._conc_plots:
@@ -2369,7 +2369,7 @@ class MonitorWidget(QWidget):
             start = dlg_dir("conc_png")
         except Exception:
             start = ""
-        path, _ = QFileDialog.getSaveFileName(self, "농도 그래프 PNG 저장",
+        path, _ = QFileDialog.getSaveFileName(self, "Save concentration plot PNG",
                                               start or "concentration.png", "PNG (*.png)")
         if not path:
             return
@@ -2384,9 +2384,9 @@ class MonitorWidget(QWidget):
             import pyqtgraph.exporters as pgex
             exporter = pgex.ImageExporter(self.glw_conc.scene())
             exporter.export(path)
-            QMessageBox.information(self, "저장 완료", f"PNG 저장됨:\n{path}")
+            QMessageBox.information(self, "Saved", f"PNG saved:\n{path}")
         except Exception as e:
-            QMessageBox.critical(self, "저장 실패", f"PNG 저장 실패:\n{e}")
+            QMessageBox.critical(self, "Save failed", f"PNG save failed:\n{e}")
 
     # =========================================================
     # [HQ Export] 
