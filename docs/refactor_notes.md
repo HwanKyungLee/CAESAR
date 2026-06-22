@@ -41,13 +41,14 @@ Mixin 상속이 현실적). 각 Mixin은 self.* 위젯 공유 가정. 중위험(
 
 ---
 
-## 분리 지점 — gui/ui_result_viewer.py (1441줄, ResultViewerWidget 단일)
-- UI(_init_ui)는 이미 영어·잘 정리됨(툴바 Open|View/Analyze/Export 그룹). 폴리시 불필요.
-- 저위험 분리 후보(나중): ①정적 파서들(`_load_result_time_gas`,`_read_numeric`,
-  `_detect_sep`,`_load_fit_table`,`_detect`)을 `result_viewer_io.py`로 → 순수함수라 안전.
-  ②플롯 메서드군(`_plot_r_trend/_r_curve/_alpha_trace/_reference/_concentration/_array/
-  _fit/_diurnal`)을 Mixin으로. 단 self._pw_top/_bot 공유라 Mixin 형태여야.
-- 지금은 분리 안 함(테스트 부재). 위 ①이 가장 안전한 첫 후보.
+## ✅ 분리 완료 — gui/result_viewer_io.py (2026-06-20, 2단계)
+- 순수 파서 5종(`load_result_time_gas`,`detect`,`read_numeric`,`detect_sep`,`load_fit_table`)
+  → **gui/result_viewer_io.py** 이동(ast로 verbatim 추출, @staticmethod 제거·de-indent).
+- 클래스엔 `_load_fit_table = staticmethod(load_fit_table)` 등 **별칭만** 남겨
+  `self._x(...)` 호출처 11곳 무수정. `_set_time_axis`는 pg 의존이라 잔류.
+- 검증: compile + import체인 + 별칭 동일성(`W._detect is RIO.detect`) +
+  **실제 파싱 동작**(GUI리포트 detect→fit, load_fit_table 가스/Status 정확) 통과.
+- 남은 후보: 플롯 메서드군 Mixin화(self._pw_top/_bot 공유라 Mixin 형태). 미실행.
 
 ## ★분리 계획 — gui/ui_dialogs_ref.py (2433줄, 4개 독립 클래스)
 **4개 클래스가 서로 참조 안 함(독립) → 클래스별 파일 분리 안전성 높음.** 가장 가치 큰 정리.
