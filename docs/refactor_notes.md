@@ -63,13 +63,15 @@ Mixin 상속이 현실적). 각 Mixin은 self.* 위젯 공유 가정. 중위험(
 - **권장 순서**: ① MonitorWidget(이득 최대) → ② ReferenceGeneratorDialog → ③ 소형 2개.
   각 단계 후 GUI 기동 확인. (이번 세션은 번역만, 분리는 사용자 확인 후 별도 실행)
 
-## 분리 후보 — gui/ui_dialogs_r.py (1468줄)
-- 클래스: R_GeneratorDialog(54), _LiveStream(347), 워커 5종(_RTrendWorker·_RTExportWorker·
-  _RTAppendWorker·_ChannelRWorker·_HeCheckWorker, 368~631), RCalibratorDialog(632).
-- 저위험 분리 후보: **워커 QThread 5종 → `r_workers.py`** (rt_precompute에만 의존, UI 비의존).
-  단 RCalibratorDialog가 이들을 import해 쓰므로 재노출/직접 import 배선 필요. import-time
-  검증 가능(워커는 클래스 본문에 무거운 호출 없음) → ui_dialogs_ref보다 분리 안전.
-- 노트만, 실제 분리는 번역 완료 후 클래스 단위 단계에서.
+## ✅ 분리 완료 — gui/r_workers.py (2026-06-20, 1단계)
+- `_LiveStream` + 워커 5종(_RTrendWorker·_RTExportWorker·_RTAppendWorker·_ChannelRWorker·
+  _HeCheckWorker) → **gui/r_workers.py** 로 이동(원본 바이트 그대로 복사).
+- `_CH_COLORS`(팔레트)는 dialog만 사용 → ui_dialogs_r 잔류.
+- ui_dialogs_r 상단에 `from gui.r_workers import (...)` 재노출 → `ui_dialogs.py`의
+  `from .ui_dialogs_r import _RTrendWorker, _ChannelRWorker`·RCalibratorDialog 내부참조 무회귀.
+- 검증: 양쪽 compile OK + import 체인(r_workers→ui_dialogs_r→ui_dialogs) + 재노출 동일성 통과.
+  워커는 모듈레벨 무거운 import 0(전부 run() lazy)이라 헤드리스로 거의 완전 검증됨.
+- ⚠️ 잔여 GUI 확인(권장): R Calibrator 열기 → 채널 로드 → 계산 시작/α R(t) 저장 1회.
 
 ## 개선 후보 (improvements)
 
