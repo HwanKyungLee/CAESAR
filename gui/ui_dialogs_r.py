@@ -425,7 +425,7 @@ class _RTrendWorker(QThread):
 
         except Exception as e:
             import traceback
-            self.log.emit(f"[오류] {e}\n{traceback.format_exc()}")
+            self.log.emit(f"[error] {e}\n{traceback.format_exc()}")
             self.finished.emit("")
 
 
@@ -448,27 +448,27 @@ class _RTExportWorker(QThread):
         try:
             import rt_precompute as RTP
         except Exception as e:
-            self.finished.emit(f"ERROR: rt_precompute 임포트 실패: {e}")
+            self.finished.emit(f"ERROR: rt_precompute import failed: {e}")
             return
         done = []
         for label, rdir, wave, cfg, flist, outp in self.tasks:
             try:
-                self.log.emit(f"[{label}] R(t) 병렬 계산 중…")
+                self.log.emit(f"[{label}] computing R(t) in parallel…")
                 all_files = RTP._RT._resolve_files(rdir, flist)
                 ks, od, wv = RTP.compute_rt_knots(
                     rdir, wave, cfg, file_list=flist, parallel=True,
                     progress_cb=lambda d, t, _l=label: self.progress.emit(d, t, _l))
                 if len(ks) == 0:
-                    self.log.emit(f"[{label}] ⚠️ knot 0개 — 저장 안 함")
+                    self.log.emit(f"[{label}] ⚠️ 0 knots — not saved")
                     continue
                 processed = [_os.path.basename(f) for f in all_files]
                 RTP.save_rt(outp, ks, od, wv, label=label, config=cfg,
                             processed_files=processed)
-                self.log.emit(f"[{label}] ✅ {len(ks)} knots ({len(processed)}파일) → {_os.path.basename(outp)}")
+                self.log.emit(f"[{label}] ✅ {len(ks)} knots ({len(processed)} files) → {_os.path.basename(outp)}")
                 done.append(f"{label}({len(ks)})")
             except Exception as e:
-                self.log.emit(f"[{label}] ❌ 실패: {e}\n{traceback.format_exc()}")
-        self.finished.emit("  |  ".join(done) if done else "저장된 R(t) 없음")
+                self.log.emit(f"[{label}] ❌ failed: {e}\n{traceback.format_exc()}")
+        self.finished.emit("  |  ".join(done) if done else "no R(t) saved")
 
 
 class _RTAppendWorker(QThread):
@@ -490,25 +490,25 @@ class _RTAppendWorker(QThread):
         try:
             import rt_precompute as RTP
         except Exception as e:
-            self.finished.emit(f"ERROR: rt_precompute 임포트 실패: {e}")
+            self.finished.emit(f"ERROR: rt_precompute import failed: {e}")
             return
         done = []
         for label, rdir, wave, cfg, flist, outp in self.tasks:
             try:
-                self.log.emit(f"[{label}] 증분 추가 중…")
+                self.log.emit(f"[{label}] appending incrementally…")
                 n_new, added = RTP.append_rt(
                     outp, rdir, wave, cfg, file_list=flist, parallel=True,
                     progress_cb=lambda d, t, _l=label: self.progress.emit(d, t, _l))
                 if n_new == 0 and added:
-                    self.log.emit(f"[{label}] ⚠️ {len(added)}개 파일 처리했으나 유효 knot 0개 (He/ZA 없음?)")
+                    self.log.emit(f"[{label}] ⚠️ {len(added)} files processed but 0 valid knots (no He/ZA?)")
                 elif n_new == 0:
-                    self.log.emit(f"[{label}] 새 파일 없음 — 건너뜀")
+                    self.log.emit(f"[{label}] no new files — skipped")
                 else:
-                    self.log.emit(f"[{label}] ✅ +{n_new} knots ({len(added)}개 파일) → {_os.path.basename(outp)}")
+                    self.log.emit(f"[{label}] ✅ +{n_new} knots ({len(added)} files) → {_os.path.basename(outp)}")
                     done.append(f"{label}(+{n_new})")
             except Exception as e:
-                self.log.emit(f"[{label}] ❌ 실패: {e}\n{traceback.format_exc()}")
-        self.finished.emit("  |  ".join(done) if done else "추가된 knot 없음")
+                self.log.emit(f"[{label}] ❌ failed: {e}\n{traceback.format_exc()}")
+        self.finished.emit("  |  ".join(done) if done else "no knots added")
 
 
 # ── 채널 색상 팔레트 ─────────────────────────────────────────────────────────
@@ -561,7 +561,7 @@ class _ChannelRWorker(QThread):
             flist   = ch_cfg.get("file_list")
             color   = ch_cfg["color"]
 
-            self.log.emit(f"[{label}] scan_directory 시작…")
+            self.log.emit(f"[{label}] scan_directory start…")
             try:
                 from datetime import timezone, timedelta
                 ts_tz  = timezone(timedelta(hours=rtcfg.ts_tz_hours))
@@ -582,9 +582,9 @@ class _ChannelRWorker(QThread):
                     rtm.save_dat(results,
                                  _os.path.join(self.out_dir, f"{label}_R_trend.dat"))
                     rtm.save_r_curves_per_file(results, f"R_{label}", self.out_dir)
-                    self.log.emit(f"[{label}] ✅ {len(results)} 사이클")
+                    self.log.emit(f"[{label}] ✅ {len(results)} cycles")
                 else:
-                    self.log.emit(f"[{label}] ⚠️ 결과 없음")
+                    self.log.emit(f"[{label}] ⚠️ no results")
 
                 all_results.append({"label": label, "results": results or [], "color": color})
 
@@ -636,7 +636,7 @@ class RCalibratorDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("R Calibrator — 채널별 반사율 교정")
+        self.setWindowTitle("R Calibrator — per-channel reflectance calibration")
         self.resize(1100, 760)
         self._worker   = None
         self._t_start  = None
@@ -656,13 +656,13 @@ class RCalibratorDialog(QDialog):
         self._load_from_left_panel()
 
     def _pick_dir(self, line_edit):
-        d = QFileDialog.getExistingDirectory(self, "폴더 선택", dlg_dir("r_folder"))
+        d = QFileDialog.getExistingDirectory(self, "Select folder", dlg_dir("r_folder"))
         dlg_dir("r_folder", d)
         if d: line_edit.setText(d)
 
     def _pick_file(self, line_edit):
         f, _ = QFileDialog.getOpenFileName(
-            self, "파일 선택", dlg_dir("r_file"), "텍스트 파일 (*.txt *.dat *.csv);;모든 파일 (*)")
+            self, "Select file", dlg_dir("r_file"), "Text files (*.txt *.dat *.csv);;All Files (*)")
         dlg_dir("r_file", f)
         if f: line_edit.setText(f)
 
@@ -693,21 +693,21 @@ class RCalibratorDialog(QDialog):
         main.setSpacing(5)
 
         # ── 채널 목록 ────────────────────────────────────────────────────────
-        grp_ch = QGroupBox("채널 목록")
+        grp_ch = QGroupBox("Channels")
         grp_ch_lay = QVBoxLayout(grp_ch)
         grp_ch_lay.setSpacing(3)
         grp_ch_lay.setContentsMargins(6, 6, 6, 4)
 
         hdr = QHBoxLayout()
-        btn_load_panel = QPushButton("🔄  왼쪽 패널에서 채널 로드")
+        btn_load_panel = QPushButton("🔄  Load channels from left panel")
         btn_load_panel.setStyleSheet(
             "background-color:#1565C0;color:white;font-weight:bold;")
         btn_load_panel.setToolTip(
-            "왼쪽 패널의 채널 설정(파장보정·R창·TZ)을 읽어 채널 행을 채웁니다.\n"
-            "채널을 변경하거나 추가했다면 클릭해 동기화하세요.")
+            "Reads the left panel's channel settings (wavecal·R-window·TZ) to fill the rows.\n"
+            "Click to sync if you changed or added channels.")
         btn_load_panel.clicked.connect(self._load_from_left_panel)
         hdr.addWidget(btn_load_panel)
-        btn_add_ch = QPushButton("＋  채널 추가")
+        btn_add_ch = QPushButton("＋  Add channel")
         btn_add_ch.setFixedWidth(100)
         btn_add_ch.clicked.connect(
             lambda: self._add_ch_row(
@@ -731,12 +731,12 @@ class RCalibratorDialog(QDialog):
         main.addWidget(grp_ch)
 
         # ── 공통 설정 ─────────────────────────────────────────────────────────
-        grp_common = QGroupBox("공통 설정")
+        grp_common = QGroupBox("Common settings")
         gl = QGridLayout(grp_common)
         gl.setSpacing(4)
         gl.setColumnStretch(1, 1)
 
-        gl.addWidget(QLabel("결과 저장 폴더:"), 0, 0, Qt.AlignmentFlag.AlignRight)
+        gl.addWidget(QLabel("Result folder:"), 0, 0, Qt.AlignmentFlag.AlignRight)
         self._le_out_dir = QLineEdit(".")
         btn_out = QPushButton("📂"); btn_out.setFixedWidth(28)
         btn_out.clicked.connect(lambda: self._pick_dir(self._le_out_dir))
@@ -744,20 +744,20 @@ class RCalibratorDialog(QDialog):
         _od_w = QWidget(); _od_w.setLayout(_od)
         gl.addWidget(_od_w, 0, 1)
 
-        gl.addWidget(QLabel("날짜 범위(선택):"), 1, 0, Qt.AlignmentFlag.AlignRight)
+        gl.addWidget(QLabel("Date range (optional):"), 1, 0, Qt.AlignmentFlag.AlignRight)
         self._le_date_start = QLineEdit()
-        self._le_date_start.setPlaceholderText("YYYYMMDD 시작 (예: 20260531)")
+        self._le_date_start.setPlaceholderText("YYYYMMDD start (e.g. 20260531)")
         self._le_date_end = QLineEdit()
-        self._le_date_end.setPlaceholderText("YYYYMMDD 끝 (예: 20260601)")
+        self._le_date_end.setPlaceholderText("YYYYMMDD end (e.g. 20260601)")
         _dr = QHBoxLayout()
         _dr.addWidget(self._le_date_start); _dr.addWidget(QLabel("~")); _dr.addWidget(self._le_date_end)
         _drw = QWidget(); _drw.setLayout(_dr)
         gl.addWidget(_drw, 1, 1)
 
-        gl.addWidget(QLabel("Cavity 설정:"), 2, 0, Qt.AlignmentFlag.AlignRight)
+        gl.addWidget(QLabel("Cavity:"), 2, 0, Qt.AlignmentFlag.AlignRight)
         from PyQt6.QtWidgets import QDoubleSpinBox as _DSB
         _cav = QHBoxLayout()
-        _cav.addWidget(QLabel("길이 (cm):"))
+        _cav.addWidget(QLabel("Length (cm):"))
         self._spin_cavity_len = _DSB()
         self._spin_cavity_len.setRange(1.0, 10000.0); self._spin_cavity_len.setDecimals(2)
         self._spin_cavity_len.setValue(51.8); self._spin_cavity_len.setFixedWidth(90)
@@ -773,32 +773,32 @@ class RCalibratorDialog(QDialog):
 
         # ── 실행 버튼들 ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        btn_run = QPushButton("▶  계산 시작")
+        btn_run = QPushButton("▶  Start")
         btn_run.setStyleSheet(
             "background-color:#4CAF50;color:white;font-weight:bold;height:36px;")
         btn_run.clicked.connect(self._run)
         self._btn_run = btn_run
         btn_row.addWidget(btn_run)
 
-        btn_rt = QPushButton("💾  α용 R(t) 저장 (병렬)")
+        btn_rt = QPushButton("💾  Save R(t) for α (parallel)")
         btn_rt.setStyleSheet(
             "background-color:#1976D2;color:white;font-weight:bold;height:36px;")
         btn_rt.setToolTip(
-            "현재 채널 설정으로 채널별 R(t)를 6코어 병렬 계산해\n"
-            "결과 저장 폴더에 R_<채널>.npz 로 저장합니다.\n"
-            "Alpha Generator에서 이 파일을 R(t)로 지정하면 알파에 적용됩니다.\n"
-            "(R 계산은 계산 시작과 동일한 scan_directory 코어 사용)")
+            "Compute per-channel R(t) with 6-core parallelism using current settings,\n"
+            "saving R_<channel>.npz to the result folder.\n"
+            "Assign this file as R(t) in Alpha Generator to apply it to alpha.\n"
+            "(R uses the same scan_directory core as Start)")
         btn_rt.clicked.connect(self._export_rt_for_alpha)
         self._btn_rt_export = btn_rt
         btn_row.addWidget(btn_rt)
 
-        btn_rt_append = QPushButton("📥  증분 추가")
+        btn_rt_append = QPushButton("📥  Append")
         btn_rt_append.setStyleSheet(
             "background-color:#00796B;color:white;font-weight:bold;height:36px;")
         btn_rt_append.setToolTip(
-            "기존 R_<채널>.npz 에 새 파일만 추가 계산합니다.\n"
-            "이미 처리된 파일은 건너뛰고 신규 파일만 계산 → 머지 저장.\n"
-            "계산 전 각 파일의 He 플래그 유무를 미리 확인하고 진행 여부를 묻습니다.")
+            "Compute only new files and add them to an existing R_<channel>.npz.\n"
+            "Already-processed files are skipped; only new files computed → merged.\n"
+            "Checks each file's He flag first and asks before proceeding.")
         btn_rt_append.clicked.connect(self._append_rt_for_alpha)
         self._btn_rt_append = btn_rt_append
         btn_row.addWidget(btn_rt_append)
@@ -823,7 +823,7 @@ class RCalibratorDialog(QDialog):
         top_splitter.addWidget(self._log)
 
         self.tableWidget = QTableWidget(0, 4)
-        self.tableWidget.setHorizontalHeaderLabels(["시간", "파일명", "채널", "R_mean (%)"])
+        self.tableWidget.setHorizontalHeaderLabels(["Time", "File", "Channel", "R_mean (%)"])
         self.tableWidget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tableWidget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.tableWidget.itemSelectionChanged.connect(self._on_table_row_selected)
@@ -832,12 +832,12 @@ class RCalibratorDialog(QDialog):
 
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         _date_axis = pg.DateAxisItem(orientation='bottom')
-        self._pw = pg.PlotWidget(axisItems={'bottom': _date_axis}, title="R 시계열")
+        self._pw = pg.PlotWidget(axisItems={'bottom': _date_axis}, title="R time-series")
         self._pw.setBackground('w'); self._pw.showGrid(x=True, y=True, alpha=0.3)
         self._pw.setLabel('left', 'R mean (%)'); self._pw.setLabel('bottom', 'Time')
         bottom_splitter.addWidget(self._pw)
 
-        self._spectrum_pw = pg.PlotWidget(title="파장별 R(λ) 곡선")
+        self._spectrum_pw = pg.PlotWidget(title="R(λ) per wavelength")
         self._spectrum_pw.setBackground('w'); self._spectrum_pw.showGrid(x=True, y=True, alpha=0.3)
         self._spectrum_pw.setLabel('left', 'Reflectance R')
         self._spectrum_pw.setLabel('bottom', 'Wavelength (nm)')
@@ -868,12 +868,12 @@ class RCalibratorDialog(QDialog):
         row.addWidget(lbl_num)
 
         le_label = QLineEdit(label)
-        le_label.setPlaceholderText("라벨")
+        le_label.setPlaceholderText("label")
         le_label.setFixedWidth(80)
         row.addWidget(le_label)
 
         le_raw_dir = QLineEdit(raw_dir)
-        le_raw_dir.setPlaceholderText("Raw 데이터 폴더")
+        le_raw_dir.setPlaceholderText("Raw data folder")
         row.addWidget(le_raw_dir, stretch=1)
 
         btn_dir = QPushButton("📂")
@@ -887,43 +887,43 @@ class RCalibratorDialog(QDialog):
         cb_raw_ch.setCurrentIndex(raw_ch - 1)
         cb_raw_ch.setFixedWidth(62)
         cb_raw_ch.setToolTip(
-            "로우 파일 내 몇 번째 ROI를 읽을지 (dio_channel)\n"
+            "Which ROI to read in the raw file (dio_channel)\n"
             "ch1: spec 0–2048 (Cold / Hot PNs)\n"
             "ch2: spec 2048–4096 (Hot ANs)\n"
-            "핫 2채널: 같은 raw_dir, ch1·ch2 각각 지정")
+            "Hot 2-channel: same raw_dir, set ch1·ch2 separately")
         row.addWidget(cb_raw_ch)
 
-        lbl_wv = QLabel("✅ wavecal" if wv_ok else "❌ 파장보정 없음")
+        lbl_wv = QLabel("✅ wavecal" if wv_ok else "❌ no wavecal")
         lbl_wv.setStyleSheet(
             "color:#2E7D32;font-weight:bold;" if wv_ok else "color:#C62828;")
         lbl_wv.setFixedWidth(104)
-        lbl_wv.setToolTip("왼쪽 패널에서 로드된 파장보정 상태")
+        lbl_wv.setToolTip("Wavecal status loaded from the left panel")
         row.addWidget(lbl_wv)
 
         # R창: 편집 가능 스핀박스 (기본값 = 핏범위에서 자동 채움)
-        row.addWidget(QLabel("R창:"))
+        row.addWidget(QLabel("R-window:"))
         sp_r_start = QDoubleSpinBox()
         sp_r_start.setRange(300.0, 1000.0); sp_r_start.setDecimals(1)
         sp_r_start.setValue(r_start); sp_r_start.setFixedWidth(58)
-        sp_r_start.setToolTip("R 계산 파장창 시작 (nm)")
+        sp_r_start.setToolTip("R calc wavelength window start (nm)")
         row.addWidget(sp_r_start)
         row.addWidget(QLabel("–"))
         sp_r_end = QDoubleSpinBox()
         sp_r_end.setRange(300.0, 1000.0); sp_r_end.setDecimals(1)
         sp_r_end.setValue(r_end); sp_r_end.setFixedWidth(58)
-        sp_r_end.setToolTip("R 계산 파장창 끝 (nm)")
+        sp_r_end.setToolTip("R calc wavelength window end (nm)")
         row.addWidget(sp_r_end)
 
         lbl_tz = QLabel(tz_str)
         lbl_tz.setStyleSheet("color:#555;font-size:11px;")
         lbl_tz.setFixedWidth(36)
-        lbl_tz.setToolTip("TZ — 왼쪽 패널 설정")
+        lbl_tz.setToolTip("TZ — set in left panel")
         row.addWidget(lbl_tz)
 
         btn_del = QPushButton("✕")
         btn_del.setFixedWidth(22)
         btn_del.setStyleSheet("color:#AAA;")
-        btn_del.setToolTip("이 채널 행 삭제")
+        btn_del.setToolTip("Delete this channel row")
         btn_del.clicked.connect(lambda _f=frame: self._del_ch_row(_f))
         row.addWidget(btn_del)
 
@@ -939,7 +939,7 @@ class RCalibratorDialog(QDialog):
         return frame
 
     def _pick_raw_dir(self, line_edit, ch_num):
-        d = QFileDialog.getExistingDirectory(self, "Raw 폴더 선택", dlg_dir("r_raw_dir"))
+        d = QFileDialog.getExistingDirectory(self, "Select Raw folder", dlg_dir("r_raw_dir"))
         if d:
             dlg_dir("r_raw_dir", d)
             line_edit.setText(d)
@@ -968,7 +968,7 @@ class RCalibratorDialog(QDialog):
         """왼쪽 패널 채널 설정 → 채널 행 동기화."""
         parent = self.parent()
         if parent is None or not hasattr(parent, '_channel_configs'):
-            self._log.append("[채널 로드] 왼쪽 패널 채널 없음 (채널을 추가하세요).")
+            self._log.append("[load channels] no channels in left panel (add a channel).")
             return
         try:
             if hasattr(parent, '_capture_config') and hasattr(parent, '_active_channel'):
@@ -977,7 +977,7 @@ class RCalibratorDialog(QDialog):
             pass
         chcfgs = {k: v for k, v in (parent._channel_configs or {}).items() if v}
         if not chcfgs:
-            self._log.append("[채널 로드] 왼쪽 패널에 설정된 채널이 없습니다.")
+            self._log.append("[load channels] no channels configured in the left panel.")
             return
 
         self._clear_ch_rows()
@@ -1014,13 +1014,13 @@ class RCalibratorDialog(QDialog):
                         wv.ravel() if wv.ndim == 1 else wv[:, 0])
                 except Exception as e:
                     frame._panel_data['wave_nm'] = None
-                    self._log.append(f"  [CH{ch}] 파장보정 로드 실패: {e}")
+                    self._log.append(f"  [CH{ch}] wavecal load failed: {e}")
             else:
                 frame._panel_data['wave_nm'] = None
 
             self._add_ch_row(frame)
 
-        self._log.append(f"[채널 로드] {len(chcfgs)}개 채널 동기화 완료")
+        self._log.append(f"[load channels] {len(chcfgs)} channels synced")
 
     def _collect_channel_cfgs(self, RTP):
         """채널 행 → (label, raw_dir, wave_nm, RTConfig, file_list, out_path) 목록."""
@@ -1057,12 +1057,12 @@ class RCalibratorDialog(QDialog):
             label   = frame.le_label.text().strip() or f"ch{frame._ch_num}"
             raw_dir = frame.le_raw_dir.text().strip()
             if not raw_dir:
-                self._log.append(f"  [{label}] raw_dir 없음 → 건너뜀")
+                self._log.append(f"  [{label}] no raw_dir → skipped")
                 continue
             wave_nm = frame._panel_data.get('wave_nm')
             if wave_nm is None:
                 self._log.append(
-                    f"  [{label}] 파장보정 없음 → 건너뜀 (왼쪽 패널 로드 후 재시도)")
+                    f"  [{label}] no wavecal → skipped (load from left panel and retry)")
                 continue
 
             dio_ch  = frame.cb_raw_ch.currentIndex() + 1  # 1-based
@@ -1089,8 +1089,8 @@ class RCalibratorDialog(QDialog):
     def _run(self):
         """채널별 scan_directory → 시계열 + 스펙트럼 플롯."""
         if not self._ch_rows:
-            QMessageBox.warning(self, "채널 없음",
-                "채널을 먼저 로드하세요.\n'🔄 왼쪽 패널에서 채널 로드' 버튼을 클릭하세요.")
+            QMessageBox.warning(self, "No channels",
+                "Load channels first.\nClick the '🔄 Load channels from left panel' button.")
             return
 
         RTP = self._rt_import()
@@ -1107,10 +1107,10 @@ class RCalibratorDialog(QDialog):
 
         tasks = self._collect_channel_cfgs(RTP)
         if not tasks:
-            QMessageBox.warning(self, "설정 오류",
-                "실행 가능한 채널이 없습니다:\n"
-                "• 각 채널의 Raw Dir를 지정하세요\n"
-                "• 파장보정은 왼쪽 패널에서 로드해야 합니다")
+            QMessageBox.warning(self, "Config error",
+                "No runnable channels:\n"
+                "• Set each channel's Raw Dir\n"
+                "• Wavecal must be loaded from the left panel")
             return
 
         out_dir = self._le_out_dir.text().strip() or "."
@@ -1126,7 +1126,7 @@ class RCalibratorDialog(QDialog):
         self._btn_run.setEnabled(False)
         self._progress.setVisible(True)
         self._t_start = time.time(); self._timer.start(1000)
-        self._lbl_elapsed.setText("경과: 00:00")
+        self._lbl_elapsed.setText("Elapsed: 00:00")
 
         self._worker = _ChannelRWorker(
             channel_cfgs, out_dir,
@@ -1151,7 +1151,7 @@ class RCalibratorDialog(QDialog):
             import rt_precompute as RTP
             return RTP
         except Exception as e:
-            QMessageBox.critical(self, "오류", f"rt_precompute 임포트 실패:\n{e}")
+            QMessageBox.critical(self, "Error", f"rt_precompute import failed:\n{e}")
             return None
 
     def _lock_rt_buttons(self, locked):
@@ -1168,36 +1168,36 @@ class RCalibratorDialog(QDialog):
         out_dir = self._le_out_dir.text().strip() or "."
         tasks = self._build_rt_tasks(RTP)
         if not tasks:
-            QMessageBox.warning(self, "입력 오류",
-                                "왼쪽 패널 채널(파장보정 포함) + raw 폴더(Cold 또는 Hot)를 지정하거나,\n"
-                                "Cold/Hot 폴더 + 파장보정 파일을 지정하세요.")
+            QMessageBox.warning(self, "Input error",
+                                "Set a left-panel channel (incl. wavecal) + raw folder (Cold or Hot), or\n"
+                                "set Cold/Hot folder + wavecal file.")
             return
 
-        self._log.append(f"[R(t) export] {len(tasks)}채널 병렬 계산 시작 → {out_dir}")
+        self._log.append(f"[R(t) export] {len(tasks)} channels parallel compute start → {out_dir}")
         self._lock_rt_buttons(True)
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)
         self._progress.setTextVisible(True)
-        self._progress.setFormat("R(t) 계산 준비…")
+        self._progress.setFormat("R(t) compute prep…")
         self._rt_export_worker = _RTExportWorker(tasks)
         self._rt_export_worker.log.connect(self._log.append)
 
         def _on_prog(done, total, label):
             self._progress.setRange(0, max(total, 1))
             self._progress.setValue(done)
-            self._progress.setFormat(f"R(t) [{label}] {done}/{total} 파일 파싱  %p%")
+            self._progress.setFormat(f"R(t) [{label}] {done}/{total} files parsed  %p%")
         self._rt_export_worker.progress.connect(_on_prog)
 
         def _done(summary):
-            self._log.append(f"[R(t) export 완료] {summary}")
+            self._log.append(f"[R(t) export done] {summary}")
             self._progress.setVisible(False)
             self._progress.setFormat("")
             self._lock_rt_buttons(False)
             QMessageBox.information(
-                self, "R(t) 저장 완료",
-                f"{summary}\n\n위치: {out_dir}\n파일: R_<채널>.npz\n\n"
-                "Alpha Generator에서 이 파일을 'R(t) 파일'로 지정하면\n"
-                "알파 생성 시 채널창 기반 R이 적용됩니다.")
+                self, "R(t) saved",
+                f"{summary}\n\nLocation: {out_dir}\nFile: R_<channel>.npz\n\n"
+                "Assign this file as 'R(t) file' in Alpha Generator to\n"
+                "apply channel-window-based R during alpha generation.")
 
         self._rt_export_worker.finished.connect(_done)
         self._rt_export_worker.start()
@@ -1212,8 +1212,8 @@ class RCalibratorDialog(QDialog):
         out_dir = self._le_out_dir.text().strip() or "."
         tasks = self._build_rt_tasks(RTP)
         if not tasks:
-            QMessageBox.warning(self, "입력 오류",
-                                "왼쪽 패널 채널(파장보정 포함) + raw 폴더를 지정하세요.")
+            QMessageBox.warning(self, "Input error",
+                                "Set a left-panel channel (incl. wavecal) + raw folder.")
             return
 
         # Phase 1 — He 플래그 검사를 백그라운드 스레드에서 실행
@@ -1222,11 +1222,11 @@ class RCalibratorDialog(QDialog):
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)   # indeterminate
         self._progress.setTextVisible(True)
-        self._progress.setFormat("He 플래그 스캔 중…")
+        self._progress.setFormat("Scanning He flags…")
 
         self._he_check_worker = _HeCheckWorker(tasks)
         self._he_check_worker.progress.connect(
-            lambda lbl: self._progress.setFormat(f"He 스캔: [{lbl}]…"))
+            lambda lbl: self._progress.setFormat(f"He scan: [{lbl}]…"))
         self._he_check_worker.finished.connect(self._on_he_check_done)
         self._he_check_worker.start()
 
@@ -1246,7 +1246,7 @@ class RCalibratorDialog(QDialog):
 
         for label, raw_dir, wave, rtcfg, flist, out_path, new_files, he_map in results:
             if not new_files:
-                summary_lines.append(f"[{label}]  새 파일 없음 (건너뜀)")
+                summary_lines.append(f"[{label}]  no new files (skipped)")
                 continue
 
             skip_count = 0
@@ -1256,39 +1256,39 @@ class RCalibratorDialog(QDialog):
                 skip_count += 1
 
             summary_lines.append(
-                f"[{label}]  새 파일 {len(new_files)}개"
-                + (f"  ⚠️ 앞 {skip_count}개 He없음(스킵)" if skip_count > 0
-                   else "  ✅ 첫 파일부터 He 있음"))
+                f"[{label}]  {len(new_files)} new files"
+                + (f"  ⚠️ first {skip_count} lack He (skip)" if skip_count > 0
+                   else "  ✅ He present from the first file"))
 
             for i, f in enumerate(new_files[:20]):
                 bn = _os.path.basename(f)
                 has_he = he_map.get(bn, False)
                 tag = ("✅ He" if has_he
-                       else "⚠️ 스킵(He없음)" if i < skip_count
-                       else "  ○ He승계")
+                       else "⚠️ skip (no He)" if i < skip_count
+                       else "  ○ He carried")
                 summary_lines.append(f"    {bn}  {tag}")
             if len(new_files) > 20:
-                summary_lines.append(f"    … ({len(new_files) - 20}개 더)")
+                summary_lines.append(f"    … ({len(new_files) - 20} more)")
 
             if skip_count == len(new_files):
                 warn_lines.append(
-                    f"[{label}] 새 파일 {len(new_files)}개 모두 He 없음 → 전부 스킵될 수 있습니다.")
+                    f"[{label}] all {len(new_files)} new files lack He → all may be skipped.")
 
             valid_tasks.append((label, raw_dir, wave, rtcfg, flist, out_path))
 
         if not valid_tasks:
             self._lock_rt_buttons(False)
-            QMessageBox.information(self, "증분 추가",
-                                    "추가할 새 파일이 없습니다.\n\n" + "\n".join(summary_lines))
+            QMessageBox.information(self, "Append",
+                                    "No new files to append.\n\n" + "\n".join(summary_lines))
             return
 
-        header = f"증분 추가 대상 채널 {len(valid_tasks)}개:\n\n"
+        header = f"Channels to append: {len(valid_tasks)}\n\n"
         if warn_lines:
-            header += "⚠️  경고:\n" + "\n".join(warn_lines) + "\n\n"
+            header += "⚠️  Warning:\n" + "\n".join(warn_lines) + "\n\n"
 
         msg = QMessageBox(self)
-        msg.setWindowTitle("증분 추가 — He 플래그 확인")
-        msg.setText(header + "계속 진행하시겠습니까?")
+        msg.setWindowTitle("Append — He flag check")
+        msg.setText(header + "Proceed?")
         msg.setDetailedText("\n".join(summary_lines))
         msg.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
@@ -1300,11 +1300,11 @@ class RCalibratorDialog(QDialog):
             return
 
         # Phase 2 — 실제 append
-        self._log.append(f"[R(t) 증분] {len(valid_tasks)}채널 추가 시작 → {out_dir}")
+        self._log.append(f"[R(t) append] {len(valid_tasks)} channels start → {out_dir}")
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)
         self._progress.setTextVisible(True)
-        self._progress.setFormat("R(t) 증분 준비…")
+        self._progress.setFormat("R(t) append prep…")
 
         self._rt_append_worker = _RTAppendWorker(valid_tasks)
         self._rt_append_worker.log.connect(self._log.append)
@@ -1312,17 +1312,17 @@ class RCalibratorDialog(QDialog):
         def _on_prog(done, total, label):
             self._progress.setRange(0, max(total, 1))
             self._progress.setValue(done)
-            self._progress.setFormat(f"R(t) 증분 [{label}] {done}/{total}  %p%")
+            self._progress.setFormat(f"R(t) append [{label}] {done}/{total}  %p%")
         self._rt_append_worker.progress.connect(_on_prog)
 
         def _done(summary):
-            self._log.append(f"[R(t) 증분 완료] {summary}")
+            self._log.append(f"[R(t) append done] {summary}")
             self._progress.setVisible(False)
             self._progress.setFormat("")
             self._lock_rt_buttons(False)
             QMessageBox.information(
-                self, "증분 추가 완료",
-                f"{summary}\n\n위치: {out_dir}\n\n기존 npz에 새 knot이 머지되었습니다.")
+                self, "Append complete",
+                f"{summary}\n\nLocation: {out_dir}\n\nNew knots merged into the existing npz.")
 
         self._rt_append_worker.finished.connect(_done)
         self._rt_append_worker.start()
@@ -1414,7 +1414,7 @@ class RCalibratorDialog(QDialog):
         self._spectrum_pw.clear()
         
         if not os.path.exists(dat_path):
-            self._spectrum_pw.setTitle(f"데이터 파일 없음: {os.path.basename(dat_path)}")
+            self._spectrum_pw.setTitle(f"No data file: {os.path.basename(dat_path)}")
             return
             
         try:
@@ -1439,23 +1439,23 @@ class RCalibratorDialog(QDialog):
             self._spectrum_pw.addItem(lr)
             
         except Exception as e:
-            self._spectrum_pw.setTitle(f"플롯 실패: {e}")
+            self._spectrum_pw.setTitle(f"plot failed: {e}")
 
     def _tick_elapsed(self):
         if self._t_start is not None:
             m, s = divmod(int(time.time() - self._t_start), 60)
-            self._lbl_elapsed.setText(f"경과: {m:02d}:{s:02d}")
+            self._lbl_elapsed.setText(f"Elapsed: {m:02d}:{s:02d}")
 
     def _on_done(self, out_dir: str):
         self._timer.stop(); self._progress.setVisible(False)
         m, s = divmod(int(time.time() - self._t_start) if self._t_start else 0, 60)
-        self._lbl_elapsed.setText(f"완료 ({m:02d}:{s:02d})")
+        self._lbl_elapsed.setText(f"done ({m:02d}:{s:02d})")
         self._t_start = None; self._btn_run.setEnabled(True)
         
         if out_dir:
-            self._log.append(f"\n✅ 완료 → 결과 폴더: {out_dir}")
+            self._log.append(f"\n✅ done → result folder: {out_dir}")
         else:
-            self._log.append("\n❌ 오류 발생 — 위 로그를 확인하세요.")
+            self._log.append("\n❌ error — check the log above.")
 
     def closeEvent(self, event):
         if self._worker is not None and self._worker.isRunning():

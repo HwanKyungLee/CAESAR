@@ -51,6 +51,14 @@
 - **권장 순서**: ① MonitorWidget(이득 최대) → ② ReferenceGeneratorDialog → ③ 소형 2개.
   각 단계 후 GUI 기동 확인. (이번 세션은 번역만, 분리는 사용자 확인 후 별도 실행)
 
+## 분리 후보 — gui/ui_dialogs_r.py (1468줄)
+- 클래스: R_GeneratorDialog(54), _LiveStream(347), 워커 5종(_RTrendWorker·_RTExportWorker·
+  _RTAppendWorker·_ChannelRWorker·_HeCheckWorker, 368~631), RCalibratorDialog(632).
+- 저위험 분리 후보: **워커 QThread 5종 → `r_workers.py`** (rt_precompute에만 의존, UI 비의존).
+  단 RCalibratorDialog가 이들을 import해 쓰므로 재노출/직접 import 배선 필요. import-time
+  검증 가능(워커는 클래스 본문에 무거운 호출 없음) → ui_dialogs_ref보다 분리 안전.
+- 노트만, 실제 분리는 번역 완료 후 클래스 단위 단계에서.
+
 ## 개선 후보 (improvements)
 
 ### gui/ui_alpha_gen.py
@@ -74,7 +82,7 @@
 | gui/dr_nam_alpha_worker.py | ✅ (3개) | ✅ | OK |
 | gui/ui_dialogs_calib.py | ✅ (2개) | 대기(전체검토 미完) | 대기 |
 | **gui/app_window.py** | ⏳ 141 | ⏳ | ★최대 분리대상 |
-| **gui/ui_dialogs_r.py** | ⏳ 112 | ⏳ | ⏳ |
+| gui/ui_dialogs_r.py | ✅ 124→0 | ✅ | 분리후보(워커5종→r_workers) |
 | gui/ui_dialogs_ref.py | ✅ 39→0 | ✅ | ★분리계획 기록(4클래스→4파일) |
 | gui/ui_result_viewer.py | ✅ 38→0 | ✅ (UI 이미 정리됨) | 노트기록(파서 추출 후보) |
 | tools/* (r_trend_monitor·alpha_wide_to_perbin 등) | ⏳ (CLI문자열 ~60) | ⏳ | 별도 배치 |
