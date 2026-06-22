@@ -23,9 +23,21 @@
 
 ## 분리 지점 (split candidates)
 
-### gui/app_window.py (4973줄, 최대 모놀리식)
-- _(읽으며 채울 예정)_ 기능별 후보: 알파 생성 / R 캘리브 / 핏 실행·QC / 결과뷰어 연동 / 셋업탭
-  각 블록의 메서드 군집을 mixin 또는 별도 모듈로 뺄 수 있는지 표시.
+### gui/app_window.py (4973줄, 최대 모놀리식 — CAESARAnalyzer 단일 QMainWindow ~150 메서드)
+**기능별 메서드 군집 → Mixin 분리 후보**(단일 거대 클래스라 별도파일 클래스분리는 불가,
+Mixin 상속이 현실적). 각 Mixin은 self.* 위젯 공유 가정. 중위험(런타임 호출 헤드리스 미검증).
+- **AlphaExportMixin**: export_alpha_files, _start_next_alpha_export, open_alpha_generator,
+  _alpha_*, _build_alpha_channel_configs, _on_alpha_channel_done (~알파 생성 묶음)
+- **RCalibMixin**: open_r_*, open_r_trend_monitor, _update_daily_rt_chart,
+  _update_setup_rt_charts, _on_setup_rt_point_clicked, _show_setup_r_spectrum
+- **AnalysisMixin**: start_analysis, stop_analysis, closeEvent, _active_workers, _fast_*,
+  update_table, _write_row_cells, analysis_finished, save
+- **QcMixin**: reapply_qc, _apply_auto_qc, _refresh_after_qc, _reapply_*
+- **RefWavecalMixin**: open_ref_properties, batch_load_refs, add_ref_row, load_wavelength_cal,
+  apply_new_wavelength, _channel_wave_cal
+- **SetupTabsMixin**: setup_daily_run_tab, setup_cavity_tab, _fwhm_* (셋업탭 구성)
+- 권장: Mixin 1개씩 빼고 매번 GUI 기동(메서드 내부 호출은 import-time 미검증).
+  먼저 결합도 낮은 SetupTabsMixin/QcMixin부터. (이번 세션은 번역만)
 
 ---
 
@@ -81,7 +93,7 @@
 | gui/worker.py | ✅ (status/로그 26개) | 검토完 | ★분리후보 아래 |
 | gui/dr_nam_alpha_worker.py | ✅ (3개) | ✅ | OK |
 | gui/ui_dialogs_calib.py | ✅ (2개) | 대기(전체검토 미完) | 대기 |
-| **gui/app_window.py** | ⏳ 141 | ⏳ | ★최대 분리대상 |
+| gui/app_window.py | ✅ 149→0 | ✅ | ★Mixin 6종 분리계획 기록 |
 | gui/ui_dialogs_r.py | ✅ 124→0 | ✅ | 분리후보(워커5종→r_workers) |
 | gui/ui_dialogs_ref.py | ✅ 39→0 | ✅ | ★분리계획 기록(4클래스→4파일) |
 | gui/ui_result_viewer.py | ✅ 38→0 | ✅ (UI 이미 정리됨) | 노트기록(파서 추출 후보) |
