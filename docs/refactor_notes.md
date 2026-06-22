@@ -97,4 +97,8 @@ Mixin 상속이 현실적). 각 Mixin은 self.* 위젯 공유 가정. 중위험(
 | gui/ui_dialogs_r.py | ✅ 124→0 | ✅ | 분리후보(워커5종→r_workers) |
 | gui/ui_dialogs_ref.py | ✅ 39→0 | ✅ | ★분리계획 기록(4클래스→4파일) |
 | gui/ui_result_viewer.py | ✅ 38→0 | ✅ (UI 이미 정리됨) | 노트기록(파서 추출 후보) |
-| tools/* (r_trend_monitor·alpha_wide_to_perbin 등) | ⏳ (CLI문자열 ~60) | ⏳ | 별도 배치 |
+| tools/* (8개 파일) | ✅ (CLI/print 65개) | ✅ | — |
+
+**★ 번역 단계 완료(2026-06-20): 전 프로젝트 한글 UI/로그/문자열 → 영어, 주석·docstring 한글 유지.**
+유일 예외 = r_results_plotter.py:16 BASE_DIR(한글 폴더명 실제 경로, 유지). r_trend_monitor
+콘솔 박스 2줄은 영어화하며 정렬도 62칸으로 교정. 다음 = 분리 단계(클래스 단위 + GUI 테스트).

@@ -129,7 +129,7 @@ def bin_series(ts: np.ndarray, pk: np.ndarray, bin_min: float):
 def main() -> None:
     ap = argparse.ArgumentParser(description="Peak-value trend per flag (avg dot + min/max lines)")
     ap.add_argument("--date", required=True, nargs="+",
-                    help="YYYYMMDD (여러 날짜 가능) e.g. 20260529 20260601")
+                    help="YYYYMMDD (multiple dates allowed) e.g. 20260529 20260601")
     ap.add_argument("--raw_dir",  required=True, help="Folder (searched recursively) with *.dat files")
     ap.add_argument("--channel",  default=None,  help="PNs | ANs | NO2  (auto if omitted)")
     ap.add_argument("--out_dir",  default=".",   help="Output directory for PNG")

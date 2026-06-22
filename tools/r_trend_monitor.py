@@ -81,7 +81,7 @@ except ImportError as e:
     # sys.exit()는 QThread 안에서 SystemExit를 던져 스레드를 비정상 종료시키므로 사용 금지.
     # ImportError를 그대로 re-raise하면 _RTrendWorker.run()의 except Exception이 잡아서
     # 로그에 표시하고 finished("")를 emit한다.
-    raise ImportError(f"필수 모듈을 찾을 수 없습니다: {e}") from e
+    raise ImportError(f"required module not found: {e}") from e
 
 # core/ 는 저장소 루트에 있다. r_batch_calculator import 시 루트가 sys.path에 추가되지만
 # 방어적으로 한 번 더 보장한다 (intensity-index 진단에서 flag 상수가 필요).
@@ -270,10 +270,10 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     files = _resolve_files(directory, file_list)
 
     if not files:
-        print(f"  .dat 파일 없음: {directory}")
+        print(f"  no .dat files: {directory}")
         return []
 
-    print(f"  {len(files)}개 파일 처리 시작...\n")
+    print(f"  {len(files)} files to process...\n")
 
     # ── 스캔 읽기: data_io 단일파스(+병렬). read_all_scans 대체. ──
     from core.data_io import (read_scans_via_dataio as _rsd,
@@ -294,7 +294,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                     if progress_cb and (_ndone % 5 == 0 or _ndone == _ntot):
                         progress_cb(_ndone, _ntot)
         except Exception as _e:
-            print(f"  [병렬 파싱 실패 → 순차] {_e}")
+            print(f"  [parallel parse failed -> sequential] {_e}")
             _parsed = None
 
     results = []
@@ -320,9 +320,9 @@ def scan_directory(directory: str, wave_nm, file_list=None,
 
         if not za or not candidate_he:
             reason = []
-            if not za:            reason.append(f"ZA스캔=0 (flag={FLAG_ZA} 행 없음)")
-            if not candidate_he:  reason.append("He없음(last_he도 없음)")
-            print(f"  [{fname}] ⏳ 스킵 @ {ts_str}  {', '.join(reason)}")
+            if not za:            reason.append(f"ZA scans=0 (no flag={FLAG_ZA} rows)")
+            if not candidate_he:  reason.append("no He (no last_he either)")
+            print(f"  [{fname}] ⏳ skip @ {ts_str}  {', '.join(reason)}")
             skip += 1
             continue
 
@@ -351,7 +351,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             # valid=0%는 ratio≈1 (He/ZA 신호 동일) → omr_d=0 → R=1.0 dummy
             # 이 파일은 결과에 포함하지 않고 last_he도 갱신하지 않는다
             if rc.valid_fraction == 0.0:
-                print(f"  [{fname}] ⏭️  valid=0% (R=1.0 dummy) 스킵 — last_he 유지")
+                print(f"  [{fname}] ⏭️  valid=0% (R=1.0 dummy) skip -- keep last_he")
                 skip += 1
                 continue
 
@@ -370,7 +370,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 w_mask = (wave_out >= float(fit_window_nm[0])) & \
                          (wave_out <= float(fit_window_nm[1]))
                 if w_mask.sum() < 50:
-                    print(f"  [{fname}] ⚠️ fit_window 내 픽셀 부족 ({w_mask.sum()}), 전 픽셀 사용")
+                    print(f"  [{fname}] ⚠️ too few pixels in fit_window ({w_mask.sum()}), using all pixels")
                     r_fit, leff_fit = r_curve, leff_arr
                 else:
                     r_fit, leff_fit = r_curve[w_mask], leff_arr[w_mask]
@@ -410,8 +410,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 "omr_d":          np.asarray(omr_d,        dtype=float),
             }
             results.append(res)
-            tag = ("  [He갱신]" if (he and rc.quality_ok) else "") + \
-                  ("  ⚠️ 이상값" if not rc.quality_ok else "")
+            tag = ("  [He updated]" if (he and rc.quality_ok) else "") + \
+                  ("  ⚠️ outlier" if not rc.quality_ok else "")
             print(f"  [{fname}] ✅ @ {ts_str}  R_mean={res['r_mean']:.6f}  "
                   f"Leff={res['leff_mean']:.2f}km  valid={res['valid_frac']*100:.1f}%{tag}")
         except Exception as e:
@@ -425,7 +425,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     results.sort(key=lambda x: x["timestamp"])
 
     saved = len(results)
-    print(f"\n  총 파일: {len(files)}  저장: {saved}  스킵: {skip}  실패: {fail}")
+    print(f"\n  total files: {len(files)}  saved: {saved}  skipped: {skip}  failed: {fail}")
     return results
 
 def _stem_digits(filename: str) -> str:
@@ -470,7 +470,7 @@ def save_r_curves_per_file(results: list[dict], channel_subdir: str,
                    fname=fname, n_za=r.get("n_za", 0), n_he=r.get("n_he", 0))
         n_saved += 1
     if n_saved:
-        print(f"  [R(λ) curves] {channel_subdir}: {n_saved}개 파일 저장")
+        print(f"  [R(λ) curves] {channel_subdir}: {n_saved} files saved")
     return n_saved
 
 
@@ -498,7 +498,7 @@ def save_dat(results: list[dict], out_path: str) -> None:
                 f"{r['r_min']:.8f}\t{r['r_max']:.8f}\t{r['leff_mean']:.4f}\t"
                 f"{r['valid_frac']*100:.1f}\t{r['n_za']}\t{r['n_he']}\n"
             )
-    print(f"  [DAT] {out_path}  ({len(results)}행)")
+    print(f"  [DAT] {out_path}  ({len(results)} rows)")
 
 def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
     if not results:
@@ -842,7 +842,7 @@ def plot_intensity_timeseries(series: dict, channel_name: str, out_path: str,
     """
     fig, ax = plt.subplots(figsize=(14, 5))
     if not _scatter_flags(ax, series, "t", color):
-        print(f"  [Intensity-time] {channel_name}: 데이터 없음 — 스킵")
+        print(f"  [Intensity-time] {channel_name}: no data -- skip")
         plt.close(fig); return
     ax.set_xlabel("Date / Time (KST)")
     ax.set_title(
@@ -870,7 +870,7 @@ def plot_intensity_index(series: dict, boundaries: list, channel_name: str,
     """
     fig, ax = plt.subplots(figsize=(14, 5))
     if not _scatter_flags(ax, series, "idx", color):
-        print(f"  [Intensity-idx] {channel_name}: 데이터 없음 — 스킵")
+        print(f"  [Intensity-idx] {channel_name}: no data -- skip")
         plt.close(fig); return
     # 파일 경계 세로선 (너무 많으면 생략)
     if 1 < len(boundaries) <= 40:
@@ -914,7 +914,7 @@ def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
 def main():
     print()
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║   CAESAR Pro — r_trend_monitor.py  반사율 시계열 모니터        ║")
+    print("║   CAESAR Pro — r_trend_monitor.py  reflectance monitor       ║")
     print(f"║   ZA={FLAG_ZA}  He={FLAG_HE}  cavity={CAVITY_LEN}cm  RL={RL_FACTOR}             ║")
     print("╚══════════════════════════════════════════════════════════════╝")
 
@@ -926,13 +926,13 @@ def main():
 
     def _load_wave(path, label):
         if not os.path.isfile(path):
-            print(f"[경고] 파일 없음: {path}")
+            print(f"[WARN] file not found: {path}")
             return None
         try:
             with open(path, "r", encoding="utf-8") as _f:
                 return np.loadtxt(_f)
         except Exception as exc:
-            print(f"[경고] {label} 파장 로드 실패: {exc}")
+            print(f"[WARN] {label} wavelength load failed: {exc}")
             return None
 
     wave_nm_cold    = _load_wave(WAVE_CAL_COLD,    "Cold")
@@ -943,7 +943,7 @@ def main():
 
     # ── Cold 채널 (CH2) ───────────────────────────────────────────
     bar = "=" * 64
-    print(f"\n{bar}\n  Cold 채널 처리\n{bar}")
+    print(f"\n{bar}\n  Cold channel\n{bar}")
     results_cold = scan_directory(COLD_DIR, wave_nm_cold, COLD_FILES,
                                   col_press=COL_PRESS_COLD, col_temp=COL_TEMP_COLD,
                                   ts_tz=COLD_TS_TZ,
@@ -952,7 +952,7 @@ def main():
                    if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
     # ── Hot PNs(roi1) 채널 (CH2, 컬럼 2053-4100) ──────────────────
-    print(f"\n{bar}\n  Hot PNs(roi1) 채널 처리  fit window: {CH_FIT_WINDOW_NM['hot_pns']} nm\n{bar}")
+    print(f"\n{bar}\n  Hot PNs (roi1) channel  fit window: {CH_FIT_WINDOW_NM['hot_pns']} nm\n{bar}")
     results_hot_pns = scan_directory(HOT_DIR, wave_nm_hot_pns, HOT_FILES,
                                      col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_TS_TZ,
@@ -961,7 +961,7 @@ def main():
                       if has_hot else []
 
     # ── Hot ANs(roi2) 채널 (CH3, 컬럼 4101-6148) ──────────────────
-    print(f"\n{bar}\n  Hot ANs(roi2) 채널 처리  fit window: {CH_FIT_WINDOW_NM['hot_ans']} nm\n{bar}")
+    print(f"\n{bar}\n  Hot ANs (roi2) channel  fit window: {CH_FIT_WINDOW_NM['hot_ans']} nm\n{bar}")
     results_hot_ans = scan_directory(HOT_DIR, wave_nm_hot_ans, HOT_FILES,
                                      col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
                                      ts_tz=HOT_ANS_TS_TZ,
@@ -978,7 +978,7 @@ def main():
     out_folder = os.path.join(OUTPUT_DIR, folder_name)
     os.makedirs(out_folder, exist_ok=True)
 
-    print(f"\n{bar}\n  결과 저장  →  {out_folder}\n{bar}")
+    print(f"\n{bar}\n  Save results  ->  {out_folder}\n{bar}")
     if results_cold:    save_dat(results_cold,    os.path.join(out_folder, f"Cold_{range_cold}.dat"))
     if results_hot_pns: save_dat(results_hot_pns, os.path.join(out_folder, f"Hot_PNs_{range_hot_pns}.dat"))
     if results_hot_ans: save_dat(results_hot_ans, os.path.join(out_folder, f"Hot_ANs_{range_hot_ans}.dat"))
@@ -1005,7 +1005,7 @@ def main():
         # 그린다. ZA/He가 amb 위로 또렷이 떠야 인덱싱이 정상이고, ZA 점이 ~1시간
         # 간격으로 묶여 보여야 주입 cadence가 정상이다.
         if SHOW_INTENSITY_INDEX:
-            print(f"\n{bar}\n  intensity 시계열 (He/ZA 인덱싱 체크)\n{bar}")
+            print(f"\n{bar}\n  intensity time-series (He/ZA indexing check)\n{bar}")
             ch_specs = [
                 ("Cold",          COLD_DIR, COLD_FILES, SPEC_START_DEFAULT, SPEC_END_DEFAULT, COLD_TS_TZ,
                  "steelblue", "Cold"),
@@ -1025,16 +1025,16 @@ def main():
                                           os.path.join(out_folder, f"Intensity_{tag}.png"), col)
 
     print("\n╔══════════════════════════════════════════════════════════════╗")
-    print("║  완료 — 반사율 요약                                            ║")
+    print("║  Done — reflectance summary                                  ║")
     print("╠══════════════════════════════════════════════════════════════╣")
     for ch, res, r_exp in [("Cold    ", results_cold, R_EXPECTED_COLD),
                            ("Hot PNs ", results_hot_pns, R_EXPECTED_HOT),
                            ("Hot ANs ", results_hot_ans, R_EXPECTED_HOT)]:
         if not res:
-            print(f"║  {ch}: 데이터 없음")
+            print(f"║  {ch}: no data")
             continue
         r_vals = np.array([r["r_mean"] for r in res])
-        print(f"║  {ch}: 사이클 {len(res)}개  R_mean={np.mean(r_vals):.6f}  경고={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}건")
+        print(f"║  {ch}: cycles {len(res)}  R_mean={np.mean(r_vals):.6f}  warnings={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
     return results_cold, results_hot_pns, results_hot_ans, out_folder

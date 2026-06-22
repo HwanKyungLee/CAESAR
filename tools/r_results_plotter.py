@@ -57,7 +57,7 @@ def load_channel(channel_dir):
             label = os.path.basename(fp).replace("_R.dat", "")
             records.append((label, wave, r))
         except Exception as e:
-            print(f"  [로드 실패] {os.path.basename(fp)}: {e}")
+            print(f"  [load failed] {os.path.basename(fp)}: {e}")
             continue
     return records
 
@@ -149,7 +149,7 @@ def make_timeseries_figure(all_records):
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     out_path = os.path.join(OUT_DIR, "R_timeseries.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"[저장] {out_path}")
+    print(f"[saved] {out_path}")
     plt.close(fig)
 
 
@@ -219,7 +219,7 @@ def make_spectra_figure(all_records):
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     out_path = os.path.join(OUT_DIR, "R_spectra.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"[저장] {out_path}")
+    print(f"[saved] {out_path}")
     plt.close(fig)
 
 
@@ -297,25 +297,25 @@ def make_comparison_figure(all_records):
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     out_path = os.path.join(OUT_DIR, "R_PNs_vs_ANs.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"[저장] {out_path}")
+    print(f"[saved] {out_path}")
     plt.close(fig)
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    print("R 결과 파일 읽는 중...")
+    print("Reading R result files...")
     all_records = {}
     for ch_name, ch_dir in CHANNELS.items():
         recs = load_channel(ch_dir)
         all_records[ch_name] = recs
-        print(f"  {ch_name}: {len(recs)}개 파일")
+        print(f"  {ch_name}: {len(recs)} files")
 
-    print("\n그래프 생성 중...")
+    print("\nGenerating plots...")
     make_timeseries_figure(all_records)
     make_spectra_figure(all_records)
     make_comparison_figure(all_records)
-    print("\n완료. 저장 위치:", OUT_DIR)
+    print("\nDone. Saved to:", OUT_DIR)
 
 
 if __name__ == "__main__":

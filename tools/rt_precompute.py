@@ -79,7 +79,7 @@ def preset(name):
     """현 캠페인 프리셋 RTConfig 반환 (cold/hot_pns/hot_ans). 새 캠페인은 RTConfig 직접 생성."""
     p = _campaign_presets()
     if name not in p:
-        raise ValueError(f"unknown preset '{name}' — 직접 RTConfig를 만들어 쓰세요. (있음: {list(p)})")
+        raise ValueError(f"unknown preset '{name}' — build an RTConfig directly. (available: {list(p)})")
     return p[name]
 
 
@@ -253,7 +253,7 @@ def append_rt(npz_path, raw_dir, wave_nm, config: RTConfig, file_list=None,
             done_set = set(ex.get("processed_files", []))
             ex_label = ex.get("label") or ex_label
         except Exception as e:
-            print(f"  [append_rt] 기존 npz 로드 실패 → 새로 생성: {e}")
+            print(f"  [append_rt] failed to load existing npz -> creating new: {e}")
 
     all_files   = _RT._resolve_files(raw_dir, file_list)
     new_files   = [f for f in all_files if os.path.basename(f) not in done_set]

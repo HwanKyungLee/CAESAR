@@ -93,14 +93,14 @@ def convert(files: list[str], mat: str, out_dir: str, chlabel: str | None, date:
     for fp in files:
         t, A, ch, off = read_wide(fp)
         if len(t) == 0:
-            print(f'  SKIP {os.path.basename(fp)}: 데이터 행 없음')
+            print(f'  SKIP {os.path.basename(fp)}: no data rows')
             continue
         channel = channel or ch
         secs_all.append(t)
         alpha_all.append(A)
-        print(f'  {os.path.basename(fp)}: {len(t)}행 (px offset {off})')
+        print(f'  {os.path.basename(fp)}: {len(t)} rows (px offset {off})')
     if not secs_all:
-        raise SystemExit('변환할 행이 없습니다.')
+        raise SystemExit('No rows to convert.')
     secs = np.concatenate(secs_all)
     A = np.vstack(alpha_all)
 
@@ -125,17 +125,17 @@ def convert(files: list[str], mat: str, out_dir: str, chlabel: str | None, date:
             alpha = np.full(N_PIX, np.nan)
         np.savetxt(os.path.join(folder, f'{ch}_{date}_{b + 1:06d}.dat'),
                    alpha.reshape(-1, 1), fmt='%20.6e')
-    print(f'완료: {n_written}/{nbin} bin 채움 → {folder}')
+    print(f'Done: filled {n_written}/{nbin} bins → {folder}')
     return folder
 
 
 def main():
-    p = argparse.ArgumentParser(description='wide 알파 → 박사님 per-bin 변환')
-    p.add_argument('inputs', nargs='+', help='wide *_alpha_trace.dat 파일(들) 또는 날짜 폴더')
-    p.add_argument('--mat', required=True, help='박사님 _avg_60s.mat (std_t 그리드)')
-    p.add_argument('--out', default=None, help='출력 폴더(기본: 입력 폴더)')
-    p.add_argument('--ch', default=None, help="채널 라벨(기본: 헤더 channel → 'ch{N}')")
-    p.add_argument('--date', default=None, help='YYYYMMDD(기본: 파일명에서 추출)')
+    p = argparse.ArgumentParser(description='wide alpha → per-bin conversion')
+    p.add_argument('inputs', nargs='+', help='wide *_alpha_trace.dat file(s) or date folder')
+    p.add_argument('--mat', required=True, help='_avg_60s.mat (std_t grid)')
+    p.add_argument('--out', default=None, help='output folder (default: input folder)')
+    p.add_argument('--ch', default=None, help="channel label (default: header channel -> 'ch{N}')")
+    p.add_argument('--date', default=None, help='YYYYMMDD (default: from filename)')
     args = p.parse_args()
 
     files = []
@@ -145,7 +145,7 @@ def main():
         else:
             files.append(inp)
     if not files:
-        raise SystemExit('입력에서 *_alpha_trace.dat 를 찾지 못했습니다.')
+        raise SystemExit('No *_alpha_trace.dat found in inputs.')
     out = args.out or os.path.dirname(os.path.abspath(files[0]))
     convert(files, args.mat, out, args.ch, args.date)
 

@@ -162,12 +162,12 @@ class ReflectanceCalculator:
                 or (self.valid_fraction < min_valid_fraction):
             self.quality_ok = False
             if contrast_med < min_contrast:
-                reason = (f"He/ZA 대비 부족 (median (He-ZA)/He = {contrast_med*100:.1f}% "
+                reason = (f"He/ZA contrast too low (median (He-ZA)/He = {contrast_med*100:.1f}% "
                           f"< {min_contrast*100:.0f}%)")
                 if contrast_med < 0:
                     reason += " — ZA>=He"
             elif contrast_med > max_contrast:
-                reason = (f"ZA 폭락(dropout) — 대비 과대 (median (He-ZA)/He = "
+                reason = (f"ZA dropout -- contrast too high (median (He-ZA)/He = "
                           f"{contrast_med*100:.1f}% > {max_contrast*100:.0f}%)")
             else:
                 reason = (f"valid {self.valid_fraction*100:.0f}% < "

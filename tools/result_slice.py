@@ -25,11 +25,11 @@ from core.result_io import (auto_out_name, merge_results, parse_when,  # noqa: E
 
 
 def main():
-    p = argparse.ArgumentParser(description='리트리벌 결과 자르기/합치기')
-    p.add_argument('inputs', nargs='+', help='결과 파일(.dat/.tsv) 1개 이상')
-    p.add_argument('--from', dest='t0', default=None, help="시작 'YYYY-MM-DD[ HH:MM[:SS]]'")
-    p.add_argument('--to', dest='t1', default=None, help="끝 (날짜만 주면 그날 23:59:59까지)")
-    p.add_argument('--out', default=None, help='출력 경로(기본: 자동 이름)')
+    p = argparse.ArgumentParser(description='slice/merge retrieval results')
+    p.add_argument('inputs', nargs='+', help='one or more result files (.dat/.tsv)')
+    p.add_argument('--from', dest='t0', default=None, help="start 'YYYY-MM-DD[ HH:MM[:SS]]'")
+    p.add_argument('--to', dest='t1', default=None, help="end (date only = until 23:59:59 that day)")
+    p.add_argument('--out', default=None, help='output path (default: auto name)')
     a = p.parse_args()
 
     try:
@@ -45,8 +45,8 @@ def main():
                      note=f'merged {len(a.inputs)} files, {ndup} dups removed, {n_in}→{len(rows)} rows')
     except ValueError as e:
         raise SystemExit(str(e))
-    print(f'완료: {out}')
-    print(f'  {len(rows)}행 ({rows[0][0]:%m-%d %H:%M} ~ {rows[-1][0]:%m-%d %H:%M})')
+    print(f'Done: {out}')
+    print(f'  {len(rows)} rows ({rows[0][0]:%m-%d %H:%M} ~ {rows[-1][0]:%m-%d %H:%M})')
 
 
 if __name__ == '__main__':
