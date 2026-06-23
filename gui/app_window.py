@@ -2609,6 +2609,10 @@ class CAESARAnalyzer(QMainWindow):
             rp = getattr(self, 'ref_props', {})
             active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
                 rp, 0.0, [0.0, 1.0], self.spin_step_limit.value())
+            # etalon 위상(e_p)을 theta 마지막에 추가 — objective_varpro가 theta[-1]을
+            # e_p로 읽으므로 워커(worker.py)와 동일하게 반드시 append해야 한다.
+            # (없으면 shift/squeeze 전부 Fix/Link 시 theta=[] → theta[-1] IndexError)
+            t0.append(0.0); lb.append(-np.pi); ub.append(np.pi)
             out = fitter.execute_varpro_fit(
                 vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
                 self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
