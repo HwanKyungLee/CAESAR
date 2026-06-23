@@ -2651,7 +2651,7 @@ class CAESARAnalyzer(QMainWindow):
         import pyqtgraph as pg
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Test Fit — {os.path.basename(fp)}")
-        dlg.resize(int(900 * self._s), int(640 * self._s))
+        dlg.resize(int(900 * self._s), int(720 * self._s))
         lay = QVBoxLayout(dlg)
         # 요약 라벨
         gtxt = "  ".join(f"{g}={ppb[g]:.2f}" for g in ppb)
@@ -2659,26 +2659,38 @@ class CAESARAnalyzer(QMainWindow):
             f"<b>ppb:</b> {gtxt}    <b>RMS:</b> {rms:.2e}    "
             f"<b>Shift:</b> {shifts[0]:+.2f}px  <b>Squeeze:</b> {squeezes[0]:.4f}    "
             f"T={T_C:.1f}°C P={P_mbar:.0f}mb"))
-        # 위: 데이터+모델 (+ 가스 성분 오버레이 S-C)
-        pw1 = pg.PlotWidget(); pw1.setBackground('w'); pw1.showGrid(x=True, y=True, alpha=0.3)
-        pw1.addLegend(offset=(10, 10))
-        pw1.plot(wl, data, pen=pg.mkPen('#1976D2', width=2), name='α data')
-        pw1.plot(wl, model, pen=pg.mkPen('#D32F2F', width=1.5), name='model')
         _pal = ["#388E3C", "#7B1FA2", "#0097A7", "#C2185B", "#5D4037"]
-        if gas_models is not None:
-            for gi, nm in enumerate(self.engine.gas_list):
-                gm = gas_models[gi] if gi < len(gas_models) else None
-                if gm is not None and len(gm) == len(wl):
-                    pw1.plot(wl, gm, pen=pg.mkPen(_pal[gi % len(_pal)], width=1, style=Qt.PenStyle.DashLine),
-                             name=f'{nm}')
-        pw1.setLabel('left', 'α (cm⁻¹)'); pw1.setLabel('bottom', 'Wavelength (nm)')
+        gms = [(gi, nm, gas_models[gi]) for gi, nm in enumerate(self.engine.gas_list)
+               if gas_models and gi < len(gas_models) and gas_models[gi] is not None
+               and len(gas_models[gi]) == len(wl)]
+        sum_gas = np.sum([g for _, _, g in gms], axis=0) if gms else np.zeros_like(wl)
+        diff_data = resid + sum_gas      # = α − (poly+etalon): 베이스라인 제거한 측정 미분광학두께
+
+        # ① 측정 vs 핏(가스합) — 베이스라인(다항식) 제거. 둘이 겹치면 좋은 핏.
+        pw1 = pg.PlotWidget(); pw1.setBackground('w'); pw1.showGrid(x=True, y=True, alpha=0.3)
+        pw1.addLegend(offset=(10, 6))
+        pw1.plot(wl, diff_data, pen=pg.mkPen('#1976D2', width=2), name='measured (baseline removed)')
+        pw1.plot(wl, sum_gas, pen=pg.mkPen('#D32F2F', width=1.5), name='fitted gases (Σ)')
+        pw1.setLabel('left', 'Diff α (cm⁻¹)')
+        pw1.setTitle('Measured vs fitted gases')
         lay.addWidget(pw1, 2)
-        # 아래: 잔차 (S-C)
+
+        # ② 레퍼런스(가스별 핏 기여) 모음 — 각 종의 흡수 지문. 선 크기 = 기여도.
         pw2 = pg.PlotWidget(); pw2.setBackground('w'); pw2.showGrid(x=True, y=True, alpha=0.3)
-        pw2.plot(wl, resid, pen=pg.mkPen('#455A64', width=1))
-        pw2.setLabel('left', 'Residual'); pw2.setLabel('bottom', 'Wavelength (nm)')
-        pw2.setTitle(f"Residual (RMS={rms:.2e})")
-        lay.addWidget(pw2, 1)
+        pw2.addLegend(offset=(10, 6))
+        for gi, nm, gm in gms:
+            pw2.plot(wl, gm, pen=pg.mkPen(_pal[gi % len(_pal)], width=1.5),
+                     name=f'{nm}  ({ppb.get(nm, float("nan")):.2f} ppb)')
+        pw2.setLabel('left', 'Diff α (cm⁻¹)')
+        pw2.setTitle('Reference contributions (per gas)')
+        lay.addWidget(pw2, 2)
+
+        # ③ 잔차 — 전체 모델 뺀 나머지. 평평한 노이즈면 좋은 핏.
+        pw3 = pg.PlotWidget(); pw3.setBackground('w'); pw3.showGrid(x=True, y=True, alpha=0.3)
+        pw3.plot(wl, resid, pen=pg.mkPen('#455A64', width=1))
+        pw3.setLabel('left', 'Residual'); pw3.setLabel('bottom', 'Wavelength (nm)')
+        pw3.setTitle(f"Residual (RMS={rms:.2e})")
+        lay.addWidget(pw3, 1)
         dlg.show()
 
     def _auto_apply_nm(self):
