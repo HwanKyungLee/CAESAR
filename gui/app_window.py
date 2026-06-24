@@ -696,6 +696,11 @@ class CAESARAnalyzer(QMainWindow):
         self.result_viewer = ResultViewerWidget(self)
         self.main_tabs.addTab(_tab_scroll(self.result_viewer), "📂 Result Viewer")
 
+        # Tab 4: Plot Maker (여러 결과를 메모리에 올려 자유 합성·시계열/산점도/Allan)
+        from .ui_plot_maker import PlotMakerWidget
+        self.plot_maker = PlotMakerWidget(self)
+        self.main_tabs.addTab(_tab_scroll(self.plot_maker), "📉 Plot Maker")
+
         right_layout.addWidget(self.main_tabs)
         
         # Keep Existing Signal Connections
