@@ -700,6 +700,10 @@ class CAESARAnalyzer(QMainWindow):
         from .ui_plot_maker import PlotMakerWidget
         self.plot_maker = PlotMakerWidget(self)
         self.main_tabs.addTab(_tab_scroll(self.plot_maker), "📉 Plot Maker")
+        # 결과뷰어 → Plot Maker 브리지: 선택 파일을 선반에 싣고 탭 전환
+        self.result_viewer.send_to_plotmaker.connect(
+            lambda paths: (self.plot_maker.add_paths(paths),
+                           self.main_tabs.setCurrentWidget(self._tab_pages[self.plot_maker])))
 
         right_layout.addWidget(self.main_tabs)
         
