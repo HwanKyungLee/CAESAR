@@ -223,6 +223,10 @@ class PlotMode:
     def render(self):
         raise NotImplementedError
 
+    def render_mpl(self, fig):
+        """출판용 matplotlib 렌더(고화질 PNG/PDF/SVG). 미지원 모드는 NotImplementedError."""
+        raise NotImplementedError
+
 
 # ── Time series ───────────────────────────────────────────────────────
 @register_mode
@@ -346,6 +350,47 @@ class TimeSeriesMode(PlotMode):
                             + (f" · resample {host.resample_sec}s" if host.resample_sec else "")
                             + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else ""))
 
+    def render_mpl(self, fig):
+        import matplotlib.dates as mdates
+        host = self.host
+        ax = fig.add_subplot(111)
+        ax_r = None
+        any_time = False
+        n = 0
+        hl, ll = [], []   # 두 축 범례 통합
+        for lab, axis in self._series:
+            res = host.resolve(lab)
+            if res is None:
+                continue
+            ds, col, y, t = res
+            if t is not None:
+                xs, ys = resample_mean(t, y, host.resample_sec)
+                ys = smooth(ys, host.smooth_n)
+                xv = [datetime.fromtimestamp(v) for v in xs]
+                any_time = True
+            else:
+                xv, ys = np.arange(len(y), dtype=float), smooth(y, host.smooth_n)
+            color = _PALETTE[n % len(_PALETTE)]
+            if axis == "R":
+                if ax_r is None:
+                    ax_r = ax.twinx()
+                    ax_r.set_ylabel("Value (right)")
+                line, = ax_r.plot(xv, ys, color=color, lw=1.6, label=f"{lab} (R)")
+            else:
+                line, = ax.plot(xv, ys, color=color, lw=1.6, label=lab)
+            hl.append(line)
+            ll.append(line.get_label())
+            n += 1
+        ax.set_xlabel("Time" if any_time else "index")
+        ax.set_ylabel("Value (left)")
+        ax.set_title(f"Time series — {n} series")
+        ax.grid(True, alpha=0.3)
+        if any_time:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+            fig.autofmt_xdate()
+        if hl:
+            ax.legend(hl, ll, loc="best", fontsize=9)
+
 
 # ── Scatter + regression ──────────────────────────────────────────────
 @register_mode
@@ -399,19 +444,15 @@ class ScatterMode(PlotMode):
             self._cx.setCurrentText(cfg.get("x", ""))
             self._cy.setCurrentText(cfg.get("y", ""))
 
-    def render(self):
+    def _xy(self):
+        """선택한 X/Y 컬럼을 정렬해 (xv, yv) 반환. 다른 데이터셋이면 시간 보간. 없으면 None."""
         host = self.host
-        host.clear_plot()
-        host.enable_right_axis(False)
-        host.set_time_axis(False)
         rx = host.resolve(self._cx.currentText())
         ry = host.resolve(self._cy.currentText())
         if rx is None or ry is None:
-            host.set_status("Pick X and Y columns.")
-            return
+            return None
         dx, cx, xv, tx = rx
         dy, cy, yv, ty = ry
-        # 다른 데이터셋이면 시간축으로 정렬(Y를 X 시각에 보간)
         if dx is not dy and tx is not None and ty is not None:
             mt = np.isfinite(ty) & np.isfinite(yv)
             if mt.sum() >= 2:
@@ -421,6 +462,18 @@ class ScatterMode(PlotMode):
         else:
             n = min(len(xv), len(yv))
             xv, yv = xv[:n], yv[:n]
+        return xv, yv
+
+    def render(self):
+        host = self.host
+        host.clear_plot()
+        host.enable_right_axis(False)
+        host.set_time_axis(False)
+        xy = self._xy()
+        if xy is None:
+            host.set_status("Pick X and Y columns.")
+            return
+        xv, yv = xy
         m = np.isfinite(xv) & np.isfinite(yv)
         host.p1.plot(xv[m], yv[m], pen=None, symbol="o", symbolSize=5,
                      symbolBrush=(33, 150, 243, 120), symbolPen=None, name="data")
@@ -438,6 +491,30 @@ class ScatterMode(PlotMode):
             host.p1.setTitle("Scatter")
             host.set_status("Not enough finite points for regression.")
         host.update_views()
+
+    def render_mpl(self, fig):
+        ax = fig.add_subplot(111)
+        xy = self._xy()
+        if xy is None:
+            ax.set_title("Scatter — pick X and Y")
+            return
+        xv, yv = xy
+        m = np.isfinite(xv) & np.isfinite(yv)
+        ax.scatter(xv[m], yv[m], s=14, c="#2196F3", alpha=0.5, edgecolors="none",
+                   label="data")
+        ax.set_xlabel(self._cx.currentText())
+        ax.set_ylabel(self._cy.currentText())
+        r = regress(xv, yv)
+        if r:
+            slope, inter, r2, n = r
+            xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
+            ax.plot(xline, slope * xline + inter, color="#D32F2F", lw=2,
+                    label=f"y={slope:.4g}x+{inter:.4g}\n$R^2$={r2:.4f}, n={n}")
+            ax.set_title(f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}")
+        else:
+            ax.set_title("Scatter")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=9)
 
 
 # ── Allan deviation ───────────────────────────────────────────────────
@@ -511,6 +588,27 @@ class AllanMode(PlotMode):
         host.set_status(f"optimal averaging ≈ {taus[imin]:.0f} s  (min Allan dev {ad[imin]:.3g})")
         host.update_views()
 
+    def render_mpl(self, fig):
+        ax = fig.add_subplot(111)
+        res = self.host.resolve(self._c.currentText())
+        out = None
+        if res:
+            ds, col, y, t = res
+            out = allan_deviation(t, y)
+        if out is None:
+            ax.set_title("Allan deviation — insufficient/irregular data")
+            return
+        taus, ad = out
+        ax.loglog(taus, ad, "o-", color="#2196F3", lw=1.8, ms=5,
+                  label=self._c.currentText())
+        imin = int(np.argmin(ad))
+        ax.axvline(taus[imin], color="#888", ls="--", lw=1)
+        ax.set_xlabel(r"Averaging time $\tau$ (s)")
+        ax.set_ylabel(r"Allan deviation $\sigma(\tau)$")
+        ax.set_title(f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s")
+        ax.grid(True, which="both", alpha=0.3)
+        ax.legend(loc="best", fontsize=9)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # 메인 위젯
@@ -561,9 +659,23 @@ class PlotMakerWidget(QWidget):
         bar.addWidget(self._smooth_spin)
 
         bar.addStretch(1)
-        for txt, fn in (("📷 PNG", self._export_png), ("📑 CSV", self._export_csv),
-                        ("💾 Save", self._save_cfg), ("📂 Load", self._load_cfg)):
+        # 출판용 DPI(벡터 PDF/SVG에는 영향 없음, PNG에만 적용)
+        bar.addWidget(QLabel("DPI:"))
+        self._dpi_spin = QSpinBox()
+        self._dpi_spin.setRange(72, 1200)
+        self._dpi_spin.setValue(300)
+        self._dpi_spin.setSingleStep(50)
+        self._dpi_spin.setToolTip("Publish PNG 해상도(벡터 PDF/SVG는 무관)")
+        bar.addWidget(self._dpi_spin)
+        for txt, fn, tip in (
+                ("🖼 Publish", self._export_publish,
+                 "matplotlib 고화질 출력 (PNG 고해상도 / 벡터 PDF·SVG)"),
+                ("📷 PNG", self._export_png, "현재 화면 그대로 빠른 PNG (pyqtgraph 2400px)"),
+                ("📑 CSV", self._export_csv, "시계열 데이터 CSV"),
+                ("💾 Save", self._save_cfg, "플롯 설정 저장"),
+                ("📂 Load", self._load_cfg, "플롯 설정 불러오기")):
             b = QPushButton(txt)
+            b.setToolTip(tip)
             b.clicked.connect(fn)
             bar.addWidget(b)
         root.addLayout(bar)
@@ -738,6 +850,36 @@ class PlotMakerWidget(QWidget):
         self._mode.render()
 
     # ── Export / config ────────────────────────────────────────────────
+    def _export_publish(self):
+        """현재 모드를 matplotlib로 재렌더 → 고화질 PNG / 벡터 PDF·SVG."""
+        out, _ = QFileDialog.getSaveFileName(
+            self, "Publish (high quality)", "plot.png",
+            "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)")
+        if not out:
+            return
+        if not os.path.splitext(out)[1]:
+            out += ".png"
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+        except Exception as e:
+            QMessageBox.warning(self, "Publish", f"matplotlib 사용 불가: {e}")
+            return
+        try:
+            fig = Figure(figsize=(10, 5.5))
+            FigureCanvasAgg(fig)          # savefig용 캔버스 부착(백엔드 무관)
+            self._mode.render_mpl(fig)
+            fig.tight_layout()
+            fig.savefig(out, dpi=self._dpi_spin.value(), bbox_inches="tight")
+            ext = os.path.splitext(out)[1].lstrip(".").upper()
+            extra = f" @ {self._dpi_spin.value()}dpi" if ext == "PNG" else " (vector)"
+            self.set_status(f"Published: {os.path.basename(out)} [{ext}{extra}]")
+        except NotImplementedError:
+            QMessageBox.information(self, "Publish",
+                                   "이 모드는 아직 고화질 출력을 지원하지 않습니다.")
+        except Exception as e:
+            QMessageBox.warning(self, "Publish", f"Failed: {e}")
+
     def _export_png(self):
         import pyqtgraph.exporters as pgex
         out, _ = QFileDialog.getSaveFileName(self, "Export PNG", "plot.png", "PNG (*.png)")
