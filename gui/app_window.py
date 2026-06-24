@@ -29,6 +29,28 @@ class CAESARAnalyzer(QMainWindow):
     Main Window Controller for CAESAR Pro v1.0.
     Integrates and commands all modules (Engine, Generators, Calibrations, Worker Threads, and Monitors).
     """
+    # ══════════════════════════════════════════════════════════════════════
+    #  CAESARAnalyzer — 메서드 목차 (각 섹션은 "§N" 으로 검색)
+    # ══════════════════════════════════════════════════════════════════════
+    #   §1  Init & UI 구성 (init_ui, showEvent, shortcuts)
+    #   §2  Setup 탭: daily-run + R/Leff 차트
+    #   §3  Cavity 탭 + FWHM/ILS 검증
+    #   §4  입력: I0 / dark / offset / flags
+    #   §5  알파 생성 (export + generator)
+    #   §6  I0 / R 진단 (auto-extract, diagnostic plot)
+    #   §7  다이얼로그 런처: ref / R / wavecal
+    #   §8  Test Fit (1-scan 미리보기)
+    #   §9  핏 범위 + 레퍼런스 관리
+    #   §10 데이터 로드 + 채널 분배
+    #   §11 분석 실행 / 워커 / autosave / closeEvent
+    #   §12 결과 테이블 / QC / fast 렌더
+    #   §13 저장 + 결과뷰어 연동
+    #   §14 채널 탭 + 시나리오 config
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ══════════════════════════════════════════════════════════════════════
+    # §1  Init & UI 구성 (init_ui, showEvent, shortcuts)
+    # ══════════════════════════════════════════════════════════════════════
     def __init__(self):
         super().__init__()
         
@@ -717,6 +739,9 @@ class CAESARAnalyzer(QMainWindow):
     # =========================================================
     # Tab 0: Daily Run
     # =========================================================
+    # ══════════════════════════════════════════════════════════════════════
+    # §2  Setup 탭: daily-run + R/Leff 차트
+    # ══════════════════════════════════════════════════════════════════════
     def setup_daily_run_tab(self):
         """Build the Daily Run tab: scenario, setup status checklist, R trend charts."""
         lay = QVBoxLayout(self.daily_run_tab)
@@ -1101,6 +1126,9 @@ class CAESARAnalyzer(QMainWindow):
         except Exception as e:
             self.plot_diagnostic.setTitle(f"plot failed: {e}")
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §3  Cavity 탭 + FWHM/ILS 검증
+    # ══════════════════════════════════════════════════════════════════════
     def setup_cavity_tab(self):
         """Configure the layout for the Pre-Analysis Cavity Setup tab."""
         # Main horizontal layout: Controls on Left, Diagnostics on Right
@@ -1794,6 +1822,9 @@ class CAESARAnalyzer(QMainWindow):
             QMessageBox.critical(self, "FWHM Best-Match",
                                  f"Failed to register reference:\n{e}")
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §4  입력: I0 / dark / offset / flags
+    # ══════════════════════════════════════════════════════════════════════
     def browse_i0_file(self):
         """Browse and set the I0 (Zero-air) measurement file."""
         filepath, _ = QFileDialog.getOpenFileName(self, "Select I0 File", self._dlg_dir('i0'), "Data Files (*.dat *.txt *.csv)")
@@ -1882,6 +1913,9 @@ class CAESARAnalyzer(QMainWindow):
         except Exception:
             return None
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §5  알파 생성 (export + generator)
+    # ══════════════════════════════════════════════════════════════════════
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
                            status_cb=None, done_cb=None, drnam_mat=None, ch_tab_map=None,
                            progress_cb=None, channels=None, gen_px_range=None, rt_map=None):
@@ -2187,6 +2221,9 @@ class CAESARAnalyzer(QMainWindow):
             self._alpha_export_worker = None
         self._start_next_alpha_export()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §6  I0 / R 진단 (auto-extract, diagnostic plot)
+    # ══════════════════════════════════════════════════════════════════════
     def auto_extract_i0(self):
         """Scans the loaded file list for ZA-flagged files and averages them to form I0."""
         if not hasattr(self, 'file_list') or not self.file_list:
@@ -2351,6 +2388,9 @@ class CAESARAnalyzer(QMainWindow):
         self.update_leff()
         self._refresh_setup_status()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §7  다이얼로그 런처: ref / R / wavecal
+    # ══════════════════════════════════════════════════════════════════════
     def open_ref_properties(self):
         """Opens the RefPropertiesDialog to configure Shift/Squeeze bounds."""
         if not hasattr(self, 'engine') or len(self.engine.gas_list) == 0:
@@ -2537,6 +2577,9 @@ class CAESARAnalyzer(QMainWindow):
         except Exception as e: 
             QMessageBox.critical(self, "Error", f"Failed to load wavelength file:\n{str(e)}")
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §8  Test Fit (1-scan 미리보기)
+    # ══════════════════════════════════════════════════════════════════════
     def _test_fit(self):
         """S-B/S-C: 첫 알파 스캔 1개만 핏 → 데이터/모델/잔차/레퍼런스 오버레이 팝업.
         실제 핏 경로(DoasFitter + get_model_components)를 그대로 써서 RUN과 동일하게 검증."""
@@ -2693,6 +2736,9 @@ class CAESARAnalyzer(QMainWindow):
         lay.addWidget(pw3, 1)
         dlg.show()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §9  핏 범위 + 레퍼런스 관리
+    # ══════════════════════════════════════════════════════════════════════
     def _auto_apply_nm(self):
         """nm 스핀 수정 완료 시 px 자동 동기화(웨이브칼 없으면 조용히 패스 — 팝업 금지).
         init 중에는 monitor가 아직 없을 수 있음 — hasattr 가드 필수."""
@@ -2950,6 +2996,9 @@ class CAESARAnalyzer(QMainWindow):
     # ---------------------------------------------------------
     # Measurement Data Loading & UI State Logic
     # ---------------------------------------------------------
+    # ══════════════════════════════════════════════════════════════════════
+    # §10 데이터 로드 + 채널 분배
+    # ══════════════════════════════════════════════════════════════════════
     def load_data(self):
         """
         Smart router that allows choosing between file or folder loading
@@ -3372,6 +3421,9 @@ class CAESARAnalyzer(QMainWindow):
             groups.setdefault(ch, []).append(entry)
         return groups or None
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §11 분석 실행 / 워커 / autosave / closeEvent
+    # ══════════════════════════════════════════════════════════════════════
     def start_analysis(self):
         """
         Validates settings, builds the initial parameter vector p0, and starts
@@ -3971,6 +4023,9 @@ class CAESARAnalyzer(QMainWindow):
                 pass
             self._autosave_fh = None
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §12 결과 테이블 / QC / fast 렌더
+    # ══════════════════════════════════════════════════════════════════════
     @staticmethod
     def _shsq_text(gases, props):
         """가스별 Shift/Squeeze 모드 한 줄 요약 (Link 관계 포함)."""
@@ -4397,6 +4452,9 @@ class CAESARAnalyzer(QMainWindow):
         gtag = f"_gT{int(gasT)}" if gasT > 0 else ""
         return lbl, f"{win}_Poly{poly}_{sh}{gtag}"
 
+    # ══════════════════════════════════════════════════════════════════════
+    # §13 저장 + 결과뷰어 연동
+    # ══════════════════════════════════════════════════════════════════════
     def save(self, auto=False):
         """
         Exports all analysis results to a tab-separated .dat or .csv file.
@@ -4799,6 +4857,9 @@ class CAESARAnalyzer(QMainWindow):
         return eng
 
     # ── 채널 탭(독립 설정) ─────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # §14 채널 탭 + 시나리오 config
+    # ══════════════════════════════════════════════════════════════════════
     def _on_channel_tab_changed(self, idx):
         """탭 전환 — 현재 채널 설정을 저장하고 선택 채널 설정을 UI/엔진에 로드."""
         if self._switching_channel or idx < 0:
