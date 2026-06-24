@@ -704,6 +704,8 @@ class CAESARAnalyzer(QMainWindow):
         self.result_viewer.send_to_plotmaker.connect(
             lambda paths: (self.plot_maker.add_paths(paths),
                            self.main_tabs.setCurrentWidget(self._tab_pages[self.plot_maker])))
+        # 결과뷰어·Plot Maker 탭에서는 왼쪽 분석패널을 접어 그래프가 전체 폭을 쓰게 한다.
+        self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
 
         right_layout.addWidget(self.main_tabs)
         
@@ -734,10 +736,37 @@ class CAESARAnalyzer(QMainWindow):
                 need = self._left_inner.sizeHint().width() + sbw + 6
                 _lw = min(need, int(self.width() * 0.55))
                 _lw = max(_lw, int(360 * self._s))
+                self._left_min_w = _lw          # 탭 복원 시 사용
                 self._left_scroll.setMinimumWidth(_lw)
                 self._splitter.setSizes([_lw, max(400, self.width() - _lw)])
             except Exception:
                 pass
+            # 첫 표시 직후 현재 탭 기준으로 좌패널 접힘 상태 동기화
+            self._on_main_tab_changed(self.main_tabs.currentIndex())
+
+    def _on_main_tab_changed(self, _idx):
+        """결과뷰어/Plot Maker 탭에서는 왼쪽 분석패널을 접어 그래프에 전체 폭을 준다.
+        다른 탭으로 돌아오면 원래 폭으로 복원. (사용자는 스플리터로 다시 조절 가능)"""
+        if not getattr(self, "_splitter_inited", False):
+            return
+        page = self.main_tabs.currentWidget()
+        wide_pages = (self._tab_pages.get(self.result_viewer),
+                      self._tab_pages.get(self.plot_maker))
+        if page in wide_pages:
+            if not getattr(self, "_left_collapsed", False):
+                self._saved_sizes = self._splitter.sizes()
+                self._left_collapsed = True
+            self._splitter.setCollapsible(0, True)
+            self._left_scroll.setMinimumWidth(0)
+            self._splitter.setSizes([0, max(400, self.width())])
+        elif getattr(self, "_left_collapsed", False):
+            self._left_collapsed = False
+            self._splitter.setCollapsible(0, False)
+            lw = getattr(self, "_left_min_w", int(360 * self._s))
+            self._left_scroll.setMinimumWidth(lw)
+            sizes = getattr(self, "_saved_sizes", None)
+            self._splitter.setSizes(sizes if sizes else
+                                    [lw, max(400, self.width() - lw)])
 
     def _setup_shortcuts(self):
         """Register keyboard shortcuts for common operations."""
