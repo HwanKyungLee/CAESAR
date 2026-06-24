@@ -1,5 +1,4 @@
 import sys
-import time
 import os
 
 # ── 크래시 로그 ──────────────────────────────────────────────────────────────
@@ -30,11 +29,13 @@ sys.excepthook = _excepthook
 from core.session_log import install as _install_session_log
 _install_session_log()
 
+# NOTE: keep these top-level imports lightweight. The heavy import
+# (`gui.app_window`, which pulls in matplotlib + scipy via the dialog
+# modules) is deferred until *after* the splash is on screen — otherwise
+# the logo can't appear until ~a second of import work finishes first.
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
-
-from gui.app_window import CAESARAnalyzer  # The main application window class
 
 # ─── Entry point ────────────────────────────────────────────────────────────
 # Everything starts here when you run  python main.py
@@ -43,15 +44,9 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # Fusion style: clean, modern look on all platforms
 
-    # Scale font size relative to screen height (reference: 1080p → 9pt)
-    from core.data_io import ui_scale
-    _s = ui_scale()
-    _font = app.font()
-    _font.setPointSize(max(7, round(9 * _s)))
-    app.setFont(_font)
-
     # ── Splash screen ────────────────────────────────────────────────────────
-    # Show a logo image while the heavy main window is initializing in the background
+    # Show the logo FIRST, before any heavy module import or window build, so it
+    # appears almost instantly. Everything slow below runs while it is visible.
     splash_pixmap = QPixmap("Argos.png")
     splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
     splash.show()
@@ -63,18 +58,30 @@ if __name__ == '__main__':
         Qt.GlobalColor.white
     )
 
-    # Force the event loop to process pending events so the splash actually
-    # renders on screen before the next line blocks the thread
+    # Force the event loop to paint the splash before the blocking work below
     app.processEvents()
 
+    # Scale font size relative to screen height (reference: 1080p → 9pt)
+    from core.data_io import ui_scale
+    _s = ui_scale()
+    _font = app.font()
+    _font.setPointSize(max(7, round(9 * _s)))
+    app.setFont(_font)
 
     # ── Main window initialization ───────────────────────────────────────────
-    # CAESARAnalyzer.__init__ loads the engine, builds every widget, and
-    # connects all signals — this is the slow part covered by the splash
-    ex = CAESARAnalyzer()
+    # Importing app_window loads matplotlib/scipy (heaviest part of startup);
+    # CAESARAnalyzer.__init__ then builds every widget and connects all signals.
+    # Both run under the splash so the user sees the logo the whole time.
+    from gui.app_window import CAESARAnalyzer  # The main application window class
 
-    # Brief pause so the splash remains visible before the main window appears
-    time.sleep(0.5)
+    splash.showMessage(
+        "Building interface...",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
+        Qt.GlobalColor.white
+    )
+    app.processEvents()
+
+    ex = CAESARAnalyzer()
 
     ex.showMaximized()
 
