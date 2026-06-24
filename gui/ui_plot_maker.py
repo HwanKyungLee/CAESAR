@@ -1020,9 +1020,11 @@ class PlotMakerWidget(QWidget):
 
     # ── UI ────────────────────────────────────────────────────────────
     def _init_ui(self):
+        from gui.flow_layout import FlowLayout
         root = QVBoxLayout(self)
 
-        bar = QHBoxLayout()
+        # 폭이 좁아지면 버튼이 다음 줄로 흐르게(잘림 방지)
+        bar = FlowLayout(spacing=6)
         b_add = QPushButton("➕ Add data")
         b_add.clicked.connect(self._add_data)
         bar.addWidget(b_add)
@@ -1051,7 +1053,6 @@ class PlotMakerWidget(QWidget):
         self._smooth_spin.valueChanged.connect(self._on_transform_changed)
         bar.addWidget(self._smooth_spin)
 
-        bar.addStretch(1)
         # 출판용 DPI(벡터 PDF/SVG에는 영향 없음, PNG에만 적용)
         bar.addWidget(QLabel("DPI:"))
         self._dpi_spin = QSpinBox()
