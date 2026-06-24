@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
     QComboBox, QSplitter, QTreeWidget, QTreeWidgetItem, QListWidget,
     QListWidgetItem, QMessageBox, QSpinBox, QSizePolicy, QStackedWidget,
+    QCheckBox, QLineEdit, QGroupBox, QFormLayout,
 )
 from PyQt6.QtCore import Qt
 
@@ -227,6 +228,10 @@ class PlotMode:
         """출판용 matplotlib 렌더(고화질 PNG/PDF/SVG). 미지원 모드는 NotImplementedError."""
         raise NotImplementedError
 
+    def csv_table(self):
+        """CSV 내보내기용 (headers, rows) 반환. 지원 안 하면 None."""
+        return None
+
 
 # ── Time series ───────────────────────────────────────────────────────
 @register_mode
@@ -236,7 +241,7 @@ class TimeSeriesMode(PlotMode):
 
     def __init__(self, host):
         super().__init__(host)
-        self._series = []   # [(label, axis 'L'/'R')]
+        self._series = []   # [[label, axis 'L'/'R', color|None], ...]
         self._w = None
 
     def options_widget(self):
@@ -248,15 +253,23 @@ class TimeSeriesMode(PlotMode):
         row = QHBoxLayout()
         b_l = QPushButton("+ Left Y")
         b_r = QPushButton("+ Right Y")
-        b_del = QPushButton("− Remove")
         b_l.clicked.connect(lambda: self._add("L"))
         b_r.clicked.connect(lambda: self._add("R"))
-        b_del.clicked.connect(self._remove)
-        for b in (b_l, b_r, b_del):
-            row.addWidget(b)
+        row.addWidget(b_l)
+        row.addWidget(b_r)
         lay.addLayout(row)
+        row2 = QHBoxLayout()
+        b_c = QPushButton("🎨 Color")
+        b_del = QPushButton("− Remove")
+        b_c.clicked.connect(self._pick_color)
+        b_del.clicked.connect(self._remove)
+        row2.addWidget(b_c)
+        row2.addWidget(b_del)
+        lay.addLayout(row2)
         self._list = QListWidget()
-        self._list.setToolTip("선반에서 컬럼을 고른 뒤 [+ Left/Right Y]. 항목 더블클릭 시 좌↔우 전환.")
+        self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self._list.setToolTip("선반에서 컬럼 선택 후 [+ Left/Right Y].\n"
+                              "더블클릭 = 좌↔우 전환, 🎨 = 선택 시리즈 색 지정.")
         self._list.itemDoubleClicked.connect(self._toggle_axis)
         lay.addWidget(self._list)
         self._w = w
@@ -264,38 +277,57 @@ class TimeSeriesMode(PlotMode):
 
     def _add(self, axis):
         for lab in self.host.selected_columns():
-            if (lab, axis) not in self._series:
-                self._series.append((lab, axis))
+            if not any(s[0] == lab and s[1] == axis for s in self._series):
+                self._series.append([lab, axis, None])
         self._refresh_list()
         self.render()
 
+    def _sel_indices(self):
+        return sorted(it.data(Qt.ItemDataRole.UserRole)
+                      for it in self._list.selectedItems())
+
     def _remove(self):
-        for it in self._list.selectedItems():
-            tup = it.data(Qt.ItemDataRole.UserRole)
-            if tup in self._series:
-                self._series.remove(tup)
+        idx = set(self._sel_indices())
+        if not idx:
+            return
+        self._series = [s for i, s in enumerate(self._series) if i not in idx]
         self._refresh_list()
         self.render()
 
     def _toggle_axis(self, item):
-        tup = item.data(Qt.ItemDataRole.UserRole)
-        if tup in self._series:
-            i = self._series.index(tup)
-            self._series[i] = (tup[0], "R" if tup[1] == "L" else "L")
+        i = item.data(Qt.ItemDataRole.UserRole)
+        if i is not None and 0 <= i < len(self._series):
+            self._series[i][1] = "R" if self._series[i][1] == "L" else "L"
             self._refresh_list()
             self.render()
 
+    def _pick_color(self):
+        from PyQt6.QtWidgets import QColorDialog
+        idx = self._sel_indices()
+        if not idx:
+            self.host.set_status("색을 바꿀 시리즈를 목록에서 선택하세요.")
+            return
+        c = QColorDialog.getColor()
+        if not c.isValid():
+            return
+        for i in idx:
+            self._series[i][2] = c.name()
+        self._refresh_list()
+        self.render()
+
     def _refresh_list(self):
+        from PyQt6.QtGui import QColor
         self._list.clear()
-        for lab, axis in self._series:
+        for i, (lab, axis, color) in enumerate(self._series):
             it = QListWidgetItem(f"[{axis}] {lab}")
-            it.setData(Qt.ItemDataRole.UserRole, (lab, axis))
+            if color:
+                it.setForeground(QColor(color))
+            it.setData(Qt.ItemDataRole.UserRole, i)
             self._list.addItem(it)
 
     def on_shelf_changed(self):
-        # 사라진 데이터셋의 시리즈 정리
         valid = set(self.host.column_choices())
-        self._series = [(l, a) for (l, a) in self._series if l in valid]
+        self._series = [s for s in self._series if s[0] in valid]
         if self._w:
             self._refresh_list()
 
@@ -303,50 +335,57 @@ class TimeSeriesMode(PlotMode):
         return {"series": self._series}
 
     def from_config(self, cfg):
-        self._series = [tuple(s) for s in cfg.get("series", [])]
+        self._series = []
+        for s in cfg.get("series", []):
+            s = list(s)
+            while len(s) < 3:
+                s.append(None)
+            self._series.append([s[0], s[1], s[2]])
         if self._w:
             self._refresh_list()
+
+    def _proc(self, y, t):
+        """리샘플+평활 적용 → (x, y). 시간 없으면 인덱스."""
+        if t is not None:
+            xs, ys = resample_mean(t, y, self.host.resample_sec)
+        else:
+            xs, ys = np.arange(len(y), dtype=float), y
+        return xs, smooth(ys, self.host.smooth_n)
 
     def render(self):
         host = self.host
         host.clear_plot()
-        use_right = any(a == "R" for _, a in self._series)
+        use_right = any(s[1] == "R" for s in self._series)
         host.enable_right_axis(use_right)
         any_time = False
-        n_left = n_right = 0
-        for lab, axis in self._series:
+        n = 0
+        for lab, axis, color in self._series:
             res = host.resolve(lab)
             if res is None:
                 continue
             ds, col, y, t = res
-            x = t if t is not None else np.arange(len(y), dtype=float)
             if t is not None:
                 any_time = True
-            xs, ys = resample_mean(x if t is not None else None, y, host.resample_sec)
-            if xs is None:
-                xs, ys = x, y
-            ys = smooth(ys, host.smooth_n)
+            xs, ys = self._proc(y, t)
+            ci = color or _PALETTE[n % len(_PALETTE)]
             if axis == "R":
-                col_i = _PALETTE[(n_left + n_right) % len(_PALETTE)]
-                curve = pg.PlotDataItem(xs, ys, pen=pg.mkPen(col_i, width=2),
+                curve = pg.PlotDataItem(xs, ys, pen=pg.mkPen(ci, width=2),
                                         name=f"{lab} (R)")
                 host.vb_right.addItem(curve)
                 if host.legend is not None:
                     host.legend.addItem(curve, f"{lab} (R)")
-                n_right += 1
             else:
-                col_i = _PALETTE[(n_left + n_right) % len(_PALETTE)]
-                host.p1.plot(xs, ys, pen=pg.mkPen(col_i, width=2), name=lab)
-                n_left += 1
+                host.p1.plot(xs, ys, pen=pg.mkPen(ci, width=2), name=lab)
+            n += 1
         host.set_time_axis(any_time)
-        host.p1.setLabel("bottom", "Time" if any_time else "index")
-        host.p1.setLabel("left", "Value (left)")
+        host.p1.setLabel("bottom", host.lbl("xlabel", "Time" if any_time else "index"))
+        host.p1.setLabel("left", host.lbl("ylabel", "Value (left)"))
         if use_right:
-            host.set_right_label("Value (right)")
-        host.p1.setTitle(f"Time series — {n_left + n_right} series")
+            host.set_right_label(host.lbl("rlabel", "Value (right)"))
+        host.p1.setTitle(host.lbl("title", f"Time series — {n} series"))
         host.update_views()
-        if n_left + n_right:
-            host.set_status(f"{n_left} left · {n_right} right series"
+        if n:
+            host.set_status(f"{n} series"
                             + (f" · resample {host.resample_sec}s" if host.resample_sec else "")
                             + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else ""))
 
@@ -358,38 +397,74 @@ class TimeSeriesMode(PlotMode):
         any_time = False
         n = 0
         hl, ll = [], []   # 두 축 범례 통합
-        for lab, axis in self._series:
+        for lab, axis, color in self._series:
             res = host.resolve(lab)
             if res is None:
                 continue
             ds, col, y, t = res
+            xs, ys = self._proc(y, t)
             if t is not None:
-                xs, ys = resample_mean(t, y, host.resample_sec)
-                ys = smooth(ys, host.smooth_n)
                 xv = [datetime.fromtimestamp(v) for v in xs]
                 any_time = True
             else:
-                xv, ys = np.arange(len(y), dtype=float), smooth(y, host.smooth_n)
-            color = _PALETTE[n % len(_PALETTE)]
+                xv = xs
+            ci = color or _PALETTE[n % len(_PALETTE)]
             if axis == "R":
                 if ax_r is None:
                     ax_r = ax.twinx()
-                    ax_r.set_ylabel("Value (right)")
-                line, = ax_r.plot(xv, ys, color=color, lw=1.6, label=f"{lab} (R)")
+                    ax_r.set_ylabel(host.lbl("rlabel", "Value (right)"))
+                line, = ax_r.plot(xv, ys, color=ci, lw=1.6, label=f"{lab} (R)")
             else:
-                line, = ax.plot(xv, ys, color=color, lw=1.6, label=lab)
+                line, = ax.plot(xv, ys, color=ci, lw=1.6, label=lab)
             hl.append(line)
             ll.append(line.get_label())
             n += 1
-        ax.set_xlabel("Time" if any_time else "index")
-        ax.set_ylabel("Value (left)")
-        ax.set_title(f"Time series — {n} series")
+        ax.set_xlabel(host.lbl("xlabel", "Time" if any_time else "index"))
+        ax.set_ylabel(host.lbl("ylabel", "Value (left)"))
+        ax.set_title(host.lbl("title", f"Time series — {n} series"))
         ax.grid(True, alpha=0.3)
         if any_time:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
             fig.autofmt_xdate()
         if hl:
             ax.legend(hl, ll, loc="best", fontsize=9)
+
+    def csv_table(self):
+        host = self.host
+        cols, time_ref = {}, None
+        for lab, axis, color in self._series:
+            r = host.resolve(lab)
+            if r is None:
+                continue
+            ds, col, y, t = r
+            xs, ys = self._proc(y, t)
+            if t is None:
+                xs = None
+            cols[lab] = (xs, ys)
+            if time_ref is None and xs is not None:
+                time_ref = xs
+        if not cols:
+            return None
+        if time_ref is not None:
+            headers = ["datetime"] + list(cols.keys())
+            rows = []
+            for i, tv in enumerate(time_ref):
+                row = [datetime.fromtimestamp(tv).strftime("%Y-%m-%d %H:%M:%S")]
+                for lab in cols:
+                    xs, ys = cols[lab]
+                    if xs is time_ref and i < len(ys):
+                        row.append(f"{ys[i]:.6g}")
+                    elif xs is not None:
+                        row.append(f"{np.interp(tv, xs, ys):.6g}")
+                    else:
+                        row.append("")
+                rows.append(row)
+            return headers, rows
+        headers = ["index"] + list(cols.keys())
+        n = max(len(v[1]) for v in cols.values())
+        rows = [[i] + [f"{cols[l][1][i]:.6g}" if i < len(cols[l][1]) else ""
+                       for l in cols] for i in range(n)]
+        return headers, rows
 
 
 # ── Scatter + regression ──────────────────────────────────────────────
@@ -416,6 +491,10 @@ class ScatterMode(PlotMode):
         lay.addWidget(self._cx)
         lay.addWidget(QLabel("Y:"))
         lay.addWidget(self._cy)
+        self._chk_ct = QCheckBox("Color by time")
+        self._chk_ct.setToolTip("점을 시각 순서대로 색칠(시간축 있을 때)")
+        self._chk_ct.toggled.connect(lambda *_: self.render())
+        lay.addWidget(self._chk_ct)
         lay.addStretch(1)
         self._w = w
         self.on_shelf_changed()
@@ -437,15 +516,17 @@ class ScatterMode(PlotMode):
     def to_config(self):
         if not self._w:
             return {}
-        return {"x": self._cx.currentText(), "y": self._cy.currentText()}
+        return {"x": self._cx.currentText(), "y": self._cy.currentText(),
+                "color_time": self._chk_ct.isChecked()}
 
     def from_config(self, cfg):
         if self._w:
             self._cx.setCurrentText(cfg.get("x", ""))
             self._cy.setCurrentText(cfg.get("y", ""))
+            self._chk_ct.setChecked(bool(cfg.get("color_time", False)))
 
     def _xy(self):
-        """선택한 X/Y 컬럼을 정렬해 (xv, yv) 반환. 다른 데이터셋이면 시간 보간. 없으면 None."""
+        """선택한 X/Y → (xv, yv, tcolor). 다른 데이터셋이면 시간 보간. tcolor=X시각(없으면 None)."""
         host = self.host
         rx = host.resolve(self._cx.currentText())
         ry = host.resolve(self._cy.currentText())
@@ -459,10 +540,12 @@ class ScatterMode(PlotMode):
                 o = np.argsort(ty[mt])
                 yv = np.interp(tx, ty[mt][o], yv[mt][o], left=np.nan, right=np.nan)
                 xv = xv.copy()
+            tcolor = tx
         else:
             n = min(len(xv), len(yv))
             xv, yv = xv[:n], yv[:n]
-        return xv, yv
+            tcolor = tx[:n] if tx is not None else None
+        return xv, yv, tcolor
 
     def render(self):
         host = self.host
@@ -473,48 +556,76 @@ class ScatterMode(PlotMode):
         if xy is None:
             host.set_status("Pick X and Y columns.")
             return
-        xv, yv = xy
+        xv, yv, tcolor = xy
         m = np.isfinite(xv) & np.isfinite(yv)
-        host.p1.plot(xv[m], yv[m], pen=None, symbol="o", symbolSize=5,
-                     symbolBrush=(33, 150, 243, 120), symbolPen=None, name="data")
-        host.p1.setLabel("bottom", self._cx.currentText())
-        host.p1.setLabel("left", self._cy.currentText())
+        if self._chk_ct.isChecked() and tcolor is not None and np.isfinite(tcolor[m]).any():
+            tc = tcolor[m].astype(float)
+            lo, hi = np.nanmin(tc), np.nanmax(tc)
+            frac = (tc - lo) / (hi - lo) if hi > lo else np.zeros_like(tc)
+            cmap = pg.colormap.get("viridis")
+            brushes = [pg.mkBrush(cmap.map(f, mode="qcolor")) for f in frac]
+            sp = pg.ScatterPlotItem(x=xv[m], y=yv[m], size=6, pen=None, brush=brushes)
+            host.p1.addItem(sp)
+        else:
+            host.p1.plot(xv[m], yv[m], pen=None, symbol="o", symbolSize=5,
+                         symbolBrush=(33, 150, 243, 120), symbolPen=None, name="data")
+        host.p1.setLabel("bottom", host.lbl("xlabel", self._cx.currentText()))
+        host.p1.setLabel("left", host.lbl("ylabel", self._cy.currentText()))
         r = regress(xv, yv)
         if r:
             slope, inter, r2, n = r
             xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
             host.p1.plot(xline, slope * xline + inter,
                          pen=pg.mkPen("#D32F2F", width=2), name="fit")
-            host.p1.setTitle(f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}")
+            host.p1.setTitle(host.lbl("title",
+                             f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
             host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}")
         else:
-            host.p1.setTitle("Scatter")
+            host.p1.setTitle(host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")
         host.update_views()
 
     def render_mpl(self, fig):
+        host = self.host
         ax = fig.add_subplot(111)
         xy = self._xy()
         if xy is None:
             ax.set_title("Scatter — pick X and Y")
             return
-        xv, yv = xy
+        xv, yv, tcolor = xy
         m = np.isfinite(xv) & np.isfinite(yv)
-        ax.scatter(xv[m], yv[m], s=14, c="#2196F3", alpha=0.5, edgecolors="none",
-                   label="data")
-        ax.set_xlabel(self._cx.currentText())
-        ax.set_ylabel(self._cy.currentText())
+        if self._chk_ct.isChecked() and tcolor is not None and np.isfinite(tcolor[m]).any():
+            sc = ax.scatter(xv[m], yv[m], s=16, c=tcolor[m], cmap="viridis",
+                            alpha=0.7, edgecolors="none")
+            cb = fig.colorbar(sc, ax=ax)
+            cb.set_label("time (epoch s)")
+        else:
+            ax.scatter(xv[m], yv[m], s=14, c="#2196F3", alpha=0.5, edgecolors="none",
+                       label="data")
+        ax.set_xlabel(host.lbl("xlabel", self._cx.currentText()))
+        ax.set_ylabel(host.lbl("ylabel", self._cy.currentText()))
         r = regress(xv, yv)
         if r:
             slope, inter, r2, n = r
             xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
             ax.plot(xline, slope * xline + inter, color="#D32F2F", lw=2,
                     label=f"y={slope:.4g}x+{inter:.4g}\n$R^2$={r2:.4f}, n={n}")
-            ax.set_title(f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}")
+            ax.set_title(host.lbl("title",
+                         f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
         else:
-            ax.set_title("Scatter")
+            ax.set_title(host.lbl("title", "Scatter"))
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=9)
+
+    def csv_table(self):
+        xy = self._xy()
+        if xy is None:
+            return None
+        xv, yv, _ = xy
+        m = np.isfinite(xv) & np.isfinite(yv)
+        headers = [self._cx.currentText(), self._cy.currentText()]
+        rows = [[f"{a:.6g}", f"{b:.6g}"] for a, b in zip(xv[m], yv[m])]
+        return headers, rows
 
 
 # ── Allan deviation ───────────────────────────────────────────────────
@@ -581,16 +692,18 @@ class AllanMode(PlotMode):
         host.p1.setLogMode(x=True, y=True)
         host.p1.plot(taus, ad, pen=pg.mkPen("#2196F3", width=2), symbol="o",
                      symbolSize=6, symbolBrush="#2196F3", name=self._c.currentText())
-        host.p1.setLabel("bottom", "Averaging time τ (s)")
-        host.p1.setLabel("left", "Allan deviation σ(τ)")
+        host.p1.setLabel("bottom", host.lbl("xlabel", "Averaging time τ (s)"))
+        host.p1.setLabel("left", host.lbl("ylabel", "Allan deviation σ(τ)"))
         imin = int(np.argmin(ad))
-        host.p1.setTitle(f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s")
+        host.p1.setTitle(host.lbl("title",
+                         f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
         host.set_status(f"optimal averaging ≈ {taus[imin]:.0f} s  (min Allan dev {ad[imin]:.3g})")
         host.update_views()
 
     def render_mpl(self, fig):
+        host = self.host
         ax = fig.add_subplot(111)
-        res = self.host.resolve(self._c.currentText())
+        res = host.resolve(self._c.currentText())
         out = None
         if res:
             ds, col, y, t = res
@@ -603,11 +716,284 @@ class AllanMode(PlotMode):
                   label=self._c.currentText())
         imin = int(np.argmin(ad))
         ax.axvline(taus[imin], color="#888", ls="--", lw=1)
-        ax.set_xlabel(r"Averaging time $\tau$ (s)")
-        ax.set_ylabel(r"Allan deviation $\sigma(\tau)$")
-        ax.set_title(f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s")
+        ax.set_xlabel(host.lbl("xlabel", r"Averaging time $\tau$ (s)"))
+        ax.set_ylabel(host.lbl("ylabel", r"Allan deviation $\sigma(\tau)$"))
+        ax.set_title(host.lbl("title",
+                     f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
         ax.grid(True, which="both", alpha=0.3)
         ax.legend(loc="best", fontsize=9)
+
+    def csv_table(self):
+        res = self.host.resolve(self._c.currentText())
+        if not res:
+            return None
+        ds, col, y, t = res
+        out = allan_deviation(t, y)
+        if out is None:
+            return None
+        taus, ad = out
+        return ["tau_s", "allan_dev"], [[f"{a:.6g}", f"{b:.6g}"] for a, b in zip(taus, ad)]
+
+
+# ── Correlation heatmap ───────────────────────────────────────────────
+@register_mode
+class HeatmapMode(PlotMode):
+    key = "heatmap"
+    label = "Correlation heatmap"
+
+    def __init__(self, host):
+        super().__init__(host)
+        self._w = None
+
+    def options_widget(self):
+        if self._w is not None:
+            return self._w
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(QLabel("선반에서 컬럼 2개 이상 선택\n(없으면 전체 컬럼 사용).\n"
+                             "시간축이 있으면 첫 컬럼 시각격자에 맞춰 정렬."))
+        b = QPushButton("↻ Compute")
+        b.clicked.connect(self.render)
+        lay.addWidget(b)
+        lay.addStretch(1)
+        self._w = w
+        return w
+
+    def _matrix(self):
+        """선택(또는 전체) 컬럼들의 Pearson 상관행렬 → (names, 2D ndarray) 또는 None."""
+        import pandas as pd
+        host = self.host
+        labels = host.selected_columns() or host.column_choices()
+        labels = list(dict.fromkeys(labels))
+        series, ref_t = {}, None
+        for lab in labels:
+            r = host.resolve(lab)
+            if r is None:
+                continue
+            ds, col, y, t = r
+            series[lab] = (y, t)
+            if ref_t is None and t is not None:
+                ref_t = t
+        if len(series) < 2:
+            return None
+        data = {}
+        if ref_t is not None:
+            for lab, (y, t) in series.items():
+                if t is not None:
+                    m = np.isfinite(t) & np.isfinite(y)
+                    if m.sum() >= 2:
+                        o = np.argsort(t[m])
+                        data[lab] = np.interp(ref_t, t[m][o], y[m][o],
+                                              left=np.nan, right=np.nan)
+                        continue
+                yy = np.full(len(ref_t), np.nan)
+                n = min(len(ref_t), len(y))
+                yy[:n] = y[:n]
+                data[lab] = yy
+        else:
+            n = min(len(y) for y, _ in series.values())
+            for lab, (y, t) in series.items():
+                data[lab] = y[:n]
+        corr = pd.DataFrame(data).corr()
+        return list(corr.columns), corr.to_numpy()
+
+    @staticmethod
+    def _short(names):
+        return [n.split(":")[-1] for n in names]
+
+    def render(self):
+        host = self.host
+        host.clear_plot()
+        host.enable_right_axis(False)
+        host.set_time_axis(False)
+        mat = self._matrix()
+        if mat is None:
+            host.set_status("상관 히트맵: 컬럼 2개 이상 필요.")
+            host.p1.setTitle("Correlation heatmap — need ≥2 columns")
+            return
+        names, C = mat
+        img = pg.ImageItem()
+        img.setOpts(axisOrder="row-major")
+        img.setImage(C)
+        img.setLevels([-1, 1])
+        try:
+            lut = pg.colormap.getFromMatplotlib("bwr").getLookupTable(0.0, 1.0, 256)
+            img.setLookupTable(lut)
+        except Exception:
+            pass
+        host.p1.addItem(img)
+        short = self._short(names)
+        ticks = [(i + 0.5, s) for i, s in enumerate(short)]
+        host.p1.getAxis("bottom").setTicks([ticks])
+        host.p1.getAxis("left").setTicks([ticks])
+        # 셀 값 주석
+        for i in range(len(names)):
+            for j in range(len(names)):
+                ti = pg.TextItem(f"{C[i, j]:.2f}", anchor=(0.5, 0.5),
+                                 color="w" if abs(C[i, j]) > 0.5 else "k")
+                ti.setPos(j + 0.5, i + 0.5)
+                host.p1.addItem(ti)
+        host.p1.invertY(True)
+        host.p1.setTitle(host.lbl("title", "Correlation matrix (Pearson r)"))
+        host.update_views()
+        host.set_status(f"{len(names)} columns")
+
+    def render_mpl(self, fig):
+        mat = self._matrix()
+        ax = fig.add_subplot(111)
+        if mat is None:
+            ax.set_title("Correlation heatmap — need ≥2 columns")
+            return
+        names, C = mat
+        short = self._short(names)
+        im = ax.imshow(C, vmin=-1, vmax=1, cmap="bwr")
+        ax.set_xticks(range(len(names)))
+        ax.set_xticklabels(short, rotation=45, ha="right")
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(short)
+        for i in range(len(names)):
+            for j in range(len(names)):
+                ax.text(j, i, f"{C[i, j]:.2f}", ha="center", va="center",
+                        fontsize=8, color="white" if abs(C[i, j]) > 0.5 else "black")
+        fig.colorbar(im, ax=ax, shrink=0.8)
+        ax.set_title(self.host.lbl("title", "Correlation matrix (Pearson r)"))
+
+    def csv_table(self):
+        mat = self._matrix()
+        if mat is None:
+            return None
+        names, C = mat
+        short = self._short(names)
+        headers = [""] + short
+        rows = [[short[i]] + [f"{C[i, j]:.4f}" for j in range(len(names))]
+                for i in range(len(names))]
+        return headers, rows
+
+
+# ── Histogram ─────────────────────────────────────────────────────────
+@register_mode
+class HistogramMode(PlotMode):
+    key = "histogram"
+    label = "Histogram"
+
+    def __init__(self, host):
+        super().__init__(host)
+        self._w = None
+
+    def options_widget(self):
+        if self._w is not None:
+            return self._w
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self._c = QComboBox()
+        self._c.currentIndexChanged.connect(lambda *_: self.render())
+        lay.addWidget(QLabel("Column:"))
+        lay.addWidget(self._c)
+        lay.addWidget(QLabel("Bins:"))
+        self._bins = QSpinBox()
+        self._bins.setRange(5, 500)
+        self._bins.setValue(40)
+        self._bins.valueChanged.connect(lambda *_: self.render())
+        lay.addWidget(self._bins)
+        self._chk_lod = QCheckBox("Show ≈3σ (LOD)")
+        self._chk_lod.setToolTip("평균+3σ 위치에 검출한계 추정선")
+        self._chk_lod.toggled.connect(lambda *_: self.render())
+        lay.addWidget(self._chk_lod)
+        lay.addStretch(1)
+        self._w = w
+        self.on_shelf_changed()
+        return w
+
+    def on_shelf_changed(self):
+        if not self._w:
+            return
+        choices = self.host.column_choices()
+        cur = self._c.currentText()
+        self._c.blockSignals(True)
+        self._c.clear()
+        self._c.addItems(choices)
+        if cur in choices:
+            self._c.setCurrentText(cur)
+        self._c.blockSignals(False)
+
+    def to_config(self):
+        return ({"col": self._c.currentText(), "bins": self._bins.value(),
+                 "lod": self._chk_lod.isChecked()} if self._w else {})
+
+    def from_config(self, cfg):
+        if self._w:
+            self._c.setCurrentText(cfg.get("col", ""))
+            self._bins.setValue(int(cfg.get("bins", 40)))
+            self._chk_lod.setChecked(bool(cfg.get("lod", False)))
+
+    def _vals(self):
+        r = self.host.resolve(self._c.currentText())
+        if not r:
+            return None
+        y = r[2]
+        return y[np.isfinite(y)]
+
+    def render(self):
+        host = self.host
+        host.clear_plot()
+        host.enable_right_axis(False)
+        host.set_time_axis(False)
+        v = self._vals()
+        if v is None or v.size == 0:
+            host.set_status("Pick a column.")
+            host.p1.setTitle("Histogram — pick a column")
+            return
+        counts, edges = np.histogram(v, bins=self._bins.value())
+        x = (edges[:-1] + edges[1:]) / 2.0
+        widths = np.diff(edges)
+        host.p1.addItem(pg.BarGraphItem(x=x, height=counts, width=widths * 0.95,
+                                        brush=(33, 150, 243, 150), pen=None))
+        mu, md, sd = float(np.mean(v)), float(np.median(v)), float(np.std(v))
+        host.p1.addItem(pg.InfiniteLine(mu, angle=90,
+                        pen=pg.mkPen("#D32F2F", width=2), label="mean"))
+        host.p1.addItem(pg.InfiniteLine(md, angle=90,
+                        pen=pg.mkPen("#388E3C", width=1, style=Qt.PenStyle.DashLine),
+                        label="median"))
+        if self._chk_lod.isChecked():
+            host.p1.addItem(pg.InfiniteLine(mu + 3 * sd, angle=90,
+                            pen=pg.mkPen("#7B1FA2", width=1, style=Qt.PenStyle.DotLine),
+                            label="≈3σ"))
+        host.p1.setLabel("bottom", host.lbl("xlabel", self._c.currentText()))
+        host.p1.setLabel("left", host.lbl("ylabel", "count"))
+        host.p1.setTitle(host.lbl("title", f"Histogram — μ={mu:.3g} σ={sd:.3g} n={v.size}"))
+        host.update_views()
+        host.set_status(f"n={v.size}  μ={mu:.4g}  median={md:.4g}  σ={sd:.4g}")
+
+    def render_mpl(self, fig):
+        host = self.host
+        ax = fig.add_subplot(111)
+        v = self._vals()
+        if v is None or v.size == 0:
+            ax.set_title("Histogram — pick a column")
+            return
+        ax.hist(v, bins=self._bins.value(), color="#2196F3", alpha=0.75,
+                edgecolor="white")
+        mu, md, sd = float(np.mean(v)), float(np.median(v)), float(np.std(v))
+        ax.axvline(mu, color="#D32F2F", lw=2, label=f"mean={mu:.3g}")
+        ax.axvline(md, color="#388E3C", lw=1.2, ls="--", label=f"median={md:.3g}")
+        if self._chk_lod.isChecked():
+            ax.axvline(mu + 3 * sd, color="#7B1FA2", lw=1, ls=":",
+                       label=f"≈3σ={mu + 3 * sd:.3g}")
+        ax.set_xlabel(host.lbl("xlabel", self._c.currentText()))
+        ax.set_ylabel(host.lbl("ylabel", "count"))
+        ax.set_title(host.lbl("title", f"Histogram — μ={mu:.3g} σ={sd:.3g} n={v.size}"))
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=9)
+
+    def csv_table(self):
+        v = self._vals()
+        if v is None or v.size == 0:
+            return None
+        counts, edges = np.histogram(v, bins=self._bins.value())
+        x = (edges[:-1] + edges[1:]) / 2.0
+        return ["bin_center", "count"], [[f"{a:.6g}", int(b)] for a, b in zip(x, counts)]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -620,10 +1006,17 @@ class PlotMakerWidget(QWidget):
         self.resample_sec = 0
         self.smooth_n = 1
         self.legend = None
+        # 라벨 오버라이드(빈 문자열=자동). 모드가 host.lbl(key, default)로 참조.
+        self.custom = {"title": "", "xlabel": "", "ylabel": "", "rlabel": ""}
         self._modes = [cls(self) for cls in _MODES]
         self._mode = self._modes[0]
         self._init_ui()
         self._rebuild_mode_options()
+
+    def lbl(self, key, default):
+        """라벨 오버라이드가 있으면 그것을, 없으면 기본값을 반환."""
+        v = (self.custom.get(key) or "").strip()
+        return v if v else default
 
     # ── UI ────────────────────────────────────────────────────────────
     def _init_ui(self):
@@ -697,6 +1090,21 @@ class PlotMakerWidget(QWidget):
             w = m.options_widget() or QWidget()
             self._opt_stack.addWidget(w)
         lv.addWidget(self._opt_stack, 1)
+
+        # 출판용 라벨 오버라이드(빈칸 = 자동)
+        gb = QGroupBox("Labels (override, blank=auto)")
+        fl = QFormLayout(gb)
+        self._ed_title = QLineEdit()
+        self._ed_x = QLineEdit()
+        self._ed_y = QLineEdit()
+        self._ed_r = QLineEdit()
+        for ed in (self._ed_title, self._ed_x, self._ed_y, self._ed_r):
+            ed.editingFinished.connect(self._on_labels_changed)
+        fl.addRow("Title", self._ed_title)
+        fl.addRow("X", self._ed_x)
+        fl.addRow("Y-left", self._ed_y)
+        fl.addRow("Y-right", self._ed_r)
+        lv.addWidget(gb)
         left.setMinimumWidth(240)
         split.addWidget(left)
 
@@ -734,6 +1142,10 @@ class PlotMakerWidget(QWidget):
         self.p1.clear()
         self.vb_right.clear()
         self.p1.setLogMode(x=False, y=False)
+        # 히트맵이 남긴 invertY/커스텀틱을 원복(다른 모드 오염 방지)
+        self.p1.invertY(False)
+        for axn in ("bottom", "left"):
+            self.p1.getAxis(axn).setTicks(None)
         self.legend = self.p1.addLegend(offset=(10, 10))
 
     def enable_right_axis(self, on):
@@ -784,6 +1196,10 @@ class PlotMakerWidget(QWidget):
         if not paths:
             return
         dlg_dir("result", paths[0])
+        self.add_paths(paths)
+
+    def add_paths(self, paths):
+        """파일 경로 목록을 선반에 로드(결과뷰어의 'Send to Plot Maker' 등에서 호출)."""
         added = 0
         for p in paths:
             try:
@@ -803,6 +1219,7 @@ class PlotMakerWidget(QWidget):
             self._refresh_tree()
             self._notify_modes()
             self.set_status(f"Added {added} dataset(s) · {len(self.shelf)} on shelf")
+        return added
 
     def _remove_data(self):
         names = set()
@@ -847,6 +1264,11 @@ class PlotMakerWidget(QWidget):
     def _on_transform_changed(self, *_):
         self.resample_sec = _RESAMPLE.get(self._res_combo.currentText(), 0)
         self.smooth_n = self._smooth_spin.value()
+        self._mode.render()
+
+    def _on_labels_changed(self):
+        self.custom = {"title": self._ed_title.text(), "xlabel": self._ed_x.text(),
+                       "ylabel": self._ed_y.text(), "rlabel": self._ed_r.text()}
         self._mode.render()
 
     # ── Export / config ────────────────────────────────────────────────
@@ -896,50 +1318,26 @@ class PlotMakerWidget(QWidget):
             QMessageBox.warning(self, "PNG export", f"Failed: {e}")
 
     def _export_csv(self):
-        """현재 시계열 모드의 시리즈를 공유 시간축으로 합쳐 CSV 저장."""
-        if self._mode.key != "timeseries" or not self._mode._series:
-            QMessageBox.information(self, "CSV", "Add series in Time series mode first.")
+        """현재 모드가 제공하는 데이터(csv_table)를 CSV로 저장."""
+        table = self._mode.csv_table()
+        if not table:
+            QMessageBox.information(self, "CSV",
+                                   "현재 모드/선택에 내보낼 데이터가 없습니다.")
             return
+        headers, rows = table
         out, _ = QFileDialog.getSaveFileName(self, "Export CSV", "plotmaker.csv",
                                              "CSV (*.csv)")
         if not out:
             return
-        cols, time_ref = {}, None
-        for lab, _axis in self._mode._series:
-            r = self.resolve(lab)
-            if r is None:
-                continue
-            ds, col, y, t = r
-            xs, ys = resample_mean(t, y, self.resample_sec) if t is not None else (None, y)
-            ys = smooth(ys if xs is not None else y, self.smooth_n)
-            cols[lab] = (xs, ys)
-            if time_ref is None and xs is not None:
-                time_ref = xs
+        if not out.lower().endswith(".csv"):
+            out += ".csv"
         try:
             import csv
             with open(out, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
-                if time_ref is not None:
-                    headers = ["datetime"] + list(cols.keys())
-                    w.writerow(headers)
-                    for i, tv in enumerate(time_ref):
-                        row = [datetime.fromtimestamp(tv).strftime("%Y-%m-%d %H:%M:%S")]
-                        for lab in cols:
-                            xs, ys = cols[lab]
-                            if xs is time_ref and i < len(ys):
-                                row.append(f"{ys[i]:.6g}")
-                            else:   # 다른 격자 → 보간
-                                row.append(f"{np.interp(tv, xs, ys):.6g}"
-                                           if xs is not None else "")
-                        w.writerow(row)
-                else:
-                    w.writerow(["index"] + list(cols.keys()))
-                    n = max(len(v[1]) for v in cols.values())
-                    for i in range(n):
-                        row = [i] + [f"{cols[l][1][i]:.6g}" if i < len(cols[l][1]) else ""
-                                     for l in cols]
-                        w.writerow(row)
-            self.set_status(f"CSV saved: {os.path.basename(out)}")
+                w.writerow(headers)
+                w.writerows(rows)
+            self.set_status(f"CSV saved: {os.path.basename(out)} ({len(rows)} rows)")
         except Exception as e:
             QMessageBox.warning(self, "CSV export", f"Failed: {e}")
 
@@ -953,6 +1351,7 @@ class PlotMakerWidget(QWidget):
             "mode": self._mode.key,
             "resample": self._res_combo.currentText(),
             "smooth": self._smooth_spin.value(),
+            "labels": dict(self.custom),
             "mode_cfg": {m.key: m.to_config() for m in self._modes},
         }
         try:
@@ -990,6 +1389,13 @@ class PlotMakerWidget(QWidget):
         self._notify_modes()
         self._res_combo.setCurrentText(cfg.get("resample", "Raw"))
         self._smooth_spin.setValue(int(cfg.get("smooth", 1)))
+        lab = cfg.get("labels", {})
+        self._ed_title.setText(lab.get("title", ""))
+        self._ed_x.setText(lab.get("xlabel", ""))
+        self._ed_y.setText(lab.get("ylabel", ""))
+        self._ed_r.setText(lab.get("rlabel", ""))
+        self.custom = {"title": lab.get("title", ""), "xlabel": lab.get("xlabel", ""),
+                       "ylabel": lab.get("ylabel", ""), "rlabel": lab.get("rlabel", "")}
         for m in self._modes:
             m.from_config(cfg.get("mode_cfg", {}).get(m.key, {}))
         # 모드 선택 복원

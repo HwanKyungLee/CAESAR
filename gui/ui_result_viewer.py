@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
     QCheckBox, QMessageBox, QDialog, QPlainTextEdit,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 
 # 수동 선택 콤보 라벨 ↔ 내부 kind 매핑
@@ -52,6 +52,9 @@ _PALETTE = ["#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
 
 class ResultViewerWidget(QWidget):
     """저장된 결과 파일을 불러와 종류를 자동 판별하고 알맞은 그래프로 표시."""
+
+    # 선택/현재 파일들을 Plot Maker 선반으로 보내달라는 신호(app_window가 연결)
+    send_to_plotmaker = pyqtSignal(list)
 
     # 순수 파서는 gui/result_viewer_io.py 로 분리, self._x(...) 호출 유지를 위해 재바인딩
     _load_result_time_gas = staticmethod(load_result_time_gas)
@@ -160,6 +163,10 @@ class ResultViewerWidget(QWidget):
         self._btn_diurnal.setToolTip("Hour-of-day mean curve of selected gas (bottom plot)")
         self._btn_diurnal.clicked.connect(self._plot_diurnal)
         fbar.addWidget(self._btn_diurnal)
+        self._btn_to_pm = QPushButton("📉 To Plot Maker")
+        self._btn_to_pm.setToolTip("선택(없으면 현재) 파일을 Plot Maker 선반으로 보내 자유 합성")
+        self._btn_to_pm.clicked.connect(self._to_plot_maker)
+        fbar.addWidget(self._btn_to_pm)
 
         fbar.addStretch(1)
         root.addLayout(fbar)
@@ -1014,6 +1021,14 @@ class ResultViewerWidget(QWidget):
         if not paths and self._path:
             paths = [self._path]
         return paths
+
+    def _to_plot_maker(self):
+        """선택(없으면 현재) 결과파일을 Plot Maker 선반으로 보낸다."""
+        paths = self._selected_paths()
+        if not paths:
+            QMessageBox.information(self, "Plot Maker", "보낼 결과 파일을 먼저 여세요.")
+            return
+        self.send_to_plotmaker.emit(paths)
 
     def _bake_qc_into_rows(self, colhdr, rows):
         """현재 K>0이면 rows(텍스트 행)의 RMS 분포로 robust 임계를 잡아 초과 행의
