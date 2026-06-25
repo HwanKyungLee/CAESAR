@@ -121,7 +121,12 @@ def load_fit_table(path):
     if is_report:
         # ── GUI 리포트 포맷 ───────────────────────────────────────
         idx = {n: i for i, n in enumerate(hdr)}
-        gases = [c for c in hdr if (c + "_Smooth") in idx]   # 주 가스 컬럼
+        # 주 가스 컬럼: <gas>_Error 가 있는 베이스 컬럼(QC-ON/OFF 무관, 항상 존재).
+        # 과거엔 _Smooth로 탐지했으나 QC/Kalman OFF 파일엔 _Smooth가 없어 가스가
+        # 하나도 안 잡히던 버그가 있었음. _Error 우선, 없으면 _Smooth로 폴백.
+        gases = [c for c in hdr if (c + "_Error") in idx]
+        if not gases:
+            gases = [c for c in hdr if (c + "_Smooth") in idx]   # 구 포맷 호환
 
         def colf_r(j):
             out = np.full(len(rows), np.nan)
