@@ -1,7 +1,72 @@
 # CAESAR Pro
 
-아라온 선상 BBCEAS(Broadband Cavity-Enhanced Absorption Spectroscopy) 실시간 분석 소프트웨어.
-raw .dat 데이터에서 파장 보정·ILS 적용·α 스펙트럼 생성·DOAS 피팅까지 한 번에 처리한다.
+쇄빙연구선 **아라온(Araon)** 선상에서 측정한 광학 분광 데이터로 대기 중 미량 기체
+(NO₂, CHOCHO 등) 농도를 산출하는 데스크톱 분석 프로그램(PyQt6 GUI)이다.
+
+장비(BBCEAS, 아래 [용어](#용어-사전) 참조)가 1시간마다 떨궈주는 raw `.dat` 파일을
+넣으면 → 파장 보정 → 흡광 스펙트럼(α) 생성 → DOAS 피팅으로 기체 농도를 뽑고,
+시계열 그래프까지 한 화면에서 만들어 준다.
+
+> **처음 보는 사람**은 [설치](#설치)와 [빠른 시작](#빠른-시작-gui-사용-흐름)만 읽으면 앱을 켤 수 있고,
+> [용어 사전](#용어-사전)에 분야 약어를 풀어 두었다.
+> **코드를 고칠 사람**은 그 아래 [폴더 구조](#폴더-구조)·[임포트 구조](#임포트-구조)를 보면 된다.
+
+---
+
+## 설치
+
+- **필요 환경**: Python 3.11+ (개발은 3.14 기준), Windows 권장(아라온 DAQ가 Windows).
+
+```bash
+# 1) 저장소 받기
+git clone https://github.com/HwanKyungLee/CAESAR.git
+cd CAESAR
+
+# 2) 가상환경 + 의존성 (PyQt6 / numpy / scipy / matplotlib / pandas / pyqtgraph / hitran-api)
+python -m venv .venv
+.venv\Scripts\activate        # (macOS/Linux: source .venv/bin/activate)
+pip install -r requirements.txt
+
+# 3) 실행
+python main.py
+```
+
+Windows에서는 `CAESAR_Pro_실행.bat` 더블클릭으로도 켜진다(콘솔 없이 GUI만 뜨고,
+크래시 로그는 `logs/crash.log` 에 쌓인다). HITRAN 라인리스트는 처음 사용할 때
+사용자별로 받아 `hitran_data/` 에 캐시된다(저장소에는 포함되지 않음).
+
+---
+
+## 빠른 시작 (GUI 사용 흐름)
+
+`python main.py` 를 실행하면 상단 탭 4개가 보인다. 왼쪽에서 오른쪽이 곧 작업 순서다.
+
+| 순서 | 탭 | 하는 일 |
+|----|----|--------|
+| 1 | 🛠️ **Setup** | raw `.dat` 폴더 지정, 파장 보정·레퍼런스·R(반사율) 준비, 피팅 시나리오 선택 |
+| 2 | 📈 **Analysis Monitor** | RUN을 눌러 DOAS 피팅 실행, 진행 상황·실시간 농도 확인 |
+| 3 | 📂 **Result Viewer** | 산출된 결과 파일(농도 시계열) 열람·자르기·병합 |
+| 4 | 📉 **Plot Maker** | 종별 시계열/Diurnal(시간대별) 그래프 만들기·내보내기 |
+
+분석에 쓰는 거울 반사율 R 등은 Setup 탭의 **R Calibrator**(R 커브·시계열)에서 만든다.
+
+---
+
+## 용어 사전
+
+도메인 약어를 처음 보는 사람을 위한 최소 설명.
+
+| 용어 | 뜻 |
+|------|----|
+| **BBCEAS** | Broadband Cavity-Enhanced Absorption Spectroscopy. 양쪽 고반사 거울 사이에 빛을 가둬 광경로를 수 km로 늘려 미량 기체까지 측정하는 분광 기법 |
+| **DOAS** | Differential Optical Absorption Spectroscopy. 흡광 스펙트럼의 미분 구조를 기준 단면과 맞춰 기체 농도를 푸는 분석법 |
+| **α (알파)** | 흡광 계수 스펙트럼. raw 신호로부터 계산하며 DOAS 피팅의 입력이 된다 |
+| **R (반사율)** | 거울 반사율. 광경로 길이를 정하는 핵심 값이라 시간에 따라 보정한다(R(t)) |
+| **ILS** | Instrument Line Shape. 분광기가 빛을 번지게 하는 정도. 기준 단면에 적용해 실제 측정과 맞춘다 |
+| **etalon** | 광학 부품의 다중 반사로 생기는 잔물결 간섭 패턴(피팅에서 보정 대상) |
+| **shift / squeeze** | 파장축의 미세한 이동·신축. 피팅 중 자동 보정한다 |
+| **ZA / He** | Zero Air / Helium 보정 스캔. R(반사율) 계산에 쓰는 기준 측정 (flag 500 / 510) |
+| **Cold / Hot** | 두 측정 채널(저온·고온 캐비티). 데이터 컬럼 구조와 보정값이 다르다 |
 
 ---
 
@@ -109,12 +174,9 @@ diagnostics.fwhm_r_check  →  core.physics
 
 ---
 
-## 실행 방법
+## 오프라인 도구 실행 (CLI)
 
-**GUI 앱 실행**
-```
-python main.py
-```
+GUI 없이 터미널에서 돌리는 분석/진단 스크립트들. (앱 자체는 위 [빠른 시작](#빠른-시작-gui-사용-흐름) 참조)
 
 **오프라인 R 시계열 모니터**
 ```
