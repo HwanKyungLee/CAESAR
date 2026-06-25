@@ -1061,6 +1061,144 @@ class HistogramMode(PlotMode):
         return ["bin_center", "count"], [[f"{a:.6g}", int(b)] for a, b in zip(x, counts)]
 
 
+# ── Diurnal (hour of day) ─────────────────────────────────────────────
+@register_mode
+class DiurnalMode(PlotMode):
+    key = "diurnal"
+    label = "Diurnal (hour of day)"
+
+    def __init__(self, host):
+        super().__init__(host)
+        self._w = None
+
+    def options_widget(self):
+        if self._w is not None:
+            return self._w
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self._c = QComboBox()
+        self._c.currentIndexChanged.connect(lambda *_: self.render())
+        lay.addWidget(QLabel("Column:"))
+        lay.addWidget(self._c)
+        lay.addWidget(QLabel("Hour shift:"))
+        self._shift = QSpinBox()
+        self._shift.setRange(-12, 14)
+        self._shift.setValue(0)
+        self._shift.setToolTip("로컬 시각에 더할 시간(예: 데이터가 UTC면 KST=+9)")
+        self._shift.valueChanged.connect(lambda *_: self.render())
+        lay.addWidget(self._shift)
+        lay.addWidget(QLabel("선 = 중앙값/평균,\n밴드 = 25–75 백분위수."))
+        lay.addStretch(1)
+        self._w = w
+        self.on_shelf_changed()
+        return w
+
+    def on_shelf_changed(self):
+        if not self._w:
+            return
+        choices = self.host.column_choices()
+        cur = self._c.currentText()
+        self._c.blockSignals(True)
+        self._c.clear()
+        self._c.addItems(choices)
+        if cur in choices:
+            self._c.setCurrentText(cur)
+        self._c.blockSignals(False)
+
+    def to_config(self):
+        return ({"col": self._c.currentText(), "shift": self._shift.value()}
+                if self._w else {})
+
+    def from_config(self, cfg):
+        if self._w:
+            self._c.setCurrentText(cfg.get("col", ""))
+            self._shift.setValue(int(cfg.get("shift", 0)))
+
+    def _stats(self):
+        """시(0–23)별 mean/median/25–75% → (H, mean, med, p25, p75, cnt, col) 또는 None."""
+        import datetime as _dt
+        r = self.host.resolve(self._c.currentText())
+        if not r:
+            return None
+        ds, col, y, t = r
+        if t is None:
+            return None
+        m = np.isfinite(t) & np.isfinite(y)
+        if m.sum() < 1:
+            return None
+        sh = self._shift.value()
+        hrs = np.array([(_dt.datetime.fromtimestamp(v).hour + sh) % 24 for v in t[m]])
+        vals = y[m]
+        H = np.arange(24)
+        mean = np.full(24, np.nan); med = np.full(24, np.nan)
+        p25 = np.full(24, np.nan); p75 = np.full(24, np.nan); cnt = np.zeros(24, int)
+        for h in range(24):
+            vv = vals[hrs == h]
+            if vv.size:
+                mean[h] = np.mean(vv); med[h] = np.median(vv)
+                p25[h] = np.percentile(vv, 25); p75[h] = np.percentile(vv, 75)
+                cnt[h] = vv.size
+        return H, mean, med, p25, p75, cnt, col
+
+    def _ylabel(self, col):
+        u = self.host.unit_of(self._c.currentText())
+        return self.host.lbl("ylabel", f"{col} [{u}]" if u else col)
+
+    def render(self):
+        host = self.host
+        host.clear_plot()
+        host.enable_right_axis(False)
+        host.set_time_axis(False)
+        s = self._stats()
+        if s is None:
+            host.set_status("시간축이 있는 컬럼을 고르세요.")
+            host.p1.setTitle("Diurnal — needs a time axis")
+            return
+        H, mean, med, p25, p75, cnt, col = s
+        lo = host.p1.plot(H, p25, pen=pg.mkPen((33, 150, 243, 0)))
+        hi = host.p1.plot(H, p75, pen=pg.mkPen((33, 150, 243, 0)))
+        host.p1.addItem(pg.FillBetweenItem(lo, hi, brush=pg.mkBrush(33, 150, 243, 60)))
+        host.p1.plot(H, med, pen=pg.mkPen("#1f4fd8", width=2), symbol="o",
+                     symbolSize=6, symbolBrush="#1f4fd8", name="Median")
+        host.p1.plot(H, mean, pen=pg.mkPen("#E6A100", width=2, style=Qt.PenStyle.DashLine),
+                     symbol="s", symbolSize=6, symbolBrush="#E6A100", name="Mean")
+        host.p1.setLabel("bottom", host.lbl("xlabel", "Hour of day"))
+        host.p1.setLabel("left", self._ylabel(col))
+        host.p1.setTitle(host.lbl("title", ""))
+        host.autoscale()
+        host.set_status(f"{col} diurnal · n={int(cnt.sum())} (band = 25–75%)")
+
+    def render_mpl(self, fig):
+        host = self.host
+        ax = fig.add_subplot(111)
+        s = self._stats()
+        if s is None:
+            ax.set_title("Diurnal — needs a time axis")
+            return
+        H, mean, med, p25, p75, cnt, col = s
+        ax.fill_between(H, p25, p75, color="#2196F3", alpha=0.25, label="25–75%")
+        ax.plot(H, med, "-o", color="#1f4fd8", lw=2, ms=5, label="Median")
+        ax.plot(H, mean, "--s", color="#E6A100", lw=2, ms=5, label="Mean")
+        ax.set_xlabel(host.lbl("xlabel", "Hour of day"))
+        ax.set_ylabel(self._ylabel(col))
+        ax.set_title(host.lbl("title", ""))
+        ax.set_xticks(range(0, 24, 3))
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=9)
+
+    def csv_table(self):
+        s = self._stats()
+        if s is None:
+            return None
+        H, mean, med, p25, p75, cnt, col = s
+        headers = ["hour", "n", "mean", "median", "p25", "p75"]
+        rows = [[int(h), int(cnt[h]),
+                 f"{mean[h]:.6g}", f"{med[h]:.6g}", f"{p25[h]:.6g}", f"{p75[h]:.6g}"]
+                for h in range(24)]
+        return headers, rows
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 메인 위젯
 # ══════════════════════════════════════════════════════════════════════
