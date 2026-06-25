@@ -58,15 +58,39 @@ def load_alpha(fp):
     return wave, alpha, T_C, P_mbar
 
 
-def build_engine(refdir, wave):
-    """wv_cal의 ILS 입힌 단일컬럼 단면(이미 픽셀그리드)을 그대로 로드. wave_nm=None→재보간 안 함."""
+def _read_col(p):
+    return np.array([float(l) for l in open(p, encoding="utf-8", errors="replace")
+                     if l.strip() and not l.lstrip().startswith("#")])
+
+
+def build_engine(refdir, wave, align=True):
+    """채널별 ILS단면을 등록. align=True면 단면을 자기 Calib nm격자→알파 wave격자로 리샘플
+    (Hot은 알파 웨이브캘≠레퍼런스 Calib라 필수). align=False=구버전(픽셀 직접, Cold만 정확)."""
     eng = UniversalEngine()
     eng.set_wavelength_axis(wave)
+    calib_files = glob.glob(os.path.join(WV, refdir, "Calib*.txt"))
+    calib_nm = _read_col(calib_files[0]) if (align and calib_files) else None
     for name, fn in REF_FILES:
         p = os.path.join(WV, refdir, fn)
-        if os.path.exists(p):
+        if not os.path.exists(p):
+            continue
+        if calib_nm is not None:
+            vals = _read_col(p)
+            n = min(len(vals), len(calib_nm))
+            f = interp1d(calib_nm[:n], vals[:n], kind="cubic",
+                         bounds_error=False, fill_value="extrapolate")
+            resampled = f(np.asarray(wave, float))   # 알파 nm격자로 정합
+            eng.raw_references[name] = resampled
+            eng.interpolators[name] = interp1d(np.arange(len(resampled)), resampled,
+                                               kind="cubic", fill_value="extrapolate")
+            mx = float(np.max(np.abs(resampled))) or 1.0
+            eng.scaling_factors[name] = mx
+            eng.multipliers[name] = 1.0
+            if name not in eng.gas_list:
+                eng.gas_list.append(name)
+        else:
             eng.add_reference(name, p, wave_nm=None, multiplier=1.0)
-    eng.apply_ils_convolution(0.0)   # 이미 ILS 적용됨 → skip(재컨볼루션 안 함)
+    eng.apply_ils_convolution(0.0)   # 이미 ILS 적용됨 → skip
     return eng
 
 
