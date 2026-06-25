@@ -46,16 +46,18 @@ _RESAMPLE = {"Raw": 0, "1 min": 60, "5 min": 300, "10 min": 600,
 class Dataset:
     """결과 파일 하나를 공통 테이블로 정규화한 메모리 표현.
 
-    time : epoch초 ndarray 또는 None(시간축 없음)
-    cols : {컬럼명: float ndarray}  (가스 ppb, RMS, 일반 수치 등)
+    time  : epoch초 ndarray 또는 None(시간축 없음)
+    cols  : {컬럼명: float ndarray}  (가스 ppb, RMS, 일반 수치 등)
+    units : {컬럼명: 단위문자열}  (예: NO2→'ppb', RMS→'cm⁻¹'). 모르면 없음.
     """
-    __slots__ = ("name", "path", "time", "cols")
+    __slots__ = ("name", "path", "time", "cols", "units")
 
-    def __init__(self, name, path, time, cols):
+    def __init__(self, name, path, time, cols, units=None):
         self.name = name
         self.path = path
         self.time = time
         self.cols = cols
+        self.units = units or {}
 
     def __len__(self):
         return max((len(v) for v in self.cols.values()), default=0)
@@ -70,9 +72,11 @@ def load_dataset(path) -> Dataset:
     if kind == "fit":
         t = load_fit_table(path)
         cols = {g: v for g, v in t["gases"].items()}
+        units = {g: "ppb" for g in t["gases"]}     # CAESAR 가스 농도 = ppb
         if t.get("rms") is not None:
             cols["RMS"] = t["rms"]
-        return Dataset(name, path, t.get("time"), cols)
+            units["RMS"] = "cm⁻¹"
+        return Dataset(name, path, t.get("time"), cols, units)
 
     # ② 일반 표(csv/tsv/농도) → pandas로 시간컬럼 + 수치컬럼
     try:
@@ -386,6 +390,27 @@ class TimeSeriesMode(PlotMode):
             xs, ys = np.arange(len(y), dtype=float), y
         return xs, smooth(ys, self.host.smooth_n)
 
+    def _auto_ylabel(self, axis, default):
+        """해당 축 시리즈들의 단위로 기본 Y라벨 생성.
+        한 종이면 'NO2 [ppb]', 같은 단위 여럿이면 'Concentration [ppb]'."""
+        cols, units = [], set()
+        for lab, ax, color, name in self._series:
+            if ax != axis:
+                continue
+            r = self.host.resolve(lab)
+            if r is None:
+                continue
+            cols.append(r[1])
+            units.add(self.host.unit_of(lab))
+        if not cols:
+            return default
+        u = next(iter(units)) if len(units) == 1 else None
+        if len(cols) == 1:
+            return f"{cols[0]} [{u}]" if u else cols[0]
+        if u == "ppb":
+            return "Concentration [ppb]"
+        return f"Value [{u}]" if u else default
+
     def render(self):
         host = self.host
         host.clear_plot()
@@ -414,10 +439,10 @@ class TimeSeriesMode(PlotMode):
             n += 1
         host.set_time_axis(any_time)
         host.p1.setLabel("bottom", host.lbl("xlabel", "Time" if any_time else "index"))
-        host.p1.setLabel("left", host.lbl("ylabel", "Value (left)"))
+        host.p1.setLabel("left", host.lbl("ylabel", self._auto_ylabel("L", "Value")))
         if use_right:
-            host.set_right_label(host.lbl("rlabel", "Value (right)"))
-        host.p1.setTitle(host.lbl("title", f"Time series — {n} series"))
+            host.set_right_label(host.lbl("rlabel", self._auto_ylabel("R", "Value")))
+        host.p1.setTitle(host.lbl("title", ""))   # 기본 제목 없음(사용자가 지정)
         host.autoscale()
         if n:
             host.set_status(f"{n} series"
@@ -448,7 +473,6 @@ class TimeSeriesMode(PlotMode):
             if axis == "R":
                 if ax_r is None:
                     ax_r = ax.twinx()
-                    ax_r.set_ylabel(host.lbl("rlabel", "Value (right)"))
                 line, = ax_r.plot(xv, ys, color=ci, lw=1.6, label=f"{disp} (R)")
             else:
                 line, = ax.plot(xv, ys, color=ci, lw=1.6, label=disp)
@@ -456,8 +480,10 @@ class TimeSeriesMode(PlotMode):
             ll.append(line.get_label())
             n += 1
         ax.set_xlabel(host.lbl("xlabel", "Time" if any_time else "index"))
-        ax.set_ylabel(host.lbl("ylabel", "Value (left)"))
-        ax.set_title(host.lbl("title", f"Time series — {n} series"))
+        ax.set_ylabel(host.lbl("ylabel", self._auto_ylabel("L", "Value")))
+        if ax_r is not None:
+            ax_r.set_ylabel(host.lbl("rlabel", self._auto_ylabel("R", "Value")))
+        ax.set_title(host.lbl("title", ""))
         ax.grid(True, alpha=0.3)
         if any_time:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
@@ -1236,6 +1262,14 @@ class PlotMakerWidget(QWidget):
         if ds is None or col not in ds.cols:
             return None
         return ds, col, ds.cols[col], ds.time
+
+    def unit_of(self, label):
+        """"ds:col"의 단위 문자열(모르면 None)."""
+        if not label or ":" not in label:
+            return None
+        name, col = label.split(":", 1)
+        ds = self.shelf.get(name)
+        return ds.units.get(col) if ds else None
 
     def _add_data(self):
         from gui.dlg_dir import dlg_dir
