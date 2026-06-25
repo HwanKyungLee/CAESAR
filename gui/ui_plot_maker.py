@@ -241,7 +241,7 @@ class TimeSeriesMode(PlotMode):
 
     def __init__(self, host):
         super().__init__(host)
-        self._series = []   # [[label, axis 'L'/'R', color|None], ...]
+        self._series = []   # [[label, axis 'L'/'R', color|None, name|None], ...]
         self._w = None
 
     def options_widget(self):
@@ -260,16 +260,19 @@ class TimeSeriesMode(PlotMode):
         lay.addLayout(row)
         row2 = QHBoxLayout()
         b_c = QPushButton("🎨 Color")
+        b_n = QPushButton("✎ Name")
         b_del = QPushButton("− Remove")
         b_c.clicked.connect(self._pick_color)
+        b_n.clicked.connect(self._rename)
         b_del.clicked.connect(self._remove)
         row2.addWidget(b_c)
+        row2.addWidget(b_n)
         row2.addWidget(b_del)
         lay.addLayout(row2)
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.setToolTip("선반에서 컬럼 선택 후 [+ Left/Right Y].\n"
-                              "더블클릭 = 좌↔우 전환, 🎨 = 선택 시리즈 색 지정.")
+                              "더블클릭 = 좌↔우 전환, 🎨 = 색 지정, ✎ = 범례 이름 지정.")
         self._list.itemDoubleClicked.connect(self._toggle_axis)
         lay.addWidget(self._list)
         self._w = w
@@ -278,7 +281,7 @@ class TimeSeriesMode(PlotMode):
     def _add(self, axis):
         for lab in self.host.selected_columns():
             if not any(s[0] == lab and s[1] == axis for s in self._series):
-                self._series.append([lab, axis, None])
+                self._series.append([lab, axis, None, None])
         self._refresh_list()
         self.render()
 
@@ -315,11 +318,42 @@ class TimeSeriesMode(PlotMode):
         self._refresh_list()
         self.render()
 
+    def _rename(self):
+        from PyQt6.QtWidgets import QInputDialog
+        idx = self._sel_indices()
+        if not idx:
+            self.host.set_status("이름을 바꿀 시리즈를 목록에서 선택하세요.")
+            return
+        i = idx[0]
+        cur = self._series[i][3] or self._auto_name(self._series[i][0])
+        text, ok = QInputDialog.getText(self._w, "Series name",
+                                        "범례 이름 (빈칸 = 자동):", text=cur)
+        if not ok:
+            return
+        self._series[i][3] = text.strip() or None
+        self._refresh_list()
+        self.render()
+
+    def _auto_name(self, lab):
+        """기본 범례 이름: 컬럼명(데이터셋 여러 개면 'NO2 (CH1)'처럼 채널 꼬리표)."""
+        import re
+        ds, _, col = lab.partition(":")
+        if len(self.host.shelf) <= 1:
+            return col
+        m = re.search(r"(CH\d+|cold|warm|hot|ROI\d+|PNs|ANs)", ds, re.I)
+        tag = m.group(1) if m else ds[:10]
+        return f"{col} ({tag})"
+
+    def _display(self, lab, name):
+        return name if name else self._auto_name(lab)
+
     def _refresh_list(self):
         from PyQt6.QtGui import QColor
         self._list.clear()
-        for i, (lab, axis, color) in enumerate(self._series):
-            it = QListWidgetItem(f"[{axis}] {lab}")
+        for i, (lab, axis, color, name) in enumerate(self._series):
+            disp = self._display(lab, name)
+            it = QListWidgetItem(f"[{axis}] {disp}")
+            it.setToolTip(lab)
             if color:
                 it.setForeground(QColor(color))
             it.setData(Qt.ItemDataRole.UserRole, i)
@@ -338,9 +372,9 @@ class TimeSeriesMode(PlotMode):
         self._series = []
         for s in cfg.get("series", []):
             s = list(s)
-            while len(s) < 3:
+            while len(s) < 4:
                 s.append(None)
-            self._series.append([s[0], s[1], s[2]])
+            self._series.append([s[0], s[1], s[2], s[3]])
         if self._w:
             self._refresh_list()
 
@@ -359,7 +393,7 @@ class TimeSeriesMode(PlotMode):
         host.enable_right_axis(use_right)
         any_time = False
         n = 0
-        for lab, axis, color in self._series:
+        for lab, axis, color, name in self._series:
             res = host.resolve(lab)
             if res is None:
                 continue
@@ -368,14 +402,15 @@ class TimeSeriesMode(PlotMode):
                 any_time = True
             xs, ys = self._proc(y, t)
             ci = color or _PALETTE[n % len(_PALETTE)]
+            disp = self._display(lab, name)
             if axis == "R":
                 curve = pg.PlotDataItem(xs, ys, pen=pg.mkPen(ci, width=2),
-                                        name=f"{lab} (R)")
+                                        name=f"{disp} (R)")
                 host.vb_right.addItem(curve)
                 if host.legend is not None:
-                    host.legend.addItem(curve, f"{lab} (R)")
+                    host.legend.addItem(curve, f"{disp} (R)")
             else:
-                host.p1.plot(xs, ys, pen=pg.mkPen(ci, width=2), name=lab)
+                host.p1.plot(xs, ys, pen=pg.mkPen(ci, width=2), name=disp)
             n += 1
         host.set_time_axis(any_time)
         host.p1.setLabel("bottom", host.lbl("xlabel", "Time" if any_time else "index"))
@@ -383,7 +418,7 @@ class TimeSeriesMode(PlotMode):
         if use_right:
             host.set_right_label(host.lbl("rlabel", "Value (right)"))
         host.p1.setTitle(host.lbl("title", f"Time series — {n} series"))
-        host.update_views()
+        host.autoscale()
         if n:
             host.set_status(f"{n} series"
                             + (f" · resample {host.resample_sec}s" if host.resample_sec else "")
@@ -397,7 +432,7 @@ class TimeSeriesMode(PlotMode):
         any_time = False
         n = 0
         hl, ll = [], []   # 두 축 범례 통합
-        for lab, axis, color in self._series:
+        for lab, axis, color, name in self._series:
             res = host.resolve(lab)
             if res is None:
                 continue
@@ -409,13 +444,14 @@ class TimeSeriesMode(PlotMode):
             else:
                 xv = xs
             ci = color or _PALETTE[n % len(_PALETTE)]
+            disp = self._display(lab, name)
             if axis == "R":
                 if ax_r is None:
                     ax_r = ax.twinx()
                     ax_r.set_ylabel(host.lbl("rlabel", "Value (right)"))
-                line, = ax_r.plot(xv, ys, color=ci, lw=1.6, label=f"{lab} (R)")
+                line, = ax_r.plot(xv, ys, color=ci, lw=1.6, label=f"{disp} (R)")
             else:
-                line, = ax.plot(xv, ys, color=ci, lw=1.6, label=lab)
+                line, = ax.plot(xv, ys, color=ci, lw=1.6, label=disp)
             hl.append(line)
             ll.append(line.get_label())
             n += 1
@@ -432,7 +468,7 @@ class TimeSeriesMode(PlotMode):
     def csv_table(self):
         host = self.host
         cols, time_ref = {}, None
-        for lab, axis, color in self._series:
+        for lab, axis, color, name in self._series:
             r = host.resolve(lab)
             if r is None:
                 continue
@@ -440,7 +476,10 @@ class TimeSeriesMode(PlotMode):
             xs, ys = self._proc(y, t)
             if t is None:
                 xs = None
-            cols[lab] = (xs, ys)
+            key = self._display(lab, name)
+            while key in cols:        # 이름 충돌 방지
+                key += "_2"
+            cols[key] = (xs, ys)
             if time_ref is None and xs is not None:
                 time_ref = xs
         if not cols:
@@ -583,7 +622,7 @@ class ScatterMode(PlotMode):
         else:
             host.p1.setTitle(host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")
-        host.update_views()
+        host.autoscale()
 
     def render_mpl(self, fig):
         host = self.host
@@ -698,7 +737,7 @@ class AllanMode(PlotMode):
         host.p1.setTitle(host.lbl("title",
                          f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
         host.set_status(f"optimal averaging ≈ {taus[imin]:.0f} s  (min Allan dev {ad[imin]:.3g})")
-        host.update_views()
+        host.autoscale()
 
     def render_mpl(self, fig):
         host = self.host
@@ -836,7 +875,7 @@ class HeatmapMode(PlotMode):
                 host.p1.addItem(ti)
         host.p1.invertY(True)
         host.p1.setTitle(host.lbl("title", "Correlation matrix (Pearson r)"))
-        host.update_views()
+        host.autoscale()
         host.set_status(f"{len(names)} columns")
 
     def render_mpl(self, fig):
@@ -963,7 +1002,7 @@ class HistogramMode(PlotMode):
         host.p1.setLabel("bottom", host.lbl("xlabel", self._c.currentText()))
         host.p1.setLabel("left", host.lbl("ylabel", "count"))
         host.p1.setTitle(host.lbl("title", f"Histogram — μ={mu:.3g} σ={sd:.3g} n={v.size}"))
-        host.update_views()
+        host.autoscale()
         host.set_status(f"n={v.size}  μ={mu:.4g}  median={md:.4g}  σ={sd:.4g}")
 
     def render_mpl(self, fig):
@@ -1164,6 +1203,15 @@ class PlotMakerWidget(QWidget):
         self.vb_right.setGeometry(self.p1.vb.sceneBoundingRect())
         self.vb_right.linkedViewChanged(self.p1.vb, self.vb_right.XAxis)
 
+    def autoscale(self):
+        """데이터에 맞춰 양축 범위 재설정. 빈 우측 ViewBox가 X를 [0,1]에 묶어
+        시간축이 깨지던 문제(autorange 미작동)를 매 render 끝에 강제 해소한다."""
+        vb = self.p1.getViewBox()
+        self.vb_right.enableAutoRange(y=True)
+        vb.enableAutoRange(x=True, y=True)
+        vb.autoRange()
+        self.update_views()
+
     def set_status(self, text):
         self._status.setText(text)
 
@@ -1273,6 +1321,24 @@ class PlotMakerWidget(QWidget):
         self._mode.render()
 
     # ── Export / config ────────────────────────────────────────────────
+    @staticmethod
+    def _apply_korean_font(matplotlib):
+        """한글 라벨이 □□로 깨지지 않게 한글 지원 폰트를 1회 설정(있으면)."""
+        if getattr(PlotMakerWidget, "_kfont_done", False):
+            return
+        PlotMakerWidget._kfont_done = True
+        try:
+            from matplotlib import font_manager as fm
+            avail = {f.name for f in fm.fontManager.ttflist}
+            for cand in ("Malgun Gothic", "NanumGothic", "AppleGothic",
+                         "Noto Sans CJK KR", "Noto Sans KR", "Gulim", "Batang"):
+                if cand in avail:
+                    matplotlib.rcParams["font.family"] = cand
+                    break
+            matplotlib.rcParams["axes.unicode_minus"] = False   # 음수 기호 깨짐 방지
+        except Exception:
+            pass
+
     def _export_publish(self):
         """현재 모드를 matplotlib로 재렌더 → 고화질 PNG / 벡터 PDF·SVG."""
         out, _ = QFileDialog.getSaveFileName(
@@ -1283,11 +1349,13 @@ class PlotMakerWidget(QWidget):
         if not os.path.splitext(out)[1]:
             out += ".png"
         try:
+            import matplotlib
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_agg import FigureCanvasAgg
         except Exception as e:
             QMessageBox.warning(self, "Publish", f"matplotlib 사용 불가: {e}")
             return
+        self._apply_korean_font(matplotlib)
         try:
             fig = Figure(figsize=(10, 5.5))
             FigureCanvasAgg(fig)          # savefig용 캔버스 부착(백엔드 무관)
