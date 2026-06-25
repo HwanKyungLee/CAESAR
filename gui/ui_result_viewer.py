@@ -71,6 +71,7 @@ class ResultViewerWidget(QWidget):
 
     # ──────────────────────────────────────────────────────────────
     def _init_ui(self):
+        from gui.flow_layout import FlowLayout
         root = QVBoxLayout(self)
 
         # ── 툴바 1줄: [열기] | [보기] ────────────────────────────────────
@@ -84,7 +85,7 @@ class ResultViewerWidget(QWidget):
             l.setStyleSheet("color:#888; font-weight:bold;")
             return l
 
-        bar = QHBoxLayout()
+        bar = FlowLayout(spacing=6)
         bar.addWidget(_grp("Open"))
         self._btn = QPushButton("📂 File")
         self._btn.clicked.connect(self._open)
@@ -135,21 +136,18 @@ class ResultViewerWidget(QWidget):
         self._spin_qc_k.valueChanged.connect(self._on_gas_changed)
         bar.addWidget(self._spin_qc_k)
 
+        root.addLayout(bar)
+
         self._lbl = QLabel("Open a result file or folder.")
         self._lbl.setStyleSheet("color:#666;")
         # 긴 상태문구가 툴바 최소폭을 강제(→그래프 잘림)하지 않게 가로 Ignored
         from PyQt6.QtWidgets import QSizePolicy
         self._lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        bar.addWidget(self._lbl, 1)
-        root.addLayout(bar)
+        root.addWidget(self._lbl)
 
-        # ── 툴바 2줄: [분석] | [내보내기] ───────────────────────────────
-        fbar = QHBoxLayout()
+        # ── 툴바 2줄: [분석] | [내보내기] (Overlay·Diurnal은 Plot Maker로 이관) ──
+        fbar = FlowLayout(spacing=6)
         fbar.addWidget(_grp("Analyze"))
-        self._btn_compare = QPushButton("📊 Overlay")
-        self._btn_compare.setToolTip("Overlay same gas from multiple selected fit files")
-        self._btn_compare.clicked.connect(self._overlay_compare)
-        fbar.addWidget(self._btn_compare)
         self._btn_td = QPushButton("🧪 NO2/PNs/ANs")
         self._btn_td.setToolTip("Select 3 results (Cold / PNs ROI1 / ANs ROI2) → time-align & difference:\n"
                                 "NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs")
@@ -159,26 +157,19 @@ class ResultViewerWidget(QWidget):
         self._btn_stats.setToolTip("Per-gas mean/median/σ/n for current fit (range-aware)")
         self._btn_stats.clicked.connect(self._show_stats)
         fbar.addWidget(self._btn_stats)
-        self._btn_diurnal = QPushButton("🕐 Diurnal")
-        self._btn_diurnal.setToolTip("Hour-of-day mean curve of selected gas (bottom plot)")
-        self._btn_diurnal.clicked.connect(self._plot_diurnal)
-        fbar.addWidget(self._btn_diurnal)
         self._btn_to_pm = QPushButton("📉 To Plot Maker")
-        self._btn_to_pm.setToolTip("선택(없으면 현재) 파일을 Plot Maker 선반으로 보내 자유 합성")
+        self._btn_to_pm.setToolTip("선택(없으면 현재) 파일을 Plot Maker 선반으로 보내\n"
+                                   "겹쳐비교·Diurnal·산점도 등 자유 합성")
         self._btn_to_pm.clicked.connect(self._to_plot_maker)
         fbar.addWidget(self._btn_to_pm)
 
-        fbar.addStretch(1)
-        root.addLayout(fbar)
-
-        # ── 툴바 3줄: [Export] — DateTimeEdit 포함이라 별도 줄(가로폭 폭발 방지) ──
-        ebar = QHBoxLayout()
-        ebar.addWidget(_grp("Export"))
+        fbar.addWidget(_sep())
+        fbar.addWidget(_grp("Export"))
         self._btn_region = QPushButton("⏱ Range")
         self._btn_region.setCheckable(True)
         self._btn_region.setToolTip("Show draggable time-range handles on the plot")
         self._btn_region.toggled.connect(self._toggle_region)
-        ebar.addWidget(self._btn_region)
+        fbar.addWidget(self._btn_region)
         # 정확한 시각 직접 입력 — 드래그와 양방향 동기 (Export/Stats의 기준값)
         from PyQt6.QtWidgets import QDateTimeEdit
         self._dt_from = QDateTimeEdit()
@@ -189,33 +180,33 @@ class ResultViewerWidget(QWidget):
             de.setCalendarPopup(True)
             de.setToolTip("Export/Stats time range (synced with drag handles)")
             de.editingFinished.connect(self._on_range_edited)
-            ebar.addWidget(de)
+            fbar.addWidget(de)
         self._btn_slice = QPushButton("✂ Export")
         self._btn_slice.setToolTip("Save the time range (or all) as a new result file.\n"
                                    "Multiple selected files in the list are merged first.")
         self._btn_slice.clicked.connect(self._export_region)
-        ebar.addWidget(self._btn_slice)
+        fbar.addWidget(self._btn_slice)
         self._btn_merge = QPushButton("🔗 Merge")
         self._btn_merge.setToolTip("Merge selected same-format result files in time order")
         self._btn_merge.clicked.connect(self._merge_files)
-        ebar.addWidget(self._btn_merge)
+        fbar.addWidget(self._btn_merge)
         self._btn_td_save = QPushButton("💾 Save TD")
         self._btn_td_save.setToolTip("Save computed NO2/PNs/ANs (+raw channel NO2) as TSV")
         self._btn_td_save.setEnabled(False)
         self._btn_td_save.clicked.connect(self._save_td_result)
-        ebar.addWidget(self._btn_td_save)
+        fbar.addWidget(self._btn_td_save)
         self._btn_png = QPushButton("📷 PNG")
         self._btn_png.setToolTip("Export current plots as high-resolution PNG (2400 px wide,\n"
                                  "top+bottom combined). For papers/reports.")
         self._btn_png.clicked.connect(self._export_png)
-        ebar.addWidget(self._btn_png)
+        fbar.addWidget(self._btn_png)
 
         self._stats_lbl = QLabel("")
         self._stats_lbl.setStyleSheet("color:#444;")
         from PyQt6.QtWidgets import QSizePolicy as _QSP
         self._stats_lbl.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Preferred)
-        ebar.addWidget(self._stats_lbl, 1)
-        root.addLayout(ebar)
+        root.addLayout(fbar)
+        root.addWidget(self._stats_lbl)
 
         # 좌: 폴더 파일목록(형태별 그룹) / 우: 플롯 2단(위=주, 아래=보조)
         hsplit = QSplitter(Qt.Orientation.Horizontal)
@@ -795,47 +786,6 @@ class ResultViewerWidget(QWidget):
             pass
         self._pw_top.scene().sigMouseClicked.connect(self._on_fit_point_clicked)
 
-    def _overlay_compare(self):
-        """목록에서 다중 선택된 fit 파일들의 현재 가스 ppb·RMS를 겹쳐 비교."""
-        paths = []
-        for it in self._list.selectedItems():
-            data = it.data(Qt.ItemDataRole.UserRole)
-            if isinstance(data, tuple) and data[0] == "file":
-                p = data[1]
-                if p.lower().endswith("_fit.tsv") or self._detect(p) == "fit":
-                    paths.append(p)
-        if not paths:
-            self._stats_lbl.setText("⚠️ Select 2+ fit files in the list to overlay.")
-            return
-        gas = self._gas_combo.currentText()
-        self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
-        self._set_time_axis(self._pw_top, False)
-        self._set_time_axis(self._pw_bot, False)
-        summ = []
-        for i, p in enumerate(paths):
-            try:
-                t = self._load_fit_table(p)
-            except Exception:
-                continue
-            g = gas if gas in t["gases"] else next(iter(t["gases"]), None)
-            if g is None:
-                continue
-            col = _PALETTE[i % len(_PALETTE)]
-            lbl = os.path.basename(p).replace("_fit.tsv", "")
-            y = t["gases"][g]
-            self._pw_top.plot(t["row_idx"], y, pen=pg.mkPen(col, width=2), name=f"{lbl}:{g}")
-            self._pw_bot.plot(t["row_idx"], t["rms"],
-                              pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DashLine),
-                              name=f"{lbl} RMS")
-            fin = y[np.isfinite(y)]
-            if fin.size:
-                summ.append(f"{lbl}: μ={float(np.mean(fin)):.3g}±{float(np.std(fin)):.2g}")
-        self._pw_top.setLabel("left", "Conc (ppb)")
-        self._pw_top.setLabel("bottom", "row_idx (≈time)")
-        self._pw_top.setTitle(f"Compare — {gas} ({len(paths)} files)")
-        self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
-        self._stats_lbl.setText("   |   ".join(summ))
-
     def _on_fit_point_clicked(self, ev):
         """ppb 그래프 클릭 → 가장 가까운 scan의 α 스펙트럼을 팝업(형제 alpha_trace)."""
         t = self._fit_cache
@@ -1242,39 +1192,3 @@ class ResultViewerWidget(QWidget):
             self._stats_lbl.setText(f"PNG saved: {os.path.basename(out)} (2400px)")
         except Exception as e:
             QMessageBox.warning(self, "PNG export", f"Failed: {e}")
-
-    def _plot_diurnal(self):
-        """선택 가스의 시(hour)별 평균±σ 곡선을 아래 그래프에 표시."""
-        t, sel = self._stats_arrays()
-        if t is None or t.get("time") is None:
-            QMessageBox.information(self, "Diurnal", "Open a fit result with a time axis first.")
-            return
-        gsel = self._gas_combo.currentText()
-        if gsel in ("", "All"):
-            gsel = next(iter(t["gases"]), None)
-        y = t["gases"].get(gsel)
-        if y is None:
-            return
-        tt = t["time"]
-        ok = sel & np.isfinite(tt) & np.isfinite(y)
-        hrs = np.array([datetime.fromtimestamp(v).hour for v in tt[ok]])
-        vals = y[ok]
-        mu = np.full(24, np.nan)
-        sd = np.full(24, np.nan)
-        for h in range(24):
-            m = hrs == h
-            if m.any():
-                mu[h] = np.mean(vals[m])
-                sd[h] = np.std(vals[m])
-        self._pw_bot.clear()
-        self._pw_bot.show()
-        self._set_time_axis(self._pw_bot, False)
-        xs = np.arange(24)
-        lo = self._pw_bot.plot(xs, mu - sd, pen=pg.mkPen(_PALETTE[0], width=0))
-        hi = self._pw_bot.plot(xs, mu + sd, pen=pg.mkPen(_PALETTE[0], width=0))
-        self._pw_bot.addItem(pg.FillBetweenItem(lo, hi, brush=pg.mkBrush(33, 150, 243, 40)))
-        self._pw_bot.plot(xs, mu, pen=pg.mkPen(_PALETTE[0], width=2), symbol="o",
-                          symbolSize=6, symbolBrush=_PALETTE[0], name=f"{gsel} hourly mean")
-        self._pw_bot.setLabel("left", f"{gsel} (ppb)")
-        self._pw_bot.setLabel("bottom", "Hour of day")
-        self._pw_bot.setTitle(f"Diurnal — {gsel} mean±σ")
