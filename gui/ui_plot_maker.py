@@ -1309,6 +1309,28 @@ class PlotMakerWidget(QWidget):
         fl.addRow("Y-left", self._ed_y)
         fl.addRow("Y-right", self._ed_r)
         lv.addWidget(gb)
+
+        # 축 범위/로그 (빈칸 = 자동)
+        gb2 = QGroupBox("Axes (blank = auto)")
+        fl2 = QFormLayout(gb2)
+        self._ax_ymin = QLineEdit(); self._ax_ymax = QLineEdit()
+        self._ax_rmin = QLineEdit(); self._ax_rmax = QLineEdit()
+        for e in (self._ax_ymin, self._ax_ymax, self._ax_rmin, self._ax_rmax):
+            e.setPlaceholderText("auto")
+            e.editingFinished.connect(self._on_axes_changed)
+        rowY = QHBoxLayout()
+        rowY.addWidget(self._ax_ymin); rowY.addWidget(QLabel("~")); rowY.addWidget(self._ax_ymax)
+        fl2.addRow("Y-left", rowY)
+        rowR = QHBoxLayout()
+        rowR.addWidget(self._ax_rmin); rowR.addWidget(QLabel("~")); rowR.addWidget(self._ax_rmax)
+        fl2.addRow("Y-right", rowR)
+        rowL = QHBoxLayout()
+        self._chk_logx = QCheckBox("log X"); self._chk_logy = QCheckBox("log Y")
+        self._chk_logx.toggled.connect(self._on_axes_changed)
+        self._chk_logy.toggled.connect(self._on_axes_changed)
+        rowL.addWidget(self._chk_logx); rowL.addWidget(self._chk_logy)
+        fl2.addRow("Scale", rowL)
+        lv.addWidget(gb2)
         left.setMinimumWidth(240)
         split.addWidget(left)
 
@@ -1369,12 +1391,67 @@ class PlotMakerWidget(QWidget):
 
     def autoscale(self):
         """데이터에 맞춰 양축 범위 재설정. 빈 우측 ViewBox가 X를 [0,1]에 묶어
-        시간축이 깨지던 문제(autorange 미작동)를 매 render 끝에 강제 해소한다."""
+        시간축이 깨지던 문제(autorange 미작동)를 매 render 끝에 강제 해소한다.
+        이후 사용자 축 설정(범위/로그)을 덮어쓴다."""
         vb = self.p1.getViewBox()
         self.vb_right.enableAutoRange(y=True)
         vb.enableAutoRange(x=True, y=True)
         vb.autoRange()
         self.update_views()
+        self.apply_axes()
+
+    @staticmethod
+    def _axis_val(edit):
+        try:
+            return float(edit.text().strip())
+        except (ValueError, AttributeError):
+            return None
+
+    def apply_axes(self):
+        """사용자 지정 축 범위/로그를 현재 플롯에 적용(빈칸/미체크는 자동 유지).
+        로그는 모드 기본값(예: Allan)을 끄지 않고 OR로 얹는다."""
+        import math
+        if not hasattr(self, "_chk_logx"):
+            return
+        ax_b = self.p1.getAxis("bottom"); ax_l = self.p1.getAxis("left")
+        fx = bool(getattr(ax_b, "logMode", False)) or self._chk_logx.isChecked()
+        fy = bool(getattr(ax_l, "logMode", False)) or self._chk_logy.isChecked()
+        self.p1.setLogMode(x=fx, y=fy)
+        vb = self.p1.getViewBox()
+
+        def conv(v, islog):
+            if v is None:
+                return None
+            if islog:
+                return math.log10(v) if v > 0 else None
+            return v
+        ymin = conv(self._axis_val(self._ax_ymin), fy)
+        ymax = conv(self._axis_val(self._ax_ymax), fy)
+        if ymin is not None and ymax is not None and ymin < ymax:
+            vb.setYRange(ymin, ymax, padding=0)
+        rmin = self._axis_val(self._ax_rmin); rmax = self._axis_val(self._ax_rmax)
+        if rmin is not None and rmax is not None and rmin < rmax:
+            self.vb_right.setYRange(rmin, rmax, padding=0)
+
+    def _apply_axes_mpl(self, fig):
+        """Publish(matplotlib)에도 동일한 축 범위/로그 적용."""
+        axes = fig.axes
+        if not axes:
+            return
+        ax = axes[0]
+        if self._chk_logx.isChecked():
+            try: ax.set_xscale("log")
+            except Exception: pass
+        if self._chk_logy.isChecked():
+            try: ax.set_yscale("log")
+            except Exception: pass
+        ymin = self._axis_val(self._ax_ymin); ymax = self._axis_val(self._ax_ymax)
+        if ymin is not None and ymax is not None and ymin < ymax:
+            ax.set_ylim(ymin, ymax)
+        rmin = self._axis_val(self._ax_rmin); rmax = self._axis_val(self._ax_rmax)
+        if rmin is not None and rmax is not None and rmin < rmax:
+            for a in axes[1:]:        # twinx 우측 축
+                a.set_ylim(rmin, rmax)
 
     def set_status(self, text):
         self._status.setText(text)
@@ -1492,6 +1569,9 @@ class PlotMakerWidget(QWidget):
                        "ylabel": self._ed_y.text(), "rlabel": self._ed_r.text()}
         self._mode.render()
 
+    def _on_axes_changed(self, *_):
+        self._mode.render()
+
     # ── Export / config ────────────────────────────────────────────────
     @staticmethod
     def _apply_korean_font(matplotlib):
@@ -1532,6 +1612,7 @@ class PlotMakerWidget(QWidget):
             fig = Figure(figsize=(10, 5.5))
             FigureCanvasAgg(fig)          # savefig용 캔버스 부착(백엔드 무관)
             self._mode.render_mpl(fig)
+            self._apply_axes_mpl(fig)
             fig.tight_layout()
             fig.savefig(out, dpi=self._dpi_spin.value(), bbox_inches="tight")
             ext = os.path.splitext(out)[1].lstrip(".").upper()
@@ -1593,6 +1674,9 @@ class PlotMakerWidget(QWidget):
             "resample": self._res_combo.currentText(),
             "smooth": self._smooth_spin.value(),
             "labels": dict(self.custom),
+            "axes": {"ymin": self._ax_ymin.text(), "ymax": self._ax_ymax.text(),
+                     "rmin": self._ax_rmin.text(), "rmax": self._ax_rmax.text(),
+                     "logx": self._chk_logx.isChecked(), "logy": self._chk_logy.isChecked()},
             "mode_cfg": {m.key: m.to_config() for m in self._modes},
         }
         try:
@@ -1637,6 +1721,11 @@ class PlotMakerWidget(QWidget):
         self._ed_r.setText(lab.get("rlabel", ""))
         self.custom = {"title": lab.get("title", ""), "xlabel": lab.get("xlabel", ""),
                        "ylabel": lab.get("ylabel", ""), "rlabel": lab.get("rlabel", "")}
+        axc = cfg.get("axes", {})
+        self._ax_ymin.setText(str(axc.get("ymin", ""))); self._ax_ymax.setText(str(axc.get("ymax", "")))
+        self._ax_rmin.setText(str(axc.get("rmin", ""))); self._ax_rmax.setText(str(axc.get("rmax", "")))
+        self._chk_logx.setChecked(bool(axc.get("logx", False)))
+        self._chk_logy.setChecked(bool(axc.get("logy", False)))
         for m in self._modes:
             m.from_config(cfg.get("mode_cfg", {}).get(m.key, {}))
         # 모드 선택 복원
