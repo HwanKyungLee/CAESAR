@@ -3,6 +3,16 @@
 이 파일은 릴리즈 태그(`git tag vX.Y.Z`)를 찍을 때마다 갱신한다.
 버전 번호 규칙: `core/__version__.py` 참조.
 
+## 릴리즈 체크리스트 (태그 찍기 전 매번)
+
+1. `core/__version__.py`의 `__version__` 값을 새 버전으로 올린다
+2. `python tools/validate_pipeline.py` 실행 → 6개 항목 전부 PASS 확인
+   (raw 파싱 / 웨이브칼 / 레퍼런스 ILS / Rayleigh 물리 / R 값 / 핏 출력 —
+   하나라도 FAIL이면 태깅 중단하고 원인부터 고친다)
+3. 의존성이 바뀌었으면 `pip freeze > requirements-lock.txt` 갱신
+4. 이번 버전에서 뭐가 바뀌었는지 아래에 새 항목으로 추가(검증 결과 포함)
+5. 커밋 → `git tag -a vX.Y.Z -m "..."` → `git push origin main --tags`
+
 ## v0.1.0 — 패키징 1단계: 경로 이식성 + 버전 태깅
 
 - 다른 컴퓨터에서 clone만으로 돌아가도록 절대경로 하드코딩 제거
@@ -11,4 +21,8 @@
   - 문헌 단면(`reference_data/raw/`)과 파장보정 상수(`reference_data/wv_cal/`)를 저장소에 번들
 - 사람이 읽는 릴리즈 버전(`core/__version__.py`, SemVer) 도입 — 스플래시/창 제목에 표시
   (결과 파일에 스탬프되는 git 해시 기반 정밀 버전은 `core/provenance.py`, 그대로 유지)
-- `requirements-lock.txt` 추가 — 이 버전 검증에 쓰인 정확한 패키지 조합 기록
+- HITRAN fetch에 소켓 타임아웃(15s) 추가 — 오프라인 환경에서 GUI 무한 정지 방지
+- `requirements.txt` 버전 고정(`>=`→`==`), `requirements-lock.txt` 추가 — 이 버전
+  검증에 쓰인 정확한 패키지 조합 기록
+- **검증**: `tools/validate_pipeline.py` 6/6 PASS (raw 파싱·웨이브칼·레퍼런스 ILS·
+  Rayleigh 물리·R 값·핏 출력 전부 통과, 회귀 없음)
