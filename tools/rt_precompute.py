@@ -96,6 +96,23 @@ def _file_first_sec(path):
     return float("nan")
 
 
+def _results_to_knots(results, base2path, npix):
+    """scan_directory results → (knot_sec[list], omr_rows[list]). 재스캔 없이 omr_d 재사용.
+    knot 시각은 raw bytepack 연초기준 초(알파 rep_sec와 같은 시계, tz 변환 없음)."""
+    knot_sec, omr_rows = [], []
+    for r in results:
+        path = base2path.get(r["filename"])
+        if path is None:
+            continue
+        sec = _file_first_sec(path)
+        od = np.asarray(r["omr_d"], dtype=float)
+        if not np.isfinite(sec) or od.shape[0] != npix:
+            continue
+        knot_sec.append(sec)
+        omr_rows.append(np.maximum(od, 1e-12))
+    return knot_sec, omr_rows
+
+
 def _compute_via_scandir(raw_dir, wave_nm, config, file_list, npix, parallel, progress_cb, verbose):
     """scan_directory(이제 data_io 단일파스+병렬)를 호출 → (knot_sec, omr_d) 추출.
     알파-R·R Trend 플롯이 같은 scan_directory 코어를 공유(단일 진실원천)."""
@@ -110,18 +127,7 @@ def _compute_via_scandir(raw_dir, wave_nm, config, file_list, npix, parallel, pr
             col_press=config.col_press, col_temp=config.col_temp, ts_tz=_tz(config.ts_tz_hours),
             spec_start=config.spec_start, spec_end=config.spec_end,
             fit_window_nm=config.fit_window_nm, parallel=parallel, progress_cb=progress_cb)
-    knot_sec, omr_rows = [], []
-    for r in results:
-        path = base2path.get(r["filename"])
-        if path is None:
-            continue
-        sec = _file_first_sec(path)
-        od = np.asarray(r["omr_d"], dtype=float)
-        if not np.isfinite(sec) or od.shape[0] != npix:
-            continue
-        knot_sec.append(sec)
-        omr_rows.append(np.maximum(od, 1e-12))
-    return knot_sec, omr_rows
+    return _results_to_knots(results, base2path, npix)
 
 
 def compute_rt_knots(raw_dir, wave_nm, config: RTConfig, file_list=None,
@@ -178,6 +184,142 @@ def load_rt(path):
     except Exception:
         out["processed_files"] = []
     return out
+
+
+# ── 날짜 갭 탐지 ────────────────────────────────────────────────────────────
+
+def find_date_gaps(npz_path):
+    """npz의 knot_sec를 달력 날짜로 변환해 [first, last] 사이에서 **knot이 0개인 날**을
+    찾는다(중간 빈 날 = R 보간으로만 채워지는 구간).
+
+    sec→날짜는 data_io와 동일하게 datetime(year,1,1)+timedelta(seconds=sec).
+    연도는 processed_files 파일명(YYYY-MM-DD)에서 취한다(bytepack은 연초기준).
+
+    반환 dict {'missing':['YYYY-MM-DD',...], 'first':..., 'last':..., 'n_days':int}
+    또는 None(판단 불가 / 갭 없음). 캠페인이 연말연시를 넘으면 부정확할 수 있음."""
+    import re as _re
+    from datetime import datetime as _dtm, timedelta as _tdl
+    if not os.path.exists(npz_path):
+        return None
+    try:
+        z = load_rt(npz_path)
+    except Exception:
+        return None
+    ks = np.asarray(z.get("knot_sec", []), dtype=float)
+    ks = ks[np.isfinite(ks)]
+    if ks.size < 2:
+        return None
+    year = None
+    for bn in z.get("processed_files", []):
+        m = _re.search(r"(\d{4})-\d{2}-\d{2}", str(bn))
+        if m:
+            year = int(m.group(1)); break
+    if year is None:
+        return None
+    base = _dtm(year, 1, 1)
+    covered = sorted({(base + _tdl(seconds=float(s))).date() for s in ks})
+    if len(covered) < 2:
+        return None
+    first, last = covered[0], covered[-1]
+    cov_set = set(covered)
+    missing, d = [], first
+    while d <= last:
+        if d not in cov_set:
+            missing.append(d.strftime("%Y-%m-%d"))
+        d += _tdl(days=1)
+    if not missing:
+        return None
+    return {"missing": missing, "first": first.strftime("%Y-%m-%d"),
+            "last": last.strftime("%Y-%m-%d"), "n_days": len(missing)}
+
+
+def _knot_date_info(z):
+    """knot_sec(연초기준 초) → npz가 실제로 담고 있는 날짜/시각 커버리지.
+
+    반환 dict 또는 None(연도 판단 불가/빈 npz):
+      first/last       : 커버된 첫·끝 날짜 'YYYY-MM-DD'
+      first_dt/last_dt : 첫·끝 knot 시각 'YYYY-MM-DD HH:MM'
+      n_days           : knot이 1개 이상 있는 distinct 날 수
+      n_missing        : first~last 사이 knot 0개인 중간 빈 날 수
+    sec→날짜는 data_io와 동일: datetime(year,1,1)+timedelta(seconds=sec).
+    연도는 processed_files 파일명(YYYY-MM-DD)에서 취함(bytepack은 연초기준)."""
+    import re as _re
+    from datetime import datetime as _dtm, timedelta as _tdl
+    ks = np.asarray(z.get("knot_sec", []), dtype=float)
+    ks = ks[np.isfinite(ks)]
+    if ks.size == 0:
+        return None
+    year = None
+    for bn in z.get("processed_files", []):
+        m = _re.search(r"(\d{4})-\d{2}-\d{2}", str(bn))
+        if m:
+            year = int(m.group(1)); break
+    if year is None:
+        return None
+    base = _dtm(year, 1, 1)
+    first_dt = base + _tdl(seconds=float(ks.min()))
+    last_dt  = base + _tdl(seconds=float(ks.max()))
+    covered  = sorted({(base + _tdl(seconds=float(s))).date() for s in ks})
+    cov_set, miss, d = set(covered), 0, covered[0]
+    while d <= covered[-1]:
+        if d not in cov_set:
+            miss += 1
+        d += _tdl(days=1)
+    return {"first": covered[0].strftime("%Y-%m-%d"),
+            "last":  covered[-1].strftime("%Y-%m-%d"),
+            "first_dt": first_dt.strftime("%Y-%m-%d %H:%M"),
+            "last_dt":  last_dt.strftime("%Y-%m-%d %H:%M"),
+            "n_days": len(covered), "n_missing": miss}
+
+
+def verify_npz(npz_path, raw_dir, file_list=None):
+    """npz 무결성 점검(읽기 전용·스캔 없음). raw 폴더 파일목록 + npz processed_files를
+    비교해 '빈 날'과 '계산 안 된 파일'을 보고한다.
+
+    반환 dict:
+      exists       : npz 존재 여부
+      n_knots      : 저장된 knot 수
+      first/last   : knot 날짜 범위(YYYY-MM-DD) 또는 None
+      gaps         : find_date_gaps 결과(빈 날) 또는 None
+      n_raw        : raw 폴더의 .dat 수
+      n_processed  : processed_files 수
+      uncomputed   : raw엔 있으나 processed_files엔 없는 basename 목록(이름순)
+    """
+    report = {"exists": False, "n_knots": 0, "first": None, "last": None,
+              "first_dt": None, "last_dt": None, "n_days": 0,
+              "gaps": None, "n_raw": 0, "n_processed": 0, "uncomputed": []}
+
+    all_files = _RT._resolve_files(raw_dir, file_list)
+    report["n_raw"] = len(all_files)
+
+    if not os.path.exists(npz_path):
+        # npz 없으면 raw 전부가 '미계산'
+        report["uncomputed"] = sorted(os.path.basename(f) for f in all_files)
+        return report
+
+    report["exists"] = True
+    try:
+        z = load_rt(npz_path)
+    except Exception:
+        return report
+
+    ks = np.asarray(z.get("knot_sec", []), dtype=float)
+    report["n_knots"] = int(np.isfinite(ks).sum())
+    done = set(z.get("processed_files", []))
+    report["n_processed"] = len(done)
+    report["uncomputed"] = sorted(
+        os.path.basename(f) for f in all_files if os.path.basename(f) not in done)
+
+    # 날짜/시각 커버리지 — 갭 유무와 무관하게 항상 보고(깨끗한 npz도 범위 표시)
+    info = _knot_date_info(z)
+    if info:
+        report.update({k: info[k] for k in
+                       ("first", "last", "first_dt", "last_dt", "n_days")})
+
+    g = find_date_gaps(npz_path)
+    if g:
+        report["gaps"] = g
+    return report
 
 
 # ── 증분 추가 유틸리티 ──────────────────────────────────────────────────────
@@ -267,16 +409,46 @@ def append_rt(npz_path, raw_dir, wave_nm, config: RTConfig, file_list=None,
         raw_dir, wave_nm, config, file_list=new_files,
         parallel=parallel, verbose=verbose, progress_cb=progress_cb)
 
-    all_processed = sorted(done_set | set(new_basenames))
+    # 기존 npz와 시간순 머지+dedup (덮어쓰기 아님). processed_files는 시도한 전체 갱신.
+    n_new, _ = _merge_knots_into_npz(
+        npz_path, new_ks, new_od, wave_nm, config, new_basenames, ex_label=ex_label)
+    return n_new, new_basenames
+
+
+def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
+                          new_basenames, ex_label=None):
+    """신규 (knot_sec, omr_d)를 기존 npz와 **시간순 머지 + 단조 dedup** 저장한다.
+    기존 npz가 있으면 누적에 합치고, 없으면 새로 만든다 — **절대 덮어쓰지 않는다**.
+    append_rt(신규파일 재계산)와 merge_results_into_npz(Start results 재사용)가 공유.
+    반환: (n_new_knots, n_total_knots)."""
+    wave_nm = np.asarray(wave_nm, dtype=float)
+    npix    = len(wave_nm)
+
+    ex_ks = np.array([], dtype=np.float64)
+    ex_od = np.zeros((0, npix), dtype=np.float64)
+    done_set = set()
+    label = ex_label if ex_label is not None else config.label
+    if os.path.exists(npz_path):
+        try:
+            ex = load_rt(npz_path)
+            ex_ks    = ex["knot_sec"]
+            ex_od    = ex["omr_d"]
+            done_set = set(ex.get("processed_files", []))
+            label    = ex.get("label") or label
+        except Exception as e:
+            print(f"  [merge] failed to load existing npz -> creating new: {e}")
+
+    all_processed = sorted(done_set | set(new_basenames or []))
+    new_ks = np.asarray(new_ks, dtype=np.float64)
 
     if len(new_ks) == 0:
         # 유효 R 없었어도 processed_files 갱신(재처리 방지)
         if len(ex_ks) > 0:
             save_rt(npz_path, ex_ks, ex_od, wave_nm,
-                    label=ex_label, config=config, processed_files=all_processed)
-        return 0, new_basenames
+                    label=label, config=config, processed_files=all_processed)
+        return 0, len(ex_ks)
 
-    # 머지 + 시간 정렬 + 단조 중복 제거
+    new_od = np.asarray(new_od, dtype=np.float64)
     if len(ex_ks) > 0:
         merged_ks = np.concatenate([ex_ks, new_ks])
         merged_od = np.vstack([ex_od, new_od])
@@ -292,6 +464,32 @@ def append_rt(npz_path, raw_dir, wave_nm, config: RTConfig, file_list=None,
     merged_od = merged_od[uniq]
 
     save_rt(npz_path, merged_ks, merged_od, wave_nm,
-            label=ex_label, config=config, processed_files=all_processed)
+            label=label, config=config, processed_files=all_processed)
+    return len(new_ks), len(merged_ks)
 
-    return len(new_ks), new_basenames
+
+def merge_results_into_npz(npz_path, results, raw_dir, wave_nm, config, file_list=None):
+    """Start가 이미 돌린 scan_directory **results를 재사용**해 npz에 증분 머지한다.
+    핵심: scan_directory를 다시 부르지 않는다 — results 안의 omr_d를 그대로 쓴다(재스캔 0).
+    기존 npz가 있으면 시간순 머지+dedup, 없으면 새로 생성. 절대 덮어쓰지 않는다.
+    반환: (n_new_knots, n_total_knots)."""
+    wave_nm = np.asarray(wave_nm, dtype=float)
+    npix    = len(wave_nm)
+    if not results:
+        return 0, 0
+
+    files = _RT._resolve_files(raw_dir, file_list)
+    base2path = {os.path.basename(f): f for f in files}
+    ks, od_rows = _results_to_knots(results, base2path, npix)
+    new_basenames = [r["filename"] for r in results if r.get("filename")]
+
+    if not ks:
+        return _merge_knots_into_npz(npz_path, np.array([]), None, wave_nm,
+                                     config, new_basenames)
+
+    order  = np.argsort(ks)
+    new_ks = np.asarray(ks, dtype=np.float64)[order]
+    new_od = np.asarray(od_rows, dtype=np.float64)[order]
+    uniq   = np.concatenate(([True], np.diff(new_ks) > 0))
+    return _merge_knots_into_npz(npz_path, new_ks[uniq], new_od[uniq], wave_nm,
+                                 config, new_basenames)

@@ -1,0 +1,415 @@
+# -*- coding: utf-8 -*-
+"""tools/validate_plotmaker.py — Plot Maker 회귀 검증 (offscreen Qt)
+=====================================================================
+gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widget)는
+테스트가 하나도 없었다. 고칠 때마다
+손으로 6개 모드를 다 눌러보는 대신, 여기서 headless(offscreen)로 위젯을
+구성 → 전 모드 렌더 → 데이터 제거 → Heatmap 더블클릭/설정 → 설정 저장·불러오기
+까지 자동으로 확인한다. validate_pipeline.py와 같은 PASS/WARN/FAIL 리포팅
+스타일이지만, Qt 위젯이라 QApplication을 offscreen으로 1회 띄운다.
+
+확인 항목
+---------
+1. 위젯 생성       : 모드가 다 등록됐나
+2. 전 모드 렌더    : render()·render_mpl()이 6개 모드 다 예외 없이 도나
+3. 잔존 렌더 방지  : 데이터셋 제거 후 콤보가 실제로 비워지나(2026-06 회귀 가드)
+4. Heatmap 더블클릭+config : on_column_activated·to_config/from_config 왕복
+5. 설정 저장/불러오기 : .pmcfg.json 라운드트립에서 mode_cfg 보존되나
+6. 색 결정론      : TimeSeries/Diurnal의 _resolve_specs()가 같은 입력→같은 색
+7. 시리즈 리스트 id무결성 : id조회·드래그순서·삭제
+8. Undo          : 데이터셋·시리즈 제거 복원
+9. 창 상태 기억   : QSettings 스플리터·탭·테마 저장→복원 왕복(2026-06 UX개편 회귀가드)
+10. Batch Publish : 종별 일괄저장 후 원래 시리즈목록/콤보선택 상태 복원되나
+11. X축 DateAxisItem 재생성 방지 : 같은 시간축 상태로 연달아 render해도 축
+    객체가 교체 안 되나(2026-07-03 실GUI 발견 — 교체되면 pg가 눈금 캐시를
+    못 넘겨받아 초기뷰 X라벨이 "00.050" 식으로 깨짐)
+12. 색상 채널태그 구분 : 같은 종을 CH1/CH2처럼 다른 태그로 동시에 그릴 때
+    서로 다른 색(2026-07-03 실GUI에서 NO2 CH1·CH2가 완전히 같은 파랑으로
+    겹쳐 안 보이던 버그 발견)
+"""
+from __future__ import annotations
+import os, sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")   # PyQt6 import 전에 설정
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+import numpy as np
+from PyQt6.QtWidgets import QApplication
+
+_APP = QApplication.instance() or QApplication([])   # 모듈 스코프, 1회만
+
+from gui.ui_plot_maker import PlotMakerWidget, Dataset
+
+CHECKS = []
+def check(name):
+    def deco(fn):
+        CHECKS.append((name, fn)); return fn
+    return deco
+
+class Skip(Exception):
+    pass
+
+
+def _fixture_dataset(name="fixture", n=500, seed=0):
+    """Qt/디스크 무관한 합성 Dataset — 시간축 + 2개 가스 컬럼 + 1개 에러 컬럼."""
+    rng = np.random.default_rng(seed)
+    t0 = 1_750_000_000.0
+    t = t0 + np.arange(n) * 60.0
+    no2 = 5 + 2 * np.sin(np.arange(n) / 50) + rng.normal(0, 0.3, n)
+    chocho = 0.5 + 0.1 * np.cos(np.arange(n) / 40) + rng.normal(0, 0.05, n)
+    return Dataset(name, f"<fixture:{name}>", t,
+                   {"NO2": no2, "CHOCHO": chocho},
+                   units={"NO2": "ppb", "CHOCHO": "ppb"},
+                   errs={"NO2": np.full(n, 0.2)})
+
+
+def _widget_with_fixture():
+    w = PlotMakerWidget()
+    ds = _fixture_dataset()
+    w.shelf[ds.name] = ds
+    w._refresh_tree()
+    w._notify_modes()
+    return w
+
+
+# ── 1. 위젯 생성 자체가 죽지 않는가 ──────────────────────────────────────
+@check("위젯 생성")
+def c_construct():
+    w = PlotMakerWidget()
+    if w._mode is None or not w._modes:
+        return "FAIL", "모드가 하나도 등록되지 않음"
+    return "PASS", f"{len(w._modes)}개 모드 등록됨: {[m.key for m in w._modes]}"
+
+
+# ── 2. 데이터 추가 → 전체 모드 순회하며 render()/render_mpl() 둘 다 무사히 ──
+@check("전 모드 render()/render_mpl() 무사고")
+def c_all_modes_render():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._refresh_list()
+    from matplotlib.figure import Figure
+    failures = []
+    for i, m in enumerate(w._modes):
+        w._mode_combo.setCurrentIndex(i)   # _on_mode_changed 트리거 → render()
+        for attr in ("_c", "_cx", "_cy"):
+            combo = getattr(m, attr, None)
+            if combo is not None and not combo.currentText():
+                combo.setCurrentText("fixture:NO2")
+        try:
+            m.render()
+            fig = Figure(figsize=(6, 4))
+            m.render_mpl(fig)
+        except NotImplementedError:
+            pass
+        except Exception as e:
+            failures.append(f"{m.key}: {type(e).__name__}: {e}")
+    if failures:
+        return "FAIL", "; ".join(failures)
+    return "PASS", f"{len(w._modes)}개 모드 render+render_mpl 무사고"
+
+
+# ── 3. 데이터셋 제거 후 stale 렌더 없는지 (2026-06 on_shelf_changed 회귀 가드) ──
+@check("데이터셋 제거 → 잔존 콤보 없음")
+def c_removal_no_stale():
+    w = _widget_with_fixture()
+    for i, m in enumerate(w._modes):
+        w._mode_combo.setCurrentIndex(i)
+        for attr in ("_c", "_cx", "_cy"):
+            combo = getattr(m, attr, None)
+            if combo is not None:
+                combo.setCurrentText("fixture:NO2")
+    w.shelf.clear()
+    w._refresh_tree()
+    w._notify_modes()
+    problems = []
+    for m in w._modes:
+        for attr in ("_c", "_cx", "_cy"):
+            combo = getattr(m, attr, None)
+            if combo is not None and combo.currentText():
+                problems.append(f"{m.key}.{attr} still shows '{combo.currentText()}'")
+    if problems:
+        return "FAIL", "; ".join(problems)
+    return "PASS", "선반 비운 후 모든 콤보가 정상적으로 비워짐"
+
+
+# ── 4. Heatmap 더블클릭 + config 라운드트립 ──────────────────────────────
+@check("Heatmap 더블클릭 no-op 아님 + config 라운드트립")
+def c_heatmap():
+    w = _widget_with_fixture()
+    hm = next(m for m in w._modes if m.key == "heatmap")
+    hm.options_widget()
+    ok = hm.on_column_activated("fixture:NO2")
+    if not ok:
+        return "FAIL", "on_column_activated이 False/no-op — 더블클릭이 여전히 죽어있음"
+    hm._pinned_cols = ["fixture:NO2", "fixture:CHOCHO"]
+    cfg = hm.to_config()
+    if cfg.get("cols") != ["fixture:NO2", "fixture:CHOCHO"]:
+        return "FAIL", f"to_config()이 pinned_cols를 보존 안 함: {cfg}"
+    hm2 = type(hm)(w)
+    hm2.from_config(cfg)
+    if hm2._pinned_cols != hm._pinned_cols:
+        return "FAIL", "from_config() 왕복 불일치"
+    return "PASS", "on_column_activated 동작 + to_config/from_config 왕복 확인"
+
+
+# ── 5. 전체 .pmcfg.json 저장→새 위젯→로드 라운드트립 ────────────────────
+@check("설정 저장→로드 라운드트립")
+def c_cfg_roundtrip():
+    import json, tempfile
+    w1 = _widget_with_fixture()
+    w1._mode_combo.setCurrentIndex(0)   # timeseries
+    ts = w1._modes[0]
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._refresh_list()
+    cfg1 = {m.key: m.to_config() for m in w1._modes}
+
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".pmcfg.json", delete=False,
+                                      encoding="utf-8")
+    try:
+        json.dump({"_version": w1._CFG_VERSION, "mode_cfg": cfg1}, tmp)
+        tmp.close()
+        with open(tmp.name, encoding="utf-8") as f:
+            loaded = json.load(f)
+        loaded = w1._migrate_cfg(loaded)
+        w2 = PlotMakerWidget()
+        for m in w2._modes:
+            m.options_widget()
+            m.from_config(loaded.get("mode_cfg", {}).get(m.key, {}))
+        ts2 = w2._modes[0]
+        if ts2._series != ts._series:
+            return "FAIL", f"timeseries 시리즈 왕복 불일치: {ts2._series} vs {ts._series}"
+        return "PASS", "mode_cfg 라운드트립 예외 없음, 시리즈 구조 보존 확인"
+    finally:
+        os.unlink(tmp.name)
+
+
+# ── 6. TimeSeries/Diurnal 색 결정론 (Part1 ResolvedSeries 구조 확인) ──────
+@check("TimeSeries/Diurnal: _resolve_specs() 결정론적")
+def c_resolve_specs_deterministic():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._series.append(["fixture:CHOCHO", "R", None, None])
+    c1 = [s.color for s in ts._resolve_specs()]
+    c2 = [s.color for s in ts._resolve_specs()]
+    if c1 != c2:
+        return "FAIL", f"TimeSeries 같은 입력인데 색이 다름: {c1} vs {c2}"
+
+    di = next(m for m in w._modes if m.key == "diurnal")
+    di.options_widget()
+    di._c.setCurrentText("fixture:NO2")
+    out1 = di._resolve_specs()
+    out2 = di._resolve_specs()
+    d1 = [s.color for s in out1[0]]
+    d2 = [s.color for s in out2[0]]
+    if d1 != d2:
+        return "FAIL", f"Diurnal 같은 입력인데 색이 다름: {d1} vs {d2}"
+    return "PASS", f"TimeSeries {c1} / Diurnal {d1} — 둘 다 결정론적"
+
+
+# ── 7. 시리즈 리스트 id()기반 조회·드래그순서·삭제 (2026-06 UX개편 회귀가드) ──
+# PyQt6은 QListWidgetItem에 저장한 plain list를 꺼낼 때 '값은 같지만 다른 객체'로
+# 복사해 반환한다(identity 비보존, 실측 확인됨) — 그래서 원본 객체 대신 id(엔트리)
+# 값을 저장하고 _series_by_id()로 되찾는 방식으로 짰다. 이 검증이 없으면 다음에
+# 누가 "item.data(...)가 그냥 객체겠지" 하고 되돌리면 삭제/색상/이름변경이
+# 전부 조용히 no-op이 된다(실제로 구현 중 한 번 이렇게 깨졌었음).
+@check("시리즈 리스트: id 조회·드래그순서·삭제 무결성")
+def c_series_list_identity():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._series.append(["fixture:CHOCHO", "R", None, None])
+    ts._refresh_list()
+    if ts._series_by_id(ts._list.item(0).data(0x0100)) is not ts._series[0]:
+        return "FAIL", "_series_by_id() 조회 실패 — 리스트 아이템과 실제 시리즈가 어긋남"
+    # 드래그 순서변경 시뮬레이션(첫 항목을 맨 뒤로)
+    row0 = ts._list.takeItem(0)
+    ts._list.addItem(row0)
+    ts._sync_order_from_list()
+    if ts._series[0][0] != "fixture:CHOCHO":
+        return "FAIL", f"드래그 재정렬 후 순서 반영 안 됨: {[s[0] for s in ts._series]}"
+    # 선택 후 삭제가 실제로 개수를 줄이는지(id 매칭 실패시 no-op이었던 버그)
+    ts._list.item(0).setSelected(True)
+    before = len(ts._series)
+    ts._remove(keep_undo=False)
+    if len(ts._series) != before - 1:
+        return "FAIL", f"선택삭제가 반영 안 됨: {before} → {len(ts._series)}"
+    return "PASS", "id조회·드래그순서·삭제 전부 정상"
+
+
+# ── 8. 가벼운 Undo (데이터셋 제거·시리즈 제거 복원) ──────────────────────
+@check("Undo: 데이터셋·시리즈 제거 복원")
+def c_undo():
+    w = _widget_with_fixture()
+    w._tree.topLevelItem(0).setSelected(True)
+    w._remove_data()
+    if w.shelf:
+        return "FAIL", "데이터셋 제거가 안 됨(테스트 전제 실패)"
+    w.undo_last()
+    if "fixture" not in w.shelf:
+        return "FAIL", "데이터셋 undo 복원 실패"
+
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._refresh_list()
+    ts._list.item(0).setSelected(True)
+    ts._remove()   # keep_undo=True(기본) — push_undo 호출됨
+    if ts._series:
+        return "FAIL", "시리즈 제거가 안 됨(테스트 전제 실패)"
+    w.undo_last()
+    if not ts._series or ts._series[0][0] != "fixture:NO2":
+        return "FAIL", "시리즈 undo 복원 실패"
+    return "PASS", "데이터셋·시리즈 undo 둘 다 정상 복원"
+
+
+# ── 9. 창 상태 기억(QSettings) 왕복 ──────────────────────────────────────
+@check("창 상태 기억: 스플리터·탭·테마 QSettings 왕복")
+def c_window_state():
+    from PyQt6.QtCore import QSettings
+    qs = QSettings("CAESAR", "app")
+    qs.remove("plotmaker")   # 테스트 오염 방지
+    try:
+        w1 = PlotMakerWidget()
+        w1._split.setSizes([260, 900])
+        w1._tabs.setCurrentIndex(2)
+        i = w1._theme_combo.findText("PPT")
+        if i < 0:
+            return "FAIL", "테마 콤보에 PPT 없음(테스트 전제 실패)"
+        w1._theme_combo.setCurrentIndex(i)
+        w1._on_theme_combo_changed()
+
+        w2 = PlotMakerWidget()   # 새 세션 흉내
+        if w2._tabs.currentIndex() != 2:
+            return "FAIL", f"탭 복원 실패: {w2._tabs.currentIndex()}"
+        if w2._theme_combo.currentText() != "PPT":
+            return "FAIL", f"테마 복원 실패: {w2._theme_combo.currentText()}"
+        if w2._lbl_size.value() != 16:   # PPT 테마 font=16 — 콤보만 아니라 실제 재적용 확인
+            return "FAIL", f"테마 재적용 실패(폰트 {w2._lbl_size.value()} != 16)"
+        return "PASS", "스플리터·탭·테마(재적용 포함) 왕복 확인"
+    finally:
+        qs.remove("plotmaker")   # 실제 사용자 설정과 안 섞이게 정리
+
+
+# ── 10. Batch Publish — 종별 일괄저장 + 상태복원 ─────────────────────────
+@check("Batch Publish: 일괄저장 + 시리즈목록/콤보선택 상태복원")
+def c_batch_publish():
+    import tempfile, glob
+    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+    orig_dlg, orig_msg = QFileDialog.getExistingDirectory, QMessageBox.information
+    try:
+        w = _widget_with_fixture()
+        ts = next(m for m in w._modes if m.key == "timeseries")
+        ts.options_widget()
+        ts._series.append(["fixture:NO2", "L", None, None])
+        ts._series.append(["fixture:CHOCHO", "R", "#00FF00", None])
+        ts._refresh_list()
+        orig_series_obj = ts._series
+
+        with tempfile.TemporaryDirectory() as tmp:
+            QFileDialog.getExistingDirectory = staticmethod(lambda *a, **k: tmp)
+            QMessageBox.information = staticmethod(lambda *a, **k: None)   # 모달 차단 방지
+            w._batch_publish()
+            pngs = sorted(os.path.basename(p) for p in glob.glob(os.path.join(tmp, "*.png")))
+            if len(pngs) != 2:
+                return "FAIL", f"TimeSeries 배치 파일 개수 이상: {pngs}"
+            if ts._series is not orig_series_obj:
+                return "FAIL", "배치 후 원래 시리즈 리스트 객체로 복원 안 됨"
+
+            # Diurnal도(콤보 선택없음 상태에서 시작 → 배치 후 다시 선택없음으로 복원돼야)
+            di = next(i for i, m in enumerate(w._modes) if m.key == "diurnal")
+            w._mode_combo.setCurrentIndex(di)
+            dm = w._mode
+            if dm._c.currentIndex() != -1:
+                return "FAIL", "테스트 전제 실패: diurnal 콤보가 이미 선택돼 있음"
+            w._batch_publish()
+            if dm._c.currentIndex() != -1:
+                return "FAIL", f"diurnal 콤보 복원 실패(index={dm._c.currentIndex()})"
+        return "PASS", "TimeSeries 2파일 + Diurnal 콤보(-1) 복원 확인"
+    finally:
+        QFileDialog.getExistingDirectory, QMessageBox.information = orig_dlg, orig_msg
+
+
+# ── 11. X축 DateAxisItem 재생성 방지 (실GUI 발견 회귀가드) ────────────────
+@check("X축: 같은 시간축 상태 연속 render에서 축 객체 유지")
+def c_axis_no_reswap():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._refresh_list(); ts.render()
+    axis1 = w.pw.getAxis("bottom")
+    ts._series.append(["fixture:CHOCHO", "L", None, None])
+    ts._refresh_list(); ts.render()
+    axis2 = w.pw.getAxis("bottom")
+    if axis1 is not axis2:
+        return "FAIL", "같은 시간축 상태인데 render()마다 축 객체가 재생성됨 — X라벨 깨짐 재발 위험"
+    if type(axis1).__name__ != "DateAxisItem":
+        return "FAIL", f"시간축 데이터인데 DateAxisItem이 아님: {type(axis1).__name__}"
+    # 실제로 축 종류가 바뀌어야 할 때(Diurnal↔TimeSeries)는 여전히 스왑돼야 함
+    di = next(i for i, m in enumerate(w._modes) if m.key == "diurnal")
+    w._mode_combo.setCurrentIndex(di)
+    if type(w.pw.getAxis("bottom")).__name__ != "AxisItem":
+        return "FAIL", "Diurnal 전환 시 축이 plain AxisItem으로 안 바뀜"
+    w._mode_combo.setCurrentIndex(0)
+    ts.render()
+    if type(w.pw.getAxis("bottom")).__name__ != "DateAxisItem":
+        return "FAIL", "TimeSeries 복귀 시 DateAxisItem으로 안 바뀜"
+    return "PASS", "동일 종류 축은 재생성 안 하고, 실제 전환 시엔 정상 스왑됨"
+
+
+# ── 12. 색상 채널태그 구분 (실GUI 발견 회귀가드) ──────────────────────────
+@check("색상: 같은 종·다른 채널태그면 다른 색")
+def c_color_channel_tag_distinct():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    c_ch1 = ts._auto_color("NO2 (CH1)")
+    c_ch2 = ts._auto_color("NO2 (CH2)")
+    if c_ch1 == c_ch2:
+        return "FAIL", f"NO2 (CH1)과 NO2 (CH2)가 같은 색: {c_ch1} — 겹쳐서 구분 불가"
+    if ts._auto_color("NO2 (ANs)") != "#1565C0" or ts._auto_color("NO2 (PNs)") != "#E65100":
+        return "FAIL", "ANs/PNs 셀 확정색이 바뀜(기존 규약 깨짐)"
+    if ts._auto_color("NO2") != "#1976D2" or ts._auto_color("ANs") != "#2E7D32":
+        return "FAIL", "무태그 종 색이 바뀜(기존 규약 깨짐)"
+    return "PASS", f"NO2 (CH1)={c_ch1} / NO2 (CH2)={c_ch2} — 구분됨, 기존 확정색 보존"
+
+
+def main():
+    print("=" * 64)
+    print(" Plot Maker 회귀 검증 (offscreen)")
+    print("=" * 64)
+    n_pass = n_warn = n_fail = n_skip = 0
+    for name, fn in CHECKS:
+        try:
+            status, msg = fn()
+        except Skip as e:
+            status, msg = "SKIP", str(e)
+        except Exception as e:
+            status, msg = "FAIL", f"오류: {type(e).__name__}: {e}"
+        icon = {"PASS": "✅", "WARN": "⚠️ ", "FAIL": "❌", "SKIP": "⏭️ "}[status]
+        print(f" [{status:4s}] {icon} {name}")
+        print(f"          {msg}")
+        n_pass += status == "PASS"; n_warn += status == "WARN"
+        n_fail += status == "FAIL"; n_skip += status == "SKIP"
+    print("-" * 64)
+    print(f" 결과: {n_pass} PASS · {n_warn} WARN · {n_fail} FAIL · {n_skip} SKIP")
+    if n_fail:
+        print(" ❌ 실패 항목이 있다 — 최근 변경이 뭔가 깨뜨렸을 수 있음.")
+    else:
+        print(" ✅ 전부 통과 — Plot Maker 건강함.")
+    return 1 if n_fail else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

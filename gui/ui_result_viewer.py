@@ -1,6 +1,15 @@
-"""결과 뷰어 (Result Viewer)
+"""결과 랩 (Result Lab — UI 탭 라벨; 내부 클래스명은 ResultViewerWidget 유지)
 ===========================
-파이프라인이 저장한 결과 파일을 GUI에 다시 넣어 바로 볼 수 있게 하는 탭.
+파이프라인이 저장한 결과 파일을 GUI에 다시 넣어 점검·QC·가공·유도·내보내기까지
+하는 탭. "파일 하나(또는 몇 개) 빠르게 보고 손보기"가 주 목적.
+
+── Plot Maker와의 경계 (새 기능 어디 둘지 한 줄 기준) ───────────────────
+  · CAESAR 결과의 '의미'가 필요한 작업이면 → 여기(Result Lab).
+    예) 가스 선택·RMS 기반 사후 QC·채널 차분(NO2/PNs/ANs)·Status·형제 α 팝업·
+        구간 슬라이스/Merge/Export. 단일~소수 결과 파일 대상.
+  · 소스 무관한 컬럼 vs 컬럼 자유조합으로 '그림 만들기'면 → Plot Maker.
+    예) 산점도+회귀·Allan·Diurnal·Heatmap·Histogram, 여러 소스 합성.
+  (이 규칙대로면 현 분할이 이미 맞음 — 옮길 코드 없음. 명문화가 목적.)
 
 지원(헤더/컬럼으로 자동 판별, 수동 선택도 가능):
   · R 트렌드   : Cold_*.dat / Hot_*.dat  (timestamp, R_mean, Leff, …) → R/Leff 시계열
@@ -17,7 +26,7 @@ from datetime import datetime
 import numpy as np
 import pyqtgraph as pg
 from gui.result_viewer_io import (load_result_time_gas, detect,
-                                  read_numeric, detect_sep, load_fit_table)
+                                  detect_sep, load_fit_table)
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
@@ -59,7 +68,6 @@ class ResultViewerWidget(QWidget):
     # 순수 파서는 gui/result_viewer_io.py 로 분리, self._x(...) 호출 유지를 위해 재바인딩
     _load_result_time_gas = staticmethod(load_result_time_gas)
     _detect               = staticmethod(detect)
-    _read_numeric         = staticmethod(read_numeric)
     _detect_sep           = staticmethod(detect_sep)
     _load_fit_table       = staticmethod(load_fit_table)
 
@@ -148,11 +156,13 @@ class ResultViewerWidget(QWidget):
         # ── 툴바 2줄: [분석] | [내보내기] (Overlay·Diurnal은 Plot Maker로 이관) ──
         fbar = FlowLayout(spacing=6)
         fbar.addWidget(_grp("Analyze"))
-        self._btn_td = QPushButton("🧪 NO2/PNs/ANs")
-        self._btn_td.setToolTip("Select 3 results (Cold / PNs ROI1 / ANs ROI2) → time-align & difference:\n"
-                                "NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs")
-        self._btn_td.clicked.connect(self._derive_no2_pns_ans)
-        fbar.addWidget(self._btn_td)
+        self._btn_calc = QPushButton("🧮 Calculator")
+        self._btn_calc.setToolTip(
+            "데이터 계산기: 여러 결과 컬럼을 변수(A,B,C…)에 매핑하고 (A-B)/C 같은 수식으로\n"
+            "가공 → 미리보기 + CSV 저장. 교차 데이터셋은 시각격자에 자동 보간.\n"
+            "(NO2/PNs/ANs 채널차분도 여기서: PNs = PNsCh−Cold = 'B-A' 식으로)")
+        self._btn_calc.clicked.connect(self._open_calculator)
+        fbar.addWidget(self._btn_calc)
         self._btn_stats = QPushButton("Σ Stats")
         self._btn_stats.setToolTip("Per-gas mean/median/σ/n for current fit (range-aware)")
         self._btn_stats.clicked.connect(self._show_stats)
@@ -190,11 +200,6 @@ class ResultViewerWidget(QWidget):
         self._btn_merge.setToolTip("Merge selected same-format result files in time order")
         self._btn_merge.clicked.connect(self._merge_files)
         fbar.addWidget(self._btn_merge)
-        self._btn_td_save = QPushButton("💾 Save TD")
-        self._btn_td_save.setToolTip("Save computed NO2/PNs/ANs (+raw channel NO2) as TSV")
-        self._btn_td_save.setEnabled(False)
-        self._btn_td_save.clicked.connect(self._save_td_result)
-        fbar.addWidget(self._btn_td_save)
         self._btn_png = QPushButton("📷 PNG")
         self._btn_png.setToolTip("Export current plots as high-resolution PNG (2400 px wide,\n"
                                  "top+bottom combined). For papers/reports.")
@@ -236,122 +241,19 @@ class ResultViewerWidget(QWidget):
 
     # ── NO2 / PNs / ANs 유도 농도 (TD-CEAS) ──────────────────────────
 
-    def _derive_no2_pns_ans(self):
-        """Cold/PNs/ANs 결과 3개 → 시간정렬·차분 → NO2/PNs/ANs 유도농도 플롯.
-        NO2=Cold, PNs=PNs채널−Cold, ANs=ANs채널−PNs채널."""
-        from PyQt6.QtWidgets import QMessageBox
-        from gui.dlg_dir import dlg_dir
-        paths = {}
-        for role, title in (('Cold', "① Select Cold result (NO2)"),
-                            ('PNs', "② Select PNs (ROI1, 180°C) result"),
-                            ('ANs', "③ Select ANs (ROI2, 300°C) result")):
-            p, _ = QFileDialog.getOpenFileName(self, title, dlg_dir("result"),
-                                               "Results (*.dat *.csv *.tsv *.txt);;All Files (*)")
-            if not p:
-                return
-            dlg_dir("result", p); paths[role] = p
-        try:
-            ct, cn = self._load_result_time_gas(paths['Cold'])
-            pt, pn = self._load_result_time_gas(paths['PNs'])
-            at, an = self._load_result_time_gas(paths['ANs'])
-        except Exception as e:
-            QMessageBox.warning(self, "Load failed", str(e)); return
-        if ct is None or len(ct) < 2:
-            QMessageBox.warning(self, "Insufficient data", "Cold result lacks Time/NO2."); return
-        # 시간정렬: PNs/ANs 채널 NO2를 Cold 시각격자에 보간(범위 밖은 NaN)
-        pn_i = np.interp(ct, pt, pn, left=np.nan, right=np.nan) if len(pt) >= 2 else np.full_like(ct, np.nan)
-        an_i = np.interp(ct, at, an, left=np.nan, right=np.nan) if len(at) >= 2 else np.full_like(ct, np.nan)
-        no2 = cn
-        pns = pn_i - cn
-        ans = an_i - pn_i
-
-        # 저장용 보관(시각 epoch + 유도농도 + 원시 채널 NO2)
-        self._td_data = {'epoch': ct, 'NO2': no2, 'PNs': pns, 'ANs': ans,
-                         'Cold_NO2': cn, 'PNsCh_NO2': pn_i, 'ANsCh_NO2': an_i,
-                         'sources': {k: os.path.basename(v) for k, v in paths.items()}}
-        if hasattr(self, '_btn_td_save'):
-            self._btn_td_save.setEnabled(True)
-
-        # 위: 유도농도(NO2/PNs/ANs), 아래: 원시 채널 NO2
-        ax1 = pg.DateAxisItem(orientation='bottom')
-        self._pw_top.setAxisItems({'bottom': ax1})
-        self._pw_top.clear()
-        self._pw_top.addLegend(offset=(10, 10))
-        self._pw_top.plot(ct, no2, pen=pg.mkPen('#1f77b4', width=2), name='NO2 (Cold)')
-        self._pw_top.plot(ct, pns, pen=pg.mkPen('#ff7f0e', width=2), name='PNs (=PNs−Cold)')
-        self._pw_top.plot(ct, ans, pen=pg.mkPen('#2ca02c', width=2), name='ANs (=ANs−PNs)')
-        self._pw_top.setLabel('left', 'Concentration (ppb)')
-        self._pw_top.setLabel('bottom', 'Time')
-
-        ax2 = pg.DateAxisItem(orientation='bottom')
-        self._pw_bot.setAxisItems({'bottom': ax2})
-        self._pw_bot.clear()
-        self._pw_bot.addLegend(offset=(10, 10))
-        self._pw_bot.plot(ct, cn, pen=pg.mkPen('#1f77b4'), name='Cold NO2')
-        self._pw_bot.plot(ct, pn_i, pen=pg.mkPen('#ff7f0e'), name='PNs channel NO2')
-        self._pw_bot.plot(ct, an_i, pen=pg.mkPen('#2ca02c'), name='ANs channel NO2')
-        self._pw_bot.setLabel('left', 'Channel NO2 (ppb)')
-        self._pw_bot.setLabel('bottom', 'Time')
-        self._lbl.setText("🧪 NO2=Cold, PNs=PNs−Cold, ANs=ANs−PNs (aligned to Cold time grid). "
-                          "Negatives = noise/time mismatch.")
-        self._lbl.setStyleSheet("color:#1565C0;")
-        # 계산 직후 저장까지 한 흐름으로 (별도 버튼 클릭 불필요)
-        if QMessageBox.question(self, "Save TD result",
-                                "NO2/PNs/ANs computed. Save to TSV now?",
-                                QMessageBox.StandardButton.Yes
-                                | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            self._save_td_result()
-
-    def _save_td_result(self):
-        """유도농도(NO2/PNs/ANs) + 원시 채널 NO2를 TSV로 저장."""
-        from PyQt6.QtWidgets import QMessageBox
-        from gui.dlg_dir import dlg_dir
-        from datetime import datetime
-        d = getattr(self, '_td_data', None)
-        if not d:
-            QMessageBox.warning(self, "No data", "Compute NO2/PNs/ANs first."); return
-        # 자동 파일명: NO2-PNs-ANs_{날짜범위}_[소스라벨].dat
-        ep = d['epoch']
-        from datetime import datetime as _dt
-        rng = ""
-        try:
-            t0, t1 = _dt.fromtimestamp(float(ep[0])), _dt.fromtimestamp(float(ep[-1]))
-            rng = f"{t0:%y%m%d}-{t1:%y%m%d}" if t0.date() != t1.date() else f"{t0:%y%m%d}"
-        except Exception:
-            pass
-        import re as _re
-        srcs = d.get('sources', {})
-        def _chan(fn, role):
-            m = _re.search(r'(cold|CH[123]|PNs|ANs|roi[123])', fn, _re.I)
-            return m.group(1) if m else role
-        slab = "+".join(_chan(srcs[k], k) for k in ('Cold', 'PNs', 'ANs') if k in srcs)
-        auto = f"NO2-PNs-ANs_{rng}_[{slab}].dat" if rng else "NO2-PNs-ANs.dat"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save derived concentrations",
-            os.path.join(dlg_dir("result") or "", auto),
-            "Data (*.dat *.csv *.tsv);;All (*)")
-        if not path:
-            return
-        dlg_dir("result", path)
-        sep = ',' if path.lower().endswith('.csv') else '\t'
-        cols = ['datetime', 'NO2', 'PNs', 'ANs', 'Cold_NO2', 'PNsCh_NO2', 'ANsCh_NO2']
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write("# CAESAR Pro derived concentrations (ppb)\n")
-                f.write("# NO2=Cold, PNs=PNsCh-Cold, ANs=ANsCh-PNsCh (aligned to Cold time grid)\n")
-                f.write(f"# sources: Cold={srcs.get('Cold','?')}  PNs={srcs.get('PNs','?')}  ANs={srcs.get('ANs','?')}\n")
-                f.write(sep.join(cols) + "\n")
-                ep = d['epoch']
-                for i in range(len(ep)):
-                    try:
-                        dt = datetime.fromtimestamp(float(ep[i])).strftime('%Y-%m-%d %H:%M:%S')
-                    except (OSError, ValueError, OverflowError):
-                        dt = str(ep[i])
-                    row = [dt] + [f"{d[c][i]:.4f}" if np.isfinite(d[c][i]) else "" for c in cols[1:]]
-                    f.write(sep.join(row) + "\n")
-            QMessageBox.information(self, "Saved", f"Derived concentration saved:\n{os.path.basename(path)}  ({len(d['epoch'])} rows)")
-        except Exception as e:
-            QMessageBox.critical(self, "Save failed", str(e))
+    def _open_calculator(self):
+        """🧮 데이터 계산기 다이얼로그. 목록의 결과파일들을 변수 후보로 넘긴다.
+        (구 NO2/PNs/ANs 채널차분은 이 계산기의 특수케이스: PNs = 'B-A' 등)."""
+        from gui.dlg_calculator import CalculatorDialog
+        paths = []
+        for i in range(self._list.count()):
+            data = self._list.item(i).data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, tuple) and data[0] == "file" and os.path.isfile(data[1]):
+                if data[1] not in paths:
+                    paths.append(data[1])
+        if self._path and self._path not in paths:
+            paths.insert(0, self._path)
+        CalculatorDialog(self, datasets=paths).exec()
 
     # ──────────────────────────────────────────────────────────────
     def _open(self):
@@ -542,37 +444,10 @@ class ResultViewerWidget(QWidget):
 
     # ── α trace (alpha_trace.dat) → 평균 α 스펙트럼 ±1σ ─────────────
     def _plot_alpha_trace(self, path):
-        wave = None
-        rows = []
-        alpha_start = 3   # 'px' 헤더에서 정함(구:3, 신:5 — doy/datetime 추가)
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            for ln in f:
-                if ln.startswith("# wavelength_nm:"):
-                    try:
-                        wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
-                                         if v.strip()], dtype=float)
-                    except Exception:
-                        pass
-                    continue
-                if ln.lower().startswith("row_idx"):
-                    cols = ln.rstrip("\n").split("\t")
-                    fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
-                    if fp is not None:
-                        alpha_start = fp
-                    continue
-                if ln.startswith("#"):
-                    continue
-                p = ln.rstrip().split("\t")
-                if len(p) > alpha_start:
-                    try:
-                        rows.append([float(x) for x in p[alpha_start:]])
-                    except ValueError:
-                        pass
-        if not rows:
+        from gui.result_viewer_io import read_alpha_trace
+        wave, _ids, a = read_alpha_trace(path)
+        if a.size == 0:
             raise ValueError("No alpha data rows")
-        a = np.array(rows, dtype=float)
-        if wave is None or len(wave) != a.shape[1]:
-            wave = np.arange(a.shape[1], dtype=float)
         m = np.nanmean(a, axis=0); s = np.nanstd(a, axis=0)
         self._set_time_axis(self._pw_top, False)
         self._pw_top.plot(wave, m + s, pen=pg.mkPen((255, 140, 0, 90), width=1))
@@ -607,8 +482,10 @@ class ResultViewerWidget(QWidget):
         xcol = df.columns[0]
         x_dt = pd.to_datetime(df[xcol], errors="coerce")
         if x_dt.notna().mean() > 0.5:
-            # ns→s epoch. Series.view는 최신 pandas에서 제거됨 → numpy로 안전 변환.
-            x = x_dt.to_numpy(dtype="datetime64[ns]").astype("int64") / 1e9
+            # naive 시각을 로컬(머신 TZ) epoch으로 — datetime64.astype(int64)는 naive를
+            # UTC로 간주해 KST 머신에서 시간축이 9h 밀린다(Plot Maker와 동일 버그 수정).
+            x = np.array([t_.timestamp() if pd.notna(t_) else np.nan
+                          for t_ in x_dt.dt.to_pydatetime()], dtype=float)
             self._set_time_axis(self._pw_top, True)
             self._pw_top.setLabel("bottom", "Date / Time")
             ycols = df.columns[1:]
@@ -617,6 +494,10 @@ class ResultViewerWidget(QWidget):
             self._set_time_axis(self._pw_top, False)
             self._pw_top.setLabel("bottom", "index")
             ycols = df.columns
+        # 개수 컬럼(n_used, *_n)은 스캔 수(신뢰도 메타)지 농도가 아니라 스케일이 달라
+        # 같은 축에 그리면 방해만 됨 → 농도 플롯에서 제외(CSV엔 그대로 보존).
+        ycols = [c for c in ycols
+                 if not (str(c) == "n_used" or str(c).endswith("_n"))]
         n = 0
         for i, c in enumerate(ycols):
             y = pd.to_numeric(df[c], errors="coerce").to_numpy()
@@ -692,23 +573,15 @@ class ResultViewerWidget(QWidget):
         if K > 0:
             rms = t.get("rms")
             if rms is not None:
+                from core.result_io import robust_rms_thresholds
                 ch = t.get("channel")   # 채널 배열(없으면 전체 한 그룹)
-                groups = {}
+                chans = [ch[i] if (ch is not None and i < len(ch)) else 0
+                         for i in range(n)]
+                thr = robust_rms_thresholds(rms, chans, K=K, min_n=5)
                 for i in range(n):
-                    g = ch[i] if (ch is not None and i < len(ch)) else 0
-                    groups.setdefault(g, []).append(i)
-                for g, idxs in groups.items():
-                    r = rms[idxs]
-                    fin = np.isfinite(r) & (r > 0)
-                    if fin.sum() < 5:
-                        continue
-                    la = np.log10(r[fin]); med = np.median(la); mad = np.median(np.abs(la - med))
-                    if mad <= 0:
-                        continue
-                    thr = 10 ** (med + K * mad)
-                    for i in idxs:
-                        if np.isfinite(rms[i]) and rms[i] > thr:
-                            mask[i] = True
+                    ti = thr.get(chans[i], np.inf)
+                    if np.isfinite(rms[i]) and rms[i] > ti:
+                        mask[i] = True
         return mask
 
     def _plot_fit(self, path):
@@ -824,40 +697,11 @@ class ResultViewerWidget(QWidget):
 
     def _show_alpha_popup(self, alpha_path, row_idx):
         """alpha_trace.dat에서 row_idx 행의 α 스펙트럼을 팝업으로 표시."""
-        wave = None
-        target = None
-        alpha_start = 3
-        with open(alpha_path, "r", encoding="utf-8", errors="replace") as f:
-            for ln in f:
-                if ln.startswith("# wavelength_nm:"):
-                    try:
-                        wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
-                                         if v.strip()], dtype=float)
-                    except Exception:
-                        pass
-                    continue
-                if ln.lower().startswith("row_idx"):
-                    cols = ln.rstrip("\n").split("\t")
-                    fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
-                    if fp is not None:
-                        alpha_start = fp
-                    continue
-                if ln.startswith("#"):
-                    continue
-                p = ln.rstrip().split("\t")
-                if len(p) > alpha_start:
-                    try:
-                        if int(float(p[0])) == row_idx:
-                            target = np.array([float(x) for x in p[alpha_start:]], dtype=float)
-                            break
-                    except ValueError:
-                        continue
+        from gui.result_viewer_io import read_alpha_trace
+        wave, target = read_alpha_trace(alpha_path, want_id=row_idx)
         if target is None:
             self._stats_lbl.setText(f"row {row_idx} not in alpha_trace")
             return
-        if wave is None or len(wave) != len(target):
-            wave = np.arange(len(target), dtype=float)
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout
         dlg = QDialog(self)
         dlg.setWindowTitle(f"α spectrum — row {row_idx} ({os.path.basename(alpha_path)})")
         dlg.resize(720, 460)
@@ -994,24 +838,18 @@ class ResultViewerWidget(QWidget):
         gases = [c for c in cols if (c + '_Smooth') in idx] or \
                 [c for c in cols if c in ('NO2', 'CHOCHO', 'H2O', 'O4', 'HONO', 'HCHO')]
         gidx = [idx[g] for g in gases] + [idx[g + '_Smooth'] for g in gases if (g + '_Smooth') in idx]
-        # 채널별 임계
+        # 채널별 임계 (단일 진실원: core.result_io)
         import numpy as _np
-        grp = {}
-        for k, (_t, line) in enumerate(rows):
+        from core.result_io import robust_rms_thresholds
+        row_ch, row_rv = [], []
+        for _t, line in rows:
             p = line.split('\t')
-            ch = p[ci] if (ci is not None and ci < len(p)) else '0'
+            row_ch.append(p[ci] if (ci is not None and ci < len(p)) else '0')
             try:
-                rv = float(p[ri])
+                row_rv.append(float(p[ri]))
             except Exception:
-                rv = _np.nan
-            grp.setdefault(ch, []).append((k, rv))
-        thr = {}
-        for ch, lst in grp.items():
-            r = _np.array([v for _, v in lst]); fin = _np.isfinite(r) & (r > 0)
-            if fin.sum() < 5:
-                thr[ch] = _np.inf; continue
-            la = _np.log10(r[fin]); med = _np.median(la); mad = _np.median(_np.abs(la - med))
-            thr[ch] = 10 ** (med + K * mad) if mad > 0 else _np.inf
+                row_rv.append(_np.nan)
+        thr = robust_rms_thresholds(row_rv, row_ch, K=K, min_n=5)
         out = []; nq = 0
         for k, (t, line) in enumerate(rows):
             p = line.split('\t')

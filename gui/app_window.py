@@ -207,23 +207,10 @@ class CAESARAnalyzer(QMainWindow):
         self._refs_dirty = False
         lay_ref.addWidget(btn_lock)
         
-        # ILS Convolution (advanced) — hidden by default.
-        # Not needed when references are pre-convolved by the Reference Generator
-        # (Stage 2). Only useful when loading raw high-resolution cross-sections.
-        self._ils_visible = False
-        self._btn_toggle_ils = QPushButton(
-            "▶  ILS convolution (advanced — unnecessary with Stage 2 references)")
-        self._btn_toggle_ils.setStyleSheet(
-            "text-align: left; color: #9e9e9e; "
-            "border: 1px solid #E0E0E0; padding: 3px 8px; font-size: 11px;")
-        self._btn_toggle_ils.setToolTip(
-            "If you use references that already had ILS applied by the Reference Generator (Stage 2),\n"
-            "this feature is unnecessary (risk of double convolution).\n"
-            "Use only when loading raw high-resolution cross-sections directly.")
-        # ILS 콘볼루션 UI 제거(F2): Stage2 레퍼런스가 이미 ILS 적용됨 — 이중 콘볼루션
-        # 위험만 있던 섹션. 위젯(spin_fwhm_nm 등)은 FWHM 자동계산 의존성 때문에 생성만 유지.
-        self._btn_toggle_ils.setVisible(False)
-
+        # ILS 콘볼루션 UI 제거: Stage2 레퍼런스가 이미 ILS 적용됨 — 이중 콘볼루션
+        # 위험만 있던 섹션이라 토글 버튼(_btn_toggle_ils)·클로저는 들어냈다.
+        # 아래 위젯(spin_fwhm_nm 등)은 FWHM 자동계산 의존성 때문에 '생성만' 유지하고,
+        # 영구히 숨긴 컨테이너에 담아둔다(패널에 표시 안 됨).
         self._ils_container = QWidget()
         self._ils_container.setVisible(False)
         layout_conv = QHBoxLayout(self._ils_container)
@@ -268,15 +255,6 @@ class CAESARAnalyzer(QMainWindow):
         self.btn_apply_ils.clicked.connect(self.apply_convolution)
         layout_conv.addWidget(self.btn_apply_ils)
         lay_ref.addWidget(self._ils_container)
-
-        def _toggle_ils():
-            self._ils_visible = not self._ils_visible
-            self._ils_container.setVisible(self._ils_visible)
-            self._btn_toggle_ils.setText(
-                "▼  ILS convolution (advanced — unnecessary with Stage 2 references)"
-                if self._ils_visible else
-                "▶  ILS convolution (advanced — unnecessary with Stage 2 references)")
-        self._btn_toggle_ils.clicked.connect(_toggle_ils)
 
         grp_ref.setLayout(lay_ref)
         left_layout.addWidget(grp_ref)
@@ -472,12 +450,25 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_qc_snr.setDecimals(0)
         self.spin_qc_snr.setValue(0.0)
         self.spin_qc_snr.setToolTip("Additional SNR floor (0 = off). Rows below this are also QC-excluded.")
+        self.chk_settle = QCheckBox("⏱ Settling")
+        self.chk_settle.setToolTip(
+            "Skip settling scans: drop the first N scans of EACH bin (purge transient right\n"
+            "after a He/ZA cycle — cavity not yet refilled, so gas reads biased LOW).\n"
+            "Non-destructive flag (Status='Settling', gas→NaN). Applied after the fit and on\n"
+            "Reapply, so you can toggle N without refitting. Bin/scan# read from the File column.")
+        self.chk_settle.setChecked(False)
+        self.spin_settle_n = QSpinBox()
+        self.spin_settle_n.setRange(0, 30)
+        self.spin_settle_n.setValue(3)
+        self.spin_settle_n.setToolTip("N scans dropped at each bin start (measured transient ≈ 3).")
+
         self.btn_reapply_qc = QPushButton("Reapply")
         self.btn_reapply_qc.setToolTip(
-            "Reapply the following 3 in order, without refitting:\n"
+            "Reapply the following in order, without refitting:\n"
             "  1) OK RMS% — re-judge OK/Unstable when threshold changes\n"
             "  2) Kalman Q/R — recompute the _Smooth column with new Q/R\n"
-            "  3) Auto QC (K/RMS max/SNR) — re-filter gas values to NaN\n"
+            "  3) Settling skip (⏱) — drop first N scans/bin (gas→NaN)\n"
+            "  4) Auto QC (K/RMS max/SNR) — re-filter gas values to NaN\n"
             "Tikhonov λ and Robust change the fit matrix itself, so they need a refit.\n"
             "Restores original concentrations before re-filtering, so it's safe to press multiple times.")
         self.btn_reapply_qc.clicked.connect(self.reapply_qc)
@@ -510,9 +501,10 @@ class CAESARAnalyzer(QMainWindow):
         _pg.addWidget(_lbl("Poly Deg"),  0, 2); _pg.addWidget(self.spin_poly_deg,  0, 3)
         _pg.addWidget(self.chk_allow_neg, 0, 4, 1, 2)
         _pg.addWidget(btn_props,         0, 6, 1, 2)
-        # r1: QC 핵심
+        # r1: QC 핵심 + 정착 스캔 제외(⏱ Settling, N)
         _pg.addWidget(self.chk_qc,        1, 0, 1, 2)
         _pg.addWidget(_lbl("K"),     1, 2); _pg.addWidget(self.spin_qc_k,      1, 3)
+        _pg.addWidget(self.chk_settle,    1, 4); _pg.addWidget(self.spin_settle_n, 1, 5)
         _pg.addWidget(self.btn_reapply_qc,1, 6, 1, 2)
         # r2: 가스별 Shift/Squeeze 요약
         from PyQt6.QtWidgets import QSizePolicy as _SPsq
@@ -694,12 +686,16 @@ class CAESARAnalyzer(QMainWindow):
         # Tab 3: Result Viewer (저장된 R/α/레퍼런스/농도 결과 파일을 불러와 표시)
         from .ui_result_viewer import ResultViewerWidget
         self.result_viewer = ResultViewerWidget(self)
-        self.main_tabs.addTab(_tab_scroll(self.result_viewer), "📂 Result Viewer")
+        self.main_tabs.addTab(_tab_scroll(self.result_viewer), "📂 Result Lab")
 
         # Tab 4: Plot Maker (여러 결과를 메모리에 올려 자유 합성·시계열/산점도/Allan)
         from .ui_plot_maker import PlotMakerWidget
         self.plot_maker = PlotMakerWidget(self)
-        self.main_tabs.addTab(_tab_scroll(self.plot_maker), "📉 Plot Maker")
+        # Plot Maker는 스크롤 영역으로 감싸지 않는다 — 플롯이 남는 공간을 채우는
+        # 위젯이라, 스크롤로 감싸면 툴바가 여러 줄일 때 전체가 세로 스크롤돼 불편.
+        # 직접 붙이면 툴바(상단 고정)+플롯(stretch)으로 스크롤 없이 한 화면에 들어온다.
+        self.main_tabs.addTab(self.plot_maker, "📉 Plot Maker")
+        self._tab_pages[self.plot_maker] = self.plot_maker
         # 결과뷰어 → Plot Maker 브리지: 선택 파일을 선반에 싣고 탭 전환
         self.result_viewer.send_to_plotmaker.connect(
             lambda paths: (self.plot_maker.add_paths(paths),
@@ -1098,6 +1094,43 @@ class CAESARAnalyzer(QMainWindow):
             f"R time-series — {n} cycles  (click a point → R(λ) spectrum tab)")
         self._setup_leff_pw.setTitle(f"Leff time-series — {n} cycles")
 
+        # ── R-cal 품질 readout: 채널별 R̄·Leff·contrast·valid%·cycle수 ──
+        if hasattr(self, '_setup_rt_readout'):
+            def _med(vals):
+                v = [x for x in vals if x is not None and np.isfinite(x)]
+                return float(np.median(v)) if v else float('nan')
+            lines = []
+            for ch in channels:
+                res = [r for r in ch["results"] if r.get('r_mean') is not None]
+                if not res:
+                    continue
+                r_pct    = _med([r['r_mean'] for r in res]) * 100.0
+                leff     = _med([r.get('leff_mean') for r in res])
+                contrast = _med([r.get('he_za_contrast') for r in res])
+                valid    = _med([r.get('valid_frac') for r in res]) * 100.0
+                # 낮은 contrast/valid = 인젝션 불량 신호 → 경고 마크
+                flag = " ⚠️" if (np.isfinite(valid) and valid < 30.0) else ""
+                con_str = f"{contrast:.2f}" if np.isfinite(contrast) else "n/a"
+                lines.append(
+                    f"{ch['label']:<8} R̄={r_pct:6.3f}%  Leff={leff:5.2f}km  "
+                    f"contrast={con_str}  valid={valid:4.0f}%  n={len(res)}{flag}")
+            self._setup_rt_readout.setText(
+                "R-cal quality (median/ch):\n" + "\n".join(lines) if lines
+                else "R-cal quality: no valid cycles")
+
+        # R(λ) 탭을 가장 최근 cycle로 미리 채움 — 클릭 전에도 비어있지 않게(탭 전환은 안 함).
+        try:
+            _latest, _lc = None, None
+            for ch in channels:
+                for r in ch["results"]:
+                    if r.get('wave_nm_full') is not None and r.get('timestamp') is not None:
+                        if _latest is None or _ts(r['timestamp']) > _ts(_latest['timestamp']):
+                            _latest, _lc = r, ch["color"]
+            if _latest is not None:
+                self._show_setup_r_spectrum_from_result(_latest, _lc, switch_tab=False)
+        except Exception:
+            pass
+
         if hasattr(self, '_diag_tabs'):
             self._diag_tabs.setCurrentIndex(1)
 
@@ -1126,7 +1159,48 @@ class CAESARAnalyzer(QMainWindow):
         if not os.path.exists(dat_path):
             dat_path = os.path.join(out_dir, file_date, f"{base}_R.dat")
         roi = r.get("fit_window_nm", (400, 500))
-        self._show_setup_r_spectrum(dat_path, roi, rec["color"])
+        # 메모리에 R(λ) 곡선이 있으면 디스크 재읽기 없이 바로 그림(더 견고).
+        if r.get('wave_nm_full') is not None and r.get('r_curve_fit') is not None:
+            self._show_setup_r_spectrum_from_result(r, rec["color"], switch_tab=True)
+        else:
+            self._show_setup_r_spectrum(dat_path, roi, rec["color"])
+
+    def _show_setup_r_spectrum_from_result(self, r, color, switch_tab=True):
+        """R(λ) 스펙트럼 탭을 result dict의 메모리 배열(wave_nm_full/r_curve_raw/fit)로 그림.
+        디스크 _R.dat 재읽기 불필요. switch_tab=False면 탭 전환 없이 갱신만(자동 미리채움용)."""
+        if not hasattr(self, 'plot_diagnostic'):
+            return
+        try:
+            wave  = np.asarray(r.get('wave_nm_full'), dtype=float)
+            r_raw = np.asarray(r.get('r_curve_raw'),  dtype=float)
+            r_fit = np.asarray(r.get('r_curve_fit'),  dtype=float)
+        except Exception:
+            return
+        if wave is None or not len(wave):
+            return
+        self.p1.clear()
+        try:
+            self.p2.clear()
+        except Exception:
+            pass
+        self.p1.plot(wave, r_raw, pen=None, symbol='o', symbolSize=3,
+                     symbolBrush=(150, 150, 150, 150))
+        self.p1.plot(wave, r_fit, pen=pg.mkPen(color, width=2.5))
+        roi = r.get('fit_window_nm')
+        if roi:
+            try:
+                self.p1.addItem(pg.LinearRegionItem(
+                    [roi[0], roi[1]], movable=False, brush=(0, 255, 0, 20)))
+            except Exception:
+                pass
+        self.plot_diagnostic.setLabel('left', 'Reflectance R', color='b')
+        self.plot_diagnostic.setLabel('bottom', 'Wavelength (nm)')
+        self.plot_diagnostic.setTitle(f"R(λ) — {r.get('filename', 'latest')}")
+        fin = np.isfinite(r_fit)
+        if fin.any():
+            self.p1.vb.setYRange(float(np.nanmin(r_fit[fin])), 1.0, padding=0.1)
+        if switch_tab and hasattr(self, '_diag_tabs'):
+            self._diag_tabs.setCurrentIndex(0)
 
     def _show_setup_r_spectrum(self, dat_path, roi, color):
         """R(λ) 스펙트럼 탭(plot_diagnostic)에 _R.dat 의 raw R 점 + 5차 피팅 선을 그림."""
@@ -1199,29 +1273,20 @@ class CAESARAnalyzer(QMainWindow):
             "Includes saving R(t).npz for α and incremental append."
         )
 
-        btn_peak_trend = QPushButton("📈 Peak Trend (He/ZA)")
-        btn_peak_trend.clicked.connect(self.open_peak_trend)
-        btn_peak_trend.setToolTip(
-            "Reads raw .dat and plots peak-intensity time-series per flag (ZA/He/Sampling).\n"
-            "ZA/He per cycle, Sampling per time-bin avg·min/max → check outliers·injection cycle.")
+        # Peak Trend 버튼은 제거(2026-06): R(t) 시간보간이 인젝션 불량 구간 스킵·보간을
+        #   처리하고 R Calibrator가 같은 scan_directory를 재사용하므로 일상 흐름에서 중복.
+        #   ui_peak_trend.py / open_peak_trend()는 raw peak 디버깅용으로 보존(배선만 해제).
 
         lay_calib.addWidget(btn_calib_tool)
         lay_calib.addWidget(btn_ref_gen)
         lay_calib.addWidget(btn_r_trend)
-        lay_calib.addWidget(btn_peak_trend)
         grp_calib.setLayout(lay_calib)
         control_layout.addWidget(grp_calib)
 
-        # S-B: Test Fit — RUN 전에 첫 알파 스캔 1개만 핏해 잔차·농도·shift를 즉석 확인.
-        # 24일 밤샘 핏 전에 세팅 검증(콜드 8px 오정렬 같은 사고를 RUN 전에 잡음).
-        btn_test_fit = QPushButton("🧪 Test Fit (1 scan)")
-        btn_test_fit.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
-        btn_test_fit.setToolTip(
-            "Fit only the first loaded alpha scan and pop up data+model overlay,\n"
-            "residual, reference overlays, retrieved ppb and shift/squeeze.\n"
-            "Use to validate settings before a long RUN.")
-        btn_test_fit.clicked.connect(self._test_fit)
-        control_layout.addWidget(btn_test_fit)
+        # Group: α Pipeline — raw→α 생성과 RUN 전 1-scan 검증. 캘리브 유틸(Tools)과
+        #   성격이 달라 별도 그룹으로 분리하고, 매일 쓰는 핵심 동작이라 강조(bold+테두리) 유지.
+        grp_pipe = QGroupBox("α Pipeline")
+        lay_pipe = QVBoxLayout()
 
         # Alpha Generator — raw → alpha 생성은 별도 팝업창에서(분석=알파 피팅과 분리).
         # 분석(좌측)은 알파를 넣고 RUN해 피팅. 알파 생성만 여기 Setup에서 창으로.
@@ -1231,7 +1296,21 @@ class CAESARAnalyzer(QMainWindow):
         btn_alpha_gen.setToolTip(
             "Takes raw measurement files in a popup and generates α spectra (*_alpha_trace.dat).\n"
             "wavecal/fit-range/cavity/flags use this main window's settings.")
-        control_layout.addWidget(btn_alpha_gen)
+
+        # Test Fit — RUN 전에 첫 알파 스캔 1개만 핏해 잔차·농도·shift를 즉석 확인.
+        # 밤샘 핏 전에 세팅 검증(콜드 8px 오정렬 같은 사고를 RUN 전에 잡음).
+        btn_test_fit = QPushButton("🧪 Test Fit (1 scan)")
+        btn_test_fit.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
+        btn_test_fit.setToolTip(
+            "Fit only the first loaded alpha scan and pop up data+model overlay,\n"
+            "residual, reference overlays, retrieved ppb and shift/squeeze.\n"
+            "Use to validate settings before a long RUN.")
+        btn_test_fit.clicked.connect(self._test_fit)
+
+        lay_pipe.addWidget(btn_alpha_gen)
+        lay_pipe.addWidget(btn_test_fit)
+        grp_pipe.setLayout(lay_pipe)
+        control_layout.addWidget(grp_pipe)
 
         # S-A: 고급 설정 구분선 — Cavity/Override/Detector는 캠페인 시작 때 한 번 맞추고
         # 평소엔 안 건드리므로 접이식 '고급' 영역으로 묶는다.
@@ -1334,18 +1413,22 @@ class CAESARAnalyzer(QMainWindow):
         # I0 Setup
         self.lbl_i0_path = QLabel("Auto from ZA scans")
         self.lbl_i0_path.setStyleSheet("color: #546E7A;")
+        # 라벨이 좌측 컬럼 최소폭을 키우지 않게 축소 허용(긴 경로는 툴팁/말줄임).
+        from PyQt6.QtWidgets import QSizePolicy as _SPi0
+        self.lbl_i0_path.setSizePolicy(_SPi0.Policy.Ignored, _SPi0.Policy.Preferred)
         btn_browse_i0 = QPushButton("Browse I₀")
         btn_browse_i0.clicked.connect(self.browse_i0_file)
-        btn_auto_i0 = QPushButton("🔍 Auto from ZA scans")
+        btn_auto_i0 = QPushButton("🔍 Auto")   # 텍스트 축약(폭 절감) — 설명은 툴팁
+        btn_auto_i0.setToolTip("Auto-extract I₀ by averaging ZA-flagged scans in the loaded files.")
         btn_auto_i0.clicked.connect(self.auto_extract_i0)
         lay_i0 = QHBoxLayout()
-        lay_i0.addWidget(self.lbl_i0_path)
+        lay_i0.addWidget(self.lbl_i0_path, 1)
         lay_i0.addWidget(btn_browse_i0)
         lay_i0.addWidget(btn_auto_i0)
         lay_ov.addRow("I₀ (Zero-Air):", lay_i0)
 
         # Temporal I0 interpolation toggle
-        self.chk_temporal_i0 = QCheckBox("Temporal I₀ interpolation (correct lamp drift)")
+        self.chk_temporal_i0 = QCheckBox("Temporal I₀ (lamp drift)")
         self.chk_temporal_i0.setToolTip(
             "Pre-scans the dataset for periodic ZA calibration files and linearly\n"
             "interpolates I0 between them so each ambient file uses the closest\n"
@@ -1515,8 +1598,25 @@ class CAESARAnalyzer(QMainWindow):
         self._btn_toggle_det.clicked.connect(_toggle_det)
 
         control_layout.addStretch(1)
-        main_layout.addLayout(control_layout, stretch=1)
-        
+        # 좌측 컨트롤 컬럼을 컨테이너로 감싸 최대폭을 건다. Manual Override/Detector 등
+        # 접이식 섹션을 펼칠 때 안쪽 넓은 행이 컬럼 '최소폭'을 키워 우측 Cavity Diagnostics를
+        # 밀어내던 문제 차단 — 펼침이 옆이 아니라 아래(스크롤)로 가게 한다. 캡은 접힘 자연폭보다
+        # 넉넉해 상단 행 클리핑 위험 없음.
+        _left_container = QWidget()
+        _left_container.setLayout(control_layout)
+        _left_container.setMaximumWidth(int(520 * self._s))   # 초기 폴백; 아래서 접힘폭으로 정밀화
+        main_layout.addWidget(_left_container, stretch=1)
+        self._setup_left_container = _left_container
+        # 접이식 섹션은 시작 시 모두 숨김 → 이 시점 레이아웃이 곧 '접힘 자연폭'.
+        # 이벤트루프 첫 틱에 그 폭으로 최대폭을 못박아 펼침 시 옆으로 커지는 점프를 0으로.
+        from PyQt6.QtCore import QTimer as _QTimer
+
+        def _cap_left_to_collapsed():
+            w = _left_container.sizeHint().width()
+            if w > 0:
+                _left_container.setMaximumWidth(w)
+        _QTimer.singleShot(0, _cap_left_to_collapsed)
+
         # --- Right Panel: Diagnostic Viewer ---
         viewer_layout = QVBoxLayout()
         grp_viewer = QGroupBox("Cavity Diagnostics")
@@ -1573,11 +1673,84 @@ class CAESARAnalyzer(QMainWindow):
         self._setup_leff_pw.showGrid(x=True, y=True, alpha=0.3)
         self._setup_leff_pw.setTitle("Leff time-series")
 
+        # R-cal 품질 readout — 채널별 R̄·Leff·He/ZA contrast·valid%·cycle수.
+        # 인젝션 불량(낮은 contrast/valid)을 알파 굽기 전에 한눈에 잡는 게이지.
+        self._setup_rt_readout = QLabel("R-cal quality: (run R Calibrator)")
+        self._setup_rt_readout.setStyleSheet(
+            "color:#37474F; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
+        # 줄바꿈 끄고 높이 상한 — 좁은 폭에서 라벨이 줄바꿈으로 부풀어 패널이 스크롤되던 것 방지.
+        self._setup_rt_readout.setWordWrap(False)
+        self._setup_rt_readout.setMaximumHeight(int(74 * self._s))
+        from PyQt6.QtWidgets import QSizePolicy as _SPrt
+        self._setup_rt_readout.setSizePolicy(_SPrt.Policy.Ignored, _SPrt.Policy.Maximum)
+        self._setup_rt_readout.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay_trend.addWidget(self._setup_rt_readout)
+
         lay_trend.addWidget(self._setup_r_trend_pw, stretch=1)
         lay_trend.addWidget(self._setup_leff_pw, stretch=1)
         self._diag_tabs.addTab(tab_trend, "📈 R/Leff Trend")
 
-        # ── Tab 2: FWHM Best-Match (validate sweep refs against measured α) ──
+        # ── Tab 2: α Health — RUN 전에 알파 폴더를 사전점검(오염 알파 조기 탐지) ──
+        # 너희가 반복적으로 데인 "조용히 오염된 알파"(트렁케이트·6175 bin당 1트레이스·
+        # flatline 퇴화)를 긴 핏 전에 잡는다. wide-alpha 리더 + 폴더집계 재사용.
+        from PyQt6.QtWidgets import QSizePolicy
+        tab_aqc = QWidget()
+        lay_aqc = QVBoxLayout(tab_aqc)
+        lay_aqc.setContentsMargins(4, 4, 4, 4)
+        lay_aqc.setSpacing(4)
+
+        _aqc_ctl = QHBoxLayout()
+        _btn_aqc_dir = QPushButton("📁 α Folder…")
+        _btn_aqc_dir.clicked.connect(self._alpha_qc_pick_folder)
+        self.lbl_aqc_dir = QLabel("(none)")
+        self.lbl_aqc_dir.setStyleSheet("color:#555;")
+        self.lbl_aqc_dir.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._btn_aqc_run = QPushButton("🩺 Run Check")
+        self._btn_aqc_run.setStyleSheet("font-weight:bold;")
+        self._btn_aqc_run.clicked.connect(self._alpha_qc_run)
+        self._aqc_folder = None
+        self.chk_aqc_auto = QCheckBox("Auto-check after Alpha Gen")
+        self.chk_aqc_auto.setToolTip(
+            "When Alpha Generator finishes, jump to this tab with the output folder\n"
+            "pre-filled and (if checked) run the health check automatically.")
+        self._btn_aqc_fitwin = QPushButton("🔍 Fit window")
+        self._btn_aqc_fitwin.setToolTip(
+            "Zoom X to the fit window (Setup ▸ fit start~end nm) and auto-fit Y to the\n"
+            "mean α inside it — strips the edge noise so the real structure is visible.")
+        self._btn_aqc_fitwin.clicked.connect(self._alpha_qc_zoom_fit)
+        self._btn_aqc_full = QPushButton("⤢ Full")
+        self._btn_aqc_full.setToolTip("Reset to the full wavelength range (auto-range).")
+        self._btn_aqc_full.clicked.connect(
+            lambda: self._aqc_pw.enableAutoRange(axis='xy', enable=True))
+        _aqc_ctl.addWidget(_btn_aqc_dir)
+        _aqc_ctl.addWidget(self.lbl_aqc_dir, stretch=1)
+        _aqc_ctl.addWidget(self.chk_aqc_auto)
+        _aqc_ctl.addWidget(self._btn_aqc_fitwin)
+        _aqc_ctl.addWidget(self._btn_aqc_full)
+        _aqc_ctl.addWidget(self._btn_aqc_run)
+        lay_aqc.addLayout(_aqc_ctl)
+
+        self.lbl_aqc_readout = QLabel("α health: pick an alpha folder and Run Check.")
+        self.lbl_aqc_readout.setStyleSheet(
+            "color:#37474F; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
+        self.lbl_aqc_readout.setWordWrap(False)
+        self.lbl_aqc_readout.setMaximumHeight(int(110 * self._s))
+        self.lbl_aqc_readout.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Maximum)
+        self.lbl_aqc_readout.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay_aqc.addWidget(self.lbl_aqc_readout)
+
+        self._aqc_pw = pg.PlotWidget()
+        self._aqc_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._aqc_pw.setLabel('left', 'α (optical depth)')
+        self._aqc_pw.setLabel('bottom', 'Wavelength (nm)')
+        self._aqc_pw.setTitle("mean α + min/max envelope")
+        self._aqc_pw.addLegend(offset=(10, 10))
+        lay_aqc.addWidget(self._aqc_pw, stretch=1)
+
+        self._tab_aqc = tab_aqc
+        self._diag_tabs.addTab(tab_aqc, "🩺 α Health")
+
+        # ── Tab 3: FWHM Best-Match (validate sweep refs against measured α) ──
         from matplotlib.figure import Figure as _FwhmFigure
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FwhmCanvas
 
@@ -1606,10 +1779,15 @@ class CAESARAnalyzer(QMainWindow):
         self.rb_fwhm_alpha_engine = QRadioButton("Engine α (latest)")
         self.rb_fwhm_alpha_engine.setToolTip("Auto: latest *_alpha_trace.dat from alpha_save_dir")
         self.rb_fwhm_alpha_file   = QRadioButton("Load from file")
+        self.rb_fwhm_alpha_folder = QRadioButton("Folder (mean α)")
+        self.rb_fwhm_alpha_folder.setToolTip(
+            "Point at a folder of *_alpha_trace.dat (recursively) — every scan in every\n"
+            "file is averaged into one mean α spectrum, then matched against the sweep.")
         self.rb_fwhm_alpha_engine.setChecked(True)
         row_a1 = QHBoxLayout()
         row_a1.addWidget(self.rb_fwhm_alpha_engine)
         row_a1.addWidget(self.rb_fwhm_alpha_file)
+        row_a1.addWidget(self.rb_fwhm_alpha_folder)
         ctl_lay.addRow("α source:", row_a1)
 
         btn_pick_alpha = QPushButton("📂 Pick α file…")
@@ -1620,6 +1798,16 @@ class CAESARAnalyzer(QMainWindow):
         row_a2.addWidget(btn_pick_alpha)
         row_a2.addWidget(self.lbl_fwhm_alpha, stretch=1)
         ctl_lay.addRow("α file:", row_a2)
+
+        btn_pick_alpha_dir = QPushButton("📁 Pick α folder…")
+        btn_pick_alpha_dir.clicked.connect(self._fwhm_pick_alpha_folder)
+        self.lbl_fwhm_alpha_dir = QLabel("(none)")
+        self.lbl_fwhm_alpha_dir.setStyleSheet("color: #555;")
+        self._fwhm_alpha_folder = None
+        row_a3 = QHBoxLayout()
+        row_a3.addWidget(btn_pick_alpha_dir)
+        row_a3.addWidget(self.lbl_fwhm_alpha_dir, stretch=1)
+        ctl_lay.addRow("α folder:", row_a3)
 
         row_btn = QHBoxLayout()
         self.btn_fwhm_run = QPushButton("🌀 Run Validation")
@@ -1644,7 +1832,12 @@ class CAESARAnalyzer(QMainWindow):
         self._fwhm_canvas = _FwhmCanvas(self._fwhm_fig)
         lay_fwhm.addWidget(self._fwhm_canvas, stretch=1)
 
-        self._diag_tabs.addTab(tab_fwhm, "🎯 FWHM Best-Match")
+        # FWHM Best-Match 탭 비활성화(2026-06): Reference Generator가 Hg 측정 dynamic ILS를
+        # 이미 적용(Ref_*_Dynamic-ILS-Applied)하므로 중복이고, 단일-NO2-ref 매칭은 잔차가
+        # 광대역 구조에 지배돼 작동 안 함(featureless, 실데이터 검증). 코드·메서드(_fwhm_*)는
+        # 전부 보존 — 재활성화는 아래 addTab 주석만 해제하면 됨.
+        self._tab_fwhm = tab_fwhm   # 미부착 보존(C++ GC 방지용 참조)
+        # self._diag_tabs.addTab(tab_fwhm, "🎯 FWHM Best-Match")
 
         lay_v.addWidget(self._diag_tabs)
         grp_viewer.setLayout(lay_v)
@@ -1677,6 +1870,281 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_fwhm_alpha.setText(f"✅ {os.path.basename(f)}")
         self.lbl_fwhm_alpha.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
+    def _fwhm_pick_alpha_folder(self):
+        d = QFileDialog.getExistingDirectory(
+            self, "Pick α folder (averages every *_alpha_trace.dat)",
+            self._dlg_dir('fwhm_alpha_dir'))
+        self._dlg_dir('fwhm_alpha_dir', d)
+        if not d:
+            return
+        self._fwhm_alpha_folder = d
+        self.rb_fwhm_alpha_folder.setChecked(True)
+        self.lbl_fwhm_alpha_dir.setText(f"✅ {d}")
+        self.lbl_fwhm_alpha_dir.setStyleSheet("color: #2E7D32; font-weight: bold;")
+
+    def _fwhm_mean_alpha_from_file(self, path):
+        """alpha_trace.dat 한 파일의 모든 ambient 행 α를 평균 → (wave_nm, alpha_mean).
+        단일 패스로 읽는다(행마다 파일 재읽기 회피)."""
+        from core.data_io import DataIO
+        first_px, t_idx, p_idx, px_start, wave_nm = DataIO._alpha_layout(path)
+        rows = []
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                s = line.strip()
+                if not s or s.startswith('#') or s.startswith('row_idx'):
+                    continue
+                parts = s.split('\t')
+                try:
+                    rows.append(np.array([float(v) for v in parts[first_px:]], dtype=float))
+                except ValueError:
+                    continue
+        if not rows:
+            raise ValueError(f"no α data rows in {os.path.basename(path)}")
+        L = min(len(r) for r in rows)
+        arr = np.array([r[:L] for r in rows], dtype=float)
+        alpha_mean = np.nanmean(arr, axis=0)
+        if wave_nm is not None and len(wave_nm) >= L:
+            wl = np.asarray(wave_nm, dtype=float)[:L]
+        elif hasattr(self, 'wavelengths') and self.wavelengths is not None \
+                and len(np.asarray(self.wavelengths).flatten()) >= L:
+            wl = np.asarray(self.wavelengths, dtype=float).flatten()[:L]
+        else:
+            wl = np.arange(L, dtype=float)
+        return wl, alpha_mean
+
+    def _fwhm_mean_alpha_from_folder(self, folder):
+        """폴더(재귀) 내 모든 *_alpha_trace.dat의 평균 α를 다시 평균 → (wave_nm, alpha_mean, n_files).
+        파일마다 파장축이 다르면 첫 파일 그리드로 보간해 합친다."""
+        import glob
+        files = sorted(glob.glob(os.path.join(folder, '**', '*_alpha_trace.dat'),
+                                 recursive=True))
+        if not files:
+            raise ValueError("폴더에 *_alpha_trace.dat 가 없습니다(하위폴더 포함 검색).")
+        ref_wl, means = None, []
+        for fp in files:
+            try:
+                wl, a = self._fwhm_mean_alpha_from_file(fp)
+            except Exception:
+                continue
+            if ref_wl is None:
+                ref_wl, means = wl, [a]
+            elif len(wl) == len(ref_wl) and np.allclose(wl, ref_wl, atol=1e-3):
+                means.append(a)
+            else:
+                means.append(np.interp(ref_wl, wl, a, left=np.nan, right=np.nan))
+        if not means:
+            raise ValueError("읽을 수 있는 α 파일이 없습니다.")
+        alpha_mean = np.nanmean(np.array(means), axis=0)
+        return ref_wl, alpha_mean, len(means)
+
+    # ── α Health / QC ──────────────────────────────────────────────────────
+    def _alpha_qc_pick_folder(self):
+        d = QFileDialog.getExistingDirectory(
+            self, "Pick α folder to health-check", self._dlg_dir('aqc_dir'))
+        self._dlg_dir('aqc_dir', d)
+        if not d:
+            return
+        self._aqc_folder = d
+        self.lbl_aqc_dir.setText(f"✅ {d}")
+        self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
+
+    def _alpha_qc_scan_folder(self, folder, status_cb=None):
+        """폴더(재귀) 내 모든 *_alpha_trace.dat를 단일패스로 스캔 → 건강성 통계.
+        평균/엔벨로프(전역 픽셀별), 파일별 스캔수·NaN율·flatline, 날짜 커버리지,
+        이상 파일 목록(스캔수 과소=6175형, flatline=퇴화, NaN과다)을 모은다."""
+        import glob, re as _re
+        from core.data_io import DataIO
+        files = sorted(glob.glob(os.path.join(folder, '**', '*_alpha_trace.dat'),
+                                 recursive=True))
+        if not files:
+            raise ValueError("폴더에 *_alpha_trace.dat 가 없습니다(하위폴더 포함).")
+        g_sum = g_cnt = g_min = g_max = wl_ref = None
+        n_scans_total = 0
+        per_file = []            # (name, n_scans, nan_frac, flat, mag)
+        dates = set()
+        for k, fp in enumerate(files):
+            if status_cb and (k % 25 == 0):
+                status_cb(k + 1, len(files))
+            try:
+                fpx, t_idx, p_idx, ps, wl = DataIO._alpha_layout(fp)
+            except Exception:
+                per_file.append((os.path.basename(fp), 0, 1.0, True, np.nan)); continue
+            rows = []
+            try:
+                with open(fp, encoding='utf-8', errors='replace') as fh:
+                    for ln in fh:
+                        s = ln.strip()
+                        if not s or s.startswith('#') or s.startswith('row_idx'):
+                            continue
+                        try:
+                            rows.append(np.array([float(v) for v in s.split('\t')[fpx:]],
+                                                 dtype=float))
+                        except ValueError:
+                            continue
+            except Exception:
+                per_file.append((os.path.basename(fp), 0, 1.0, True, np.nan)); continue
+            if not rows:
+                per_file.append((os.path.basename(fp), 0, 1.0, True, np.nan)); continue
+            L = min(len(r) for r in rows)
+            arr = np.array([r[:L] for r in rows], dtype=float)
+            n = len(rows); n_scans_total += n
+            nanf = float(np.mean(~np.isfinite(arr)))
+            with np.errstate(invalid='ignore', divide='ignore'):
+                msp = np.nanmean(arr, axis=0)
+                _std = np.nanstd(msp)
+                mag = float(np.nanmedian(np.abs(msp)))
+            flat = bool(not np.isfinite(_std) or _std < 1e-12) or (n == 1)
+            per_file.append((os.path.basename(fp), n, nanf, flat, mag))
+            m = _re.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', os.path.basename(fp))
+            if m:
+                dates.add(f"{m.group(1)}-{m.group(2)}-{m.group(3)}")
+            if g_sum is None:
+                g_sum = np.zeros(L); g_cnt = np.zeros(L)
+                g_min = np.full(L, np.inf); g_max = np.full(L, -np.inf)
+                wl_ref = (np.asarray(wl, float)[:L]
+                          if wl is not None and len(wl) >= L else np.arange(L, dtype=float))
+            Lc = min(L, len(g_sum))
+            sub = arr[:, :Lc]; fin = np.isfinite(sub)
+            g_sum[:Lc] += np.where(fin, sub, 0.0).sum(axis=0)
+            g_cnt[:Lc] += fin.sum(axis=0)
+            with np.errstate(invalid='ignore'):
+                g_min[:Lc] = np.minimum(g_min[:Lc], np.nanmin(np.where(fin, sub, np.nan), axis=0))
+                g_max[:Lc] = np.maximum(g_max[:Lc], np.nanmax(np.where(fin, sub, np.nan), axis=0))
+        mean = np.where(g_cnt > 0, g_sum / np.maximum(g_cnt, 1), np.nan)
+        scans = np.array([p[1] for p in per_file if p[1] > 0], dtype=float)
+        med_scans = float(np.median(scans)) if len(scans) else 0.0
+        # 이상 판정: 스캔수<max(2, 0.3×median)=과소(6175형), flatline, NaN>5%
+        low_thr = max(2.0, 0.3 * med_scans)
+        anomalies = [p for p in per_file
+                     if p[1] < low_thr or p[3] or p[2] > 0.05]
+        return dict(wl=wl_ref, mean=mean, lo=g_min, hi=g_max,
+                    n_files=len(files), n_scans=n_scans_total, med_scans=med_scans,
+                    dates=sorted(dates), per_file=per_file, anomalies=anomalies)
+
+    def _alpha_qc_after_export(self, out_dir):
+        """Alpha Generator 완료 훅: 출력폴더를 α Health에 자동 연결하고 탭으로 포커스.
+        'Auto-check' 체크 시 점검까지 자동 실행 — 생성→점검 흐름을 끊기지 않게."""
+        if not out_dir or not hasattr(self, 'lbl_aqc_dir'):
+            return
+        self._aqc_folder = out_dir
+        self.lbl_aqc_dir.setText(f"✅ {out_dir}")
+        self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
+        try:
+            if hasattr(self, '_diag_tabs') and hasattr(self, '_tab_aqc'):
+                self._diag_tabs.setCurrentWidget(self._tab_aqc)
+        except Exception:
+            pass
+        if getattr(self, 'chk_aqc_auto', None) is not None and self.chk_aqc_auto.isChecked():
+            self._alpha_qc_run()
+        elif hasattr(self, 'lbl_aqc_readout'):
+            self.lbl_aqc_readout.setText("α health: folder set from last export — click 🩺 Run Check.")
+
+    def _alpha_qc_run(self):
+        if not self._aqc_folder:
+            QMessageBox.warning(self, "α Health", "Pick an α folder first.")
+            return
+        self._btn_aqc_run.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            def _st(k, n):
+                self.status.setText(f"🩺 α Health scanning {k}/{n}…")
+                QApplication.processEvents()
+            r = self._alpha_qc_scan_folder(self._aqc_folder, status_cb=_st)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            self._btn_aqc_run.setEnabled(True)
+            QMessageBox.critical(self, "α Health", f"scan failed:\n{e}")
+            return
+        QApplication.restoreOverrideCursor()
+        self._btn_aqc_run.setEnabled(True)
+
+        # ── plot: mean α + min/max envelope ──
+        self._aqc_pw.clear()
+        wl, mean, lo, hi = r['wl'], r['mean'], r['lo'], r['hi']
+        self._aqc_plot_data = (wl, mean, lo, hi)   # 🔍 Fit window 버튼용
+        fin = np.isfinite(wl) & np.isfinite(mean)
+        if fin.any():
+            try:
+                c_lo = pg.PlotCurveItem(wl[fin], np.where(np.isfinite(lo[fin]), lo[fin], np.nan),
+                                        pen=pg.mkPen((180, 180, 180, 120)))
+                c_hi = pg.PlotCurveItem(wl[fin], np.where(np.isfinite(hi[fin]), hi[fin], np.nan),
+                                        pen=pg.mkPen((180, 180, 180, 120)))
+                self._aqc_pw.addItem(c_lo); self._aqc_pw.addItem(c_hi)
+                self._aqc_pw.addItem(pg.FillBetweenItem(c_lo, c_hi, brush=(120, 170, 255, 50)))
+            except Exception:
+                pass
+            self._aqc_pw.plot(wl[fin], mean[fin], pen=pg.mkPen('#1565C0', width=2),
+                              name="mean α")
+        self._aqc_pw.setTitle(f"mean α + envelope — {r['n_files']} files, {r['n_scans']:,} scans")
+
+        # ── readout ──
+        nan_files = sum(1 for p in r['per_file'] if p[2] > 0.05)
+        flat_files = sum(1 for p in r['per_file'] if p[3])
+        low_files = sum(1 for p in r['per_file']
+                        if p[1] < max(2.0, 0.3 * r['med_scans']))
+        mags = np.array([p[4] for p in r['per_file'] if np.isfinite(p[4])])
+        mag_str = (f"{np.nanmin(mags):.1e}~{np.nanmax(mags):.1e}" if len(mags) else "n/a")
+        dts = r['dates']
+        date_str = (f"{dts[0]}~{dts[-1]} ({len(dts)}d)" if dts else "n/a")
+        # 요약(사실) 줄과 경고(이상) 줄을 색으로 분리: 요약=파랑, 경고만 주황.
+        # 이상이 0이면 경고줄도 초록으로(전부 정상 신호).
+        info_lines = [
+            f"files={r['n_files']}  scans={r['n_scans']:,}  median scans/file={r['med_scans']:.0f}",
+            f"dates: {date_str}   |α| range: {mag_str}",
+        ]
+        warn_lines = [
+            f"⚠ anomalies: {len(r['anomalies'])}  (low-scan={low_files}, flatline={flat_files}, NaN>5%={nan_files})",
+        ]
+        for name, n, nf, flat, mag in r['anomalies'][:6]:
+            tag = []
+            if flat: tag.append("FLAT")
+            if n < max(2.0, 0.3 * r['med_scans']): tag.append(f"scans={n}")
+            if nf > 0.05: tag.append(f"NaN={nf*100:.0f}%")
+            warn_lines.append(f"   • {name}: {','.join(tag)}")
+        if len(r['anomalies']) > 6:
+            warn_lines.append(f"   … +{len(r['anomalies'])-6} more")
+
+        def _esc(s):   # HTML 이스케이프 + 공백/들여쓰기 보존
+            return (s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                     .replace(' ', '&nbsp;'))
+        INFO_C = '#1565C0'
+        WARN_C = '#E65100' if r['anomalies'] else '#2E7D32'
+        html  = [f'<span style="color:{INFO_C};">{_esc(s)}</span>' for s in info_lines]
+        html += [f'<span style="color:{WARN_C};">{_esc(s)}</span>' for s in warn_lines]
+        self.lbl_aqc_readout.setText('<br>'.join(html))
+        self.lbl_aqc_readout.setStyleSheet(
+            "font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
+        self.status.setText(
+            f"🩺 α Health: {r['n_files']} files, {len(r['anomalies'])} anomalies")
+
+    def _alpha_qc_zoom_fit(self):
+        """🔍 Fit window: X를 Setup의 핏범위(start~end nm)로 줌 + 그 구간 mean α에 Y 오토핏.
+        가장자리(저 R·저광량)의 거대한 노이즈 엔벨로프를 빼고 캠페인 평균 흡수 구조를 본다.
+        Y는 엔벨로프가 아니라 mean에 맞춘다(엔벨로프 기준이면 mean이 또 0처럼 눌림)."""
+        data = getattr(self, '_aqc_plot_data', None)
+        if not data:
+            QMessageBox.information(self, "α Health", "먼저 🩺 Run Check를 실행하세요.")
+            return
+        wl, mean, _lo, _hi = data
+        lo_nm = float(self.spin_fit_start_nm.value())
+        hi_nm = float(self.spin_fit_end_nm.value())
+        if hi_nm < lo_nm:
+            lo_nm, hi_nm = hi_nm, lo_nm
+        m = np.isfinite(wl) & np.isfinite(mean) & (wl >= lo_nm) & (wl <= hi_nm)
+        if not m.any():
+            QMessageBox.information(self, "α Health",
+                f"핏범위 {lo_nm:.0f}~{hi_nm:.0f} nm 안에 데이터가 없습니다.\n"
+                "Setup의 fit start/end nm를 확인하세요.")
+            return
+        ys = mean[m]
+        ylo, yhi = float(np.nanmin(ys)), float(np.nanmax(ys))
+        span = yhi - ylo
+        pad = span * 0.15 if span > 0 else (abs(yhi) * 0.5 or 1e-9)
+        self._aqc_pw.setXRange(lo_nm, hi_nm, padding=0.02)
+        self._aqc_pw.setYRange(ylo - pad, yhi + pad, padding=0)
+        self._aqc_pw.setTitle(
+            f"mean α — fit window {lo_nm:.0f}~{hi_nm:.0f} nm  (edge noise excluded)")
+
     def _fwhm_auto_find_latest_alpha(self):
         """Find newest *_alpha_trace.dat in self.alpha_save_dir (if set)."""
         import glob
@@ -1701,6 +2169,11 @@ class CAESARAnalyzer(QMainWindow):
            (``self.wavelengths``) so the polynomial baseline fit uses
            real nm, not pixel indices.
         """
+        # wide alpha_trace(헤더 # wavelength_nm + 시간×픽셀 행, datetime에 공백 있음)는
+        # 공백 split이 깨지므로 전용 리더로 모든 행을 평균한 대표 α를 쓴다.
+        from core.data_io import DataIO
+        if DataIO._is_alpha_trace_format(path):
+            return self._fwhm_mean_alpha_from_file(path)
         df = pd.read_csv(path, sep=r'\s+', header=None, comment='#', engine='python')
         if df.shape[1] >= 2:
             wl  = pd.to_numeric(df.iloc[:, 0], errors='coerce').to_numpy()
@@ -1744,49 +2217,73 @@ class CAESARAnalyzer(QMainWindow):
                 "No Ref_*_FWHM*nm.dat files found in the selected folder.")
             return
 
-        if self.rb_fwhm_alpha_file.isChecked():
-            alpha_path = self._fwhm_alpha_file_path
-            if not alpha_path:
+        # α source: folder(평균) / file / engine(최신). folder는 폴더 내 모든 알파를 평균.
+        alpha_label = ""
+        if self.rb_fwhm_alpha_folder.isChecked():
+            if not self._fwhm_alpha_folder:
                 QMessageBox.warning(self, "FWHM Best-Match",
-                    "α source = file, but no file picked.")
+                    "α source = folder, but no folder picked.")
                 return
+            try:
+                wl_a, a, n_files = self._fwhm_mean_alpha_from_folder(self._fwhm_alpha_folder)
+            except Exception as e:
+                QMessageBox.critical(self, "FWHM Best-Match", f"α folder load failed:\n{e}")
+                return
+            alpha_label = f"{os.path.basename(self._fwhm_alpha_folder.rstrip('/\\'))} (mean of {n_files} files)"
         else:
-            alpha_path = self._fwhm_auto_find_latest_alpha()
-            if not alpha_path:
-                QMessageBox.warning(self, "FWHM Best-Match",
-                    "No *_alpha_trace.dat found in alpha_save_dir.\n"
-                    "Run alpha export first, or pick a file manually.")
+            if self.rb_fwhm_alpha_file.isChecked():
+                alpha_path = self._fwhm_alpha_file_path
+                if not alpha_path:
+                    QMessageBox.warning(self, "FWHM Best-Match",
+                        "α source = file, but no file picked.")
+                    return
+            else:
+                alpha_path = self._fwhm_auto_find_latest_alpha()
+                if not alpha_path:
+                    QMessageBox.warning(self, "FWHM Best-Match",
+                        "No *_alpha_trace.dat found in alpha_save_dir.\n"
+                        "Run alpha export first, or pick a file/folder manually.")
+                    return
+            try:
+                wl_a, a = self._fwhm_load_alpha(alpha_path)
+            except Exception as e:
+                QMessageBox.critical(self, "FWHM Best-Match", f"α load failed:\n{e}")
                 return
-
-        try:
-            wl_a, a = self._fwhm_load_alpha(alpha_path)
-        except Exception as e:
-            QMessageBox.critical(self, "FWHM Best-Match", f"α load failed:\n{e}")
-            return
+            alpha_label = os.path.basename(alpha_path)
 
         # Each ref file is one column of cross-section values on the ref's
         # native wavelength grid. We need a wavelength axis for the ref. We
         # interpolate α onto ref pixel index here only as a fallback; the
         # preferred path is when ref length == len(wl_a) (target grid match).
         scores = {}
+        self._fwhm_legacy_mismatch = False   # 레거시 단일컬럼 ref 길이 불일치 감지용
         for fpath in ref_files:
             fname = os.path.basename(fpath)
             fv = self._fwhm_parse_fwhm_from_name(fname)
             if fv is None:
                 continue
             try:
-                ref_vals = np.loadtxt(fpath, comments="#")
+                ref_raw = np.loadtxt(fpath, comments="#")
             except Exception:
                 continue
-            ref_vals = np.asarray(ref_vals).flatten()
-            # Align by length: assume ref was generated on the same target
-            # wavelength grid as the α file (both come from the calibration).
-            n = min(len(ref_vals), len(a))
-            if n < 50:
+            ref_raw = np.asarray(ref_raw)
+            if ref_raw.ndim == 2 and ref_raw.shape[1] >= 2:
+                # 2-column (wavelength_nm, cross_section) → α 파장축에 보간 정렬(정확).
+                # 인덱스 정렬과 달리 α가 sub-window/다른 그리드여도 올바르게 겹친다.
+                ref_wl, ref_y = ref_raw[:, 0], ref_raw[:, 1]
+                ref_on_a = np.interp(wl_a, ref_wl, ref_y, left=np.nan, right=np.nan)
+                m = np.isfinite(ref_on_a) & np.isfinite(a)
+                r_fit, a_fit, wl_fit = ref_on_a[m], a[m], wl_a[m]
+            else:
+                # legacy 단일컬럼(파장축 없음) → 같은 그리드 가정(인덱스 정렬).
+                # 길이가 다르면 정렬이 어긋나 RMS가 평평해지므로 경고 플래그를 세운다.
+                ref_y = ref_raw.flatten()
+                if len(ref_y) != len(a):
+                    self._fwhm_legacy_mismatch = True
+                n = min(len(ref_y), len(a))
+                r_fit, a_fit, wl_fit = ref_y[:n], a[:n], wl_a[:n]
+            if len(r_fit) < 50:
                 continue
-            r_fit = ref_vals[:n]
-            a_fit = a[:n]
-            wl_fit = wl_a[:n]
             # Normalized polynomial basis to avoid ill-conditioning
             wn = (wl_fit - wl_fit.mean()) / max(1e-9, wl_fit.std())
             # ── Numerical conditioning ───────────────────────────────────
@@ -1825,14 +2322,21 @@ class CAESARAnalyzer(QMainWindow):
                               label=f"best = {best_fv:.3f} nm")
         self._fwhm_ax.set_xlabel("FWHM (nm)")
         self._fwhm_ax.set_ylabel("RMS residual")
-        self._fwhm_ax.set_title(f"FWHM Best-Match — α: {os.path.basename(alpha_path)}")
+        self._fwhm_ax.set_title(f"FWHM Best-Match — α: {alpha_label}")
         self._fwhm_ax.legend()
         self._fwhm_canvas.draw()
 
+        _warn = ("\n⚠️ legacy single-column refs with length≠α detected — index-aligned "
+                 "(may be unreliable). Re-run the FWHM Sweep to save wavelength-tagged refs."
+                 if self._fwhm_legacy_mismatch else "")
         self.lbl_fwhm_best.setText(
             f"🏆 Best FWHM = {best_fv:.3f} nm  (RMS = {best_rms:.3e})\n"
-            f"   → {os.path.basename(best_path)}"
+            f"   → {os.path.basename(best_path)}{_warn}"
         )
+        if self._fwhm_legacy_mismatch:
+            self.lbl_fwhm_best.setStyleSheet("color: #E65100; font-weight: bold;")
+        else:
+            self.lbl_fwhm_best.setStyleSheet("color: #2E7D32; font-weight: bold;")
         self.btn_fwhm_set_active.setEnabled(True)
 
     def _fwhm_set_active_ref(self):
@@ -2166,6 +2670,8 @@ class CAESARAnalyzer(QMainWindow):
                     f"\n\nLocation:\n{self._alpha_out_dir}\n"
                     "Filename: {source}_{channel}_alpha_trace.dat\n"
                     "Usable in Result Viewer / Analysis (RUN).")
+            # close-the-loop: 생성한 폴더를 α Health에 자동 연결 → 점검 까먹지 않게.
+            self._alpha_qc_after_export(self._alpha_out_dir)
             return
         cfg = self._alpha_queue.pop(0)
         self._alpha_status(f"📁 Alpha [{cfg['label']}] computing (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
@@ -2181,6 +2687,11 @@ class CAESARAnalyzer(QMainWindow):
             cavity_len    = self.spin_d_len.value(),
             output_dir    = self._alpha_out_dir,
             dark_spectrum = self._alpha_dark,
+            # dark scale·detector offset·stray light — RUN 경로와 물리 일치(기본값=무회귀).
+            dark_scale_factor    = self.spin_dark_scale.value(),
+            offset_spectrum      = getattr(self, 'offset_data', None),
+            offset_scale_factor  = self.spin_offset_scale.value(),
+            stray_light_fraction = self.spin_stray_light.value(),
             channel       = cfg['channel'],
             avg_sec       = self._alpha_avgsec,
             channel_label = cfg['label'],
@@ -2452,20 +2963,11 @@ class CAESARAnalyzer(QMainWindow):
             print("✅ [Generator Sync] Lamp data and wavelength axis auto-configured.")
             
         # Assuming add_ref_row exists in the remaining parts of BBCEASAnalyzer
-        dialog.reference_saved.connect(self.add_ref_row) 
+        dialog.reference_saved.connect(self.add_ref_row)
         dialog.exec()
 
-
-    def open_r_generator(self):
-        """Opens the R-Curve Generator dialog. On success, loads the result directly into r_data."""
-        wave_data = getattr(self, 'wavelengths', None)
-        dialog = R_GeneratorDialog(self, wavelengths=wave_data)
-        if dialog.exec() and hasattr(dialog, 'r_curve_result'):
-            self.r_data = dialog.r_curve_result
-            self.update_diagnostic_plot()
-            self.update_leff()
-            self.status.setText(f"✅ R-Curve loaded ({len(self.r_data)} pixels)")
-            print(f"✅ R-Curve auto-loaded: {len(self.r_data)} pixels, mean R = {self.r_data.mean():.6f}")
+    # open_r_generator / R_GeneratorDialog 제거됨(2026-06): R Calibrator가 R(λ)·R(t)
+    # 계산을 흡수했고 이 다이얼로그는 UI 버튼이 없는 죽은 경로였음.
 
     def open_r_trend_monitor(self):
         """R Calibrator: 채널별 반사율 교정 및 R(t) 계산."""
@@ -4288,9 +4790,15 @@ class CAESARAnalyzer(QMainWindow):
         kq = self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005
         kr = self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050
         rms_pct = self.spin_rms_thresh.value() if hasattr(self, 'spin_rms_thresh') else 10.0
+        _settle_on = hasattr(self, 'chk_settle') and self.chk_settle.isChecked()
+        _settle_str = (f", Settling (first {self.spin_settle_n.value()}/bin)"
+                       if _settle_on else "")
+        _n_settle = sum(1 for r in self.results if str(r.get('Status', '')) == 'Settling')
         QMessageBox.information(self, "Reapply",
-                                f"Reapplied OK RMS% ({rms_pct:.1f}%), Kalman (Q={kq}, R={kr}), QC (K={K:g}).\n"
-                                f"Excluded: {len(changed)} / {len(self.results):,} rows")
+                                f"Reapplied OK RMS% ({rms_pct:.1f}%), Kalman (Q={kq}, R={kr}), "
+                                f"QC (K={K:g}){_settle_str}.\n"
+                                f"Excluded: {len(changed)} / {len(self.results):,} rows"
+                                + (f"  (settling {_n_settle})" if _settle_on else ""))
 
     def _reapply_ok_rms_status(self):
         """OK RMS% 임계 변경을 반영해 각 행의 OK/Unstable 상태를 재판정.
@@ -4372,31 +4880,46 @@ class CAESARAnalyzer(QMainWindow):
                     r[f"{nm}_Smooth"] = v
                 if not str(r.get('Status', '')).startswith('QC-Excluded'):
                     r['Status'] = r.get('_qc_orig_status', r.get('Status', ''))
+        # ── (b) 정착(settling) 스캔 제외 — QC와 독립(자체 체크박스), 복원 뒤라 비파괴 ──
+        # 각 빈 첫 N스캔 = 캘(He/ZA) 복귀 직후 퍼지 과도 → 농도 저편향. File의 '[NNNN]'이
+        # 빈 내 스캔#. gas→NaN + Status='Settling'으로 flag(지우지 않음 — 복원/토글 가능).
+        if hasattr(self, 'chk_settle') and self.chk_settle.isChecked():
+            import re as _re
+            n_settle = self.spin_settle_n.value() if hasattr(self, 'spin_settle_n') else 3
+            for r in self.results:
+                if str(r.get('Status', '')).startswith('QC-Excluded'):
+                    continue
+                m = _re.search(r'\[(\d+)\]', str(r.get('File', '')))
+                si = int(m.group(1)) if m else -1
+                if 0 <= si < n_settle:
+                    for nm in self.engine.gas_list:
+                        r[nm] = float('nan')
+                        if f"{nm}_Smooth" in r:
+                            r[f"{nm}_Smooth"] = float('nan')
+                    r['Status'] = 'Settling'
         def _status_changed():
             return [i for i, r in enumerate(self.results)
                     if str(r.get('Status', '')) != prev_status[i]]
         if not (hasattr(self, 'chk_qc') and self.chk_qc.isChecked()):
-            return _status_changed()   # 복원만 (이전 QC 해제)
+            return _status_changed()   # 복원만 (이전 QC 해제) — settling은 위에서 이미 적용
         K = self.spin_qc_k.value() if hasattr(self, 'spin_qc_k') else 8.0
         if K <= 0:
             return _status_changed()   # 자동 끔(수동 RMS상한만 사용) — 복원만
-        # 채널별 RMS 수집 → log공간 robust 임계
-        by_ch = {}
+        # 채널별 RMS 수집 → log공간 robust 임계 (단일 진실원: core.result_io)
+        # min_n=1: 이 경로는 핏 결과 전체라 채널마다 표본이 충분 — 기존 동작(표본수
+        # 무관 계산) 보존. 결과뷰어 QC는 부분 파일도 다루므로 min_n=5를 쓴다.
+        from core.result_io import robust_rms_thresholds
+        _rms_list, _ch_list = [], []
         for r in self.results:
             try:
-                rms = float(r.get('RMS', float('nan')))
+                _rms_list.append(float(r.get('RMS', float('nan'))))
             except Exception:
-                rms = float('nan')
-            if _np.isfinite(rms) and rms > 0:
-                by_ch.setdefault(r.get('Channel', 1), []).append(rms)
-        thr_by_ch = {}
-        for ch, arr in by_ch.items():
-            la = _np.log10(_np.asarray(arr))
-            med = _np.median(la)
-            mad = _np.median(_np.abs(la - med))
-            thr_by_ch[ch] = 10 ** (med + K * mad) if mad > 0 else float('inf')
+                _rms_list.append(float('nan'))
+            _ch_list.append(r.get('Channel', 1))
+        thr_by_ch = robust_rms_thresholds(_rms_list, _ch_list, K=K, min_n=1)
         for r in self.results:
-            if str(r.get('Status', '')).startswith('QC-Excluded'):   # 워커 수동 QC는 유지
+            # 워커 수동 QC(QC-Excluded)·정착(Settling) 행은 이미 제외됨 → 유지
+            if str(r.get('Status', '')).startswith(('QC-Excluded', 'Settling')):
                 continue
             try:
                 rms = float(r.get('RMS', float('nan')))

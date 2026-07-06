@@ -1,5 +1,5 @@
 """gui/ui_dialogs_r.py
-R 커브 & R 시계열: R_GeneratorDialog, _RTrendWorker, RTrendMonitorDialog
+R 시계열: _RTrendWorker, RCalibratorDialog(RTrendMonitorDialog 별칭)
 """
 import sys
 import os
@@ -46,306 +46,12 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTextEdit, QFrame)
 from PyQt6.QtCore import Qt, QThread, QTimer, QSettings, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
-
-
-# =============================================================================
-# 7. Post-Processing & Export (Final Output)
-# =============================================================================
-class R_GeneratorDialog(QDialog):
-    """
-    BBCEAS Universal R-Curve Generator.
-
-    Calculates the wavelength-dependent mirror reflectivity R(λ) using the
-    difference in Rayleigh scattering cross-sections of two well-characterised gases.
-
-    Physical principle (Washenfelder et al. 2008)
-    ---------------------------------------------
-    When light bounces between two high-reflectivity mirrors separated by distance d,
-    the effective path length is L_eff = d / (1 − R).  By measuring two gases whose
-    scattering is well-known (e.g., Zero-Air and Helium), we can solve for R(λ):
-
-        ratio = I_gas2 / I_gas1
-        R(λ)  = 1 − d · (ratio·α₂ − α₁) / (1 − ratio)
-
-    The resulting R-curve is saved as a CSV file and loaded into the main engine
-    before analysis to enable accurate ppb-level concentration retrieval.
-    """
-    def __init__(self, parent, wavelengths):
-        super().__init__(parent)
-        self.setWindowTitle("🎡 BBCEAS Universal R-Curve Generator")
-        _s = _ui_scale()
-        self.resize(int(550 * _s), int(650 * _s))
-        self.wl = wavelengths
-        self.data1 = None
-        self.data2 = None
-        self.init_ui()
-
-    def init_ui(self):
-        self.main_layout = QVBoxLayout(self)
-        
-        # 1. Physical Parameters Section
-        phys_group = QGroupBox("Physical Parameters")
-        phys_form = QFormLayout()
-        
-        self.txt_d = QLineEdit("51.8")
-        self.txt_temp = QLineEdit("25.0")
-        self.txt_press = QLineEdit("1013.25")
-        
-        phys_form.addRow("Cavity Length (d, cm):", self.txt_d)
-        phys_form.addRow("Temperature (°C):", self.txt_temp)
-        phys_form.addRow("Pressure (mbar):", self.txt_press)
-        
-        phys_group.setLayout(phys_form)
-        self.main_layout.addWidget(phys_group)
-
-        # Preset table: (C, k, reference)
-        PRESETS = {
-            "Zero-Air (ZA/Air)":    (1.100065e-15, -4.1656, "Bucholtz (1995) J. Atmos. Sci. 52, 1705"),
-            "Nitrogen (N2)":        (1.2577e-15,   -4.1814, "Naus & Ubachs (2000) J. Mol. Spectrosc. 203, 106"),
-            "Helium (He)":          (1.336e-17,    -4.1287, "Ityaksov et al. (2008) Chem. Phys. Lett. 462, 31"),
-            "Argon (Ar)":           (4.50e-17,     -4.0564, "Ityaksov et al. (2008) Chem. Phys. Lett. 462, 31"),
-            "Carbon Dioxide (CO2)": (6.50e-16,     -4.26,   "Sneep & Ubachs (2005) J. Quant. Spectrosc. 92, 293 (approx.)"),
-            "Neon (Ne)":            (2.68e-18,     -4.12,   "Sneep & Ubachs (2005) J. Quant. Spectrosc. 92, 293 (approx.)"),
-            "Krypton (Kr)":         (2.01e-16,     -4.02,   "Sneep & Ubachs (2005) J. Quant. Spectrosc. 92, 293 (approx.)"),
-            "Custom Input":         (None,          None,    ""),
-        }
-
-        # 2. Gas Slot Generator (Returns the constructed GroupBox and its widgets)
-        def create_gas_slot(slot_num):
-            box = QGroupBox(f"Gas Slot {slot_num} Settings")
-            vbox = QVBoxLayout()
-
-            combo = QComboBox()
-            combo.addItems(list(PRESETS.keys()))
-
-            # C / k fields — always visible; pre-filled for presets, blank for Custom
-            ck_widget = QWidget()
-            ck_hbox = QHBoxLayout(ck_widget)
-            ck_hbox.setContentsMargins(0, 0, 0, 0)
-            txt_c = QLineEdit()
-            txt_c.setPlaceholderText("C  (e.g. 1.1e-15)")
-            txt_k = QLineEdit()
-            txt_k.setPlaceholderText("k  (e.g. -4.17)")
-            ck_hbox.addWidget(QLabel("C:"))
-            ck_hbox.addWidget(txt_c)
-            ck_hbox.addWidget(QLabel("k:"))
-            ck_hbox.addWidget(txt_k)
-
-            # Always-visible formula explanation
-            lbl_ck_info = QLabel(
-                "<b>σ(λ) = C · λᵏ</b> &nbsp;[cm²]<br>"
-                "C : scattering coefficient — gas-specific constant; larger molecules / higher polarity → larger C<br>"
-                "k : wavelength exponent — typically −4 ~ −4.3; pure Rayleigh gives exactly −4"
-            )
-            lbl_ck_info.setStyleSheet("color: #333; font-size: 10px; background: #f5f5f5; padding: 4px; border-radius: 3px;")
-            lbl_ck_info.setWordWrap(True)
-
-            # Reference label shown below C/k fields
-            lbl_ref = QLabel("")
-            lbl_ref.setStyleSheet("color: #555; font-size: 10px; font-style: italic;")
-            lbl_ref.setWordWrap(True)
-
-            def on_combo_changed():
-                name = combo.currentText()
-                c_val, k_val, ref = PRESETS[name]
-                if c_val is not None:
-                    txt_c.setText(f"{c_val:.6e}")
-                    txt_k.setText(str(k_val))
-                    txt_c.setStyleSheet("")
-                    txt_k.setStyleSheet("")
-                    lbl_ref.setText(f"Ref: {ref}")
-                else:
-                    txt_c.clear()
-                    txt_k.clear()
-                    lbl_ref.setText("Enter C and k manually.")
-
-            combo.currentIndexChanged.connect(lambda _: on_combo_changed())
-            on_combo_changed()  # Populate fields for the default selection
-
-            btn_file = QPushButton(f"📂 Load Gas {slot_num} Spectrum")
-            btn_file.clicked.connect(lambda: self.load_data(slot_num))
-
-            lbl_file = QLabel(f"Gas {slot_num}: No file selected")
-            lbl_file.setStyleSheet("color: gray; font-size: 11px;")
-
-            vbox.addWidget(QLabel("<b>Select Gas Type:</b>"))
-            vbox.addWidget(combo)
-            vbox.addWidget(ck_widget)
-            vbox.addWidget(lbl_ck_info)
-            vbox.addWidget(lbl_ref)
-            vbox.addWidget(btn_file)
-            vbox.addWidget(lbl_file)
-            box.setLayout(vbox)
-
-            return box, combo, txt_c, txt_k, lbl_file
-
-        # Instantiate Gas 1 and Gas 2 widgets
-        self.slot1_box, self.combo1, self.c1, self.k1, self.lbl1 = create_gas_slot(1)
-        self.slot2_box, self.combo2, self.c2, self.k2, self.lbl2 = create_gas_slot(2)
-        
-        self.main_layout.addWidget(self.slot1_box)
-        self.main_layout.addWidget(self.slot2_box)
-
-        # 3. Final Calculation Button
-        self.btn_calc = QPushButton("📊 Calculate Reflectivity (R(λ))")
-        self.btn_calc.setFixedHeight(60)
-        self.btn_calc.setStyleSheet("""
-            QPushButton {
-                background-color: #0277BD; color: white; 
-                font-weight: bold; font-size: 15px; border-radius: 5px;
-            }
-            QPushButton:hover { background-color: #01579B; }
-        """)
-        self.btn_calc.clicked.connect(self.calculate_r)
-        self.main_layout.addWidget(self.btn_calc)
-
-    def load_data(self, slot):
-        """Loads spectrum data, filtering out specialized headers (e.g., Ocean Optics timestamps)."""
-        filename, _ = QFileDialog.getOpenFileName(self, f"Select Spectrum {slot}", dlg_dir("spectrum"), "Data Files (*.txt *.dat *.csv)")
-        dlg_dir("spectrum", filename)
-        if not filename: return
-
-        try:
-            with open(filename, 'r', encoding='ISO-8859-1') as file:
-                lines = file.readlines()
-            
-            start_idx = -1
-            for i, line in enumerate(lines):
-                if ">>>>>Begin Spectral Data<<<<<" in line:
-                    start_idx = i + 1
-                    break
-            
-            if start_idx != -1:
-                # Process specialized format
-                data_line = lines[start_idx + 1].strip().split('\t')
-                try:
-                    float(data_line[0])
-                    numeric_values = [float(x) for x in data_line if x.strip()]
-                except ValueError:
-                    # Skip the first column if it's a non-numeric timestamp
-                    numeric_values = [float(x) for x in data_line[1:] if x.strip()]
-                intensity = np.array(numeric_values)
-            else:
-                # Standard pandas parsing for regular CSV/DAT files
-                df = pd.read_csv(filename, sep=None, engine='python', header=None)
-                df_numeric = df.apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
-                intensity = df_numeric.iloc[:, 0].values
-
-            # Assign to the correct slot and update UI
-            if slot == 1:
-                self.data1 = intensity.astype(float)
-                self.lbl1.setText(f"✅ Loaded: {os.path.basename(filename)}")
-                self.lbl1.setStyleSheet("color: blue; font-weight: bold;")
-            else:
-                self.data2 = intensity.astype(float)
-                self.lbl2.setText(f"✅ Loaded: {os.path.basename(filename)}")
-                self.lbl2.setStyleSheet("color: blue; font-weight: bold;")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Error loading file:\n{e}")
-
-    def get_rayleigh(self, combo, txt_c, txt_k):
-        r"""
-        Returns the Rayleigh scattering cross-section σ(λ) [cm²] using
-        σ = C · λ^k  (λ in nm), where C and k are read directly from the UI
-        fields so the user can override preset values at any time.
-        """
-        try:
-            c_val = float(txt_c.text())
-            k_val = float(txt_k.text())
-        except ValueError:
-            gas = combo.currentText()
-            raise ValueError(
-                f"C or k value for '{gas}' is not a valid number.\n"
-                "Please check the input fields."
-            )
-        return c_val * (self.wl ** k_val)
-
-    def calculate_r(self):
-        """Calculates the mirror reflectivity R(λ) and prompts the user to save it as a CSV."""
-        if self.data1 is None or self.data2 is None:
-            QMessageBox.warning(self, "Missing Data", "Please load spectra for both Gas 1 and Gas 2.")
-            return
-
-        if self.wl is None:
-            QMessageBox.warning(
-                self, "No Wavelength Calibration",
-                "Wavelength calibration has not been loaded.\n\n"
-                "Please load or run the Wavelength Calibration Tool first,\n"
-                "then re-open the R-Curve Generator."
-            )
-            return
-
-        try:
-            # Helper to align data lengths if resolutions mismatch
-            def match_length(data, target_len):
-                if len(data) == target_len:
-                    return data
-                return np.interp(np.linspace(0, 1, target_len), np.linspace(0, 1, len(data)), data)
-
-            d1 = match_length(self.data1, len(self.wl))
-            d2 = match_length(self.data2, len(self.wl))
-            
-            # Calculate molecular number density (rho) using Ideal Gas Law
-            # $P(Pa) / (k_B \cdot T(K)) \times 10^{-6}$ (conversion to molecules/cm^3)
-            pressure_pa = float(self.txt_press.text()) * 100
-            temp_k = float(self.txt_temp.text()) + 273.15
-            k_b = 1.380649e-23
-            
-            rho = (pressure_pa / (k_b * temp_k)) * 1e-6 
-            
-            # Calculate total extinction coefficients
-            alpha1 = self.get_rayleigh(self.combo1, self.c1, self.k1) * rho
-            alpha2 = self.get_rayleigh(self.combo2, self.c2, self.k2) * rho
-
-            # Calculate Reflectivity R
-            ratio = d2 / d1
-            cavity_len = float(self.txt_d.text())
-            
-            r_curve = 1 - cavity_len * ((ratio * alpha2 - alpha1) / (1 - ratio))
-
-            # Validate R range: R must be in (0, 1) for a physically real mirror.
-            # Values outside this range indicate noise, division-by-zero near ratio=1,
-            # or a mis-matched gas pair. Clip and warn so downstream analysis is safe.
-            n_bad = int(np.sum((r_curve < 0) | (r_curve > 1)))
-            if n_bad > 0:
-                r_curve = np.clip(r_curve, 0.0, 1.0)
-                QMessageBox.warning(
-                    self, "Out-of-Range Pixels",
-                    f"{n_bad} pixel(s) had R < 0 or R > 1 and were clipped to [0, 1].\n\n"
-                    "This typically occurs at spectral edges where I₂/I₁ ≈ 1 "
-                    "(ratio denominator near zero) or where signal-to-noise is poor.\n"
-                    "Check that the correct gases are assigned to each slot "
-                    "and that the spectra cover the same wavelength range."
-                )
-
-            gas1 = self.combo1.currentText().split(' ')[0]
-            gas2 = self.combo2.currentText().split(' ')[0]
-            import datetime
-            date_str = datetime.datetime.now().strftime("%Y%m%d")
-
-            default_fname = f"RCurve_{gas1}_vs_{gas2}_d{cavity_len}cm_{date_str}.csv"
-
-            # Save the result
-            _start = os.path.join(dlg_dir("rcurve_save"), default_fname) if dlg_dir("rcurve_save") else default_fname
-            save_path, _ = QFileDialog.getSaveFileName(self, "Save R-Curve", _start, "CSV (*.csv)")
-            dlg_dir("rcurve_save", save_path)
-
-            if save_path:
-                pd.DataFrame({'Wavelength': self.wl, 'Reflectivity': r_curve}).to_csv(save_path, index=False)
-                self.r_curve_result = r_curve  # Expose result so caller can load it directly
-                QMessageBox.information(self, "Success", "Reflectivity curve saved successfully!")
-                self.accept()
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Calculation Error", f"Failed to calculate R(λ):\n{e}")
-
 # =============================================================================
 # R Trend Monitor Components (UI + Worker)
 # =============================================================================
 
 from gui.r_workers import (_LiveStream, _RTrendWorker, _RTExportWorker,
-                           _RTAppendWorker, _ChannelRWorker, _HeCheckWorker)
+                           _ChannelRWorker)
 
 
 # ── 채널 색상 팔레트 ─────────────────────────────────────────────────────────
@@ -511,28 +217,50 @@ class RCalibratorDialog(QDialog):
         self._btn_run = btn_run
         btn_row.addWidget(btn_run)
 
-        btn_rt = QPushButton("💾  Save R(t) for α (parallel)")
+        # Start 시 scan 결과를 그대로 α R(t) npz에 증분 머지(재스캔 0). 기본 ON이라
+        # 사용자가 npz를 따로 관리할 필요 없음 — 기존 npz엔 머지(덮어쓰기 아님),
+        # 없으면 생성. 단순히 트렌드만 볼 땐 끄면 npz를 안 건드린다.
+        self._chk_auto_npz = QCheckBox("Auto-update α R(t) npz")
+        self._chk_auto_npz.setChecked(True)
+        self._chk_auto_npz.setToolTip(
+            "Start 계산 결과를 R_<channel>.npz에 자동 증분 머지합니다(재스캔 없음).\n"
+            "기존 npz가 있으면 새 knot만 시간순 머지+중복제거(덮어쓰지 않음),\n"
+            "없으면 새로 만듭니다. 끄면 Start가 npz를 건드리지 않습니다.")
+        btn_row.addWidget(self._chk_auto_npz)
+
+        # 이미 npz에 계산돼 있는 파일은 다시 스캔하지 않음(속도). 트렌드 플롯은
+        # 기존 트렌드 dat을 불러와 합쳐서 전체를 보여준다.
+        self._chk_skip_done = QCheckBox("Skip already-computed")
+        self._chk_skip_done.setChecked(True)
+        self._chk_skip_done.setToolTip(
+            "npz의 processed_files에 이미 있는 파일은 다시 계산하지 않습니다(재실행·연장이 빨라짐).\n"
+            "전체 트렌드는 기존 {channel}_R_trend.dat을 불러와 새 결과와 합쳐 표시합니다.\n"
+            "끄면 선택 범위 전체를 매번 다시 계산합니다.")
+        btn_row.addWidget(self._chk_skip_done)
+
+        # 평소엔 Start(auto-update 체크) 하나로 npz가 증분 관리된다. Rebuild는
+        # 설정 변경/손상 시 npz를 처음부터 다시 만드는 비상용 탈출구(덮어쓰기).
+        btn_rt = QPushButton("🔁  Rebuild npz (full)")
         btn_rt.setStyleSheet(
             "background-color:#1976D2;color:white;font-weight:bold;height:36px;")
         btn_rt.setToolTip(
-            "Compute per-channel R(t) with 6-core parallelism using current settings,\n"
-            "saving R_<channel>.npz to the result folder.\n"
-            "Assign this file as R(t) in Alpha Generator to apply it to alpha.\n"
-            "(R uses the same scan_directory core as Start)")
+            "Recompute every file from scratch and OVERWRITE R_<channel>.npz.\n"
+            "Use only when settings changed (cavity/RL/R-window) or the npz is damaged.\n"
+            "Normal incremental updates are handled by Start's 'Auto-update' checkbox.")
         btn_rt.clicked.connect(self._export_rt_for_alpha)
         self._btn_rt_export = btn_rt
         btn_row.addWidget(btn_rt)
 
-        btn_rt_append = QPushButton("📥  Append")
-        btn_rt_append.setStyleSheet(
+        btn_verify = QPushButton("🔍  Verify npz")
+        btn_verify.setStyleSheet(
             "background-color:#00796B;color:white;font-weight:bold;height:36px;")
-        btn_rt_append.setToolTip(
-            "Compute only new files and add them to an existing R_<channel>.npz.\n"
-            "Already-processed files are skipped; only new files computed → merged.\n"
-            "Checks each file's He flag first and asks before proceeding.")
-        btn_rt_append.clicked.connect(self._append_rt_for_alpha)
-        self._btn_rt_append = btn_rt_append
-        btn_row.addWidget(btn_rt_append)
+        btn_verify.setToolTip(
+            "Read-only check of each channel's R_<channel>.npz (no scanning):\n"
+            "• missing days (calendar days with no knot → R interpolated)\n"
+            "• uncomputed files (in the raw folder but not yet in the npz)")
+        btn_verify.clicked.connect(self._verify_npz)
+        self._btn_rt_verify = btn_verify
+        btn_row.addWidget(btn_verify)
         main.addLayout(btn_row)
 
         # ── 진행 표시줄 ────────────────────────────────────────────────────────
@@ -780,7 +508,10 @@ class RCalibratorDialog(QDialog):
             if ds or de:
                 lo = self._norm_date(ds, "0000-00-00")
                 hi = self._norm_date(de, "9999-99-99")
-                return self._files_in_range(d, lo, hi) or None
+                # 범위 내 0개면 [] 그대로 반환한다. 예전엔 `or None`이라 빈 결과가
+                # None→"디렉토리 전체 스캔"으로 둔갑해(콜드처럼 해당 기간 데이터가
+                # 없는 채널이 폴더를 통째로 긁었다). []는 scan_directory가 즉시 빠져나옴.
+                return self._files_in_range(d, lo, hi)
             return None
 
         tasks = []
@@ -812,9 +543,51 @@ class RCalibratorDialog(QDialog):
                 spec_start=spec_s, spec_end=spec_e,
                 ts_tz_hours=tz_h, label=label, dio_channel=dio_ch)
 
+            flist = _flist(raw_dir)
+            # 날짜범위가 설정됐는데 그 안에 파일이 0개면 채널을 명시적으로 스킵한다.
+            # (예: 콜드가 멈춰 19~26 데이터가 없을 때 "여기서 끝" — 전체 스캔 안 함)
+            if flist is not None and len(flist) == 0:
+                self._log.append(
+                    f"  [{label}] no files in date range "
+                    f"{ds or '*'}~{de or '*'} → skipped")
+                continue
             tasks.append((label, raw_dir, wave_nm, rtcfg,
-                          _flist(raw_dir), _os.path.join(out_dir, f"R_{label}.npz")))
+                          flist, _os.path.join(out_dir, f"R_{label}.npz")))
         return tasks
+
+    def _warn_flag_mismatch(self):
+        """패널 primary ZA/He flag가 R-cal이 실제 쓰는 raw_parser.FLAG_ZA/HE(스칼라)와
+        다르면 로그 경고. R-cal 파이프라인(scan_directory/reflectance_calc)은 모듈 전역
+        flag를 쓰므로 패널 flag와 연동되지 않는다 — 불일치를 가시화만 한다(차단 X).
+        R-cal은 pure-injecting(500/510)만 쓰는 게 옳고, Alpha Generator의 I0/He 선택과
+        일치해야 R(t)와 α의 기준이 어긋나지 않는다."""
+        parent = self.parent()
+        if parent is None or not hasattr(parent, 'txt_flag_za'):
+            return
+        try:
+            from core.raw_parser import FLAG_ZA as _RZA, FLAG_HE as _RHE
+        except Exception:
+            return
+
+        def _primary(txt, default):
+            try:
+                vals = parent._parse_flags(txt) if hasattr(parent, '_parse_flags') else None
+                return int(vals[0]) if vals else default
+            except Exception:
+                return default
+        p_za = _primary(parent.txt_flag_za.text(), _RZA)
+        p_he = _primary(parent.txt_flag_he.text(), _RHE)
+        diffs = []
+        if p_za != _RZA:
+            diffs.append(f"ZA primary={p_za}(panel)≠{_RZA}(R-cal)")
+        if p_he != _RHE:
+            diffs.append(f"He primary={p_he}(panel)≠{_RHE}(R-cal)")
+        if diffs:
+            self._log.append(
+                f"⚠️ [flag mismatch] R-cal uses raw_parser pure-injecting flags "
+                f"({_RZA}/{_RHE}), NOT the left-panel flags: " + "; ".join(diffs) +
+                f". R(t)/R-cal proceeds with {_RZA}/{_RHE}; set panel ZA/He back to "
+                f"{_RZA}/{_RHE} to keep R consistent with Alpha Generator's I0/He selection.")
 
     # ── 계산 시작 ─────────────────────────────────────────────────────────────
     def _run(self):
@@ -823,6 +596,7 @@ class RCalibratorDialog(QDialog):
             QMessageBox.warning(self, "No channels",
                 "Load channels first.\nClick the '🔄 Load channels from left panel' button.")
             return
+        self._warn_flag_mismatch()
 
         RTP = self._rt_import()
         if RTP is None:
@@ -847,9 +621,9 @@ class RCalibratorDialog(QDialog):
         out_dir = self._le_out_dir.text().strip() or "."
         channel_cfgs = [
             {"label":     label, "raw_dir": raw_dir, "wave_nm": wave,
-             "rtcfg":     cfg,   "file_list": flist,
+             "rtcfg":     cfg,   "file_list": flist, "npz_path": npz_path,
              "color":     _CH_COLORS[i % len(_CH_COLORS)]}
-            for i, (label, raw_dir, wave, cfg, flist, _) in enumerate(tasks)
+            for i, (label, raw_dir, wave, cfg, flist, npz_path) in enumerate(tasks)
         ]
 
         self._log.clear(); self._pw.clear(); self._spectrum_pw.clear()
@@ -861,7 +635,9 @@ class RCalibratorDialog(QDialog):
 
         self._worker = _ChannelRWorker(
             channel_cfgs, out_dir,
-            self._spin_cavity_len.value(), self._spin_rl.value())
+            self._spin_cavity_len.value(), self._spin_rl.value(),
+            auto_npz=self._chk_auto_npz.isChecked(),
+            skip_done=self._chk_skip_done.isChecked())
         self._worker.log.connect(self._log.append)
         self._worker.data_ready.connect(self._on_data_ready)
         self._worker.finished.connect(self._on_done)
@@ -887,11 +663,12 @@ class RCalibratorDialog(QDialog):
 
     def _lock_rt_buttons(self, locked):
         self._btn_rt_export.setEnabled(not locked)
-        self._btn_rt_append.setEnabled(not locked)
+        self._btn_rt_verify.setEnabled(not locked)
 
-    # ── 전체 재계산 저장 ────────────────────────────────────────────────────
+    # ── 전체 재계산(Rebuild) ────────────────────────────────────────────────
     def _export_rt_for_alpha(self):
-        """현재 설정으로 채널별 R(t)를 병렬 계산해 R_<채널>.npz 저장(Alpha Generator용)."""
+        """현재 설정으로 채널별 R(t)를 처음부터 재계산해 R_<채널>.npz를 **덮어쓴다**.
+        평소 증분은 Start의 Auto-update가 담당 — 이건 설정변경/손상 시 비상용."""
         RTP = self._rt_import()
         if RTP is None:
             return
@@ -904,6 +681,24 @@ class RCalibratorDialog(QDialog):
                                 "set Cold/Hot folder + wavecal file.")
             return
 
+        # 덮어쓰기 경고 — 기존 누적 npz가 있으면 명시적으로 확인받는다.
+        import os as _os
+        existing = [t[5] for t in tasks if _os.path.exists(t[5])]
+        if existing:
+            names = "\n".join(f"  • {_os.path.basename(p)}" for p in existing)
+            ans = QMessageBox.warning(
+                self, "Rebuild npz — overwrite?",
+                "다음 npz를 처음부터 다시 계산해 **덮어씁니다**(증분 아님):\n"
+                f"{names}\n\n"
+                "평소 추가는 Start의 'Auto-update α R(t) npz'로 충분합니다.\n"
+                "설정(cavity/RL/R-window)을 바꿨거나 npz가 손상된 경우에만 사용하세요.\n\n"
+                "계속할까요?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel)
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+
+        self._warn_flag_mismatch()
         self._log.append(f"[R(t) export] {len(tasks)} channels parallel compute start → {out_dir}")
         self._lock_rt_buttons(True)
         self._progress.setVisible(True)
@@ -933,130 +728,82 @@ class RCalibratorDialog(QDialog):
         self._rt_export_worker.finished.connect(_done)
         self._rt_export_worker.start()
 
-    # ── 증분 추가 ───────────────────────────────────────────────────────────
-    def _append_rt_for_alpha(self):
-        """기존 npz에 새 파일만 추가 — He 플래그 검사를 백그라운드로 실행 후 확인 다이얼로그."""
+    # ── npz 검증 (읽기 전용) ─────────────────────────────────────────────────
+    def _verify_npz(self):
+        """채널별 R_<채널>.npz를 읽어 '빈 날(knot 0)'과 '미계산 파일(raw엔 있으나
+        npz엔 없음)'을 보고한다. 스캔하지 않으므로 즉시 끝난다(읽기 전용)."""
+        import os as _os
         RTP = self._rt_import()
         if RTP is None:
             return
 
-        out_dir = self._le_out_dir.text().strip() or "."
         tasks = self._build_rt_tasks(RTP)
         if not tasks:
             QMessageBox.warning(self, "Input error",
                                 "Set a left-panel channel (incl. wavecal) + raw folder.")
             return
 
-        # Phase 1 — He 플래그 검사를 백그라운드 스레드에서 실행
-        self._append_out_dir = out_dir
-        self._lock_rt_buttons(True)
-        self._progress.setVisible(True)
-        self._progress.setRange(0, 0)   # indeterminate
-        self._progress.setTextVisible(True)
-        self._progress.setFormat("Scanning He flags…")
+        summary_lines = []   # 다이얼로그 본문(요약)
+        detail_lines  = []   # 펼침(상세: 미계산 파일 목록)
+        any_issue = False
 
-        self._he_check_worker = _HeCheckWorker(tasks)
-        self._he_check_worker.progress.connect(
-            lambda lbl: self._progress.setFormat(f"He scan: [{lbl}]…"))
-        self._he_check_worker.finished.connect(self._on_he_check_done)
-        self._he_check_worker.start()
-
-    def _on_he_check_done(self, results):
-        """_HeCheckWorker 완료 콜백 — 확인 다이얼로그 표시 후 append worker 시작."""
-        import os as _os
-
-        self._progress.setRange(0, 1)
-        self._progress.setValue(0)
-        self._progress.setVisible(False)
-        self._progress.setFormat("")
-        out_dir = self._append_out_dir
-
-        summary_lines = []
-        warn_lines    = []
-        valid_tasks   = []
-
-        for label, raw_dir, wave, rtcfg, flist, out_path, new_files, he_map in results:
-            if not new_files:
-                summary_lines.append(f"[{label}]  no new files (skipped)")
+        for label, raw_dir, wave, rtcfg, flist, npz_path in tasks:
+            try:
+                rep = RTP.verify_npz(npz_path, raw_dir, file_list=flist)
+            except Exception as e:
+                summary_lines.append(f"[{label}]  ❌ verify failed: {e}")
                 continue
 
-            skip_count = 0
-            for f in new_files:
-                if he_map.get(_os.path.basename(f), False):
-                    break
-                skip_count += 1
+            if not rep["exists"]:
+                summary_lines.append(
+                    f"[{label}]  ⚠️ no npz yet ({_os.path.basename(npz_path)}) — "
+                    f"{rep['n_raw']} raw files uncomputed")
+                any_issue = True
+                continue
 
+            gaps = rep["gaps"]
+            unc  = rep["uncomputed"]
+            status = "✅ clean" if (not gaps and not unc) else "⚠️ issues"
+            if gaps or unc:
+                any_issue = True
             summary_lines.append(
-                f"[{label}]  {len(new_files)} new files"
-                + (f"  ⚠️ first {skip_count} lack He (skip)" if skip_count > 0
-                   else "  ✅ He present from the first file"))
+                f"[{label}]  {status}  knots={rep['n_knots']}, raw={rep['n_raw']}, "
+                f"computed={rep['n_processed']}")
+            # 날짜/시각 커버리지 — npz에 실제로 들어있는 데이터 구간(항상 표시)
+            if rep.get("first_dt"):
+                cov = (f"      • coverage: {rep['first_dt']} ~ {rep['last_dt']}"
+                       f"  ({rep['n_days']} days)")
+                if rep["n_days"] and gaps:
+                    cov += f", {gaps['n_days']} empty"
+                summary_lines.append(cov)
+            elif rep["first"]:
+                summary_lines.append(
+                    f"      • coverage: {rep['first']} ~ {rep['last']}")
 
-            for i, f in enumerate(new_files[:20]):
-                bn = _os.path.basename(f)
-                has_he = he_map.get(bn, False)
-                tag = ("✅ He" if has_he
-                       else "⚠️ skip (no He)" if i < skip_count
-                       else "  ○ He carried")
-                summary_lines.append(f"    {bn}  {tag}")
-            if len(new_files) > 20:
-                summary_lines.append(f"    … ({len(new_files) - 20} more)")
-
-            if skip_count == len(new_files):
-                warn_lines.append(
-                    f"[{label}] all {len(new_files)} new files lack He → all may be skipped.")
-
-            valid_tasks.append((label, raw_dir, wave, rtcfg, flist, out_path))
-
-        if not valid_tasks:
-            self._lock_rt_buttons(False)
-            QMessageBox.information(self, "Append",
-                                    "No new files to append.\n\n" + "\n".join(summary_lines))
-            return
-
-        header = f"Channels to append: {len(valid_tasks)}\n\n"
-        if warn_lines:
-            header += "⚠️  Warning:\n" + "\n".join(warn_lines) + "\n\n"
+            if gaps:
+                shown = ", ".join(gaps["missing"][:12]) + (
+                    f" … (+{gaps['n_days'] - 12})" if gaps["n_days"] > 12 else "")
+                summary_lines.append(f"      • missing days ({gaps['n_days']}): {shown}")
+            if unc:
+                summary_lines.append(f"      • uncomputed files: {len(unc)}")
+                detail_lines.append(f"[{label}] uncomputed files ({len(unc)}):")
+                detail_lines += [f"    {b}" for b in unc[:200]]
+                if len(unc) > 200:
+                    detail_lines.append(f"    … (+{len(unc) - 200} more)")
 
         msg = QMessageBox(self)
-        msg.setWindowTitle("Append — He flag check")
-        msg.setText(header + "Proceed?")
-        msg.setDetailedText("\n".join(summary_lines))
-        msg.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-        msg.setIcon(QMessageBox.Icon.Warning if warn_lines else QMessageBox.Icon.Question)
-
-        if msg.exec() != QMessageBox.StandardButton.Yes:
-            self._lock_rt_buttons(False)
-            return
-
-        # Phase 2 — 실제 append
-        self._log.append(f"[R(t) append] {len(valid_tasks)} channels start → {out_dir}")
-        self._progress.setVisible(True)
-        self._progress.setRange(0, 0)
-        self._progress.setTextVisible(True)
-        self._progress.setFormat("R(t) append prep…")
-
-        self._rt_append_worker = _RTAppendWorker(valid_tasks)
-        self._rt_append_worker.log.connect(self._log.append)
-
-        def _on_prog(done, total, label):
-            self._progress.setRange(0, max(total, 1))
-            self._progress.setValue(done)
-            self._progress.setFormat(f"R(t) append [{label}] {done}/{total}  %p%")
-        self._rt_append_worker.progress.connect(_on_prog)
-
-        def _done(summary):
-            self._log.append(f"[R(t) append done] {summary}")
-            self._progress.setVisible(False)
-            self._progress.setFormat("")
-            self._lock_rt_buttons(False)
-            QMessageBox.information(
-                self, "Append complete",
-                f"{summary}\n\nLocation: {out_dir}\n\nNew knots merged into the existing npz.")
-
-        self._rt_append_worker.finished.connect(_done)
-        self._rt_append_worker.start()
+        msg.setWindowTitle("Verify npz")
+        msg.setIcon(QMessageBox.Icon.Warning if any_issue else QMessageBox.Icon.Information)
+        msg.setText(
+            ("아래 항목을 확인하세요. 빈 날·미계산 파일은 그 구간 R이 보간으로만 "
+             "채워짐을 뜻합니다.\n해당 날짜/파일을 Start로 계산하면 자동 삽입됩니다.\n\n"
+             if any_issue else "모든 채널 npz가 깨끗합니다 (빈 날·미계산 파일 없음).\n\n")
+            + "\n".join(summary_lines))
+        if detail_lines:
+            msg.setDetailedText("\n".join(detail_lines))
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+        self._log.append("[verify] " + " | ".join(summary_lines))
 
     def _on_data_ready(self, arg0, arg1, arg2, out_dir):
         """arg0 = new [{label,results,color},...] 또는 legacy cold_results list."""
@@ -1120,6 +867,25 @@ class RCalibratorDialog(QDialog):
 
         for ch in channels:
             _plot_fill(ch["results"], ch["color"], ch["label"])
+
+        # ── 중간 빈 날 알림 ───────────────────────────────────────────────────
+        # auto_npz 머지 후 워커가 채널별 npz_gaps(달력상 knot 0개인 날)를 첨부한다.
+        # 있으면 한 번에 모아 경고 팝업 — 그 구간 R은 보간으로만 채워짐을 알린다.
+        gap_lines = []
+        for ch in channels:
+            g = ch.get("npz_gaps")
+            if g:
+                shown = ", ".join(g["missing"][:12]) + (
+                    f" … (+{g['n_days'] - 12})" if g["n_days"] > 12 else "")
+                gap_lines.append(
+                    f"[{ch['label']}] {g['n_days']} day(s) missing "
+                    f"({g['first']}~{g['last']}):\n    {shown}")
+        if gap_lines:
+            QMessageBox.warning(
+                self, "Missing days in R(t)",
+                "아래 날짜는 npz에 데이터(knot)가 없어 알파에서 R이 보간으로만 "
+                "채워집니다.\n해당 날짜 데이터를 나중에 계산해 Start하면 자동으로 "
+                "중간에 삽입됩니다.\n\n" + "\n\n".join(gap_lines))
 
         all_r = [r["r_mean"] * 100 for ch in channels for r in ch["results"]]
         if all_r:

@@ -5,7 +5,7 @@ gui/ui_dialogs.py — 하위 호환 re-export wrapper
 
   ui_dialogs_calib.py  — NavigationHelper, WavelengthCalibrationDialog, RangeSelectorDialog
   ui_dialogs_ref.py    — MaskDialog, RefPropertiesDialog, ReferenceGeneratorDialog, MonitorWidget
-  ui_dialogs_r.py      — R_GeneratorDialog, _RTrendWorker, RCalibratorDialog
+  ui_dialogs_r.py      — _RTrendWorker, RCalibratorDialog
                          (RTrendMonitorDialog = RCalibratorDialog 별칭 포함)
 
 기존 코드가 'from .ui_dialogs import *' 또는 'from gui.ui_dialogs import ...' 형태로
@@ -13,5 +13,5 @@ gui/ui_dialogs.py — 하위 호환 re-export wrapper
 """
 from .ui_dialogs_calib import *   # NavigationHelper, WavelengthCalibrationDialog, RangeSelectorDialog
 from .ui_dialogs_ref   import *   # MaskDialog, RefPropertiesDialog, ReferenceGeneratorDialog, MonitorWidget
-from .ui_dialogs_r     import *   # R_GeneratorDialog, RCalibratorDialog, RTrendMonitorDialog(alias)
+from .ui_dialogs_r     import *   # RCalibratorDialog, RTrendMonitorDialog(alias)
 from .ui_dialogs_r     import _RTrendWorker, _ChannelRWorker  # private classes

@@ -282,7 +282,9 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     _parsed = None
     if parallel and len(files) > 1:
         import concurrent.futures as _cf
-        _nproc = min((os.cpu_count() or 4), 6)
+        # 전체 코어의 절반만 사용(과부하 방지). 노트북 12코어→6, 데스크톱 등 코어가
+        # 더 많으면 자동으로 더 쓴다. 최소 1.
+        _nproc = max(1, (os.cpu_count() or 4) // 2)
         try:
             _parsed = {}
             _ndone = 0
@@ -397,6 +399,7 @@ def scan_directory(directory: str, wave_nm, file_list=None,
                 "r_max":      float(np.max(r_fit)),
                 "leff_mean":  float(np.nanmean(leff_fit)),
                 "valid_frac": rc.valid_fraction,
+                "he_za_contrast": float(getattr(rc, 'he_za_contrast', float('nan'))),
                 "n_za":       len(za),
                 "n_he":       len(candidate_he),
                 "fit_window_nm": fit_window_nm,
@@ -499,6 +502,53 @@ def save_dat(results: list[dict], out_path: str) -> None:
                 f"{r['valid_frac']*100:.1f}\t{r['n_za']}\t{r['n_he']}\n"
             )
     print(f"  [DAT] {out_path}  ({len(results)} rows)")
+
+def load_dat(path: str) -> list[dict]:
+    """save_dat가 쓴 트렌드 .dat를 부분 result dict 목록으로 되읽는다(플롯/누적 백필용).
+
+    스킵 모드에서 '이미 계산된 파일'은 다시 스캔하지 않으므로, 전체 트렌드를 그리려면
+    기존 행을 이 함수로 불러와 새 결과와 합친다. 반환 각 dict: timestamp(naive
+    datetime, KST), filename, r_mean, r_std, r_min, r_max, leff_mean, valid_frac,
+    n_za, n_he, fit_window_nm. 파싱 실패 행은 건너뛴다."""
+    from datetime import datetime as _dt
+    rows: list[dict] = []
+    fit_win = None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                s = line.rstrip("\n")
+                if s.startswith("#"):
+                    m = re.search(r"R_fit_window_nm=([0-9.]+)-([0-9.]+)", s)
+                    if m:
+                        fit_win = (float(m.group(1)), float(m.group(2)))
+                    continue
+                if not s.strip() or s.startswith("timestamp"):
+                    continue
+                p = s.split("\t")
+                if len(p) < 4:
+                    continue
+                try:
+                    ts = _dt.strptime(p[0], "%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+
+                def _f(i, d=0.0):
+                    try:    return float(p[i])
+                    except (IndexError, ValueError): return d
+
+                def _i(i, d=0):
+                    try:    return int(float(p[i]))
+                    except (IndexError, ValueError): return d
+
+                rows.append({
+                    "timestamp": ts, "filename": p[1],
+                    "r_mean": _f(2), "r_std": _f(3), "r_min": _f(4), "r_max": _f(5),
+                    "leff_mean": _f(6), "valid_frac": _f(7) / 100.0,
+                    "n_za": _i(8), "n_he": _i(9), "fit_window_nm": fit_win,
+                })
+    except Exception:
+        return rows
+    return rows
 
 def _plot_channel(ax_r, ax_l, results, channel_name, r_expected, color):
     if not results:

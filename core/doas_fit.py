@@ -160,9 +160,13 @@ class DoasFitter:
                            theta0, theta_lb, theta_ub, poly_order, fixed_e_f,
                            absolute_center, fit_sign, ref_properties, temperature,
                            tikhonov_lambda, use_robust,
-                           override_lam=None, override_robust=None, allow_negative_gas=False):
+                           override_lam=None, override_robust=None, allow_negative_gas=False,
+                           custom_basis=None):
         """VarPro + NNLS + Tikhonov + Robust(IRLS) 엔진. AnalysisWorker에서 verbatim 이식.
-        allow_negative_gas=True면 가스 계수 하한을 0→−∞로 풀어 음수 농도 허용(0근처 비편향)."""
+        allow_negative_gas=True면 가스 계수 하한을 0→−∞로 풀어 음수 농도 허용(0근처 비편향).
+        custom_basis: (n_pix, k) 외부 선형 베이스(Ring·fixed-pattern 고유벡터 등). None이면
+          컬럼 0개라 기존과 바이트동일. 컬럼은 poly 뒤·etalon 앞에 삽입돼 etalon이 마지막
+          열로 유지되므로 반환 인덱싱이 보존되고 gas 계수(c_opt[0:num_gases])도 불변."""
         gas_lb = -np.inf if allow_negative_gas else 0.0
         x_min, x_max = pixel_idx[0], pixel_idx[-1]
         x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
@@ -189,6 +193,16 @@ class DoasFitter:
         prev_weights = np.diag(W_current).copy()
         num_gases = len(self.engine.gas_list)
 
+        # custom_basis 정규화: None이면 컬럼 0개(=기존 동작). poly 뒤·etalon 앞에 들어간다.
+        CB = None if custom_basis is None else np.asarray(custom_basis, dtype=float).reshape(len(pixel_idx), -1)
+
+        # Tikhonov 패널티 대각: 다항식(Chebyshev) 배경 열은 절대 수축하지 않는다.
+        # (λ>0일 때 배경모양 왜곡·gas 과소편향 방지 — 표준 DOAS. gas·custom·etalon만 능형화.)
+        def _penalty(ncols):
+            pen = np.full(ncols, lam, dtype=float)
+            pen[num_gases:num_gases + (poly_order + 1)] = 0.0
+            return np.diag(pen)
+
         for iteration in range(max_iters):
             def objective_varpro(theta):
                 val_dict = {v: theta[i] for i, v in enumerate(active_vars)}
@@ -196,7 +210,6 @@ class DoasFitter:
                 for v, t in linked_vars.items():
                     val_dict[v] = val_dict.get(t, 0.0)
 
-                e_p = theta[-1]
                 cols = []
                 for name in self.engine.gas_list:
                     sh_i, sq_i = val_dict[f"{name}_sh"], val_dict[f"{name}_sq"]
@@ -209,7 +222,13 @@ class DoasFitter:
 
                 for j in range(poly_order + 1):
                     cols.append(T[:, j])
-                cols.append(np.sin(fixed_e_f * pixel_idx + e_p))
+                if CB is not None:
+                    for kk in range(CB.shape[1]):
+                        cols.append(CB[:, kk])
+                # etalon: sin·cos 두 선형열 — 진폭/위상을 선형으로 흡수(비선형 위상 e_p 제거).
+                # A·sin(f·x+φ)=A·cosφ·sin(f·x)+A·sinφ·cos(f·x) 라 같은 모델공간이며 전역 선형해.
+                cols.append(np.sin(fixed_e_f * pixel_idx))
+                cols.append(np.cos(fixed_e_f * pixel_idx))
 
                 A_weighted = W_current @ np.column_stack(cols)
                 y_weighted = W_current @ optical_depth
@@ -217,7 +236,7 @@ class DoasFitter:
                 num_cols = A_weighted.shape[1]
 
                 if lam > 0:
-                    A_aug = np.vstack((A_weighted, np.eye(num_cols) * lam))
+                    A_aug = np.vstack((A_weighted, _penalty(num_cols)))
                     y_aug = np.concatenate((y_weighted, np.zeros(num_cols)))
                 else:
                     A_aug, y_aug = A_weighted, y_weighted
@@ -228,8 +247,13 @@ class DoasFitter:
                 res_temp = lsq_linear(A_aug, y_aug, bounds=(lb_inner, ub_inner))
                 return y_aug - A_aug @ res_temp.x
 
-            res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub), max_nfev=1500)
-            theta_opt = res_nonlin.x
+            if len(theta0) > 0:
+                res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub), max_nfev=1500)
+                theta_opt = res_nonlin.x
+            else:
+                # 비선형 파라미터 없음(모든 shift/squeeze가 Fix; etalon은 이제 선형 sin·cos).
+                # least_squares는 빈 x0에서 에러나므로 선형해만 1회. (콜드 shift Fix 0 시나리오)
+                theta_opt = np.asarray([], dtype=float)
 
             val_dict_opt = {v: theta_opt[i] for i, v in enumerate(active_vars)}
             val_dict_opt.update(fixed_vars)
@@ -238,7 +262,6 @@ class DoasFitter:
 
             opt_shifts = [val_dict_opt[f"{g}_sh"] for g in self.engine.gas_list]
             opt_squeezes = [val_dict_opt[f"{g}_sq"] for g in self.engine.gas_list]
-            best_ep = theta_opt[-1]
 
             cols = []
             for i, name in enumerate(self.engine.gas_list):
@@ -250,7 +273,11 @@ class DoasFitter:
                 cols.append(col)
             for j in range(poly_order + 1):
                 cols.append(T[:, j])
-            cols.append(np.sin(fixed_e_f * pixel_idx + best_ep))
+            if CB is not None:
+                for kk in range(CB.shape[1]):
+                    cols.append(CB[:, kk])
+            cols.append(np.sin(fixed_e_f * pixel_idx))
+            cols.append(np.cos(fixed_e_f * pixel_idx))
 
             A_final = np.column_stack(cols)
             A_f_w = W_current @ A_final
@@ -259,7 +286,7 @@ class DoasFitter:
             num_cols_final = A_f_w.shape[1]
 
             if lam > 0:
-                A_aug = np.vstack((A_f_w, np.eye(num_cols_final) * lam))
+                A_aug = np.vstack((A_f_w, _penalty(num_cols_final)))
                 y_aug = np.concatenate((y_w, np.zeros(num_cols_final)))
             else:
                 A_aug, y_aug = A_f_w, y_w
@@ -305,4 +332,11 @@ class DoasFitter:
                 c_gas[i] = 0.0
                 c_perr[i] = 0.0
 
-        return opt_shifts, opt_squeezes, c_gas, c_opt[num_gases:-1], c_opt[-1], best_ep, c_perr
+        # etalon: 마지막 두 열 = a·sin + b·cos → 진폭/위상으로 환산해 반환(하류의
+        # `amp·sin(f·x + phase)` 재구성과 정확히 동일: a=A·cosφ, b=A·sinφ).
+        a_et, b_et = float(c_opt[-2]), float(c_opt[-1])
+        etalon_amp = float(np.hypot(a_et, b_et))
+        etalon_phase = float(np.arctan2(b_et, a_et))
+        poly_coeffs = c_opt[num_gases:-2]
+
+        return opt_shifts, opt_squeezes, c_gas, poly_coeffs, etalon_amp, etalon_phase, c_perr

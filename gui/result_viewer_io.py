@@ -90,6 +90,72 @@ def detect_sep(path):
     return None
 
 
+def read_alpha_trace(path, want_id=None):
+    """alpha_trace.dat 공통 파서 (뷰어의 α평균 플롯과 포인트클릭 α팝업이 공유).
+
+    헤더 규약: '# wavelength_nm:'(있으면 파장축), 'row_idx …' 헤더의 'px*' 컬럼
+    위치로 α 시작열(alpha_start) 자동 탐지(기본 3). '#' 줄은 건너뜀.
+
+    want_id=None : (wave, ids, alpha2d) — 전체 데이터 행.
+        wave: 파장 ndarray(없거나 길이 불일치면 픽셀 인덱스).
+        ids : 각 행의 row_idx(첫 컬럼) float ndarray.
+        alpha2d: (행, 파장) ndarray. 데이터 없으면 (0,0).
+    want_id=정수 : (wave, alpha1d) — 그 row_idx 행만 찾아 '조기종료'(대용량 파일에서
+        클릭마다 전체를 읽지 않게). 못 찾으면 (wave, None).
+    """
+    wave = None
+    alpha_start = 3
+    ids, rows = [], []
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for ln in f:
+            if ln.startswith("# wavelength_nm:"):
+                try:
+                    wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
+                                     if v.strip()], dtype=float)
+                except Exception:
+                    pass
+                continue
+            if ln.lower().startswith("row_idx"):
+                cols = ln.rstrip("\n").split("\t")
+                fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
+                if fp is not None:
+                    alpha_start = fp
+                continue
+            if ln.startswith("#"):
+                continue
+            p = ln.rstrip().split("\t")
+            if len(p) <= alpha_start:
+                continue
+            if want_id is not None:
+                try:
+                    if int(float(p[0])) != want_id:
+                        continue
+                    vals = np.array([float(x) for x in p[alpha_start:]], dtype=float)
+                except ValueError:
+                    continue
+                w = wave if (wave is not None and len(wave) == len(vals)) \
+                    else np.arange(len(vals), dtype=float)
+                return w, vals
+            try:
+                vals = [float(x) for x in p[alpha_start:]]
+            except ValueError:
+                continue
+            try:
+                rid = int(float(p[0]))
+            except ValueError:
+                rid = len(ids)
+            ids.append(rid)
+            rows.append(vals)
+    if want_id is not None:
+        return wave, None
+    if not rows:
+        return wave, np.array([], dtype=float), np.empty((0, 0), dtype=float)
+    a = np.array(rows, dtype=float)
+    if wave is None or len(wave) != a.shape[1]:
+        wave = np.arange(a.shape[1], dtype=float)
+    return wave, np.array(ids, dtype=float), a
+
+
 def load_fit_table(path):
     """fit 표 파싱 — 3가지 포맷 지원.
     ① 구 alpha-fit: row_idx T_C P_mbar <gases> rms_cm-1

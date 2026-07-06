@@ -34,6 +34,54 @@ def parse_row_time(ts: str):
     return None
 
 
+def robust_rms_thresholds(rms, channels=None, K=8.0, min_n=5):
+    """채널별 robust RMS 이상치 임계값을 계산해 {채널: 임계} dict로 반환.
+
+    각 채널에서 유한하고 >0 인 RMS만 모아 log 공간에서
+        thr = 10 ^ (median(log10 r) + K · MAD(log10 r))
+    로 임계를 잡는다(분포 기반 — 매직넘버 불필요). RMS가 이 임계를 넘는 행이
+    이상치(핏 실패/구름·저광)다.
+
+    DOAS 자동 QC의 '단일 진실원': 핏 종료 후 자동 QC(app_window._apply_auto_qc)와
+    결과뷰어의 표시/통계·내보내기 QC가 모두 이 함수를 호출한다. 식을 한 곳에서만
+    관리해 세 경로가 어긋나지 않게 한다.
+
+    Args:
+        rms: RMS 값 시퀀스(array-like, NaN 허용).
+        channels: 각 RMS의 채널 라벨 시퀀스(rms와 같은 길이·순서). None이면 전체를
+            한 그룹으로 본다. 라벨 타입(int/str)은 호출부 내에서 일관되기만 하면 된다.
+        K: 민감도. 클수록 느슨(이상치 적게 검출). 0 이하면 빈 dict 반환(=QC 끔).
+        min_n: 임계를 계산할 최소 유한표본 수. 미만인 채널은 임계 +inf(=아무도 제외 안 함).
+
+    Returns:
+        {channel_label: threshold(float)} dict. K<=0이면 {}.
+        표본부족이거나 MAD<=0(분포가 거의 단일값)인 채널의 임계는 +inf.
+    """
+    import numpy as np
+    if K is None or K <= 0:
+        return {}
+    rms = list(rms)
+    if channels is None:
+        channels = [0] * len(rms)
+    else:
+        channels = list(channels)
+    groups: dict = {}
+    for r, ch in zip(rms, channels):
+        groups.setdefault(ch, []).append(r)
+    thr: dict = {}
+    for ch, vals in groups.items():
+        a = np.asarray(vals, dtype=float)
+        fin = np.isfinite(a) & (a > 0)
+        if int(fin.sum()) < min_n:
+            thr[ch] = float('inf')
+            continue
+        la = np.log10(a[fin])
+        med = float(np.median(la))
+        mad = float(np.median(np.abs(la - med)))
+        thr[ch] = float(10 ** (med + K * mad)) if mad > 0 else float('inf')
+    return thr
+
+
 def read_result(fp: str):
     """결과 파일 → (주석헤더 리스트, 컬럼헤더 문자열, [(datetime, 원본행 문자열)]).
 

@@ -176,17 +176,21 @@ class _RTAppendWorker(QThread):
 
 class _ChannelRWorker(QThread):
     """채널별 scan_directory() 호출 — 계산 시작 버튼용.
-    channel_cfgs: list of {label, raw_dir, wave_nm, rtcfg, file_list, color}"""
+    channel_cfgs: list of {label, raw_dir, wave_nm, rtcfg, file_list, color, npz_path}
+    auto_npz=True면 scan한 results를 그대로 α R(t) npz에 증분 머지한다(재스캔 0)."""
     log        = pyqtSignal(str)
     finished   = pyqtSignal(str)
     data_ready = pyqtSignal(object, object, object, object)
 
-    def __init__(self, channel_cfgs, out_dir, cavity_len, rl_factor):
+    def __init__(self, channel_cfgs, out_dir, cavity_len, rl_factor,
+                 auto_npz=False, skip_done=False):
         super().__init__()
         self.channel_cfgs = channel_cfgs
         self.out_dir      = out_dir
         self.cavity_len   = cavity_len
         self.rl_factor    = rl_factor
+        self.auto_npz     = auto_npz
+        self.skip_done    = skip_done   # True면 npz processed_files에 있는 파일은 재계산 안 함
 
     def run(self):
         import sys as _sys, os as _os, traceback, io, contextlib
@@ -211,15 +215,40 @@ class _ChannelRWorker(QThread):
             rtcfg   = ch_cfg["rtcfg"]
             flist   = ch_cfg.get("file_list")
             color   = ch_cfg["color"]
+            npz_gaps = None   # 머지 후 채워짐 — 중간 빈 날 목록(있으면 GUI가 팝업)
+            npz_path = ch_cfg.get("npz_path") or \
+                _os.path.join(self.out_dir, f"R_{label}.npz")
+            trend_path = _os.path.join(self.out_dir, f"{label}_R_trend.dat")
 
             self.log.emit(f"[{label}] scan_directory start…")
             try:
                 from datetime import timezone, timedelta
                 ts_tz  = timezone(timedelta(hours=rtcfg.ts_tz_hours))
+
+                # ── 이미 npz에 있는 파일은 다시 계산하지 않는다(속도) ──
+                # npz의 processed_files를 'done 장부'로 보고 그 파일은 스캔에서 제외.
+                scan_list = flist
+                if self.skip_done:
+                    candidates = rtm._resolve_files(raw_dir, flist)
+                    done_set = set()
+                    if _os.path.exists(npz_path):
+                        try:
+                            import rt_precompute as RTP
+                            done_set = set(RTP.load_rt(npz_path).get("processed_files", []))
+                        except Exception:
+                            pass
+                    scan_list = [f for f in candidates
+                                 if _os.path.basename(f) not in done_set]
+                    n_skip = len(candidates) - len(scan_list)
+                    if n_skip:
+                        self.log.emit(
+                            f"[{label}] ⏭️ skip {n_skip} already-computed file(s); "
+                            f"scanning {len(scan_list)} new")
+
                 _buf   = io.StringIO()
                 with contextlib.redirect_stdout(_buf):
                     results = rtm.scan_directory(
-                        raw_dir, wave_nm, file_list=flist,
+                        raw_dir, wave_nm, file_list=scan_list,
                         col_press=rtcfg.col_press, col_temp=rtcfg.col_temp,
                         ts_tz=ts_tz,
                         spec_start=rtcfg.spec_start, spec_end=rtcfg.spec_end,
@@ -229,19 +258,60 @@ class _ChannelRWorker(QThread):
                     if line.strip():
                         self.log.emit(line)
 
+                # 새로 계산된 파일: 곡선 저장 + npz 증분 머지 (재스캔 없이 results 재사용)
                 if results:
-                    rtm.save_dat(results,
-                                 _os.path.join(self.out_dir, f"{label}_R_trend.dat"))
                     rtm.save_r_curves_per_file(results, f"R_{label}", self.out_dir)
-                    self.log.emit(f"[{label}] ✅ {len(results)} cycles")
-                else:
+                    self.log.emit(f"[{label}] ✅ {len(results)} new cycles")
+                    if self.auto_npz:
+                        try:
+                            import rt_precompute as RTP
+                            n_new, n_tot = RTP.merge_results_into_npz(
+                                npz_path, results, raw_dir, wave_nm, rtcfg,
+                                file_list=flist)
+                            self.log.emit(
+                                f"[{label}] 🔄 α npz +{n_new} new knots "
+                                f"(total {n_tot}) → {_os.path.basename(npz_path)}")
+                            # 중간 빈 날(달력상 knot 0개) 탐지 → 로그 + GUI 팝업용 첨부
+                            npz_gaps = RTP.find_date_gaps(npz_path)
+                            if npz_gaps:
+                                self.log.emit(
+                                    f"[{label}] ⚠️ {npz_gaps['n_days']} day(s) with no data "
+                                    f"between {npz_gaps['first']}~{npz_gaps['last']}: "
+                                    + ", ".join(npz_gaps["missing"]))
+                        except Exception as _e:
+                            self.log.emit(f"[{label}] ⚠️ α npz update failed: {_e}")
+                elif not self.skip_done:
                     self.log.emit(f"[{label}] ⚠️ no results")
 
-                all_results.append({"label": label, "results": results or [], "color": color})
+                # ── 플롯/트렌드: 스킵 시 기존 트렌드 dat과 합쳐 전체를 보존 ──
+                # 스킵된 파일은 이번 results에 없으므로, 기존 트렌드 dat을 불러와
+                # 새 결과와 파일명 기준 병합(새 결과 우선)→시간순 정렬. 트렌드 dat도
+                # 누적본으로 갱신. (스킵 OFF면 기존 동작과 동일)
+                plot_results = results
+                if self.skip_done:
+                    prior = []
+                    if _os.path.exists(trend_path):
+                        try:
+                            prior = rtm.load_dat(trend_path)
+                        except Exception:
+                            pass
+                    fresh = {r["filename"] for r in results}
+                    plot_results = [r for r in prior if r["filename"] not in fresh] + results
+                    plot_results.sort(key=lambda r: r["timestamp"].replace(tzinfo=None))
+                    if not results:
+                        self.log.emit(
+                            f"[{label}] no new files; showing {len(plot_results)} existing")
+
+                if plot_results:
+                    rtm.save_dat(plot_results, trend_path)
+
+                all_results.append({"label": label, "results": plot_results or [],
+                                    "color": color, "npz_gaps": npz_gaps})
 
             except Exception as e:
                 self.log.emit(f"[{label}] ❌ {e}\n{traceback.format_exc()}")
-                all_results.append({"label": label, "results": [], "color": color})
+                all_results.append({"label": label, "results": [], "color": color,
+                                    "npz_gaps": None})
 
         # arg0 = new-format [{label, results, color}]; arg1/arg2 = [] (unused)
         self.data_ready.emit(all_results, [], [], self.out_dir)

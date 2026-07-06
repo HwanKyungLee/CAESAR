@@ -520,9 +520,15 @@ class AnalysisWorker(QThread):
                             # The differential Rayleigh term removes the T/P-dependent background
                             # between the ZA and ambient scans.
                             # RL (Purge Length Ratio): CH1=0.9330, CH2=0.9950, CH3=0.9968
+                            # ── RL 적용 수정 (2026-06) ──────────────────────────────────
+                            # one_minus_r_over_d = RL·(1-R)/d (R-cal에서 ×RL 됨). 과거 식은
+                            # `omr/RL + alpha_ref` 라 RL이 (1-R)/d 항에서 소거돼 RL이 알파에
+                            # 무효였다(검증: RL 0.933 vs 1.0 → α 0.00% 변화). HANDOFF 공식
+                            # α=RL·[(1-R)/d + α_ZA]·(I_ZA/I−1)−Δα 대로 RL이 괄호 전체를 곱하게
+                            # `omr + RL·alpha_ref` 로 교정(= RL·[(1-R)/d + alpha_ref]).
                             alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_za_last, self.p_za_last, 'zero_air')
                             alpha_ray_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.temperature, self.pressure, 'zero_air')
-                            optical_depth = ((self.one_minus_r_over_d / self.rl_factor + alpha_ref) * ((I_0 - I_meas) / I_meas)
+                            optical_depth = ((self.one_minus_r_over_d + self.rl_factor * alpha_ref) * ((I_0 - I_meas) / I_meas)
                                             - (alpha_ray_sample - alpha_ref))
                             fit_sign = 1.0
 
@@ -565,7 +571,8 @@ class AnalysisWorker(QThread):
                     # 4. Parameter setup
                     active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = self._setup_fit_parameters(initial_shift_center, current_params)
                     fixed_e_f = self.etalon_freq  
-                    theta0.append(0.0); theta_lb.append(-np.pi); theta_ub.append(np.pi)
+                    # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
+                    #  두 선형열로 처리. 위상 append 제거.)
                     
                     try:
                         weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(I_meas))
@@ -667,7 +674,7 @@ class AnalysisWorker(QThread):
                         # SNR: signal / noise, both in the same (scaled) units.
                         n_pts = len(pixel_idx)
                         n_gases = len(self.engine.gas_list)
-                        n_params = len(theta0) + n_gases + (poly_order + 1) + 1
+                        n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
                         dof = max(n_pts - n_params, 1)
                         # Neumann estimator σ on the fitted signal (optical_depth units for both modes)
                         signal_for_stats = intensity_raw if is_linear_mode else optical_depth
@@ -750,7 +757,7 @@ class AnalysisWorker(QThread):
                     ch_label = f"[CH{self.channel}] " if self.channel > 1 else ""
                     self.plot_update.emit(pixel_idx, diff_data, diff_fit, np.zeros_like(pixel_idx), final_params_dict, ch_label + os.path.basename(file_path))
                     sh_val, sq_val = opt_shifts[ 0 ] if len(opt_shifts) > 0 else 0, opt_squeezes[ 0 ] if len(opt_squeezes) > 0 else 1
-                    self.trend_update.emit({'idx': i, 'shift': sh_val, 'squeeze': sq_val, 'rms': rms, 'channel': self.channel})
+                    self.trend_update.emit({'idx': i, 'shift': sh_val, 'squeeze': sq_val, 'rms': rms, 'channel': self.channel, 'Time': result.get('Time')})
                     
             except Exception as e: 
                 result['Status'] = f"Skip: {str(e)}"
@@ -846,7 +853,8 @@ class AnalysisWorker(QThread):
                     active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = \
                         self._setup_fit_parameters(initial_shift_center, current_params)
                     fixed_e_f = self.etalon_freq
-                    theta0.append(0.0); theta_lb.append(-np.pi); theta_ub.append(np.pi)
+                    # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
+                    #  두 선형열로 처리. 위상 append 제거.)
                     try:
                         weights = np.ones_like(intensity_processed)
                         weights = weights / np.mean(weights)
@@ -900,7 +908,7 @@ class AnalysisWorker(QThread):
                             result[f"{nm}_Squeeze"] = opt_squeezes[gj]
 
                         n_pts = len(pixel_idx); n_gases = len(self.engine.gas_list)
-                        n_params = len(theta0) + n_gases + (poly_order + 1) + 1
+                        n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
                         dof = max(n_pts - n_params, 1)
                         sigma_pix = np.std(np.diff(intensity_raw)) / np.sqrt(2)
                         if sigma_pix < 1e-30:
@@ -1034,12 +1042,12 @@ class AnalysisWorker(QThread):
         chunk_size = max(150, min(400, -(-n // (nproc * 6))))     # ceil, clamped
         cfg = self._chunk_cfg()
 
-        tasks = []
+        tasks = []   # [(task_tuple, body_scans), …] — body_scans는 청크 실패 시 Skip 백필용
         bs = 0
         while bs < n:
             be = min(bs + chunk_size, n)
             ws = max(0, bs - warmup)
-            tasks.append((scans[ws:be], bs - ws, 0.0, etalon))
+            tasks.append(((scans[ws:be], bs - ws, 0.0, etalon), scans[bs:be]))
             bs = be
 
         # Cap BLAS threads to 1 PER worker process BEFORE the pool is spawned, so the
@@ -1057,7 +1065,11 @@ class AnalysisWorker(QThread):
         try:
             with cf.ProcessPoolExecutor(max_workers=nproc, initializer=_chunk_init,
                                         initargs=(self.engine, cfg)) as ex:
-                pending = {ex.submit(_chunk_entry, t) for t in tasks}
+                # future → 그 청크의 body 스캔들. 청크가 통째로 죽었을 때(워커 크래시·
+                # 피클 실패·OOM 등) 해당 전역 인덱스를 Skip 결과로 백필해 순서-emit 루프
+                # (`while nxt in done`)가 그 지점에서 영구 정지하지 않게 하는 보험.
+                fut_body = {ex.submit(_chunk_entry, t): body for t, body in tasks}
+                pending = set(fut_body)
                 while pending:
                     if not self.is_running:
                         for _f in pending:
@@ -1075,6 +1087,13 @@ class AnalysisWorker(QThread):
                                 done[gi] = r
                         except Exception as e:
                             print(f"[ParallelFit] chunk error: {e}")
+                            # 빠진 인덱스를 Skip으로 메워 emit이 막히지 않게(데이터 유실
+                            # 대신 명시적 Skip 표시). 결과 dict 모양은 기존 Skip과 동일.
+                            for (gi, _fp, _ridx) in fut_body.get(fut, ()):
+                                done.setdefault(gi, {
+                                    'File': f"{os.path.basename(_fp)} [{_ridx:04d}]",
+                                    'Channel': self.channel, 'Params': {},
+                                    'Status': 'Skip: chunk failed', 'RMS': 0})
                     # Emit results in scan order. Fast mode collects them (table/plots
                     # are rendered once at the end), so we only emit result_ready +
                     # progress here — NO per-scan trend/plot signals (those don't keep
@@ -1246,6 +1265,10 @@ class AlphaExportWorker(QThread):
                  rl_factor, cavity_len,
                  output_dir,
                  dark_spectrum=None,    # 1-D float array (full 2048 px), or None
+                 dark_scale_factor=1.0,     # t_meas/t_dark — RUN(AnalysisWorker)과 동일
+                 offset_spectrum=None,      # detector offset (full px), or None
+                 offset_scale_factor=1.0,   # n_meas/n_offset
+                 stray_light_fraction=0.0,  # ε: I_corr=(I−ε·mean(I))/(1−ε)
                  channel=1,             # spectrometer channel (1=CH1/ROI1)
                  r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
                  r_cal_omr_max=1e-5,    # block-mean omr_d 상한 — 이보다 크면 reject
@@ -1293,6 +1316,34 @@ class AlphaExportWorker(QThread):
                 self.dark = self.dark[pixel_min:pixel_max]
         else:
             self.dark = None
+        # detector offset / dark-scale / stray light — RUN 경로(AnalysisWorker)와 물리 일치.
+        # 기본값(scale=1, offset=None, ε=0)에선 기존 'I−dark'와 완전 동일(무회귀).
+        self.dark_scale_factor    = float(dark_scale_factor)
+        self.offset_scale_factor  = float(offset_scale_factor)
+        self.stray_light_fraction = float(stray_light_fraction)
+        if offset_spectrum is not None:
+            self.offset = np.asarray(offset_spectrum, dtype=float)
+            if len(self.offset) > (pixel_max - pixel_min):
+                self.offset = self.offset[pixel_min:pixel_max]
+        else:
+            self.offset = None
+
+    def _correct_intensity(self, I):
+        """강도 보정(dark·offset·stray) — RUN(AnalysisWorker L488-494)과 동일 물리식.
+        보정값이 모두 기본이면 원본을 그대로 반환해 byte-동일(무회귀)을 보장한다."""
+        I = np.asarray(I, dtype=float)
+        if (self.dark is None and self.offset is None
+                and self.stray_light_fraction <= 1e-9):
+            return I
+        out = I.copy()
+        if self.dark is not None:
+            out = out - self.dark_scale_factor * self.dark
+        if self.offset is not None:
+            out = out - self.offset_scale_factor * self.offset
+        if self.stray_light_fraction > 1e-9:
+            eps = self.stray_light_fraction
+            out = (out - eps * np.mean(out)) / (1.0 - eps)
+        return out
 
     def stop(self):
         self.is_running = False
@@ -1431,7 +1482,8 @@ class AlphaExportWorker(QThread):
                     _rpf[_fp] = []; _files.append(_fp)
                 _rpf[_fp].append(_ri)
             _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _files]
-            _nproc = min((os.cpu_count() or 4), 6)
+            # 전체 코어의 절반만(과부하 방지). R calc 병렬파싱과 동일 정책.
+            _nproc = max(1, (os.cpu_count() or 4) // 2)
             _win = max(2, _nproc * 2)
             self.status_msg.emit(
                 f"Pass 1 (parallel {_nproc} cores): parsing {len(_files)} files…")
@@ -1526,10 +1578,10 @@ class AlphaExportWorker(QThread):
         self.status_msg.emit(
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
 
-        # dark 보정 (블록평균 후 한 번만)
-        if has_dark:
-            za_spectra = [s - dark for s in za_spectra]
-            he_spectra = [s - dark for s in he_spectra]
+        # 강도 보정(dark·offset·stray) — 블록평균 후 한 번만. RUN 경로와 동일 물리.
+        # 기본값(scale=1·offset=None·ε=0)에선 기존 'I−dark'와 byte-동일(무회귀).
+        za_spectra = [self._correct_intensity(s) for s in za_spectra]
+        he_spectra = [self._correct_intensity(s) for s in he_spectra]
 
         # ── R-calibration: R Trend Monitor와 동일한 reflectance_calc 로 통일 ──
         # α 가 쓰는 (1-R)/d 를 R Trend 파이프라인과 같은 코드로 만든다. near-0
@@ -1594,7 +1646,10 @@ class AlphaExportWorker(QThread):
         # 품질필터·5차피팅)로 omr_d를 구하고 za_gidx 위에서 보간한다. 유효 knot<2면
         # omr_interp=None → 기존 단일 best_omr_d 로 폴백(무회귀).
         omr_interp = None
-        if za_spectra and he_spectra and len(za_gidx) >= 2:
+        # rt_path(R calibrator 프리컴퓨트 npz)가 있으면 아래 _omr_d_at이 그걸(rt_omr_interp)
+        # 우선 쓰므로, 여기서 ZA 블록마다 reflectance_calc(5차 polyfit)로 자체 R(t)를 만드는
+        # 건 헛수고다 → 스킵. (rt 로드 실패 시엔 best_omr_d 단일 R로 폴백.)
+        if (not getattr(self, 'rt_path', None)) and za_spectra and he_spectra and len(za_gidx) >= 2:
             try:
                 from reflectance_calc import ReflectanceCalculator as _RC
             except Exception:
@@ -1785,6 +1840,16 @@ class AlphaExportWorker(QThread):
                 return omr_interp(float(g))
             return best_omr_d
 
+        # ── zero_air Rayleigh σ는 파장만의 함수(T/P 무관) → 1회만 계산 ──────────
+        # α_ray(λ,T,P) = σ(λ)·N(T,P). σ(λ)(Sellmeier, 2048픽셀)는 모든 bin에서 동일하고
+        # bin마다 바뀌는 건 스칼라 N(T,P)뿐. STP(0℃,1013.25mbar)에선 N=N0라
+        # get_alpha_rayleigh(…,0,1013.25,…)=σ·N0. 이후 bin마다 N/N0 스칼라만 곱한다.
+        # bin마다 get_alpha_rayleigh를 재호출하던 것과 수학적으로 동일(무회귀), Sellmeier
+        # 재계산만 루프 밖으로 뺀다.
+        _ZA_REF = RayleighPhysics.get_alpha_rayleigh(wave_nm, 0.0, 1013.25, 'zero_air')
+        def _alpha_za(T, P):
+            return _ZA_REF * (float(P) / 1013.25) * (273.15 / (float(T) + 273.15))
+
         # ── Pass 2: ambient 를 avg_sec(기본 60초) 시간평균 후 alpha 계산 ────────
         # 박사님 Alpha 파이프라인(Step2 avgsec=60)과 동일. 단일 스캔(~1초)은
         # noise가 커 DOAS 피팅이 불안정해진다 → gidx-시간(약 0.97초/행) 기준으로
@@ -1863,12 +1928,13 @@ class AlphaExportWorker(QThread):
                             i0_interp, t_i0, p_i0 = pchip_i0(gmean), float(pchip_t(gmean)), float(pchip_p(gmean))
                     else:
                         i0_interp, t_i0, p_i0 = i_za_static, t_za_static, p_za_static
-                    i_am_dc = (I - dark) if has_dark else I
+                    i_am_dc = self._correct_intensity(I)
                     i0_s = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
                     i_am_s = np.where(i_am_dc > 0, i_am_dc, 1e-9).astype(float)
-                    alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
-                    alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
-                    alpha = ((_omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)) / self.rl_factor + alpha_ref)
+                    alpha_ref    = _alpha_za(t_i0, p_i0)
+                    alpha_sample = _alpha_za(t_am, p_am)
+                    # RL은 괄호 전체를 곱한다(omr=RL·(1-R)/d → omr + RL·alpha_ref = RL·[(1-R)/d+α_ZA]).
+                    alpha = ((_omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)) + self.rl_factor * alpha_ref)
                              * ((i0_s - i_am_s) / i_am_s) - (alpha_sample - alpha_ref))
                     n_written += 1
                 else:
@@ -1916,14 +1982,15 @@ class AlphaExportWorker(QThread):
                     t_i0      = t_za_static
                     p_i0      = p_za_static
 
-                i_am_dc = (i_am - dark) if has_dark else i_am
+                i_am_dc = self._correct_intensity(i_am)
                 i0_s   = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
                 i_am_s = np.where(i_am_dc   > 0, i_am_dc,   1e-9).astype(float)
 
-                alpha_ref    = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
-                alpha_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
+                alpha_ref    = _alpha_za(t_i0, p_i0)
+                alpha_sample = _alpha_za(t_am, p_am)
 
-                alpha = ((_omr_d_at(gmean, rep_sec) / self.rl_factor + alpha_ref)
+                # RL은 괄호 전체를 곱한다(omr=RL·(1-R)/d → omr + RL·alpha_ref = RL·[(1-R)/d+α_ZA]).
+                alpha = ((_omr_d_at(gmean, rep_sec) + self.rl_factor * alpha_ref)
                          * ((i0_s - i_am_s) / i_am_s)
                          - (alpha_sample - alpha_ref))
 
@@ -1953,8 +2020,10 @@ class AlphaExportWorker(QThread):
                 f.write(f"# RL_factor={self.rl_factor}  d={self.cavity_len} cm\n")
                 f.write(f"# I0_mode={i0_mode}  ZA_count={n_za}\n")
                 f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (alpha after {self.avg_sec:.0f}s time-average of ambient)\n")
-                dark_note = f"mean={dark.mean():.1f}" if has_dark else "None"
+                dark_note = f"mean={dark.mean():.1f}×{self.dark_scale_factor:g}" if has_dark else "None"
                 f.write(f"# dark_correction={dark_note}\n")
+                f.write(f"# offset_correction={'applied×%g' % self.offset_scale_factor if self.offset is not None else 'None'}"
+                        f"  stray_light_eps={self.stray_light_fraction:g}\n")
                 f.write(f"# Calibration: {rt_calib_note or calib_info_per_file.get(fp, 'unknown')}\n")
                 wv_str = '\t'.join(f"{w:.4f}" for w in wave_nm)
                 f.write(f"# wavelength_nm:\t{wv_str}\n")
