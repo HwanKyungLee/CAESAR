@@ -22,7 +22,7 @@
 git clone https://github.com/HwanKyungLee/CAESAR.git
 cd CAESAR
 
-# 2) 가상환경 + 의존성 (PyQt6 / numpy / scipy / matplotlib / pandas / pyqtgraph / hitran-api)
+# 2) 가상환경 + 의존성 (PyQt6 / numpy / scipy / matplotlib / pandas / pyqtgraph / hitran-api / threadpoolctl)
 python -m venv .venv
 .venv\Scripts\activate        # (macOS/Linux: source .venv/bin/activate)
 pip install -r requirements.txt
@@ -32,8 +32,17 @@ python main.py
 ```
 
 Windows에서는 `CAESAR_Pro_실행.bat` 더블클릭으로도 켜진다(콘솔 없이 GUI만 뜨고,
-크래시 로그는 `logs/crash.log` 에 쌓인다). HITRAN 라인리스트는 처음 사용할 때
-사용자별로 받아 `hitran_data/` 에 캐시된다(저장소에는 포함되지 않음).
+크래시 로그는 `logs/crash.log` 에 쌓인다). HITRAN 라인리스트("🌐 Generate from HITRAN"
+버튼, Reference Generator에서 새 단면을 만들 때만 필요)는 처음 쓸 때 인터넷으로 받아
+`hitran_data/` 에 캐시되고(저장소에는 포함되지 않음, 사용자별) 이후로는 캐시만 쓴다.
+현재 쓰는 시나리오(NO2/CHOCHO/O4)는 이미 만들어진 문헌 단면 파일을 쓰므로 일상적인
+분석 실행에는 인터넷이 필요 없다. 인터넷이 없는 환경(예: 선상)에서 이 버튼을 눌러
+아직 캐시 안 된 종을 새로 받으려 하면 15초 후 타임아웃 에러가 뜬다(멈추지 않음).
+
+문헌 단면(NO2/CHOCHO/O4)과 파장보정 상수는 `reference_data/`에 저장소째 포함돼 있어
+별도로 준비할 게 없다. 분석 결과(alpha/fitting/R/figure)는 기본적으로 `output/`에
+쌓이며(머신별 재생성 산출물이라 저장소에는 포함 안 됨), 파일 다이얼로그에서 다른
+위치를 고르면 다음부터 그 위치를 기억한다.
 
 ---
 
@@ -143,12 +152,16 @@ CAESAR/
 ├── scenarios/                 ← DOAS 피팅 시나리오 JSON
 │   └── Doctor_Scenario_Cold_ROI1_ROI2.json
 │
+├── reference_data/            ← 레포에 번들된 입력 데이터 (core/paths.py 기준 경로)
+│   ├── raw/                   ← 문헌 단면 (NO2/CHOCHO/O4)
+│   └── wv_cal/                ← 채널별 파장보정 상수 (cold/roi1/roi2)
+│
 └── docs/                      ← 설계/이력 문서
     ├── refactor_notes.md
     └── HANDOFF.md             ← 세션 핸드오프 노트 (아카이브)
 ```
 
-> `.venv/`, `.vscode/`, `hitran_data/`, `logs/`, `__pycache__/`, R 출력 폴더,
+> `.venv/`, `.vscode/`, `hitran_data/`, `logs/`, `output/`, `__pycache__/`, R 출력 폴더,
 > 도구 출력 PNG 등 머신별·재생성 가능 산출물은 `.gitignore`로 제외된다.
 
 ---

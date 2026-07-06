@@ -1,0 +1,7 @@
+# BBCEAS FWHM & Sigma Analysis Records
+# Generated: 20260602
+# Formula: abs(Sigma) = FWHM / 2.3548
+------------------------------------------------------------
+Pixel	FWHM(nm)	FWHM(px)	abs_Sigma(nm)	abs_Sigma(px)
+106.468	3.4079	68.4019	1.4472	29.0478
+738.981	3.5532	72.8298	1.5089	30.9282

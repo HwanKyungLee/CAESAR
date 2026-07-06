@@ -1,7 +1,11 @@
-PyQt6>=6.4.0
-numpy>=1.24.0
-scipy>=1.10.0
-matplotlib>=3.7.0
-pandas>=2.0.0
-pyqtgraph>=0.13.0
-hitran-api>=1.2.0
+PyQt6==6.11.0
+numpy==2.4.6
+scipy==1.17.1
+matplotlib==3.10.9
+pandas==3.0.3
+pyqtgraph==0.14.0
+hitran-api==1.3.0.0
+threadpoolctl==3.6.0
+
+# scikit-learn은 메인 앱(GUI)에는 필요 없음 — campaigns/yeosu_2026/hot_cavity_t/scripts
+# (Hot 캐비티 온도 back-cast GBR 모델) 전용 의존성이라 별도 설치 필요시에만 추가.

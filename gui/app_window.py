@@ -22,6 +22,8 @@ from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 from core.engine import UniversalEngine
 from .worker import AnalysisWorker, AlphaExportWorker
 from core.data_io import DataIO
+from core.paths import WV_CAL_DIR, DEFAULT_OUTPUT_DIR, resolve_ref_path
+from core.__version__ import __version__
 from .ui_dialogs import *
 
 class CAESARAnalyzer(QMainWindow):
@@ -76,7 +78,7 @@ class CAESARAnalyzer(QMainWindow):
         from core.data_io import ui_scale
         s = ui_scale()
         self._s = s
-        self.setWindowTitle('CAESAR Pro v1.0')
+        self.setWindowTitle(f'CAESAR Pro v{__version__}')
         # 시작 크기만 모니터 작업영역 안으로 제한(작은 화면에서 잘리지 않게).
         # setMaximumSize로 잠그면 '최대화' 자체가 막히므로 쓰지 않는다 —
         # 내용발 창 팽창은 왼쪽 스크롤(AsNeeded)이 이미 차단함.
@@ -2547,8 +2549,8 @@ class CAESARAnalyzer(QMainWindow):
         self._start_next_alpha_export()
         return True
 
-    # wv_cal 자동탐색 베이스 (채널별 파장보정 — 사용자 지정 위치)
-    _WV_CAL_BASE = r"C:\Doasis_Work\Output\wv_cal"
+    # wv_cal 자동탐색 베이스 (채널별 파장보정 — 레포 번들 reference_data/wv_cal)
+    _WV_CAL_BASE = WV_CAL_DIR
 
     def _channel_wl_path(self, ch):
         """채널 ch의 wavecal 파일 경로 — 채널 탭 config. 활성 채널은 현재 로드된 경로."""
@@ -4515,7 +4517,7 @@ class CAESARAnalyzer(QMainWindow):
             import time as _t
             try:
                 from gui.dlg_dir import dlg_dir
-                base = dlg_dir('save_results') or r'C:\Doasis_Work\Output\fitting'
+                base = dlg_dir('save_results') or os.path.join(DEFAULT_OUTPUT_DIR, 'fitting')
             except Exception:
                 base = os.getcwd()
             folder = os.path.join(base, '_autosave')
@@ -5100,7 +5102,7 @@ class CAESARAnalyzer(QMainWindow):
 
         if auto:
             # L3: 완료 시 자동 저장 — 다이얼로그 없이 기존 파일명 규칙으로
-            _base = self._dlg_dir('save') or r'C:\Doasis_Work\Output\fitting'
+            _base = self._dlg_dir('save') or os.path.join(DEFAULT_OUTPUT_DIR, 'fitting')
             os.makedirs(_base, exist_ok=True)
             path = os.path.join(_base, default_fname)
         else:
@@ -5396,7 +5398,7 @@ class CAESARAnalyzer(QMainWindow):
         from core.engine import UniversalEngine
         eng = UniversalEngine()
         wave = None
-        wlp = cfg.get('wl_path', '')
+        wlp = resolve_ref_path(cfg.get('wl_path', ''))
         if wlp and os.path.exists(wlp):
             wave = self._load_wavecal_array(wlp)
         if wave is None:   # 폴백: 현재 로드된 마스터 wavecal
@@ -5405,9 +5407,10 @@ class CAESARAnalyzer(QMainWindow):
         if wave is not None:
             eng.set_wavelength_axis(wave)
         for ref in cfg.get('refs', []):
-            if os.path.exists(ref.get('path', '')):
+            ref_path = resolve_ref_path(ref.get('path', ''))
+            if os.path.exists(ref_path):
                 try:
-                    eng.add_reference(name=ref['name'], filepath=ref['path'],
+                    eng.add_reference(name=ref['name'], filepath=ref_path,
                                       wave_nm=wave, multiplier=10.0 ** ref.get('mult', 0))
                 except Exception as e:
                     print(f"[ch engine] ref failed {ref.get('name')}: {e}")
@@ -5540,7 +5543,7 @@ class CAESARAnalyzer(QMainWindow):
         if hasattr(self, 'spin_rl_factor') and "rl_factor" in scenario:
             self.spin_rl_factor.setValue(scenario["rl_factor"])
 
-        wl_path = scenario.get("wl_path", "")
+        wl_path = resolve_ref_path(scenario.get("wl_path", ""))
         if wl_path and os.path.exists(wl_path):
             self.load_wavelength_cal(auto_path=wl_path)
         elif hasattr(self, 'lbl_wavecal'):
@@ -5559,8 +5562,9 @@ class CAESARAnalyzer(QMainWindow):
                 self.ref_widgets.clear()
             self.engine.clear_engine()
             for ref in refs:
-                if os.path.exists(ref['path']):
-                    self.add_ref_row(name=ref['name'], path=ref['path'])
+                ref_path = resolve_ref_path(ref['path'])
+                if os.path.exists(ref_path):
+                    self.add_ref_row(name=ref['name'], path=ref_path)
                     self.ref_widgets[-1]['mult'].setValue(ref.get('mult', 0))
             if refs:
                 self.lock_ref(silent=True)   # 채널 전환/시나리오 적용 자동 재락 — 팝업 없음

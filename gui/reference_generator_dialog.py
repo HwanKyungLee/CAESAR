@@ -405,7 +405,16 @@ class ReferenceGeneratorDialog(QDialog):
 
             # 이미 받아둔 라인리스트가 있으면 다운로드 생략 (오프라인 / hitran.org API 다운 시에도 동작)
             if table_name not in hapi.LOCAL_TABLE_CACHE:
-                hapi.fetch(table_name, gas_id, 1, 1e7/w_max, 1e7/w_min)
+                # hapi.fetch() 내부 urllib2.urlopen()에 timeout이 없어(hapi.py) 네트워크가
+                # 아예 안 잡히는 환경(배 위 등)에서 GUI가 무한정 멈출 수 있다 — 소켓 기본
+                # timeout을 걸어 15초 내 실패하게 만들고, 아래 except가 에러 메시지로 띄운다.
+                import socket
+                _prev_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(15)
+                try:
+                    hapi.fetch(table_name, gas_id, 1, 1e7/w_max, 1e7/w_min)
+                finally:
+                    socket.setdefaulttimeout(_prev_timeout)
             else:
                 print(f"[HITRAN] '{table_name}' using local cache (skip download)")
 

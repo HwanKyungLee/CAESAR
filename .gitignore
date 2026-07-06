@@ -21,8 +21,15 @@ hitran_data/
 # 런타임 로그 (crash.log, session_*.log — 머신/세션별)
 logs/
 
+# 분석 산출물 기본 저장 위치 (alpha/fitting/R/figure — 재생성 가능, 머신별)
+/output/
+
 # 임시 patch 파일 (적용 후 남은 아티팩트)
 *.patch
+
+# 스타트업 프로파일링 1회성 스크립트/로그 (커밋용 아님)
+_timeit_startup.py
+importtime.log
 
 # 대용량 모델 출력물 (재생성 가능, git 부적합)
 campaigns/yeosu_2026/hot_cavity_t/model/hot_T_left_cavity_unified.csv

@@ -37,6 +37,8 @@ from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 
+from core.__version__ import __version__
+
 # ─── Entry point ────────────────────────────────────────────────────────────
 # Everything starts here when you run  python main.py
 if __name__ == '__main__':
@@ -53,7 +55,7 @@ if __name__ == '__main__':
 
     # Print a loading message at the bottom-center of the splash image
     splash.showMessage(
-        "Loading CAESAR Pro V1.0 Engine...",
+        f"Loading CAESAR Pro v{__version__} Engine...",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
         Qt.GlobalColor.white
     )

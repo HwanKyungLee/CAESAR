@@ -4,16 +4,16 @@
     "active": 1,
     "channels": {
         "1": {
-            "wl_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260604_Hg_400-497nm_Poly2.txt",
+            "wl_path": "reference_data/wv_cal/cold/Calib_20260604_Hg_400-497nm_Poly2.txt",
             "refs": [
                 {
                     "name": "NO2",
-                    "path": "C:/Doasis_Work/Reference raw\\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
+                    "path": "reference_data/raw/NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
                     "mult": 0
                 },
                 {
                     "name": "CHOCHO",
-                    "path": "C:/Doasis_Work/Reference raw\\CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
+                    "path": "reference_data/raw/CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
                     "mult": -1
                 },
                 {
@@ -68,12 +68,12 @@
             "refs": [
                 {
                     "name": "NO2",
-                    "path": "C:/Doasis_Work/Reference raw\\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
+                    "path": "reference_data/raw/NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
                     "mult": 0
                 },
                 {
                     "name": "CHOCHO",
-                    "path": "C:/Doasis_Work/Reference raw\\CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
+                    "path": "reference_data/raw/CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
                     "mult": -1
                 },
                 {
@@ -128,12 +128,12 @@
             "refs": [
                 {
                     "name": "NO2",
-                    "path": "C:/Doasis_Work/Reference raw\\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
+                    "path": "reference_data/raw/NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt",
                     "mult": 0
                 },
                 {
                     "name": "CHOCHO",
-                    "path": "C:/Doasis_Work/Reference raw\\CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
+                    "path": "reference_data/raw/CHOCHO_Volkamer(2005)_296K_250.031-526.168nm(0.001nm).txt",
                     "mult": -1
                 },
                 {
