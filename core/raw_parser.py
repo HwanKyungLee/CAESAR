@@ -12,8 +12,10 @@ Layout (verified against 2026-05 Yeosu campaign data + 박사님
 
 ::
 
-  col  0      : LabVIEW timestamp byte-pack low 16 bits (uint16)
-  col  1      : LabVIEW timestamp byte-pack high 16 bits (uint16)
+  col  0      : LabVIEW timestamp byte-pack HIGH 16 bits (uint16) — bytepack=(col0<<16)|col1
+  col  1      : LabVIEW timestamp byte-pack LOW 16 bits (uint16)
+                (필드/상수명 time_lo·COL_TIME_LO 등은 역사적 오명 — 수식이 정본이며
+                 기준 .mat doy와 std=0.0000s 일치 검증됨. 이름만 보고 순서 바꾸지 말 것)
   col  2      : exposure (centiseconds? unit unclear, MATLAB calls it 'ms')
   col  3      : tempccd (CCD temp, ÷100 = °C)
   col  4      : state flag (1=Atmosphere, 500=ZA, 510=He, 502/512=wait, 503/513=end)

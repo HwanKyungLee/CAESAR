@@ -3147,6 +3147,7 @@ class CAESARAnalyzer(QMainWindow):
             # ── 알파 첫 데이터행 + 파장헤더 읽기 ──
             wave_nm_file = None
             alpha_start = None
+            px_start = 0
             T_C, P_mbar = 25.0, 1013.25
             row = None
             with open(fp, encoding='utf-8', errors='replace') as fh:
@@ -3159,6 +3160,10 @@ class CAESARAnalyzer(QMainWindow):
                     if cols and cols[0] == 'row_idx':
                         idx = {c: i for i, c in enumerate(cols)}
                         alpha_start = next(i for i, c in enumerate(cols) if c.startswith('px'))
+                        try:   # 알파의 첫 픽셀 번호(예: 'px700' → 700) — px 핏단위 슬라이스 보정용
+                            px_start = int(cols[alpha_start][2:])
+                        except ValueError:
+                            px_start = 0
                         _iT, _iP = idx.get('T_C'), idx.get('P_mbar')
                         continue
                     if alpha_start is not None:
@@ -3180,9 +3185,9 @@ class CAESARAnalyzer(QMainWindow):
             unit = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
             if unit == 'px':
                 pmin, pmax = int(self.txt_min.text()), int(self.txt_max.text())
-                # 알파 헤더 px offset 보정
-                px0 = int(wave_nm_file is not None and 0)  # alpha 헤더 첫 px
-                sl = slice(max(0, pmin), min(n_pix, pmax + 1))
+                # px 값은 '검출기 픽셀 번호' — 알파가 px_start부터 저장돼 있으므로
+                # 배열 인덱스로는 px_start를 빼서 슬라이스(워커 _alpha_fit_slice와 동일 의미).
+                sl = slice(max(0, pmin - px_start), max(1, min(n_pix, pmax - px_start + 1)))
             else:
                 lo, hi = self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value()
                 i0 = int(np.abs(wave_nm_file - lo).argmin())
@@ -3203,10 +3208,9 @@ class CAESARAnalyzer(QMainWindow):
             rp = getattr(self, 'ref_props', {})
             active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
                 rp, 0.0, [0.0, 1.0], self.spin_step_limit.value())
-            # etalon 위상(e_p)을 theta 마지막에 추가 — objective_varpro가 theta[-1]을
-            # e_p로 읽으므로 워커(worker.py)와 동일하게 반드시 append해야 한다.
-            # (없으면 shift/squeeze 전부 Fix/Link 시 theta=[] → theta[-1] IndexError)
-            t0.append(0.0); lb.append(-np.pi); ub.append(np.pi)
+            # (구식 etalon 위상 append 제거 — doas_fit가 etalon을 sin·cos 선형열로
+            #  처리한 뒤로는 위상이 비선형 파라미터가 아니다. 워커와 동일하게 theta는
+            #  shift/squeeze만. 전부 Fix면 theta=[]여도 doas_fit가 선형해 1회로 처리.)
             out = fitter.execute_varpro_fit(
                 vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
                 self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,

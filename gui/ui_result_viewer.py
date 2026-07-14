@@ -899,8 +899,12 @@ class ResultViewerWidget(QWidget):
         if 'RMS' not in idx:
             return rows, 0
         ri = idx['RMS']; ci = idx.get('Channel'); si = idx.get('Status')
-        gases = [c for c in cols if (c + '_Smooth') in idx] or \
-                [c for c in cols if c in ('NO2', 'CHOCHO', 'H2O', 'O4', 'HONO', 'HCHO')]
+        # 가스 컬럼 탐지: {gas}_Error 우선(QC/Kalman 무관 항상 존재 — load_fit_table과
+        # 동일 규칙. 병렬핏 결과는 _Smooth가 없어 구 탐지가 빈손이었음) → _Smooth →
+        # 알려진 종 이름 폴백.
+        gases = ([c for c in cols if (c + '_Error') in idx]
+                 or [c for c in cols if (c + '_Smooth') in idx]
+                 or [c for c in cols if c in ('NO2', 'CHOCHO', 'H2O', 'O4', 'HONO', 'HCHO')])
         gidx = [idx[g] for g in gases] + [idx[g + '_Smooth'] for g in gases if (g + '_Smooth') in idx]
         # 채널별 임계 (단일 진실원: core.result_io)
         import numpy as _np
