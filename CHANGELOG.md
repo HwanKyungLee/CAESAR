@@ -6,12 +6,31 @@
 ## 릴리즈 체크리스트 (태그 찍기 전 매번)
 
 1. `core/__version__.py`의 `__version__` 값을 새 버전으로 올린다
-2. `python tools/validate_pipeline.py` 실행 → 6개 항목 전부 PASS 확인
+2. `python tools/validate_pipeline.py` 실행 → FAIL 0 확인
    (raw 파싱 / 웨이브칼 / 레퍼런스 ILS / Rayleigh 물리 / R 값 / 핏 출력 —
-   하나라도 FAIL이면 태깅 중단하고 원인부터 고친다)
+   하나라도 FAIL이면 태깅 중단하고 원인부터 고친다. 외부 대조 데이터가
+   없는 머신에선 raw 파싱·핏 출력이 SKIP으로 뜰 수 있음 — SKIP은 허용,
+   가능하면 데이터 있는 머신에서 6 PASS로 확인)
 3. 의존성이 바뀌었으면 `pip freeze > requirements-lock.txt` 갱신
 4. 이번 버전에서 뭐가 바뀌었는지 아래에 새 항목으로 추가(검증 결과 포함)
 5. 커밋 → `git tag -a vX.Y.Z -m "..."` → `git push origin main --tags`
+
+## v0.2.0 — 2026-06~07 누적 기능 + 전수조사 + 미팅 문서 세트
+
+- **기능**: 📅 날짜 로더(dlg_date_load — Result Lab·Plot Maker 공용, 기간선택→
+  일별 자동머지), 알파 생성 입력 화이트리스트(YYYY-MM-DD-NNN — 2026-07-09
+  알파 오염사고 재발 방지), Plot Maker 확장(라벨스타일 pg/mpl 패리티·
+  TimeShift 표시전용·CustomResample·X패딩 분리), R Calibrator UX(증분 npz·
+  Verify), 일별 저장 마이그레이션 도구(migrate_fitting_daily, 바이트검증),
+  알파 Pass1 캐시 모듈 뼈대(alpha_cache)
+- **전수조사(2026-07-14)**: 전 모듈 감사 — 코어 물리/피팅 이상 없음 확인,
+  ±Neg/QC 툴팁-기본값 불일치 교정, README 드리프트 3건 수정, 미수정
+  잠재이슈 5건 문서화(docs/전수조사_2026-07-14.md)
+- **문서 세트**: 프로그램 소개(논문 스타일)·핵심개념 스터디노트·미팅
+  디스커션 아젠다·소프트웨어 개선 로드맵(문헌 벤치마크 기반)
+- **검증**: validate_pipeline 4 PASS·0 FAIL·2 SKIP(외부 대조 데이터 없는
+  머신이라 raw 파싱·핏 출력 실행 불가 — 코드 문제 아님),
+  validate_plotmaker 24/24 PASS. 의존성 변경 없음(requirements-lock 그대로)
 
 ## v0.1.0 — 패키징 1단계: 경로 이식성 + 버전 태깅
 
