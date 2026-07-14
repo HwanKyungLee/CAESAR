@@ -157,6 +157,34 @@ def slice_rows(rows, t0: datetime | None = None, t1: datetime | None = None):
     return rows
 
 
+def split_rows_by_day(rows) -> dict:
+    """rows → {'YYMMDD': [rows...]} 날짜별 분할. 핏은 스캔 단위 독립이라 무손실.
+    날짜 경계는 행 타임스탬프 그대로(TZ 변환 없음 — Cold=UTC/Hot=KST 각자 기준)."""
+    out: dict[str, list] = {}
+    for t, line in rows:
+        out.setdefault(f"{t:%y%m%d}", []).append((t, line))
+    return out
+
+
+def archive_existing(path: str, base: str) -> str | None:
+    """path에 파일이 이미 있으면 {base}/_archive/ 아래로 이동(비파괴 — 삭제 없음).
+
+    상대경로를 보존하고 파일 수정시각을 이름에 붙여 몇 번을 재핏해도 이전 버전이
+    전부 남는다: {base}/_archive/{상대경로stem}__{mtime YYMMDD_HHMMSS}{ext}.
+    path가 없으면 None, 이동했으면 이동된 경로를 반환."""
+    if not os.path.exists(path):
+        return None
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(base))
+    if rel.startswith('..'):        # base 밖 파일은 상대경로 대신 이름만
+        rel = os.path.basename(path)
+    stem, ext = os.path.splitext(rel)
+    mt = datetime.fromtimestamp(os.path.getmtime(path))
+    dst = os.path.join(base, '_archive', f"{stem}__{mt:%y%m%d_%H%M%S}{ext}")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.replace(path, dst)
+    return dst
+
+
 def write_result(out: str, comments, colhdr, rows, note: str = ''):
     """주석헤더 + 이력주석 + 컬럼헤더 + 행 저장."""
     with open(out, 'w', encoding='utf-8') as fh:
@@ -180,10 +208,10 @@ import re as _re
 
 def clean_stem(path: str) -> str:
     """파일경로 → 설명적 핵심 이름만. 디렉토리·확장자 제거 +
-    앞쪽 날짜범위 프리픽스(YYMMDD-YYMMDD_)·뒤쪽 _slice…/_merge…/_merged 태그 제거.
+    앞쪽 날짜 프리픽스(YYMMDD_ 또는 YYMMDD-YYMMDD_)·뒤쪽 _slice…/_merge…/_merged 태그 제거.
     예: '…/260517-260606_cold_438-476nm_Poly4_ShLink_slice2605..' → 'cold_438-476nm_Poly4_ShLink'."""
     stem = os.path.splitext(os.path.basename(path))[0]
-    stem = _re.sub(r'^\d{6}-\d{6}_', '', stem)                       # 앞 날짜범위
+    stem = _re.sub(r'^\d{6}(-\d{6})?_', '', stem)                    # 앞 날짜(범위)
     stem = _re.sub(r'_(slice|merge\d*|merged)[0-9_\-]*$', '', stem)   # 뒤 가공 태그
     stem = _re.sub(r'_\d{6}[-_]\d{4}-\d{6}[-_]\d{4}$', '', stem)      # 뒤 slice 시각태그
     return stem or 'result'
@@ -242,28 +270,34 @@ def neg_qc_from_comments(comments) -> tuple[str | None, str | None]:
 
 def detect_fitting_base(path: str) -> str:
     """path가 .../{날짜}/{neg_o|neg_x}/{QC*}/파일 버킷 구조 안이면 그 최상위 base를,
-    아니면 파일이 있는 폴더를 반환(버킷 못 찾음 → 제자리 저장)."""
+    아니면 파일이 있는 폴더를 반환(버킷 못 찾음 → 제자리 저장).
+    _derived/ 안의 파일이면 한 단계 더 올라가 진짜 base를 반환(중첩 방지)."""
     ap = os.path.abspath(path)
     qc_dir = os.path.dirname(ap)
     neg_dir = os.path.dirname(qc_dir)
     date_dir = os.path.dirname(neg_dir)
     if (os.path.basename(neg_dir) in ('neg_o', 'neg_x')
             and os.path.basename(qc_dir).startswith('QC')):
-        return os.path.dirname(date_dir)
+        base = os.path.dirname(date_dir)
+        if os.path.basename(base) == '_derived':
+            base = os.path.dirname(base)
+        return base
     return qc_dir
 
 
 def bucketed_out_name(first_input: str, rows, comments, kind: str = 'slice',
                       nfiles: int = 1, ext: str = '.dat',
                       qc_override: str | None = None) -> str:
-    """머지/슬라이스 결과의 자동 저장경로: {base}/{날짜}/{neg}/{QC}/{이름}.
+    """머지/슬라이스 결과의 자동 저장경로: {base}/_derived/{날짜}/{neg}/{QC}/{이름}.
     neg·QC는 입력파일 # 헤더에서 상속(qc_override 있으면 그게 우선 — 뷰어 사후 QC 재적용),
-    날짜는 출력 rows의 실제 범위. base는 입력이 버킷 안이면 그 최상위, 아니면 입력 폴더."""
+    날짜는 출력 rows의 실제 범위. base는 입력이 버킷 안이면 그 최상위, 아니면 입력 폴더.
+    _derived 아래로 두는 이유: 정식 결과는 날짜별(하루=폴더) 트리로 저장되므로,
+    기간 머지 같은 파생물이 최상위에 범위 폴더를 다시 만들지 않게 분리."""
     base = detect_fitting_base(first_input)
     neg, qc = neg_qc_from_comments(comments)
     if qc_override:
         qc = qc_override
-    folder = os.path.join(base, _date_bucket(rows), neg or 'neg_x', qc or 'QCoff')
+    folder = os.path.join(base, '_derived', _date_bucket(rows), neg or 'neg_x', qc or 'QCoff')
     stem = clean_stem(first_input)
     if kind == 'merge':
         name = f'{stem}_merge{nfiles}_{_span_tag(rows)}{ext}'

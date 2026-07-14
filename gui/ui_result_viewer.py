@@ -75,6 +75,7 @@ class ResultViewerWidget(QWidget):
         super().__init__(parent)
         self._path = None
         self._region = None      # pg.LinearRegionItem (구간선택)
+        self._time_shift_hours = 0.0   # 표시 전용 시각 보정(원본/Export/Stats는 항상 원래 시각)
         self._init_ui()
 
     # ──────────────────────────────────────────────────────────────
@@ -101,6 +102,12 @@ class ResultViewerWidget(QWidget):
         self._btn_folder = QPushButton("📁 Folder")
         self._btn_folder.clicked.connect(self._open_folder)
         bar.addWidget(self._btn_folder)
+        self._btn_dates = QPushButton("📅 Dates")
+        self._btn_dates.setToolTip(
+            "일별 핏 버킷({YYMMDD}/{neg}/{QC}/)에서 기간·시리즈를 골라 자동 머지해 열기.\n"
+            "머지 파일은 _derived/에 저장(캐시 재사용) — 원본 일별 파일은 그대로.")
+        self._btn_dates.clicked.connect(self._open_by_date)
+        bar.addWidget(self._btn_dates)
         bar.addWidget(QLabel("Type:"))
         self._combo = QComboBox()
         self._combo.addItems(list(_KIND_BY_LABEL.keys()))
@@ -143,6 +150,20 @@ class ResultViewerWidget(QWidget):
             "Works on any result (QC-applied or not) — RMS column is always original.")
         self._spin_qc_k.valueChanged.connect(self._on_gas_changed)
         bar.addWidget(self._spin_qc_k)
+
+        bar.addWidget(QLabel("Time shift:"))
+        self._spin_shift = QDoubleSpinBox()
+        self._spin_shift.setRange(-72.0, 72.0)
+        self._spin_shift.setDecimals(2)
+        self._spin_shift.setSingleStep(1.0)
+        self._spin_shift.setValue(0.0)
+        self._spin_shift.setSuffix(" h")
+        self._spin_shift.setFixedWidth(70)
+        self._spin_shift.setToolTip(
+            "그래프 표시만 +/-시간 이동(장비 시계 오차·타임존 불일치를 눈으로 맞춰볼 때).\n"
+            "Export/Merge/Stats/구간선택은 항상 원본(파일 그대로) 시각 기준 — 이 값에 영향받지 않음.")
+        self._spin_shift.valueChanged.connect(self._on_shift_changed)
+        bar.addWidget(self._spin_shift)
 
         root.addLayout(bar)
 
@@ -193,7 +214,10 @@ class ResultViewerWidget(QWidget):
             fbar.addWidget(de)
         self._btn_slice = QPushButton("✂ Export")
         self._btn_slice.setToolTip("Save the time range (or all) as a new result file.\n"
-                                   "Multiple selected files in the list are merged first.")
+                                   "Multiple selected files in the list are merged first.\n"
+                                   "Concentration CSV (e.g. Calculator output): saves the whole file "
+                                   "with the current Time shift baked into its time column "
+                                   "(0 shift = plain copy).")
         self._btn_slice.clicked.connect(self._export_region)
         fbar.addWidget(self._btn_slice)
         self._btn_merge = QPushButton("🔗 Merge")
@@ -277,6 +301,22 @@ class ResultViewerWidget(QWidget):
             return
         self._browse_dir(d)
 
+    def _open_by_date(self):
+        """📅 일별 버킷에서 기간·시리즈 선택 → 자동 머지 파일들을 목록에 올리고 첫 개 표시."""
+        from gui.dlg_date_load import DateLoadDialog
+        dlg = DateLoadDialog(self)
+        if not dlg.exec() or not dlg.loaded_paths:
+            return
+        self._list.clear()
+        for p in dlg.loaded_paths:
+            it = QListWidgetItem(f"📄  {os.path.basename(p)}")
+            it.setData(Qt.ItemDataRole.UserRole, ("file", p))
+            self._list.addItem(it)
+        self._lbl.setText(f"📅 {len(dlg.loaded_paths)} merged series — click to view")
+        self._lbl.setStyleSheet("color:#1565C0;")
+        self._path = dlg.loaded_paths[0]
+        self._reload()
+
     # ── 미니 파일탐색기 ───────────────────────────────────────────────
     _RESULT_EXTS = ('.dat', '.csv', '.txt', '.tsv')
 
@@ -337,11 +377,17 @@ class ResultViewerWidget(QWidget):
             self._path = data[1]
             self._reload()
 
+    def _on_shift_changed(self, v):
+        self._time_shift_hours = float(v)
+        self._range_init_path = None   # 시프트 값이 바뀌면 범위입력칸도 새 시프트로 재초기화
+        self._reload()
+
     def _reload(self):
         if not self._path:
             return
         forced = _KIND_BY_LABEL.get(self._combo.currentText(), "auto")
         kind = self._detect(self._path) if forced == "auto" else forced
+        self._current_kind = kind
         self._pw_top.clear()
         self._pw_bot.clear()
         self._pw_bot.show()
@@ -357,8 +403,10 @@ class ResultViewerWidget(QWidget):
             }.get(kind, self._plot_array)
             handler(self._path)
             auto = "" if forced != "auto" else " (auto-detected)"
-            self._lbl.setText(f"✅ {os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}")
-            self._lbl.setStyleSheet("color:#1565C0;")
+            shift_tag = (f"  ⚠ time shift {self._time_shift_hours:+g}h (display only)"
+                        if self._time_shift_hours else "")
+            self._lbl.setText(f"✅ {os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
+            self._lbl.setStyleSheet("color:#C62828;" if self._time_shift_hours else "color:#1565C0;")
         except Exception as e:
             self._lbl.setText(f"❌ Failed to display: {e}  (try selecting Type manually)")
             self._lbl.setStyleSheet("color:#C62828;")
@@ -395,6 +443,8 @@ class ResultViewerWidget(QWidget):
         if not ts:
             raise ValueError("No R-trend data rows found")
         ts = np.array(ts); rmean = np.array(rmean); rstd = np.array(rstd); leff = np.array(leff)
+        if self._time_shift_hours:
+            ts = ts + self._time_shift_hours * 3600.0
         self._set_time_axis(self._pw_top, True)
         self._set_time_axis(self._pw_bot, True)
         col = _PALETTE[0]
@@ -486,6 +536,8 @@ class ResultViewerWidget(QWidget):
             # UTC로 간주해 KST 머신에서 시간축이 9h 밀린다(Plot Maker와 동일 버그 수정).
             x = np.array([t_.timestamp() if pd.notna(t_) else np.nan
                           for t_ in x_dt.dt.to_pydatetime()], dtype=float)
+            if self._time_shift_hours:
+                x = x + self._time_shift_hours * 3600.0
             self._set_time_axis(self._pw_top, True)
             self._pw_top.setLabel("bottom", "Date / Time")
             ycols = df.columns[1:]
@@ -594,6 +646,9 @@ class ResultViewerWidget(QWidget):
         # x축: 실제 시각(datetime)이 있으면 그걸로(실시간 시계열), 없으면 row_idx
         has_time = t.get("time") is not None and np.isfinite(t["time"]).any()
         x = t["time"] if has_time else t["row_idx"]
+        # 표시 전용 시각 보정 — t["time"](캐시 원본)·Export/구간선택/클릭 α팝업은 항상 원래 값 사용.
+        if has_time and self._time_shift_hours:
+            x = x + self._time_shift_hours * 3600.0
         self._set_time_axis(self._pw_top, has_time)
         self._set_time_axis(self._pw_bot, has_time)
         xlabel = "Date / Time" if has_time else "row_idx (≈time)"
@@ -670,8 +725,13 @@ class ResultViewerWidget(QWidget):
             xclick = float(mp.x())
         except Exception:
             return
-        # 플롯에 쓴 x축(시간 우선, 없으면 row_idx)으로 가장 가까운 점을 찾는다
-        xarr = t["time"] if (t.get("time") is not None and np.isfinite(t["time"]).any()) else t["row_idx"]
+        # 플롯에 쓴 x축(시간 우선, 없으면 row_idx)으로 가장 가까운 점을 찾는다.
+        # xarr(t["time"])은 항상 원본 시각 — 클릭좌표는 표시 시프트가 적용된 화면
+        # 좌표계이므로 비교 전에 되돌린다.
+        has_time = t.get("time") is not None and np.isfinite(t["time"]).any()
+        xarr = t["time"] if has_time else t["row_idx"]
+        if has_time and self._time_shift_hours:
+            xclick -= self._time_shift_hours * 3600.0
         j = int(np.nanargmin(np.abs(xarr - xclick)))
         row_idx = int(t["row_idx"][j])
         alpha_path = self._sibling_alpha(self._path)
@@ -794,6 +854,10 @@ class ResultViewerWidget(QWidget):
             b = self._dt_to.dateTime().toSecsSinceEpoch()
         except Exception:
             return None, None
+        if self._time_shift_hours:
+            # 입력칸은 표시(시프트된) 시각 기준 — 원본 파일 시각으로 되돌려서 비교/반환.
+            off = self._time_shift_hours * 3600.0
+            a -= off; b -= off
         if a >= b:
             return None, None
         tt = t["time"]
@@ -873,6 +937,9 @@ class ResultViewerWidget(QWidget):
     def _export_region(self):
         """선택구간(없으면 전체)을 result_io로 잘라 새 파일로 저장.
         목록에서 여러 파일 선택 시 병합 후 자름."""
+        if getattr(self, '_current_kind', None) == 'concentration':
+            self._export_concentration_shifted()
+            return
         from core.result_io import merge_results, slice_rows, write_result, bucketed_out_name
         paths = self._selected_paths()
         if not paths:
@@ -910,6 +977,44 @@ class ResultViewerWidget(QWidget):
         self._stats_lbl.setText(
             f"Saved: {os.path.basename(out)}  ({len(rows)} rows{qmsg}, "
             f"{rows[0][0]:%m-%d %H:%M} ~ {rows[-1][0]:%m-%d %H:%M})")
+
+    def _export_concentration_shifted(self):
+        """Concentration 종류(계산기 CSV 등)는 fit용 merge_results/slice_rows 포맷과
+        안 맞아 여기서 따로 처리 — 원본을 다시 읽어 time 컬럼에 현재 Time shift만
+        반영해 그대로 새 CSV로 저장(구간선택 없이 전체, 시프트=0이면 사본).
+        보정 사실은 파일 첫 줄에 남겨 무엇이 바뀌었는지 항상 드러낸다."""
+        import pandas as pd
+        path = self._path
+        if not path:
+            QMessageBox.information(self, "Export", "Open a result file first.")
+            return
+        sep = self._detect_sep(path) or r"\s+"
+        df = pd.read_csv(path, sep=sep, comment="#", engine="python")
+        xcol = df.columns[0]
+        x_dt = pd.to_datetime(df[xcol], errors="coerce")
+        if x_dt.notna().mean() <= 0.5:
+            QMessageBox.warning(self, "Export", "No time column found to shift/save.")
+            return
+        shift_h = self._time_shift_hours
+        out_df = df.copy()
+        out_df[xcol] = (x_dt + pd.Timedelta(hours=shift_h)).dt.strftime("%Y-%m-%d %H:%M:%S")
+        base, ext = os.path.splitext(path)
+        tag = f"_shift{shift_h:+g}h" if shift_h else "_copy"
+        suggest = f"{base}{tag}{ext or '.csv'}"
+        out, _ = QFileDialog.getSaveFileName(self, "Export (time-shifted)", suggest,
+                                             "CSV (*.csv);;All (*)")
+        if not out:
+            return
+        _d = os.path.dirname(out)
+        if _d:
+            os.makedirs(_d, exist_ok=True)
+        with open(out, "w", encoding="utf-8", newline="") as f:
+            f.write(f"# source: {os.path.basename(path)}\n")
+            if shift_h:
+                f.write(f"# time shifted by {shift_h:+g}h vs. source (Result Lab manual correction)\n")
+            out_df.to_csv(f, index=False)
+        shift_msg = f" · shift {shift_h:+g}h" if shift_h else ""
+        self._stats_lbl.setText(f"Saved: {os.path.basename(out)} ({len(out_df)} rows{shift_msg})")
 
     def _merge_files(self):
         """목록에서 선택한 같은 형식 결과파일들을 시간순 병합 저장."""

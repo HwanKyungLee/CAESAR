@@ -467,16 +467,17 @@ class TimeSeriesMode(PlotMode):
                 and any_time and tspan[0] is not None:
             self._draw_night_pg(host, tspan[0], tspan[1])
         host.set_time_axis(any_time)
-        host.p1.setLabel("bottom", host.lbl("xlabel", "Time" if any_time else "index"))
-        host.p1.setLabel("left", host.lbl("ylabel", self._auto_ylabel_from_specs(specs, "L", "Value")))
+        host.pg_label("xlabel", host.lbl("xlabel", "Time" if any_time else "index"))
+        host.pg_label("ylabel", host.lbl("ylabel", self._auto_ylabel_from_specs(specs, "L", "Value")))
         if use_right:
-            host.set_right_label(host.lbl("rlabel", self._auto_ylabel_from_specs(specs, "R", "Value")))
-        host.p1.setTitle(host.lbl("title", ""))   # 기본 제목 없음(사용자가 지정)
+            host.pg_label("rlabel", host.lbl("rlabel", self._auto_ylabel_from_specs(specs, "R", "Value")))
+        host.pg_label("title", host.lbl("title", ""))   # 기본 제목 없음(사용자가 지정)
         host.autoscale()
         if specs:
             host.set_status(f"{len(specs)} series"
-                            + (f" · resample {host.resample_sec}s" if host.resample_sec else "")
-                            + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else ""))
+                            + (f" · resample {host.resample_sec:g}s" if host.resample_sec else "")
+                            + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else "")
+                            + (f" · ⚠ time shift {host.time_shift_hours:+g}h" if host.time_shift_hours else ""))
 
     def _render_mpl_split(self, specs, fig):
         """Publish 분할: 시리즈마다 패널 1개(세로 스택, x축 공유). 종별 분리 그림.
@@ -504,8 +505,8 @@ class TimeSeriesMode(PlotMode):
             a.set_ylabel(f"{s.display_name} [{s.unit}]" if s.unit else s.display_name)
             a.grid(True, alpha=0.3)
             a.legend(loc="best", fontsize=8)
-        axes[-1].set_xlabel(self.host.lbl("xlabel", "Time" if any_time else "index"))
-        axes[0].set_title(self.host.lbl("title", ""))
+        self.host.mpl_label(axes[-1], "xlabel", self.host.lbl("xlabel", "Time" if any_time else "index"))
+        self.host.mpl_label(axes[0], "title", self.host.lbl("title", ""))
         if any_time:
             axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
             if tspan[0] is not None:    # x축 공유 → 마지막 패널에 tight xlim(양 끝 공백 제거)
@@ -551,11 +552,11 @@ class TimeSeriesMode(PlotMode):
             for a, b in self._night_spans(tspan[0], tspan[1]):
                 ax.axvspan(_dt.datetime.fromtimestamp(a), _dt.datetime.fromtimestamp(b),
                            color=self._night_color, alpha=0.18, lw=0, zorder=0)
-        ax.set_xlabel(host.lbl("xlabel", "Time" if any_time else "index"))
-        ax.set_ylabel(host.lbl("ylabel", self._auto_ylabel_from_specs(specs, "L", "Value")))
+        host.mpl_label(ax, "xlabel", host.lbl("xlabel", "Time" if any_time else "index"))
+        host.mpl_label(ax, "ylabel", host.lbl("ylabel", self._auto_ylabel_from_specs(specs, "L", "Value")))
         if ax_r is not None:
-            ax_r.set_ylabel(host.lbl("rlabel", self._auto_ylabel_from_specs(specs, "R", "Value")))
-        ax.set_title(host.lbl("title", ""))
+            host.mpl_label(ax_r, "rlabel", host.lbl("rlabel", self._auto_ylabel_from_specs(specs, "R", "Value")))
+        host.mpl_label(ax, "title", host.lbl("title", ""))
         ax.grid(True, alpha=0.3)
         if any_time:
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
@@ -702,19 +703,19 @@ class ScatterMode(PlotMode):
             _pt = pg.mkColor(self.color("points", "#2196F3")); _pt.setAlpha(120)
             host.p1.plot(xv[m], yv[m], pen=None, symbol="o", symbolSize=5,
                          symbolBrush=_pt, symbolPen=None, name="data")
-        host.p1.setLabel("bottom", host.lbl("xlabel", self._cx.currentText()))
-        host.p1.setLabel("left", host.lbl("ylabel", self._cy.currentText()))
+        host.pg_label("xlabel", host.lbl("xlabel", self._cx.currentText()))
+        host.pg_label("ylabel", host.lbl("ylabel", self._cy.currentText()))
         r = regress(xv, yv)
         if r:
             slope, inter, r2, n = r
             xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
             host.p1.plot(xline, slope * xline + inter,
                          pen=pg.mkPen(self.color("fit", "#D32F2F"), width=2), name="fit")
-            host.p1.setTitle(host.lbl("title",
-                             f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
+            host.pg_label("title", host.lbl("title",
+                          f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
             host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}")
         else:
-            host.p1.setTitle(host.lbl("title", "Scatter"))
+            host.pg_label("title", host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")
         host.autoscale()
 
@@ -735,18 +736,18 @@ class ScatterMode(PlotMode):
         else:
             ax.scatter(xv[m], yv[m], s=14, c=self.color("points", "#2196F3"), alpha=0.5,
                        edgecolors="none", label="data")
-        ax.set_xlabel(host.lbl("xlabel", self._cx.currentText()))
-        ax.set_ylabel(host.lbl("ylabel", self._cy.currentText()))
+        host.mpl_label(ax, "xlabel", host.lbl("xlabel", self._cx.currentText()))
+        host.mpl_label(ax, "ylabel", host.lbl("ylabel", self._cy.currentText()))
         r = regress(xv, yv)
         if r:
             slope, inter, r2, n = r
             xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
             ax.plot(xline, slope * xline + inter, color=self.color("fit", "#D32F2F"), lw=2,
                     label=f"y={slope:.4g}x+{inter:.4g}\n$R^2$={r2:.4f}, n={n}")
-            ax.set_title(host.lbl("title",
-                         f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
+            host.mpl_label(ax, "title", host.lbl("title",
+                           f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
         else:
-            ax.set_title(host.lbl("title", "Scatter"))
+            host.mpl_label(ax, "title", host.lbl("title", "Scatter"))
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=9)
 
@@ -818,11 +819,11 @@ class AllanMode(PlotMode):
         host.p1.setLogMode(x=True, y=True)
         host.p1.plot(taus, ad, pen=pg.mkPen(_cv, width=2), symbol="o",
                      symbolSize=6, symbolBrush=_cv, name=self._c.currentText())
-        host.p1.setLabel("bottom", host.lbl("xlabel", "Averaging time τ (s)"))
-        host.p1.setLabel("left", host.lbl("ylabel", "Allan deviation σ(τ)"))
+        host.pg_label("xlabel", host.lbl("xlabel", "Averaging time τ (s)"))
+        host.pg_label("ylabel", host.lbl("ylabel", "Allan deviation σ(τ)"))
         imin = int(np.argmin(ad))
-        host.p1.setTitle(host.lbl("title",
-                         f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
+        host.pg_label("title", host.lbl("title",
+                      f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
         host.set_status(f"optimal averaging ≈ {taus[imin]:.0f} s  (min Allan dev {ad[imin]:.3g})")
         host.autoscale()
 
@@ -842,10 +843,10 @@ class AllanMode(PlotMode):
                   label=self._c.currentText())
         imin = int(np.argmin(ad))
         ax.axvline(taus[imin], color="#888", ls="--", lw=1)
-        ax.set_xlabel(host.lbl("xlabel", r"Averaging time $\tau$ (s)"))
-        ax.set_ylabel(host.lbl("ylabel", r"Allan deviation $\sigma(\tau)$"))
-        ax.set_title(host.lbl("title",
-                     f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
+        host.mpl_label(ax, "xlabel", host.lbl("xlabel", r"Averaging time $\tau$ (s)"))
+        host.mpl_label(ax, "ylabel", host.lbl("ylabel", r"Allan deviation $\sigma(\tau)$"))
+        host.mpl_label(ax, "title", host.lbl("title",
+                       f"Allan deviation — min σ={ad[imin]:.3g} @ τ={taus[imin]:.0f}s"))
         ax.grid(True, which="both", alpha=0.3)
         ax.legend(loc="best", fontsize=9)
 
@@ -1006,7 +1007,7 @@ class HeatmapMode(PlotMode):
                 ti.setPos(j + 0.5, i + 0.5)
                 host.p1.addItem(ti)
         host.p1.invertY(True)
-        host.p1.setTitle(host.lbl("title", "Correlation matrix (Pearson r)"))
+        host.pg_label("title", host.lbl("title", "Correlation matrix (Pearson r)"))
         host.autoscale()
         host.set_status(f"{len(names)} columns")
 
@@ -1028,7 +1029,7 @@ class HeatmapMode(PlotMode):
                 ax.text(j, i, f"{C[i, j]:.2f}", ha="center", va="center",
                         fontsize=8, color="white" if abs(C[i, j]) > 0.5 else "black")
         fig.colorbar(im, ax=ax, shrink=0.8)
-        ax.set_title(self.host.lbl("title", "Correlation matrix (Pearson r)"))
+        self.host.mpl_label(ax, "title", self.host.lbl("title", "Correlation matrix (Pearson r)"))
 
     def csv_table(self):
         mat = self._matrix()
@@ -1139,9 +1140,9 @@ class HistogramMode(PlotMode):
             host.p1.addItem(pg.InfiniteLine(h["lod"], angle=90,
                             pen=pg.mkPen(h["lod_color"], width=1,
                                          style=Qt.PenStyle.DotLine), label="≈3σ"))
-        host.p1.setLabel("bottom", host.lbl("xlabel", self._c.currentText()))
-        host.p1.setLabel("left", host.lbl("ylabel", "count"))
-        host.p1.setTitle(host.lbl("title", f"Histogram — μ={h['mu']:.3g} σ={h['sd']:.3g} n={h['v'].size}"))
+        host.pg_label("xlabel", host.lbl("xlabel", self._c.currentText()))
+        host.pg_label("ylabel", host.lbl("ylabel", "count"))
+        host.pg_label("title", host.lbl("title", f"Histogram — μ={h['mu']:.3g} σ={h['sd']:.3g} n={h['v'].size}"))
         host.autoscale()
         host.set_status(f"n={h['v'].size}  μ={h['mu']:.4g}  median={h['md']:.4g}  σ={h['sd']:.4g}")
 
@@ -1160,9 +1161,9 @@ class HistogramMode(PlotMode):
         if h["lod"] is not None:
             ax.axvline(h["lod"], color=h["lod_color"], lw=1, ls=":",
                        label=f"≈3σ={h['lod']:.3g}")
-        ax.set_xlabel(host.lbl("xlabel", self._c.currentText()))
-        ax.set_ylabel(host.lbl("ylabel", "count"))
-        ax.set_title(host.lbl("title", f"Histogram — μ={h['mu']:.3g} σ={h['sd']:.3g} n={h['v'].size}"))
+        host.mpl_label(ax, "xlabel", host.lbl("xlabel", self._c.currentText()))
+        host.mpl_label(ax, "ylabel", host.lbl("ylabel", "count"))
+        host.mpl_label(ax, "title", host.lbl("title", f"Histogram — μ={h['mu']:.3g} σ={h['sd']:.3g} n={h['v'].size}"))
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)
 
@@ -1322,9 +1323,9 @@ class DiurnalMode(PlotMode):
         host.p1.plot(mn.x, mn.y, pen=pg.mkPen(mn.color, width=mn.width, style=Qt.PenStyle.DashLine),
                      symbol=mn.marker, symbolSize=mn.msize, symbolBrush=mn.color,
                      name=mn.display_name)
-        host.p1.setLabel("bottom", host.lbl("xlabel", "Hour of day"))
-        host.p1.setLabel("left", self._ylabel(col))
-        host.p1.setTitle(host.lbl("title", ""))
+        host.pg_label("xlabel", host.lbl("xlabel", "Hour of day"))
+        host.pg_label("ylabel", self._ylabel(col))
+        host.pg_label("title", host.lbl("title", ""))
         host.autoscale()
         host.set_status(f"{col} diurnal · n={int(cnt.sum())} (band = 25–75%)")
 
@@ -1345,9 +1346,9 @@ class DiurnalMode(PlotMode):
                 label=med.display_name)
         ax.plot(mn.x, mn.y, "--s", color=mn.color, lw=mn.width, ms=mn.msize,
                 label=mn.display_name)
-        ax.set_xlabel(host.lbl("xlabel", "Hour of day"))
-        ax.set_ylabel(self._ylabel(col))
-        ax.set_title(host.lbl("title", ""))
+        host.mpl_label(ax, "xlabel", host.lbl("xlabel", "Hour of day"))
+        host.mpl_label(ax, "ylabel", self._ylabel(col))
+        host.mpl_label(ax, "title", host.lbl("title", ""))
         ax.set_xticks(range(0, 24, 3))
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=9)

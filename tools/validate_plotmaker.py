@@ -26,6 +26,31 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 12. 색상 채널태그 구분 : 같은 종을 CH1/CH2처럼 다른 태그로 동시에 그릴 때
     서로 다른 색(2026-07-03 실GUI에서 NO2 CH1·CH2가 완전히 같은 파랑으로
     겹쳐 안 보이던 버그 발견)
+13. Time shift 표시전용 : 시프트가 resolve() 반환 시각만 옮기고 원본
+    Dataset.time은 불변 + Publish에 경고문 삽입 (2026-07-06 기능)
+14. Custom resample : 콤보 Custom+분 스핀 → resample_sec 환산 (2026-07-06)
+15. 라벨 스타일 pg↔mpl 패리티 : label_style(size/color/pos)를 두 렌더러가
+    동일하게 소비 — pos 있으면 양쪽 다 원래 축라벨 비우고 자유배치로
+    (2026-07-07 세션 내내 재발한 'pg만 고침/mpl만 고침' 버그류 가드)
+16. label_style 저장/복원 : _gather_style/_apply_style 왕복 + 위젯 동기화
+17. Annotate 양경로 : 마커선·라벨이 pg와 mpl(범례 off여도) 둘 다 그려지나
+    (2026-07-06 실GUI 발견 — mpl은 legend label로만 넘겨 범례 끄면 증발)
+18. 시간축 X범위 패딩 : 화면(pg)은 경계 눈금 안 잘리게 2% 패딩, Publish는
+    tight 유지 (2026-07-06 '29일/5일 눈금 잘림' 실GUI 발견 버그의 회귀가드)
+19. Tick size : 눈금 글자 크기가 pg(tickFont)·mpl(labelsize)에 같은 규칙
+    (_tick_pt: 지정값 > 전역 Font−2 > 기본)으로 적용 (2026-07-07 기능)
+20. 주석 = 범위 무영향 : epoch 세로선 주석이 Diurnal(0-23h) 등 다른 좌표계
+    모드의 mpl 축범위를 못 늘리나 (2026-07-07 실GUI — diurnal x축이 17억으로
+    폭발해 데이터 압착. pg ignoreBounds와 의미론 통일 가드)
+21. SI prefix 금지 : pg 축이 작은 값(0.2 ppb대)을 ×1000 스케일(200 표시+
+    ×0.001 라벨)하지 않나 — mpl은 원시값이라 화면-Publish 눈금 불일치
+    (2026-07-07 실GUI 발견)
+22. 눈금 숫자/눈금선 분리 : '숫자' 꺼도 '눈금선'만 남길 수 있나 — pg
+    (showValues/tickLength)·mpl(labelbottom/bottom) 독립 토글 (2026-07-07 요청)
+23. X 틱 앵커 : 앵커 날짜+N일 간격 눈금이 pg·mpl 같은 위치에 찍히나
+    (2026-07-07 요청 — "원하는 날짜에서 며칠 간격")
+24. 눈금선 방향/길이 : 바깥(out)/안(in)·길이(px)가 pg(tickLength 부호)·
+    mpl(direction/length)에 같은 규칙으로 적용 (2026-07-07 요청)
 """
 from __future__ import annotations
 import os, sys
@@ -383,6 +408,354 @@ def c_color_channel_tag_distinct():
     if ts._auto_color("NO2") != "#1976D2" or ts._auto_color("ANs") != "#2E7D32":
         return "FAIL", "무태그 종 색이 바뀜(기존 규약 깨짐)"
     return "PASS", f"NO2 (CH1)={c_ch1} / NO2 (CH2)={c_ch2} — 구분됨, 기존 확정색 보존"
+
+
+# ── 13. Time shift = 표시 전용 (원본 불변) ────────────────────────────────
+@check("Time shift: 표시만 이동, 원본 Dataset.time 불변")
+def c_time_shift_display_only():
+    w = _widget_with_fixture()
+    ds = w.shelf["fixture"]
+    t_orig = ds.time.copy()
+    w._shift_spin.setValue(9.0)          # _on_transform_changed → time_shift_hours
+    if w.time_shift_hours != 9.0:
+        return "FAIL", f"스핀 9h인데 time_shift_hours={w.time_shift_hours}"
+    _, _, _, t_shifted = w.resolve("fixture:NO2")
+    if not np.allclose(t_shifted, t_orig + 9 * 3600):
+        return "FAIL", "resolve()가 +9h를 반영하지 않음"
+    if not np.array_equal(ds.time, t_orig):
+        return "FAIL", "원본 Dataset.time이 변조됨 — 표시전용 계약 위반!"
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    fig = w._build_publish_fig()
+    warn = any("time shift" in t.get_text() for t in fig.texts)
+    if not warn:
+        return "FAIL", "Publish 그림에 time shift 경고문이 없음(조용한 시각조작 금지 계약)"
+    w._shift_spin.setValue(0.0)
+    fig0 = w._build_publish_fig()
+    if any("time shift" in t.get_text() for t in fig0.texts):
+        return "FAIL", "시프트 0인데 경고문이 남아있음"
+    return "PASS", "+9h: resolve만 이동·원본 불변·Publish 경고문 on/off 정상"
+
+
+# ── 14. Custom resample 분→초 환산 ────────────────────────────────────────
+@check("Resample: Custom 분 스핀 → resample_sec")
+def c_custom_resample():
+    w = _widget_with_fixture()
+    w._res_combo.setCurrentText("5 min")
+    if w.resample_sec != 300:
+        return "FAIL", f"프리셋 5 min인데 resample_sec={w.resample_sec}"
+    if w._res_custom_spin.isEnabled():
+        return "FAIL", "프리셋 선택인데 Custom 스핀이 활성화돼 있음"
+    w._res_combo.setCurrentText("Custom…")
+    if not w._res_custom_spin.isEnabled():
+        return "FAIL", "Custom 선택했는데 분 스핀이 비활성"
+    w._res_custom_spin.setValue(2.5)
+    if w.resample_sec != 150.0:
+        return "FAIL", f"2.5분인데 resample_sec={w.resample_sec} (150 기대)"
+    return "PASS", "5min 프리셋=300s · Custom 2.5min=150s · 스핀 활성화 연동 정상"
+
+
+# ── 15. 라벨 스타일 pg↔mpl 패리티 (이번 세션 재발 버그류의 핵심 가드) ──────
+@check("라벨 스타일: pg(화면)·mpl(Publish) 동일 소비")
+def c_label_style_parity():
+    from matplotlib.figure import Figure
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    # (a) pos=None + size/color → 양쪽 다 '원래 자리' 라벨에 스타일만
+    w.label_style["ylabel"] = {"pos": None, "size": 14, "color": "#2E7D32"}
+    ts.render()
+    if not w.p1.getAxis("left").labelText:
+        return "FAIL", "(a) pg 기본경로인데 좌축 라벨이 비어있음"
+    if "ylabel" in w._custom_label_items:
+        return "FAIL", "(a) pos=None인데 자유배치 아이템이 생김"
+    fig = Figure(figsize=(6, 4)); ts.render_mpl(fig)
+    ax = fig.axes[0]
+    if ax.get_ylabel() != "NO2 [ppb]":
+        return "FAIL", f"(a) mpl ylabel='{ax.get_ylabel()}' (NO2 [ppb] 기대)"
+    if ax.yaxis.label.get_color() != "#2E7D32" or ax.yaxis.label.get_fontsize() != 14:
+        return "FAIL", "(a) mpl ylabel 색/크기가 label_style을 반영 안 함"
+    # (b) pos 지정 → 양쪽 다 원래 라벨 비우고 자유배치(transAxes 비율)로
+    w.label_style["ylabel"]["pos"] = (-0.09, 0.5)
+    ts.render()
+    if w.p1.getAxis("left").labelText:
+        return "FAIL", "(b) 자유배치인데 pg 원래 축라벨이 남아있음(이중 표시)"
+    if "ylabel" not in w._custom_label_items:
+        return "FAIL", "(b) pg 자유배치 아이템이 안 생김"
+    fig2 = Figure(figsize=(6, 4)); ts.render_mpl(fig2)
+    ax2 = fig2.axes[0]
+    if ax2.get_ylabel():
+        return "FAIL", "(b) 자유배치인데 mpl ylabel이 남아있음(이중 표시)"
+    free = [t for t in ax2.texts if t.get_text() == "NO2 [ppb]"]
+    if not free:
+        return "FAIL", "(b) mpl에 자유배치 텍스트가 없음 — pg에만 보이고 Publish에선 증발"
+    if free[0].get_transform() is not ax2.transAxes:
+        return "FAIL", "(b) mpl 자유배치가 transAxes(비율)가 아님 — pg와 위치 어긋남"
+    return "PASS", "기본경로 스타일 반영 + 자유배치 시 양쪽 모두 이전/전환 일치"
+
+
+# ── 16. label_style 저장/복원 왕복 ────────────────────────────────────────
+@check("label_style: 스타일 저장/복원 왕복 + 위젯 동기화")
+def c_label_style_roundtrip():
+    import json
+    w = _widget_with_fixture()
+    w.label_style["ylabel"] = {"pos": (-0.09, 0.5), "size": 14, "color": "#2E7D32"}
+    st = json.loads(json.dumps(w._gather_style()))   # 디스크 왕복과 동일(JSON화)
+    w2 = PlotMakerWidget()
+    w2._apply_style(st)
+    got = w2.label_style["ylabel"]
+    if got["size"] != 14 or got["color"] != "#2E7D32" or tuple(got["pos"]) != (-0.09, 0.5):
+        return "FAIL", f"복원값 불일치: {got}"
+    wdg = w2._label_style_widgets["ylabel"]
+    if wdg["size"].value() != 14 or not wdg["free_chk"].isChecked():
+        return "FAIL", "복원 후 Size 스핀/📍 체크박스가 동기화 안 됨"
+    return "PASS", "JSON 왕복 후 값·위젯 모두 일치"
+
+
+# ── 17. Annotate 마커선·라벨이 양 렌더러에 (범례 off여도) ──────────────────
+@check("Annotate: 마커선+라벨 pg·mpl 양쪽 표시")
+def c_annotations_both_renderers():
+    import pyqtgraph as pg_
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()
+    n_before = sum(isinstance(it, pg_.InfiniteLine) for it in w.p1.items)
+    tmid = float(np.median(w.shelf["fixture"].time))
+    w._annots = [{"kind": "vline", "val": tmid, "label": "evt", "color": "#d32f2f"},
+                 {"kind": "hline", "val": 5.0, "label": "LOD", "color": "#7B1FA2"}]
+    ts.render()
+    n_after = sum(isinstance(it, pg_.InfiniteLine) for it in w.p1.items)
+    if n_after - n_before != 2:
+        return "FAIL", f"pg 마커선 {n_after - n_before}개 추가됨 (2개 기대)"
+    w._legend_combo.setCurrentText("off")    # 원버그 조건: 범례 꺼도 라벨 보여야
+    fig = w._build_publish_fig()
+    ax = fig.axes[0]
+    texts = {t.get_text().strip() for a in fig.axes for t in a.texts}
+    if "evt" not in texts or "LOD" not in texts:
+        return "FAIL", f"범례 off에서 mpl 라벨 증발: {texts} (2026-07-06 버그 재발)"
+    dashed = [ln for ln in ax.lines if ln.get_linestyle() == "--"]
+    if len(dashed) < 2:
+        return "FAIL", f"mpl 점선 마커선 {len(dashed)}개 (2개 기대)"
+    w._legend_combo.setCurrentText("auto")
+    return "PASS", "pg 선 2개 · mpl(범례 off) 선 2개+라벨 2개 모두 표시"
+
+
+# ── 18. 시간축 X범위: 화면은 경계눈금 패딩, Publish는 tight ────────────────
+@check("X범위: pg 2% 패딩(경계눈금 보임) · mpl tight")
+def c_xrange_padding_split():
+    import datetime as _dt
+    import matplotlib.dates as mdates
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()                                        # _time_axis=True 확정
+    t = w.shelf["fixture"].time
+    a = _dt.datetime.fromtimestamp(float(t[50])).strftime("%Y-%m-%d %H:%M")
+    b = _dt.datetime.fromtimestamp(float(t[-50])).strftime("%Y-%m-%d %H:%M")
+    w._ax_xmin.setText(a); w._ax_xmax.setText(b)
+    w.apply_axes()
+    ae, be = w._parse_x(a), w._parse_x(b)
+    (v0, v1), _ = w.p1.getViewBox().viewRange()
+    if not (v0 < ae and v1 > be):
+        return "FAIL", f"pg 화면에 패딩이 없음(v=[{v0:.0f},{v1:.0f}] vs [{ae:.0f},{be:.0f}]) — 경계 눈금 잘림 재발"
+    fig = w._build_publish_fig()
+    x0, x1 = fig.axes[0].get_xlim()
+    e0 = mdates.date2num(_dt.datetime.fromtimestamp(ae))
+    e1 = mdates.date2num(_dt.datetime.fromtimestamp(be))
+    if abs(x0 - e0) > 1e-4 or abs(x1 - e1) > 1e-4:
+        return "FAIL", f"mpl이 tight가 아님: [{x0},{x1}] vs [{e0},{e1}]"
+    return "PASS", "화면=패딩으로 경계눈금 보존 · Publish=요청범위 그대로 tight"
+
+
+# ── 19. Tick size — pg·mpl 동일 규칙 ──────────────────────────────────────
+@check("Tick size: pg tickFont·mpl labelsize 동일 규칙")
+def c_tick_size_parity():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    # 규칙 자체(_tick_pt): 지정값 > 전역 Font−2 > 0
+    w._tick_size.setValue(0); w._lbl_size.setValue(0)
+    if w._tick_pt() != 0:
+        return "FAIL", f"둘 다 auto인데 _tick_pt={w._tick_pt()} (0 기대)"
+    w._lbl_size.setValue(14)
+    if w._tick_pt() != 12:
+        return "FAIL", f"전역 14pt 유도값 _tick_pt={w._tick_pt()} (12 기대)"
+    w._tick_size.setValue(9)
+    if w._tick_pt() != 9:
+        return "FAIL", f"명시 9pt인데 _tick_pt={w._tick_pt()} — 지정값이 우선이어야"
+    # pg: render 후 축 tickFont에 반영됐나
+    ts.render()
+    tf = w.p1.getAxis("bottom").style.get("tickFont")
+    if tf is None or tf.pointSize() != 9:
+        return "FAIL", f"pg 축 tickFont={tf and tf.pointSize()} (9 기대)"
+    # mpl: Publish figure 눈금 라벨 크기
+    fig = w._build_publish_fig()
+    lab = fig.axes[0].xaxis.get_ticklabels()
+    if not lab or lab[0].get_fontsize() != 9:
+        return "FAIL", f"mpl 눈금 크기={lab and lab[0].get_fontsize()} (9 기대)"
+    # auto로 되돌리면 pg 기본(tickFont=None)으로 복귀하나
+    w._tick_size.setValue(0); w._lbl_size.setValue(0)
+    ts.render()
+    if w.p1.getAxis("bottom").style.get("tickFont") is not None:
+        return "FAIL", "auto 복귀 후에도 pg tickFont가 남아있음"
+    return "PASS", "규칙(지정>유도>기본)·pg 9pt·mpl 9pt·auto 복귀 전부 일치"
+
+
+# ── 20. 주석이 다른 좌표계 모드의 mpl 범위를 못 늘리나 ─────────────────────
+@check("주석: Diurnal 등 다른 좌표계 mpl 범위 무영향")
+def c_annotation_no_range_blowup():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()                                   # 시계열에서 epoch 세로선을 찍은 상황
+    tmid = float(np.median(w.shelf["fixture"].time))   # ≈1.75e9
+    w._annots = [{"kind": "vline", "val": tmid, "label": "evt", "color": "#d32f2f"}]
+    di = next(m for m in w._modes if m.key == "diurnal")
+    w._mode_combo.setCurrentText(di.label)        # diurnal로 전환(x=0-23h)
+    w._mode = di
+    di.options_widget()
+    if hasattr(di, "_c"):
+        di._c.setCurrentText("fixture:NO2")
+    di.render()                                   # pg 쪽 — ignoreBounds라 원래 무영향
+    fig = w._build_publish_fig()                  # mpl Publish 경로
+    x0, x1 = fig.axes[0].get_xlim()
+    if x1 > 100:                                  # 0-23h여야 하는데 epoch까지 늘어났나
+        return "FAIL", f"diurnal mpl x범위가 주석 때문에 폭발: [{x0:.3g}, {x1:.3g}]"
+    # 원래 좌표계(시계열)에서는 주석이 여전히 정상 표시되는지 재확인
+    w._mode_combo.setCurrentText(ts.label); w._mode = ts
+    ts.render()
+    fig2 = w._build_publish_fig()
+    texts = {t.get_text().strip() for a in fig2.axes for t in a.texts}
+    if "evt" not in texts:
+        return "FAIL", "범위 고정 처리가 시계열의 정상 주석 라벨까지 없앰"
+    return "PASS", f"diurnal x=[{x0:.2g},{x1:.2g}] 유지 · 시계열 주석 라벨 정상"
+
+
+# ── 21. pg 축 auto-SI-prefix 금지 (화면·Publish 눈금 일치) ─────────────────
+@check("SI prefix: pg 축이 작은 값을 ×1000 스케일하지 않음")
+def c_no_si_prefix_scaling():
+    w = PlotMakerWidget()
+    rng = np.random.default_rng(1)
+    t0 = 1_750_000_000.0
+    n = 300
+    t = t0 + np.arange(n) * 60.0
+    ans = 0.1 + 0.2 * np.sin(np.arange(n) / 30) + rng.normal(0, 0.05, n)   # 0.x ppb대
+    ds = Dataset("small", "<fixture:small>", t, {"ANs": ans}, units={"ANs": "ppb"})
+    w.shelf[ds.name] = ds
+    w._refresh_tree(); w._notify_modes()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["small:ANs", "L", None, None])
+    ts.render()
+    bad = [nm for nm in ("left", "right", "bottom")
+           if getattr(w.p1.getAxis(nm), "autoSIPrefix", False)
+           or w.p1.getAxis(nm).autoSIPrefixScale != 1.0]
+    if bad:
+        return "FAIL", f"{bad} 축에 SI prefix 스케일 활성 — 0.2가 200으로 표시됨(화면-Publish 불일치)"
+    w.set_time_axis(False)   # 축 교체 경로(비시간축 새 AxisItem)도 확인
+    if getattr(w.p1.getAxis("bottom"), "autoSIPrefix", False):
+        return "FAIL", "set_time_axis(False)가 갈아끼운 bottom 축에 SI prefix가 다시 켜짐"
+    w.set_time_axis(True)    # DateAxisItem 재생성 경로
+    if getattr(w.p1.getAxis("bottom"), "autoSIPrefix", False):
+        return "FAIL", "set_time_axis(True)가 갈아끼운 bottom 축에 SI prefix가 다시 켜짐"
+    return "PASS", "3개 축 + 축 교체 후에도 SI 스케일 없음(scale=1.0) — 원시값 그대로"
+
+
+# ── 22. 눈금 숫자와 눈금선 독립 토글 ──────────────────────────────────────
+@check("눈금: 숫자 off + 눈금선 on 분리 동작 (pg·mpl)")
+def c_tick_text_marks_independent():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()
+    w._chk_xticks.setChecked(False)     # 숫자 끄고
+    w._chk_xtickmarks.setChecked(True)  # 눈금선은 유지
+    w.apply_axes()
+    bax = w.p1.getAxis("bottom")
+    if bax.style.get("showValues", True):
+        return "FAIL", "pg: 숫자 껐는데 showValues가 켜져 있음"
+    if bax.style.get("tickLength", 0) == 0:
+        return "FAIL", "pg: 눈금선 켰는데 tickLength=0 — 숫자와 같이 사라짐(분리 실패)"
+    fig = w._build_publish_fig()
+    ax = fig.axes[0]
+    kw = ax.xaxis._major_tick_kw
+    if kw.get("label1On", True):
+        return "FAIL", "mpl: 숫자 껐는데 labelbottom이 켜져 있음"
+    if not kw.get("tick1On", False):
+        return "FAIL", "mpl: 눈금선 켰는데 bottom tick이 꺼짐(분리 실패)"
+    w._chk_xtickmarks.setChecked(False)   # 둘 다 끄면 전부 사라져야
+    w.apply_axes()
+    if w.p1.getAxis("bottom").style.get("tickLength", 0) != 0:
+        return "FAIL", "pg: 둘 다 껐는데 눈금선이 남아있음"
+    return "PASS", "숫자 off+눈금선 on: pg tickLength 유지·mpl tick1On 유지, 둘 다 off도 정상"
+
+
+# ── 23. X 틱 앵커 날짜+간격 (pg·mpl 동일 위치) ────────────────────────────
+@check("X 틱 앵커: 날짜+N일 간격이 pg·mpl 동일")
+def c_anchored_x_ticks():
+    import datetime as _dt
+    import matplotlib.dates as mdates
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()
+    t = w.shelf["fixture"].time
+    anchor_dt = _dt.datetime.fromtimestamp(float(t[100])).replace(minute=0, second=0)
+    w._tick_x.setText("0.25")                                # 6시간 간격
+    w._tick_x_anchor.setText(anchor_dt.strftime("%Y-%m-%d %H:%M"))
+    w.apply_axes()
+    pos = w._anchored_x_ticks(0.25)
+    if not pos:
+        return "FAIL", "_anchored_x_ticks()가 눈금을 안 만듦"
+    anchor_ep = anchor_dt.timestamp()
+    step = 0.25 * 86400.0
+    bad = [p for p, _l in pos if abs((p - anchor_ep) % step) > 1e-6
+           and abs((p - anchor_ep) % step - step) > 1e-6]
+    if bad:
+        return "FAIL", f"앵커 위상이 안 맞는 눈금 {len(bad)}개"
+    if not any(abs(p - anchor_ep) < 1e-6 for p, _l in pos):
+        return "FAIL", "앵커 날짜 자체에 눈금이 없음"
+    # pg 축에 실제로 박혔나
+    bax = w.p1.getAxis("bottom")
+    if not getattr(bax, "_tickLevels", None):
+        return "FAIL", "pg setTicks가 적용 안 됨(_tickLevels 비어있음)"
+    # mpl locator도 같은 위치인가
+    fig = w._build_publish_fig()
+    loc = fig.axes[-1].xaxis.get_major_locator()
+    locs_num = sorted(loc())
+    want = sorted(mdates.date2num(_dt.datetime.fromtimestamp(p)) for p, _l in pos)
+    if len(locs_num) != len(want) or any(abs(a - b) > 1e-8 for a, b in zip(locs_num, want)):
+        return "FAIL", f"mpl 눈금({len(locs_num)}개)과 pg 눈금({len(want)}개) 위치 불일치"
+    w._tick_x.setText(""); w._tick_x_anchor.setText("")
+    return "PASS", f"앵커 {anchor_dt:%m-%d %H:%M}+6h 간격 눈금 {len(pos)}개 — pg·mpl 동일 위치"
+
+
+# ── 24. 눈금선 방향(안/바깥)·길이 — pg·mpl 동일 규칙 ───────────────────────
+@check("눈금선: 방향(in/out)·길이 pg·mpl 동일 적용")
+def c_tick_direction_length():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()
+    w._tick_dir.setCurrentIndex(1)   # 안(in)
+    w._tick_len.setValue(8)
+    w.apply_axes()
+    if w.p1.getAxis("bottom").style.get("tickLength") != -8:
+        return "FAIL", f"pg in/8px인데 tickLength={w.p1.getAxis('bottom').style.get('tickLength')} (-8 기대)"
+    fig = w._build_publish_fig()
+    kw = fig.axes[0].xaxis._major_tick_kw
+    if kw.get("tickdir") != "in" or kw.get("size") != 8:
+        return "FAIL", f"mpl in/8px 미반영: dir={kw.get('tickdir')} len={kw.get('size')}"
+    w._tick_dir.setCurrentIndex(0)   # 바깥(out), auto 길이
+    w._tick_len.setValue(0)
+    w.apply_axes()
+    if w.p1.getAxis("bottom").style.get("tickLength") != 5:
+        return "FAIL", "pg out/auto가 +5가 아님"
+    fig2 = w._build_publish_fig()
+    kw2 = fig2.axes[0].xaxis._major_tick_kw
+    if kw2.get("tickdir") != "out":
+        return "FAIL", "mpl out 미반영"
+    return "PASS", "in/8px: pg=-8·mpl in 8 — out/auto: pg=+5·mpl out. 규칙 일치"
 
 
 def main():

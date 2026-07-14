@@ -42,7 +42,8 @@ WAVECAL = os.path.join(OUT, r"wv_cal\cold\Calib_20260523_Hg_4line_400-497nm_Poly
 ILS_REF = os.path.join(OUT, r"wv_cal\cold\Ref_NO2_Dynamic-ILS-Applied.dat")
 RAW_XS  = r"C:\Doasis_Work\Reference raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt"
 R_NPZ   = os.path.join(OUT, r"R\R_cold.npz")
-FIT_DIR = os.path.join(OUT, r"fitting\260517-260618\neg_o\QCk6")
+# 일별 버킷 구조({YYMMDD}/{neg}/{QC}) — 2* 패턴이라 _archive/_derived는 안 걸림
+FIT_GLOB = os.path.join(OUT, "fitting", "2*", "neg_o", "QCk6")
 
 # 웨이브칼 기준: (픽셀, 진짜 Hg 파장 nm). 0523 4-line 기준. 허용오차 0.2nm.
 WAVECAL_ANCHORS = [(86, 404.66), (149, 407.78), (721, 435.83), (1883, 491.60)]
@@ -188,10 +189,11 @@ def _read_fit_no2(path):
 
 @check("핏 출력 (NO2 타당·채널일치)")
 def c_fit():
-    _need(FIT_DIR)
+    if not glob.glob(FIT_GLOB):
+        raise Skip(f"파일 없음: {FIT_GLOB}")
     meds = {}
     for tag in ("cold", "CH1", "CH2"):
-        fs = glob.glob(os.path.join(FIT_DIR, f"*{tag}*.dat"))
+        fs = sorted(glob.glob(os.path.join(FIT_GLOB, f"*{tag}*.dat")))
         fs = [f for f in fs if "NO2-PNs" not in os.path.basename(f)]
         if fs:
             no2 = _read_fit_no2(fs[0])

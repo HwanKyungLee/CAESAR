@@ -64,6 +64,10 @@ def detect(path: str) -> str:
         return "fit"
     if name.endswith(".tsv") or "rms_cm" in head:
         return "concentration"
+    # 데이터 계산기 출력(ANs/PNs 등 임의 이름) — gui/dlg_calculator.py가 쓰는
+    # "# Data Calculator result: ..." 시그니처로 가스명과 무관하게 인식.
+    if "data calculator result" in head:
+        return "concentration"
     if "wavelength" in head and "reflect" in head:
         return "reference"
     if any(k in head for k in ("datetime", "timestamp", "doy", "no2", "hcho",

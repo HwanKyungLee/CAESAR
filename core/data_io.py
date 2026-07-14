@@ -297,17 +297,71 @@ class DataIO:
         """Convenience wrapper — True when the file has ≥ 2 active channels."""
         return DataIO.detect_channels(filepath) >= 2
 
+    # 행수 디스크 캐시: raw는 불변이라 (경로,크기,mtime)이 같으면 행수도 같다.
+    # 100MB×1200파일 인덱싱(구 텍스트루프 ~20s/파일 = 침묵 7시간!)을 첫 1회 이후 0초로.
+    _scan_count_cache: dict | None = None
+    _scan_count_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'logs', 'scan_count_cache.json')
+
     @staticmethod
-    def count_scan_rows(filepath):
-        """Counts the number of non-empty rows (= scans) in a Mega-Matrix file."""
-        count = 0
+    def _scan_cache_load():
+        if DataIO._scan_count_cache is None:
+            try:
+                import json
+                with open(DataIO._scan_count_path, encoding='utf-8') as fh:
+                    DataIO._scan_count_cache = json.load(fh)
+            except Exception:
+                DataIO._scan_count_cache = {}
+        return DataIO._scan_count_cache
+
+    @staticmethod
+    def _scan_cache_save():
         try:
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    if line.strip():
-                        count += 1
+            import json
+            os.makedirs(os.path.dirname(DataIO._scan_count_path), exist_ok=True)
+            with open(DataIO._scan_count_path, 'w', encoding='utf-8') as fh:
+                json.dump(DataIO._scan_count_cache, fh)
         except Exception:
             pass
+
+    @staticmethod
+    def count_scan_rows(filepath):
+        """Counts the number of non-empty rows (= scans) in a Mega-Matrix file.
+
+        바이너리 청크로 비어있지 않은 라인을 센다(구 텍스트 라인루프 대비 ~20배 —
+        USB HDD 100MB 기준 20s→~1s). 텍스트 모드와 동일 기준: CRLF/LF 파일에서
+        strip 후 비지 않은 라인 수 (raw는 LabVIEW CRLF — 검증됨).
+        결과는 (크기,mtime) 키로 logs/scan_count_cache.json 에 캐시."""
+        try:
+            st = os.stat(filepath)
+            key = f"{os.path.abspath(filepath)}|{st.st_size}|{st.st_mtime_ns}"
+        except OSError:
+            key = None
+        if key is not None:
+            hit = DataIO._scan_cache_load().get(key)
+            if hit is not None:
+                return int(hit)
+        count = 0
+        try:
+            with open(filepath, 'rb') as fh:
+                tail = b''
+                while True:
+                    chunk = fh.read(1 << 23)   # 8MB
+                    if not chunk:
+                        break
+                    lines = (tail + chunk).split(b'\n')
+                    tail = lines.pop()
+                    for ln in lines:
+                        if ln.strip():
+                            count += 1
+                if tail.strip():
+                    count += 1
+        except Exception:
+            pass
+        if key is not None and count:
+            DataIO._scan_cache_load()[key] = count
+            DataIO._scan_cache_save()
         return count
 
     _alpha_fmt_cache: dict = {}   # (path, mtime) -> bool, alpha 포맷 판정 캐시

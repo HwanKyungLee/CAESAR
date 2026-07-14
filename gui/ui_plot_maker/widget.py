@@ -24,9 +24,48 @@ from .data import Dataset, load_dataset
 from . import modes as _modes_registration  # noqa: F401 — import 자체가 @register_mode 실행(등록) 트리거
 
 
-# 리샘플 콤보 라벨 → 초. 0 = 원본 유지.
+class _DraggableLabel(pg.TextItem):
+    """제목/축라벨 자유배치용 — ViewBox(데이터좌표계)가 아니라 씬에 직접 붙여서
+    ViewBox 범위 밖(축 여백)에도 보이게 한다(ViewBox는 자기 view range 밖의
+    자식 아이템을 안 그리는 걸 실측으로 확인 — data 좌표 기반으로는 여백 배치가
+    근본적으로 불가능했음). 위치는 matplotlib의 transAxes와 같은 개념인 'ViewBox
+    사각형 기준 비율(fx,fy)'로 저장 — 창 크기가 바뀌어도, pg 미리보기·mpl
+    Publish 둘 다 같은 (fx,fy)로 항상 같은 상대 위치에 온다."""
+
+    def __init__(self, host, key, **kw):
+        super().__init__(**kw)
+        self.host = host
+        self.key = key
+        self._moving = False
+
+    def _vb(self):
+        return self.host.vb_right if self.key == "rlabel" else self.host.p1.getViewBox()
+
+    def mouseDragEvent(self, ev):
+        if ev.button() != Qt.MouseButton.LeftButton:
+            return
+        ev.accept()
+        if ev.isStart():
+            self._moving = True
+            self._cursor_offset = self.pos() - self.mapToParent(ev.buttonDownPos())
+        if not self._moving:
+            return
+        new_pos = self._cursor_offset + self.mapToParent(ev.pos())
+        self.setPos(new_pos)
+        if ev.isFinish():
+            self._moving = False
+            rect = self._vb().sceneBoundingRect()
+            fx = (new_pos.x() - rect.left()) / rect.width() if rect.width() else 0.5
+            fy = (rect.bottom() - new_pos.y()) / rect.height() if rect.height() else 0.5
+            st = self.host.label_style.setdefault(self.key, {})
+            st["pos"] = (float(fx), float(fy))
+            self.host.set_status(f"'{self.key}' 라벨 위치 이동됨 — Reset positions로 되돌릴 수 있음")
+
+
+# 리샘플 콤보 라벨 → 초. 0 = 원본 유지. Custom은 옆 스핀박스(분)로 사용자가 직접 지정.
+_RESAMPLE_CUSTOM = "Custom…"
 _RESAMPLE = {"Raw": 0, "1 min": 60, "5 min": 300, "10 min": 600,
-             "30 min": 1800, "1 hour": 3600}
+             "30 min": 1800, "1 hour": 3600, _RESAMPLE_CUSTOM: -1}
 
 # 범례 위치: pyqtgraph offset(음수=우/하단 기준) · matplotlib loc 문자열
 _LEGEND_OFFSET = {"TL": (10, 10), "TR": (-10, 10), "BL": (10, -10), "BR": (-10, -10)}
@@ -78,11 +117,20 @@ class PlotMakerWidget(QWidget):
         self.shelf = {}        # name → Dataset
         self.resample_sec = 0
         self.smooth_n = 1
+        self.time_shift_hours = 0.0   # 표시 전용 시각 보정(원본 파일은 그대로) — resolve()에서 적용
         self.legend = None
         # 라벨 오버라이드(빈 문자열=자동). 모드가 host.lbl(key, default)로 참조.
         self.custom = {"title": "", "xlabel": "", "ylabel": "", "rlabel": ""}
+        # 라벨별 스타일: size/color(둘 다 None=자동) + pos(None=기본 위치,
+        # (x,y) 데이터좌표=드래그로 자유배치). pg_label()/mpl_label()이 참조하는
+        # 단일 진실원 — 화면(pg)·Publish(mpl)가 같은 값을 그린다.
+        self.label_style = {k: {"pos": None, "size": None, "color": None}
+                            for k in ("title", "xlabel", "ylabel", "rlabel")}
+        self._custom_label_items = {}   # key → 화면에 떠 있는 _DraggableLabel(pg)
         # 주석(마커선): [{kind:'vline'/'hline', val:float, label:str, color:str}, ...]
         self._annots = []
+        self._annot_dlg = None      # 열려있는 Annotate 창(모덜리스 싱글턴)
+        self._annot_pick = None     # 클릭으로 값 찍는 중이면 {"kind","label","color"}, 아니면 None
         self._undo_slot = None   # 가벼운 1단계 undo(전체 스택 아님) — 방금 지운 것만 기억
         self._modes = [cls(self) for cls in _MODES]
         self._mode = self._modes[0]
@@ -135,6 +183,8 @@ class PlotMakerWidget(QWidget):
         bar = FlowLayout(spacing=6)
         for txt, fn, tip in (
                 ("➕ Add data", self._add_data, "결과 파일(.dat/.csv)을 선반에 추가"),
+                ("📅 By date", self._add_data_by_date,
+                 "일별 핏 버킷에서 기간·시리즈를 골라 자동 머지해 선반에 추가"),
                 ("🔍 Preview", self._preview_publish, "출력(Publish) 그대로 미리보기"),
                 ("🖼 Publish", self._export_publish, "고화질 PNG / 벡터 PDF·SVG 저장")):
             b = QPushButton(txt); b.setToolTip(tip); b.clicked.connect(fn)
@@ -149,9 +199,11 @@ class PlotMakerWidget(QWidget):
         tab_data = QWidget(); dv = QVBoxLayout(tab_data)
         drow = QHBoxLayout()
         b_add2 = QPushButton("➕ Add"); b_add2.clicked.connect(self._add_data)
+        b_date2 = QPushButton("📅 By date"); b_date2.setToolTip("일별 핏 버킷에서 기간 선택 → 자동 머지 추가")
+        b_date2.clicked.connect(self._add_data_by_date)
         b_rm = QPushButton("🗑 Remove"); b_rm.setToolTip("선택 데이터셋 제거")
         b_rm.clicked.connect(self._remove_data)
-        drow.addWidget(b_add2); drow.addWidget(b_rm); dv.addLayout(drow)
+        drow.addWidget(b_add2); drow.addWidget(b_date2); drow.addWidget(b_rm); dv.addLayout(drow)
         dv.addWidget(QLabel("Data shelf — 컬럼 선택 후 Style 탭에서 추가"))
         self._tree_search = QLineEdit()
         self._tree_search.setPlaceholderText("🔍 데이터셋·컬럼 검색")
@@ -176,11 +228,27 @@ class PlotMakerWidget(QWidget):
         self._res_combo = QComboBox(); self._res_combo.addItems(list(_RESAMPLE.keys()))
         self._res_combo.currentIndexChanged.connect(self._on_transform_changed)
         trow.addWidget(self._res_combo)
+        self._res_custom_spin = QDoubleSpinBox()
+        self._res_custom_spin.setRange(0.1, 1440.0); self._res_custom_spin.setValue(2.0)
+        self._res_custom_spin.setSuffix(" min"); self._res_custom_spin.setDecimals(1)
+        self._res_custom_spin.setToolTip("Resample=Custom일 때 평균 낼 구간(분)")
+        self._res_custom_spin.setEnabled(False)
+        self._res_custom_spin.valueChanged.connect(self._on_transform_changed)
+        trow.addWidget(self._res_custom_spin)
         trow.addWidget(QLabel("Smooth"))
         self._smooth_spin = QSpinBox(); self._smooth_spin.setRange(1, 999); self._smooth_spin.setValue(1)
         self._smooth_spin.setToolTip("rolling 평균 점 수(1=끔)")
         self._smooth_spin.valueChanged.connect(self._on_transform_changed)
         trow.addWidget(self._smooth_spin); dv.addLayout(trow)
+        trow2 = QHBoxLayout()
+        trow2.addWidget(QLabel("Time shift"))
+        self._shift_spin = QDoubleSpinBox()
+        self._shift_spin.setRange(-72.0, 72.0); self._shift_spin.setValue(0.0)
+        self._shift_spin.setSuffix(" h"); self._shift_spin.setDecimals(2); self._shift_spin.setSingleStep(1.0)
+        self._shift_spin.setToolTip("시간축 전체를 +/-시간만큼 이동해서 표시(원본 파일은 그대로, 화면만 보정).\n"
+                                    "장비 시계 오차/타임존 불일치를 눈으로 맞춰볼 때 사용.")
+        self._shift_spin.valueChanged.connect(self._on_transform_changed)
+        trow2.addWidget(self._shift_spin); trow2.addStretch(1); dv.addLayout(trow2)
         self._tabs.addTab(_scroll(tab_data), "Data")
 
         # ═══════════ Style 탭 ═══════════
@@ -291,20 +359,48 @@ class PlotMakerWidget(QWidget):
                                 "정확한 간격은 Publish/Preview에서 확인하세요(화면은 근사치).")
         self._tick_x.editingFinished.connect(self._on_axes_changed)
         self._tick_y.editingFinished.connect(self._on_axes_changed)
-        flg.addRow("X tick", self._tick_x)
+        trow_x = QHBoxLayout()
+        trow_x.addWidget(self._tick_x, 1)
+        self._tick_x_anchor = QLineEdit()
+        self._tick_x_anchor.setPlaceholderText("앵커 (예: 06-29)")
+        self._tick_x_anchor.setToolTip("시간축 눈금의 기준 날짜 — 여기 적은 날짜부터 좌측 간격(일)씩 눈금.\n"
+                                       "예: 앵커 06-29 + 간격 7 → 06-29, 07-06, 07-13… (앞쪽으로도 06-22, 06-15…)\n"
+                                       "빈칸 = 자동 배치(달력 기준). 화면·Publish 동일 적용.")
+        self._tick_x_anchor.editingFinished.connect(self._on_axes_changed)
+        trow_x.addWidget(self._tick_x_anchor, 1)
+        flg.addRow("X tick", trow_x)
         flg.addRow("Y tick", self._tick_y)
+        srow = QHBoxLayout()
+        self._tick_dir = QComboBox(); self._tick_dir.addItems(["바깥(out)", "안(in)"])
+        self._tick_dir.setToolTip("눈금선 방향 — 그래프 바깥쪽 또는 안쪽. 화면·Publish 동일 적용.")
+        self._tick_dir.currentIndexChanged.connect(self._on_axes_changed)
+        srow.addWidget(self._tick_dir)
+        srow.addWidget(QLabel("길이"))
+        self._tick_len = QSpinBox()
+        self._tick_len.setRange(0, 20); self._tick_len.setValue(0)
+        self._tick_len.setSpecialValueText("auto"); self._tick_len.setSuffix(" px")
+        self._tick_len.setToolTip("눈금선 길이(0=auto≈5px). 화면·Publish 동일 적용.")
+        self._tick_len.valueChanged.connect(self._on_axes_changed)
+        srow.addWidget(self._tick_len); srow.addStretch(1)
+        flg.addRow("Tick 선", srow)
         av.addWidget(gbg)
         # 축 라벨·눈금 표시 토글 (끄면 아예 안 그림)
         gbsh = QGroupBox("Show (끄면 숨김)")
         flsh = QFormLayout(gbsh)
-        self._chk_xlabel = QCheckBox("label"); self._chk_xticks = QCheckBox("ticks")
-        self._chk_ylabel = QCheckBox("label"); self._chk_yticks = QCheckBox("ticks")
-        for c in (self._chk_xlabel, self._chk_xticks, self._chk_ylabel, self._chk_yticks):
+        self._chk_xlabel = QCheckBox("label"); self._chk_xticks = QCheckBox("숫자")
+        self._chk_ylabel = QCheckBox("label"); self._chk_yticks = QCheckBox("숫자")
+        self._chk_xtickmarks = QCheckBox("눈금선"); self._chk_ytickmarks = QCheckBox("눈금선")
+        for c in (self._chk_xlabel, self._chk_xticks, self._chk_ylabel, self._chk_yticks,
+                  self._chk_xtickmarks, self._chk_ytickmarks):
             c.setChecked(True); c.toggled.connect(self._on_axes_changed)
         self._chk_xlabel.setToolTip("X축 이름(예: Time) 표시")
-        self._chk_xticks.setToolTip("X축 눈금 숫자/날짜 표시")
-        rxs = QHBoxLayout(); rxs.addWidget(self._chk_xlabel); rxs.addWidget(self._chk_xticks); rxs.addStretch(1)
-        rys = QHBoxLayout(); rys.addWidget(self._chk_ylabel); rys.addWidget(self._chk_yticks); rys.addStretch(1)
+        self._chk_xticks.setToolTip("X축 눈금 숫자/날짜(텍스트) 표시")
+        self._chk_xtickmarks.setToolTip("X축 눈금선(짧은 금) 표시 — 숫자를 꺼도 눈금선만 남길 수 있음")
+        self._chk_ytickmarks.setToolTip("Y축 눈금선(짧은 금) 표시 — 숫자를 꺼도 눈금선만 남길 수 있음")
+        rxs = QHBoxLayout(); rxs.addWidget(self._chk_xlabel); rxs.addWidget(self._chk_xticks)
+        rxs.addWidget(self._chk_xtickmarks); rxs.addStretch(1)
+        rys = QHBoxLayout(); rys.addWidget(self._chk_ylabel); rys.addWidget(self._chk_yticks)
+        rys.addWidget(self._chk_ytickmarks); rys.addStretch(1)
         flsh.addRow("X axis", rxs)
         flsh.addRow("Y axis", rys)
         av.addWidget(gbsh)
@@ -329,20 +425,30 @@ class PlotMakerWidget(QWidget):
         gv.addWidget(gbl)
         gb = QGroupBox("Labels (override, blank=auto)")
         fl = QFormLayout(gb)
+        self._label_style_widgets = {}
         self._ed_title = QLineEdit(); self._ed_x = QLineEdit()
         self._ed_y = QLineEdit(); self._ed_r = QLineEdit()
-        for ed in (self._ed_title, self._ed_x, self._ed_y, self._ed_r):
-            ed.editingFinished.connect(self._on_labels_changed)
-        fl.addRow("Title", self._ed_title)
-        fl.addRow("X", self._ed_x)
-        fl.addRow("Y-left", self._ed_y)
-        fl.addRow("Y-right", self._ed_r)
+        fl.addRow("Title", self._build_label_row("title", self._ed_title))
+        fl.addRow("X", self._build_label_row("xlabel", self._ed_x))
+        fl.addRow("Y-left", self._build_label_row("ylabel", self._ed_y))
+        fl.addRow("Y-right", self._build_label_row("rlabel", self._ed_r))
         self._lbl_size = QSpinBox()
         self._lbl_size.setRange(0, 40); self._lbl_size.setValue(0)
         self._lbl_size.setSpecialValueText("auto"); self._lbl_size.setSuffix(" pt")
-        self._lbl_size.setToolTip("축 라벨·제목 글자 크기 (0=auto). 화면·Publish 모두 적용.")
+        self._lbl_size.setToolTip("전역 기본 글자 크기(0=auto). 각 라벨 옆 Size가 0이면 이 값을 씀.")
         self._lbl_size.valueChanged.connect(self._on_labels_changed)
-        fl.addRow("Font size", self._lbl_size)
+        fl.addRow("Font size (default)", self._lbl_size)
+        self._tick_size = QSpinBox()
+        self._tick_size.setRange(0, 40); self._tick_size.setValue(0)
+        self._tick_size.setSpecialValueText("auto"); self._tick_size.setSuffix(" pt")
+        self._tick_size.setToolTip("눈금 숫자/날짜 글자 크기 (0=auto: 전역 Font size−2).\n"
+                                   "화면 미리보기·Publish 모두 적용.")
+        self._tick_size.valueChanged.connect(self._on_labels_changed)
+        fl.addRow("Tick size", self._tick_size)
+        btn_reset_pos = QPushButton("↺ Reset positions")
+        btn_reset_pos.setToolTip("드래그로 옮긴 라벨 위치를 전부 기본 자리로 되돌림(크기/색은 유지)")
+        btn_reset_pos.clicked.connect(self.reset_label_positions)
+        fl.addRow("", btn_reset_pos)
         gv.addWidget(gb)
         gv.addStretch(1)
         self._tabs.addTab(_scroll(tab_leg), "Legend")
@@ -415,6 +521,11 @@ class PlotMakerWidget(QWidget):
         self.pw.setBackground("w")
         self.pw.showGrid(x=True, y=True, alpha=0.3)
         self.p1 = self.pw.plotItem
+        # pg auto-SI-prefix 끔 — 켜져 있으면 축 범위가 작을 때(예: 0~0.6 ppb)
+        # 값을 ×1000해 200/400/600으로 표시하고 "(×0.001)"을 붙임. matplotlib
+        # Publish는 원시값 그대로라 화면-출력이 어긋난다(2026-07-07 실GUI 발견).
+        for _nm in ("left", "right", "bottom"):
+            self.p1.getAxis(_nm).enableAutoSIPrefix(False)
         self.legend = self.p1.addLegend(offset=(10, 10))
         # 우측 Y축용 보조 ViewBox
         self.vb_right = pg.ViewBox()
@@ -433,6 +544,7 @@ class PlotMakerWidget(QWidget):
             _ln.setZValue(200); _ln.setVisible(False)
             self.p1.addItem(_ln, ignoreBounds=True)
         self.p1.scene().sigMouseMoved.connect(self._on_cursor_move)
+        self.p1.scene().sigMouseClicked.connect(self._on_plot_clicked)
         rv.addWidget(self.pw, 1)
         self._status = QLabel("")
         self._status.setStyleSheet("color:#444;")
@@ -524,13 +636,22 @@ class PlotMakerWidget(QWidget):
             return None
 
     def _edit_annotations(self):
+        # 모덜리스 싱글턴 — 이미 열려있으면 새로 안 만들고 앞으로 가져옴(그래프 클릭이
+        # 통하려면 모덜(exec)이면 안 됨 — 모덜 창은 뒤 그래프의 마우스클릭을 막는다).
+        if self._annot_dlg is not None:
+            try:
+                self._annot_dlg.raise_(); self._annot_dlg.activateWindow()
+                return
+            except RuntimeError:
+                self._annot_dlg = None
         from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
                                      QComboBox, QLineEdit, QPushButton, QLabel,
                                      QColorDialog)
         from PyQt6.QtGui import QColor
         dlg = QDialog(self)
+        dlg.setModal(False)
         dlg.setWindowTitle("🏷 Annotations (marker lines)")
-        dlg.resize(440, 320)
+        dlg.resize(460, 340)
         v = QVBoxLayout(dlg)
         lst = QListWidget()
 
@@ -548,13 +669,13 @@ class PlotMakerWidget(QWidget):
                     vs = f"{a['val']:.6g}"
                 lst.addItem(f"{tag}{vs}   {a.get('label', '')}")
         refresh()
+        self._annot_dlg_refresh = refresh   # _on_plot_clicked가 클릭 추가 후 여기 갱신
         v.addWidget(QLabel("현재 마커선 (선택 후 Remove)"))
         v.addWidget(lst, 1)
 
         row = QHBoxLayout()
         cb = QComboBox(); cb.addItems(["Vertical (x)", "Horizontal (y)"])
-        ed_val = QLineEdit(); ed_val.setPlaceholderText("값 (시간축 세로선은 'MM-DD HH:MM')")
-        ed_lab = QLineEdit(); ed_lab.setPlaceholderText("라벨")
+        ed_lab = QLineEdit(); ed_lab.setPlaceholderText("라벨(선택)")
         cstate = {"c": "#d32f2f"}
         b_col = QPushButton("🎨"); b_col.setFixedWidth(34)
         b_col.setStyleSheet(f"background:{cstate['c']};color:white;")
@@ -565,7 +686,23 @@ class PlotMakerWidget(QWidget):
                 cstate["c"] = c.name()
                 b_col.setStyleSheet(f"background:{c.name()};color:white;")
         b_col.clicked.connect(pick_col)
-        b_add = QPushButton("+ Add")
+        b_pick = QPushButton("🖱 그래프에서 클릭해 찍기")
+        b_pick.setToolTip("누르고 그래프의 원하는 위치를 클릭하면 그 자리에 마커가 생김.\n"
+                          "우클릭하면 취소.")
+
+        def start_pick():
+            kind = "vline" if cb.currentIndex() == 0 else "hline"
+            self._annot_pick = {"kind": kind, "label": ed_lab.text().strip(),
+                                "color": cstate["c"]}
+            axis = "세로선(x)" if kind == "vline" else "가로선(y)"
+            self.set_status(f"🖱 그래프를 클릭하면 {axis} 마커 추가 — 우클릭=취소")
+        b_pick.clicked.connect(start_pick)
+        row.addWidget(cb); row.addWidget(ed_lab, 1); row.addWidget(b_col); row.addWidget(b_pick)
+        v.addLayout(row)
+
+        row1b = QHBoxLayout()
+        ed_val = QLineEdit(); ed_val.setPlaceholderText("직접 값 입력(선택) — 숫자, 시간축 세로선은 'MM-DD HH:MM'")
+        b_add = QPushButton("+ Add (typed value)")
 
         def add():
             kind = "vline" if cb.currentIndex() == 0 else "hline"
@@ -577,15 +714,14 @@ class PlotMakerWidget(QWidget):
                 except ValueError:
                     val = None
             if val is None:
-                self.set_status("주석 값 파싱 실패 — 숫자(시간축 세로선은 날짜시각).")
+                self.set_status("주석 값 파싱 실패 — 숫자(시간축 세로선은 날짜시각) 또는 위의 🖱 클릭 찍기 사용.")
                 return
             self._annots.append({"kind": kind, "val": val,
                                  "label": ed_lab.text().strip(), "color": cstate["c"]})
-            ed_val.clear(); ed_lab.clear(); refresh(); self._mode.render()
+            ed_val.clear(); refresh(); self._mode.render()
         b_add.clicked.connect(add)
-        row.addWidget(cb); row.addWidget(ed_val, 1); row.addWidget(ed_lab, 1)
-        row.addWidget(b_col); row.addWidget(b_add)
-        v.addLayout(row)
+        row1b.addWidget(ed_val, 1); row1b.addWidget(b_add)
+        v.addLayout(row1b)
 
         row2 = QHBoxLayout()
         b_rm = QPushButton("− Remove selected")
@@ -595,17 +731,21 @@ class PlotMakerWidget(QWidget):
             if 0 <= i < len(self._annots):
                 self._annots.pop(i); refresh(); self._mode.render()
         b_rm.clicked.connect(rm)
-        b_close = QPushButton("Close"); b_close.clicked.connect(dlg.accept)
+        b_close = QPushButton("Close"); b_close.clicked.connect(dlg.close)
         row2.addWidget(b_rm); row2.addStretch(1); row2.addWidget(b_close)
         v.addLayout(row2)
-        dlg.exec()
+
+        def on_finished(*_):
+            self._annot_dlg = None
+            self._annot_dlg_refresh = None
+            self._annot_pick = None
+        dlg.finished.connect(on_finished)
+        self._annot_dlg = dlg
+        dlg.show()
 
     def enable_right_axis(self, on):
         self.p1.showAxis("right", show=on)
         self.vb_right.setGeometry(self.p1.vb.sceneBoundingRect())
-
-    def set_right_label(self, text):
-        self.p1.setLabel("right", text)
 
     def set_time_axis(self, on):
         self._time_axis = on
@@ -619,6 +759,7 @@ class PlotMakerWidget(QWidget):
             # CHOCHO+H2O+NO2 3개를 연달아 더블클릭해 추가하다 발견.)
         self._time_axis_installed = on
         ax = pg.DateAxisItem(orientation="bottom") if on else pg.AxisItem(orientation="bottom")
+        ax.enableAutoSIPrefix(False)   # 새 축도 SI 스케일 금지(위 init 주석 참고)
         self.pw.setAxisItems({"bottom": ax})
 
     def update_views(self):
@@ -666,27 +807,43 @@ class PlotMakerWidget(QWidget):
         return {
             "_version": self._STYLE_VERSION,
             "font_size": self._lbl_size.value(),
+            "tick_size": self._tick_size.value(),
             "legend": self._legend_combo.currentText(),
             "legend_size": self._legend_size.value(),
             "resample": self._res_combo.currentText(),
+            "resample_custom_min": self._res_custom_spin.value(),
             "smooth": self._smooth_spin.value(),
+            "time_shift_h": self._shift_spin.value(),
             "mode_colors": {m.key: dict(m.colors) for m in self._modes if m.colors},
             "night": night,
+            "label_style": self.label_style,
         }
 
     def _apply_style(self, st):
         if "font_size" in st:
             self._lbl_size.setValue(int(st["font_size"]))
+        if "tick_size" in st:
+            self._tick_size.setValue(int(st["tick_size"]))
         if st.get("legend") in ("auto", "TL", "TR", "BL", "BR", "off"):
             self._legend_combo.setCurrentText(st["legend"])
         if "legend_size" in st:
             self._legend_size.setValue(int(st["legend_size"]))
+        if "resample_custom_min" in st:
+            self._res_custom_spin.setValue(float(st["resample_custom_min"]))
         if st.get("resample"):
             i = self._res_combo.findText(st["resample"])
             if i >= 0:
                 self._res_combo.setCurrentIndex(i)
         if "smooth" in st:
             self._smooth_spin.setValue(int(st["smooth"]))
+        if "time_shift_h" in st:
+            self._shift_spin.setValue(float(st["time_shift_h"]))
+        if "label_style" in st:
+            for k, v in st["label_style"].items():
+                pos = v.get("pos")
+                self.label_style[k] = {"pos": tuple(pos) if pos else None,
+                                       "size": v.get("size"), "color": v.get("color")}
+            self._sync_label_style_widgets()
         for m in self._modes:
             mc = (st.get("mode_colors") or {}).get(m.key)
             if mc:
@@ -780,6 +937,41 @@ class PlotMakerWidget(QWidget):
         gp = self.pw.viewport().mapToGlobal(self.pw.mapFromScene(pos))
         QToolTip.showText(gp, text, self.pw)
 
+    def _on_plot_clicked(self, ev):
+        """🖱 Pick 모드일 때만 반응 — 클릭 위치를 그대로 마커 값으로 채택.
+        우클릭=취소. 값 입력칸 대신 그래프에서 직접 찍는 방식(_edit_annotations 참고)."""
+        if self._annot_pick is None:
+            return
+        if ev.button() == Qt.MouseButton.RightButton:
+            self._annot_pick = None
+            self.set_status("마커 추가 취소됨")
+            return
+        if not self.p1.sceneBoundingRect().contains(ev.scenePos()):
+            return
+        mp = self.p1.vb.mapSceneToView(ev.scenePos())
+        kind = self._annot_pick["kind"]
+        val = float(mp.x() if kind == "vline" else mp.y())
+        self._annots.append({"kind": kind, "val": val,
+                             "label": self._annot_pick.get("label", ""),
+                             "color": self._annot_pick.get("color", "#d32f2f")})
+        self._annot_pick = None
+        self._mode.render()
+        if self._time_axis and kind == "vline":
+            import datetime as _dt
+            try:
+                vs = _dt.datetime.fromtimestamp(val).strftime("%m-%d %H:%M")
+            except Exception:
+                vs = f"{val:.6g}"
+        else:
+            vs = f"{val:.6g}"
+        self.set_status(f"마커 추가됨: {vs}")
+        refresh = getattr(self, "_annot_dlg_refresh", None)
+        if refresh:
+            try:
+                refresh()
+            except Exception:
+                pass
+
     def autoscale(self):
         """데이터에 맞춰 양축 범위 재설정. 빈 우측 ViewBox가 X를 [0,1]에 묶어
         시간축이 깨지던 문제(autorange 미작동)를 매 render 끝에 강제 해소한다.
@@ -790,24 +982,107 @@ class PlotMakerWidget(QWidget):
         vb.autoRange()
         self.update_views()
         self.apply_axes()
-        self._apply_pg_label_font()
 
-    def _apply_pg_label_font(self):
-        """화면 플롯 축 라벨·제목 글자 크기 적용(0=auto면 건너뜀). render 끝마다 호출."""
-        sz = self._lbl_size.value() if hasattr(self, "_lbl_size") else 0
-        if sz <= 0:
+    # ── 라벨(제목/축) 그리기 — pg(화면)·mpl(Publish) 공용 진입점 ─────────────
+    # 모드들은 p1.setLabel/setTitle·ax.set_ylabel 등을 직접 부르지 않고 이 두
+    # 메서드만 호출한다 — label_style(pos/size/color)가 화면·Publish에서
+    # 절대 어긋나지 않게(ResolvedSeries와 같은 설계 원칙).
+    _AXIS_OF_KEY = {"xlabel": "bottom", "ylabel": "left", "rlabel": "right"}
+
+    def _default_label_pos(self, key):
+        """자유배치를 처음 켤 때 시작 위치 — ViewBox 사각형 기준 비율(fx,fy),
+        matplotlib의 ax.transAxes와 같은 개념(0-1 밖=축 여백 쪽). 전형적인
+        축라벨 오프셋과 비슷한 값으로 시작해서 드래그로 다듬게 한다."""
+        return {"title": (0.5, 1.05), "xlabel": (0.5, -0.09),
+               "ylabel": (-0.09, 0.5), "rlabel": (1.09, 0.5)}.get(key, (0.5, 0.5))
+
+    def _label_scene_pos(self, key, fx, fy):
+        """(fx,fy) 비율 → 현재 창 크기 기준 실제 씬(픽셀) 좌표."""
+        vb = self.vb_right if key == "rlabel" else self.p1.getViewBox()
+        rect = vb.sceneBoundingRect()
+        return (rect.left() + fx * rect.width(), rect.bottom() - fy * rect.height())
+
+    def pg_label(self, key, text):
+        """key: 'title'/'xlabel'/'ylabel'/'rlabel'. label_style[key]['pos']가
+        없으면 pg 기본 축라벨/제목으로, 있으면 드래그 가능한 자유배치 텍스트로
+        — ViewBox가 아니라 씬에 직접 붙여서 축 여백 쪽에도 놓일 수 있게 한다
+        (ViewBox 자식은 view range 밖이면 아예 안 그려지는 걸 확인했음)."""
+        st = self.label_style.setdefault(key, {"pos": None, "size": None, "color": None})
+        old = self._custom_label_items.pop(key, None)
+        if old is not None:
+            try:
+                self.p1.scene().removeItem(old)
+            except Exception:
+                pass
+        size = st.get("size") or (self._lbl_size.value() or 10)
+        color = st.get("color")
+        if st.get("pos") is None:
+            if key == "title":
+                self.p1.setTitle(text, size=f"{size}pt", **({"color": color} if color else {}))
+            else:
+                ax = self.p1.getAxis(self._AXIS_OF_KEY[key])
+                style = {"font-size": f"{size}pt"}
+                if color:
+                    style["color"] = color
+                ax.setLabel(text, **style)
             return
-        try:
-            style = {"font-size": f"{sz}pt"}
-            for nm in ("bottom", "left", "right"):
-                ax = self.p1.getAxis(nm)
-                if ax is not None and getattr(ax, "labelText", ""):
-                    ax.setLabel(**style)
-            ti = getattr(self.p1, "titleLabel", None)
-            if ti is not None and ti.text:
-                self.p1.setTitle(ti.text, size=f"{sz}pt")
-        except Exception:
-            pass
+        # 자유배치: 원래 자리는 비우고 드래그 가능한 텍스트로 대체
+        if key == "title":
+            self.p1.setTitle(None)   # None=완전히 숨김(""는 빈 줄 30px가 남음)
+        else:
+            self.p1.getAxis(self._AXIS_OF_KEY[key]).setLabel("")
+        if not text:
+            return
+        # ylabel/rlabel은 원래 pg 축라벨처럼 세로로 회전(안 그러면 가로 텍스트가
+        # 데이터 한복판에 그냥 떠 있는 것처럼 보임 — 실사용에서 발견된 버그).
+        angle = 90 if key in ("ylabel", "rlabel") else 0
+        item = _DraggableLabel(self, key, text=text, color=color or "#000000",
+                               anchor=(0.5, 0.5), angle=angle)
+        from PyQt6.QtGui import QFont
+        font = QFont(); font.setPointSize(int(size)); item.setFont(font)
+        fx, fy = st["pos"]
+        sx, sy = self._label_scene_pos(key, fx, fy)
+        item.setPos(sx, sy)
+        self.p1.scene().addItem(item)   # ViewBox 대신 씬에 직접 → 여백 쪽도 표시됨
+        self._custom_label_items[key] = item
+
+    def mpl_label(self, ax, key, text):
+        """key: 'title'/'xlabel'/'ylabel'/'rlabel'. ax는 해당 라벨이 붙을 Axes
+        (rlabel이면 twinx된 오른쪽 축). pg_label과 동일한 label_style 참조."""
+        st = self.label_style.get(key, {"pos": None, "size": None, "color": None})
+        size = st.get("size") or (self._lbl_size.value() or None)
+        color = st.get("color")
+        setter = {"title": ax.set_title, "xlabel": ax.set_xlabel,
+                 "ylabel": ax.set_ylabel, "rlabel": ax.set_ylabel}[key]
+        if st.get("pos") is None:
+            setter(text, fontsize=size, **({"color": color} if color else {}))
+            return
+        setter("")
+        if not text:
+            return
+        # pg와 동일하게 축(ax) 사각형 기준 비율(fx,fy) — transAxes는 정확히 이 개념이라
+        # 데이터 범위/줌과 무관하게 pg 미리보기와 항상 같은 상대 위치가 된다.
+        rot = 90 if key in ("ylabel", "rlabel") else 0
+        fx, fy = st["pos"]
+        ax.text(fx, fy, text, transform=ax.transAxes, fontsize=size or 10,
+               color=color or "black", rotation=rot, ha="center", va="center", clip_on=False)
+
+    def toggle_label_free_pos(self, key, on):
+        """라벨 자유배치 on/off. on이면 기본 시작위치(_default_label_pos)를 잡아
+        드래그 가능하게, off면 pos를 지워 원래 축 자리로 되돌림."""
+        st = self.label_style.setdefault(key, {"pos": None, "size": None, "color": None})
+        st["pos"] = self._default_label_pos(key) if on else None
+        self._mode.render()
+
+    def reset_label_positions(self):
+        self.label_style = {k: {"pos": None, "size": v.get("size"), "color": v.get("color")}
+                            for k, v in self.label_style.items()}
+        for w in getattr(self, "_label_style_widgets", {}).values():
+            chk = w.get("free_chk")
+            if chk is not None:
+                chk.blockSignals(True); chk.setChecked(False); chk.blockSignals(False)
+        self._mode.render()
+        self.set_status("라벨 위치 전부 기본값으로 리셋")
 
     def _edit_colors(self):
         """현재 모드의 color_keys() 요소들 색을 지정하는 다이얼로그(라이브 적용)."""
@@ -993,7 +1268,11 @@ class PlotMakerWidget(QWidget):
         self._mark_invalid(self._ax_xmin, bool(self._ax_xmin.text().strip()) and xmin is None)
         self._mark_invalid(self._ax_xmax, bool(self._ax_xmax.text().strip()) and xmax is None)
         if xmin is not None and xmax is not None and xmin < xmax:
-            vb.setXRange(conv(xmin, fx), conv(xmax, fx), padding=0)
+            # 시간축(DateAxisItem)은 padding=0이면 양 끝 눈금 라벨이 축 경계를 벗어나
+            # 아예 그려지지 않는 pyqtgraph 특성이 있음 → 화면표시만 살짝 여백(2%)을 둬서
+            # 29일/5일 같은 경계 날짜가 잘리지 않고 보이게 함(Publish/저장 좌표는 그대로 tight).
+            pad = 0.02 if self._time_axis and not fx else 0
+            vb.setXRange(conv(xmin, fx), conv(xmax, fx), padding=pad)
         ymin_raw = self._axis_val(self._ax_ymin); ymax_raw = self._axis_val(self._ax_ymax)
         self._mark_invalid(self._ax_ymin, bool(self._ax_ymin.text().strip()) and ymin_raw is None)
         self._mark_invalid(self._ax_ymax, bool(self._ax_ymax.text().strip()) and ymax_raw is None)
@@ -1022,20 +1301,87 @@ class PlotMakerWidget(QWidget):
         tx = self._axis_val(self._tick_x)
         self._mark_invalid(self._tick_x, bool(self._tick_x.text().strip()) and not (tx and tx > 0))
         if tx and tx > 0 and not fx:
-            step = tx * 86400.0 if self._time_axis else tx
+            anchored = self._anchored_x_ticks(tx)
             try:
-                self.p1.getAxis("bottom").setTickSpacing(major=step, minor=step / 2.0)
+                if anchored is not None:
+                    # 앵커 날짜 기준 고정 눈금 — pg setTickSpacing은 epoch 0 기준
+                    # 위상이라 임의 날짜 앵커가 안 됨 → 명시적 setTicks로 통일.
+                    self.p1.getAxis("bottom").setTicks([anchored])
+                else:
+                    step = tx * 86400.0 if self._time_axis else tx
+                    self.p1.getAxis("bottom").setTickSpacing(major=step, minor=step / 2.0)
             except Exception as e:
                 self.set_status(f"⚠ X tick spacing 적용 실패(화면만, Publish는 정상): {e}")
-        # 축 라벨·눈금 표시/숨김 (화면)
+        # 눈금 글자 크기 (화면) — Publish(_apply_axes_mpl)와 같은 규칙(_tick_pt)
+        ts_pt = self._tick_pt()
+        try:
+            from PyQt6.QtGui import QFont
+            tf = None
+            if ts_pt > 0:
+                tf = QFont(); tf.setPointSize(ts_pt)
+            for nm in ("bottom", "left", "right"):
+                self.p1.getAxis(nm).setStyle(tickFont=tf)   # None=pg 기본
+        except Exception: pass
+        # 축 라벨·눈금 표시/숨김 (화면) — 숫자(텍스트)와 눈금선(마크)은 독립 토글
         if hasattr(self, "_chk_xlabel"):
             bax = self.p1.getAxis("bottom"); lax = self.p1.getAxis("left")
             try:
-                bax.setStyle(showValues=self._chk_xticks.isChecked())
-                lax.setStyle(showValues=self._chk_yticks.isChecked())
+                sx_pg = self._chk_xticks.isChecked(); sy_pg = self._chk_yticks.isChecked()
+                mx_pg = self._chk_xtickmarks.isChecked(); my_pg = self._chk_ytickmarks.isChecked()
+                tick_px = self._tick_geom_px()   # 부호 = 방향(pg: 양수=바깥, 음수=안)
+                bax.setStyle(showValues=sx_pg, tickLength=tick_px if mx_pg else 0)
+                lax.setStyle(showValues=sy_pg, tickLength=tick_px if my_pg else 0)
                 bax.showLabel(self._chk_xlabel.isChecked())
                 lax.showLabel(self._chk_ylabel.isChecked())
             except Exception: pass
+
+    def _tick_geom_px(self):
+        """눈금선 부호있는 길이(px) — pg·mpl 공용 단일 규칙.
+        길이 = Tick 선 길이(0=auto→5), 부호 = 방향(바깥 out=+ / 안 in=−).
+        pg AxisItem은 bottom/left 기준 양수가 텍스트쪽(바깥), 음수가 플롯 안쪽."""
+        n = self._tick_len.value() if hasattr(self, "_tick_len") else 0
+        length = n if n > 0 else 5
+        is_in = hasattr(self, "_tick_dir") and self._tick_dir.currentIndex() == 1
+        return -length if is_in else length
+
+    def _anchored_x_ticks(self, tx_days):
+        """앵커 날짜 + N일 간격의 X 눈금 목록 [(epoch, 라벨), ...] — 시간축이고
+        앵커 입력이 있을 때만(아니면 None=기존 자동/등간격 로직). 앵커는 위상
+        기준이라 화면 범위 앞뒤로도 같은 간격으로 이어진다. pg·mpl 공용."""
+        if not self._time_axis:
+            return None
+        txt = (getattr(self, "_tick_x_anchor", None) and self._tick_x_anchor.text().strip()) or ""
+        if not txt:
+            if hasattr(self, "_tick_x_anchor"):
+                self._mark_invalid(self._tick_x_anchor, False)   # 지웠으면 오류표시도 해제
+            return None
+        anchor = self._parse_x(txt)
+        self._mark_invalid(self._tick_x_anchor, anchor is None)
+        if anchor is None:
+            return None
+        (x0, x1), _ = self.p1.getViewBox().viewRange()
+        step = tx_days * 86400.0
+        import math, datetime as _dt
+        k0 = math.floor((x0 - anchor) / step)
+        k1 = math.ceil((x1 - anchor) / step)
+        fmt = "%m-%d" if tx_days >= 1 else "%m-%d %H:%M"
+        out = []
+        for k in range(int(k0), int(k1) + 1):
+            p = anchor + k * step
+            try:
+                out.append((p, _dt.datetime.fromtimestamp(p).strftime(fmt)))
+            except (OSError, OverflowError, ValueError):
+                continue
+        return out or None
+
+    def _tick_pt(self):
+        """눈금 글자 크기(pt) — pg·mpl 공용 단일 규칙.
+        Tick size 지정 시 그 값, 0(auto)이면 전역 Font size−2(최소 6), 둘 다 auto면 0(=기본)."""
+        t = self._tick_size.value() if hasattr(self, "_tick_size") else 0
+        if t > 0:
+            return t
+        sz = self._lbl_size.value() if hasattr(self, "_lbl_size") else 0
+        return max(sz - 2, 6) if sz > 0 else 0
 
     def _apply_axes_mpl(self, fig):
         """Publish(matplotlib)에도 동일한 축 범위/로그 적용."""
@@ -1084,7 +1430,15 @@ class PlotMakerWidget(QWidget):
         if tx and tx > 0:
             if self._time_axis:
                 import matplotlib.dates as _mdates
-                axes[-1].xaxis.set_major_locator(_mdates.DayLocator(interval=max(1, int(tx))))
+                anchored = self._anchored_x_ticks(tx)
+                if anchored is not None:
+                    # 앵커 날짜 기준 고정 눈금 — pg(apply_axes)와 같은 위치 목록 사용
+                    import datetime as _dt2
+                    locs = [_mdates.date2num(_dt2.datetime.fromtimestamp(p))
+                            for p, _lbl in anchored]
+                    axes[-1].xaxis.set_major_locator(_mtick.FixedLocator(locs))
+                else:
+                    axes[-1].xaxis.set_major_locator(_mdates.DayLocator(interval=max(1, int(tx))))
             else:
                 for a in axes:
                     a.xaxis.set_major_locator(_mtick.MultipleLocator(tx))
@@ -1095,31 +1449,65 @@ class PlotMakerWidget(QWidget):
                 a.xaxis.label.set_fontsize(sz)
                 a.yaxis.label.set_fontsize(sz)
                 a.title.set_fontsize(sz + 1)
-                a.tick_params(labelsize=max(sz - 2, 6))
+        ts_pt = self._tick_pt()   # 눈금 글자 크기 — 화면(apply_axes)과 같은 규칙
+        if ts_pt > 0:
+            for a in axes:
+                a.tick_params(labelsize=ts_pt)
         # 축 라벨·눈금 표시/숨김 (Publish). 끄면 아예 안 그림.
         if hasattr(self, "_chk_xlabel"):
             hide_xl = not self._chk_xlabel.isChecked()
             hide_yl = not self._chk_ylabel.isChecked()
             sx = self._chk_xticks.isChecked(); sy = self._chk_yticks.isChecked()
+            mx = self._chk_xtickmarks.isChecked(); my = self._chk_ytickmarks.isChecked()
+            tick_px = self._tick_geom_px()   # 부호=방향, 절대값=길이 — 화면(pg)과 동일 규칙
+            tdir = "in" if tick_px < 0 else "out"
             for a in axes:
                 if hide_xl:
                     a.set_xlabel("")
                 if hide_yl:
                     a.set_ylabel("")
-                a.tick_params(labelbottom=sx, labelleft=sy)
-        # 주석 마커선(세로=이벤트, 가로=LOD/임계) — 모든 패널에(분할 시 x축 공유)
+                a.tick_params(axis="x", which="both", bottom=mx, labelbottom=sx,
+                              direction=tdir, length=abs(tick_px))
+                a.tick_params(axis="y", which="both", left=my, labelleft=sy,
+                              direction=tdir, length=abs(tick_px))
+        # 주석 마커선(세로=이벤트, 가로=LOD/임계) — 모든 패널에(분할 시 x축 공유).
+        # 화면(pg InfiniteLine)은 라벨을 선 옆에 직접 띄우고 범례엔 안 넣는다 — Publish도
+        # 동일하게 axvline(label=)이 아니라 text()로 선 옆에 그려서 legend on/off와
+        # 무관하게 항상 보이게 한다(이전엔 label=만 줘서 범례가 꺼져 있으면 안 보였음).
         import datetime as _dt
+        if getattr(self, "_annots", []):
+            # pg는 ignoreBounds=True로 넣어 마커선이 화면 범위를 못 늘리는데, mpl의
+            # axvline/axhline은 자동범위(datalim)에 포함된다 → 다른 좌표계 모드
+            # (Diurnal 0-23h 등)에서 epoch 초 세로선이 x축을 17억까지 늘려 데이터가
+            # 압착되는 실버그(2026-07-07). 자동범위를 먼저 확정·고정해두고 주석을
+            # 그린 뒤 되돌려서 pg와 같은 의미론(선은 범위에 무영향)으로 맞춘다.
+            for a in axes:
+                a.autoscale_view()          # 사용자가 xlim/ylim 지정했으면 그대로 유지됨
+            saved_lims = [(a, a.get_xlim(), a.get_ylim()) for a in axes]
         for an in getattr(self, "_annots", []):
             col = an.get("color") or "#555"
             lbl = an.get("label") or None
             for ai, a in enumerate(axes):
-                lb = lbl if ai == 0 else None   # 라벨은 첫 패널만(범례 중복 방지)
+                show_label = (ai == 0) and lbl   # 라벨은 첫 패널에만(중복 방지)
                 if an["kind"] == "vline":
                     xv = (_dt.datetime.fromtimestamp(an["val"]) if self._time_axis
                           else an["val"])
-                    a.axvline(xv, color=col, ls="--", lw=1, label=lb)
+                    a.axvline(xv, color=col, ls="--", lw=1)
+                    if show_label:
+                        ylo, yhi = a.get_ylim()
+                        a.text(xv, yhi, f" {lbl}", color=col, fontsize=8,
+                              va="top", ha="left", clip_on=True,   # 범위 밖 라벨은 선처럼 안 보이게
+                              bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
                 else:
-                    a.axhline(an["val"], color=col, ls="--", lw=1, label=lb)
+                    a.axhline(an["val"], color=col, ls="--", lw=1)
+                    if show_label:
+                        xlo, xhi = a.get_xlim()
+                        a.text(xlo, an["val"], f"{lbl} ", color=col, fontsize=8,
+                              va="bottom", ha="left", clip_on=True,
+                              bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
+        if getattr(self, "_annots", []):
+            for a, xl, yl in saved_lims:    # 주석이 늘려놓은 범위 원상복구(ignoreBounds 동치)
+                a.set_xlim(xl); a.set_ylim(yl)
         # 범례 위치/끄기 — 모드가 만든 범례를 중앙에서 재배치
         loc = self._legend_combo.currentText() if hasattr(self, "_legend_combo") else "TL"
         a0 = axes[0]
@@ -1191,14 +1579,18 @@ class PlotMakerWidget(QWidget):
         return out
 
     def resolve(self, label):
-        """"ds:col" → (Dataset, col, y, t) 또는 None."""
+        """"ds:col" → (Dataset, col, y, t) 또는 None.
+        t는 time_shift_hours가 있으면 표시용으로만 이동(ds.time 원본은 불변)."""
         if not label or ":" not in label:
             return None
         name, col = label.split(":", 1)
         ds = self.shelf.get(name)
         if ds is None or col not in ds.cols:
             return None
-        return ds, col, ds.cols[col], ds.time
+        t = ds.time
+        if t is not None and self.time_shift_hours:
+            t = t + self.time_shift_hours * 3600.0
+        return ds, col, ds.cols[col], t
 
     # 명시 단위가 없을 때 ppb로 볼 미량기체 농도 컬럼(정확 매칭 — _Shift/_Squeeze 등 제외).
     _PPB_COLS = {"no2", "ans", "pns", "chocho", "glyoxal", "h2o",
@@ -1233,6 +1625,13 @@ class PlotMakerWidget(QWidget):
             return
         dlg_dir("result", paths[0])
         self.add_paths(paths)
+
+    def _add_data_by_date(self):
+        """📅 일별 핏 버킷에서 기간·시리즈 선택 → 자동 머지 파일을 선반에 추가."""
+        from gui.dlg_date_load import DateLoadDialog
+        dlg = DateLoadDialog(self)
+        if dlg.exec() and dlg.loaded_paths:
+            self.add_paths(dlg.loaded_paths)
 
     def add_paths(self, paths):
         """파일 경로 목록을 선반에 로드(결과뷰어의 'Send to Plot Maker' 등에서 호출)."""
@@ -1474,13 +1873,83 @@ class PlotMakerWidget(QWidget):
         self._mode.render()
 
     def _on_transform_changed(self, *_):
-        self.resample_sec = _RESAMPLE.get(self._res_combo.currentText(), 0)
+        is_custom = self._res_combo.currentText() == _RESAMPLE_CUSTOM
+        self._res_custom_spin.setEnabled(is_custom)
+        if is_custom:
+            self.resample_sec = self._res_custom_spin.value() * 60.0
+        else:
+            self.resample_sec = _RESAMPLE.get(self._res_combo.currentText(), 0)
         self.smooth_n = self._smooth_spin.value()
+        self.time_shift_hours = self._shift_spin.value()
         self._mode.render()
 
     def _on_labels_changed(self):
         self.custom = {"title": self._ed_title.text(), "xlabel": self._ed_x.text(),
                        "ylabel": self._ed_y.text(), "rlabel": self._ed_r.text()}
+        self._mode.render()
+
+    def _build_label_row(self, key, line_edit):
+        """Labels 그룹박스 한 줄: [텍스트][크기(0=전역)][🎨 색][↺ 리셋][📍 자유배치].
+        self._label_style_widgets[key]에 위젯들을 저장해 설정 저장/불러오기 때 재사용."""
+        line_edit.editingFinished.connect(self._on_labels_changed)
+        row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(line_edit, 1)
+        sp = QSpinBox(); sp.setRange(0, 40); sp.setSpecialValueText("−"); sp.setSuffix("pt")
+        sp.setFixedWidth(58)
+        sp.setToolTip("이 라벨만 글자 크기(0=전역 Font size 사용)")
+        sp.valueChanged.connect(lambda v, k=key: self._on_label_style_changed(k))
+        row.addWidget(sp)
+        btn = QPushButton("🎨"); btn.setFixedWidth(26)
+        btn.setToolTip("이 라벨 글자색 지정(왼쪽 클릭=고르기)")
+        btn.clicked.connect(lambda _, k=key, b=btn: self._pick_label_color(k, b))
+        row.addWidget(btn)
+        btn_rst = QPushButton("↺"); btn_rst.setFixedWidth(22)
+        btn_rst.setToolTip("이 라벨의 크기·색을 자동으로 되돌림")
+        btn_rst.clicked.connect(lambda _, k=key: self._reset_label_style(k))
+        row.addWidget(btn_rst)
+        chk = QCheckBox("📍")
+        chk.setToolTip("체크하면 그래프 안쪽·바깥 여백 어디든 마우스로 드래그해 놓을 수 있음.\n"
+                      "위치는 화면 비율로 저장되어 화면·Publish가 항상 같은 자리에 그림.")
+        chk.toggled.connect(lambda on, k=key: self.toggle_label_free_pos(k, on))
+        row.addWidget(chk)
+        self._label_style_widgets[key] = {"size": sp, "color_btn": btn, "free_chk": chk}
+        w = QWidget(); w.setLayout(row)
+        return w
+
+    def _on_label_style_changed(self, key):
+        sp = self._label_style_widgets[key]["size"]
+        st = self.label_style.setdefault(key, {"pos": None, "size": None, "color": None})
+        st["size"] = sp.value() or None
+        self._mode.render()
+
+    def _pick_label_color(self, key, btn):
+        from PyQt6.QtWidgets import QColorDialog
+        from PyQt6.QtGui import QColor
+        cur = (self.label_style.get(key) or {}).get("color") or "#000000"
+        c = QColorDialog.getColor(QColor(cur), self, f"{key} color")
+        if not c.isValid():
+            return
+        st = self.label_style.setdefault(key, {"pos": None, "size": None, "color": None})
+        st["color"] = c.name()
+        btn.setStyleSheet(f"background:{c.name()};")
+        self._mode.render()
+
+    def _sync_label_style_widgets(self):
+        """label_style(설정 불러오기 등으로 바뀜) → Size/색/📍 위젯 표시 동기화."""
+        for k, w in getattr(self, "_label_style_widgets", {}).items():
+            st = self.label_style.get(k) or {}
+            sp, btn, chk = w["size"], w["color_btn"], w["free_chk"]
+            sp.blockSignals(True); sp.setValue(int(st.get("size") or 0)); sp.blockSignals(False)
+            btn.setStyleSheet(f"background:{st['color']};" if st.get("color") else "")
+            chk.blockSignals(True); chk.setChecked(st.get("pos") is not None); chk.blockSignals(False)
+
+    def _reset_label_style(self, key):
+        st = self.label_style.setdefault(key, {"pos": None, "size": None, "color": None})
+        st["size"] = None; st["color"] = None
+        w = self._label_style_widgets.get(key)
+        if w:
+            w["size"].blockSignals(True); w["size"].setValue(0); w["size"].blockSignals(False)
+            w["color_btn"].setStyleSheet("")
         self._mode.render()
 
     def _on_axes_changed(self, *_):
@@ -1520,6 +1989,9 @@ class PlotMakerWidget(QWidget):
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
         self._mode.render_mpl(fig)
         self._apply_axes_mpl(fig)
+        if self.time_shift_hours:
+            fig.text(0.995, 0.005, f"⚠ time shift {self.time_shift_hours:+g}h applied (display only)",
+                     ha="right", va="bottom", fontsize=7, color="#b00")
         fig.tight_layout()
         return fig
 
@@ -1713,16 +2185,25 @@ class PlotMakerWidget(QWidget):
             "datasets": {n: ds.path for n, ds in self.shelf.items()},
             "mode": self._mode.key,
             "resample": self._res_combo.currentText(),
+            "resample_custom_min": self._res_custom_spin.value(),
             "smooth": self._smooth_spin.value(),
+            "time_shift_h": self._shift_spin.value(),
             "labels": dict(self.custom),
+            "label_style": self.label_style,
             "axes": {"xmin": self._ax_xmin.text(), "xmax": self._ax_xmax.text(),
                      "ymin": self._ax_ymin.text(), "ymax": self._ax_ymax.text(),
                      "rmin": self._ax_rmin.text(), "rmax": self._ax_rmax.text(),
                      "logx": self._chk_logx.isChecked(), "logy": self._chk_logy.isChecked(),
                      "grid": self._chk_grid.isChecked(), "grid_minor": self._chk_grid_minor.isChecked(),
                      "tick_x": self._tick_x.text(), "tick_y": self._tick_y.text(),
+                     "tick_x_anchor": self._tick_x_anchor.text(),
+                     "tick_size": self._tick_size.value(),
+                     "tick_dir": self._tick_dir.currentIndex(),
+                     "tick_len": self._tick_len.value(),
                      "xlabel_on": self._chk_xlabel.isChecked(), "ylabel_on": self._chk_ylabel.isChecked(),
-                     "xticks_on": self._chk_xticks.isChecked(), "yticks_on": self._chk_yticks.isChecked()},
+                     "xticks_on": self._chk_xticks.isChecked(), "yticks_on": self._chk_yticks.isChecked(),
+                     "xtickmarks_on": self._chk_xtickmarks.isChecked(),
+                     "ytickmarks_on": self._chk_ytickmarks.isChecked()},
             "fig_size": [self._fig_w.value(), self._fig_h.value()], "dpi": self._dpi_spin.value(),
             "mode_cfg": {m.key: m.to_config() for m in self._modes},
         }
@@ -1760,8 +2241,10 @@ class PlotMakerWidget(QWidget):
                 missing.append(name)
         self._refresh_tree()
         self._notify_modes()
+        self._res_custom_spin.setValue(float(cfg.get("resample_custom_min", 2.0)))
         self._res_combo.setCurrentText(cfg.get("resample", "Raw"))
         self._smooth_spin.setValue(int(cfg.get("smooth", 1)))
+        self._shift_spin.setValue(float(cfg.get("time_shift_h", 0.0)))
         lab = cfg.get("labels", {})
         self._ed_title.setText(lab.get("title", ""))
         self._ed_x.setText(lab.get("xlabel", ""))
@@ -1769,6 +2252,12 @@ class PlotMakerWidget(QWidget):
         self._ed_r.setText(lab.get("rlabel", ""))
         self.custom = {"title": lab.get("title", ""), "xlabel": lab.get("xlabel", ""),
                        "ylabel": lab.get("ylabel", ""), "rlabel": lab.get("rlabel", "")}
+        if "label_style" in cfg:
+            for k, v in cfg["label_style"].items():
+                pos = v.get("pos")
+                self.label_style[k] = {"pos": tuple(pos) if pos else None,
+                                       "size": v.get("size"), "color": v.get("color")}
+            self._sync_label_style_widgets()
         axc = cfg.get("axes", {})
         self._ax_xmin.setText(str(axc.get("xmin", ""))); self._ax_xmax.setText(str(axc.get("xmax", "")))
         self._ax_ymin.setText(str(axc.get("ymin", ""))); self._ax_ymax.setText(str(axc.get("ymax", "")))
@@ -1778,10 +2267,17 @@ class PlotMakerWidget(QWidget):
         self._chk_grid.setChecked(bool(axc.get("grid", True)))
         self._chk_grid_minor.setChecked(bool(axc.get("grid_minor", False)))
         self._tick_x.setText(str(axc.get("tick_x", ""))); self._tick_y.setText(str(axc.get("tick_y", "")))
+        self._tick_x_anchor.setText(str(axc.get("tick_x_anchor", "")))
+        self._tick_size.setValue(int(axc.get("tick_size", 0)))
+        self._tick_dir.setCurrentIndex(int(axc.get("tick_dir", 0)))
+        self._tick_len.setValue(int(axc.get("tick_len", 0)))
         self._chk_xlabel.setChecked(bool(axc.get("xlabel_on", True)))
         self._chk_ylabel.setChecked(bool(axc.get("ylabel_on", True)))
         self._chk_xticks.setChecked(bool(axc.get("xticks_on", True)))
         self._chk_yticks.setChecked(bool(axc.get("yticks_on", True)))
+        # 구버전 설정(눈금선 키 없음)은 당시 동작(숫자와 함께 on/off)을 따라감
+        self._chk_xtickmarks.setChecked(bool(axc.get("xtickmarks_on", axc.get("xticks_on", True))))
+        self._chk_ytickmarks.setChecked(bool(axc.get("ytickmarks_on", axc.get("yticks_on", True))))
         fsz = cfg.get("fig_size")
         if isinstance(fsz, (list, tuple)) and len(fsz) == 2:
             self._chk_autosize.setChecked(False)   # 저장된 크기 유지(자동 덮어쓰기 끔)

@@ -344,7 +344,7 @@ class AnalysisWorker(QThread):
                 _ts = DataIO.parse_alpha_row_time(file_path, row_idx)   # 알파: doy/datetime 컬럼
             else:
                 _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
-            # 채널 입력 TZ → UTC 변환(KST면 −9h). 계기시각을 출력 시각으로만 보정.
+            # 채널 시각 시프트(초). 순수 시간이동 — 계기시각을 출력 시각으로만 보정.
             _off = getattr(self, 'tz_offset_sec', 0)
             if _ts is not None and _off:
                 from datetime import timedelta as _td_tz
@@ -755,7 +755,10 @@ class AnalysisWorker(QThread):
                     diff_data = plot_signal - poly_val_orig - etalon_part_orig
                     diff_fit = fit_sign * abs_val_orig
                     ch_label = f"[CH{self.channel}] " if self.channel > 1 else ""
-                    self.plot_update.emit(pixel_idx, diff_data, diff_fit, np.zeros_like(pixel_idx), final_params_dict, ch_label + os.path.basename(file_path))
+                    # 4번째 인자 = 폴리 베이스라인(모니터 'Polynomial Baseline' 파란선). 예전엔
+                    # zeros를 넘겨 화면에 0 직선으로 떴다(폴리는 실제 핏·적용됨 — diff_data에서
+                    # poly_val_orig를 빼는 중). 실제 폴리 곡선을 넘겨 보이게 한다.
+                    self.plot_update.emit(pixel_idx, diff_data, diff_fit, poly_val_orig, final_params_dict, ch_label + os.path.basename(file_path))
                     sh_val, sq_val = opt_shifts[ 0 ] if len(opt_shifts) > 0 else 0, opt_squeezes[ 0 ] if len(opt_squeezes) > 0 else 1
                     self.trend_update.emit({'idx': i, 'shift': sh_val, 'squeeze': sq_val, 'rms': rms, 'channel': self.channel, 'Time': result.get('Time')})
                     
@@ -1361,13 +1364,19 @@ class AlphaExportWorker(QThread):
         wave_nm = self.wave_nm
         n_pix   = len(wave_nm)
 
-        # expand to (filepath, row_idx) tuples
+        # expand to (filepath, row_idx) tuples — 인덱싱(파일별 스캔수 세기) 진행 표시
+        _nf = len(self.file_list)
+        self.total_ready.emit(max(1, _nf))
+        self.status_msg.emit(f"Indexing {_nf} file(s)…")
         expanded = []
-        for entry in self.file_list:
+        for _k, entry in enumerate(self.file_list, 1):
             if isinstance(entry, tuple):
                 expanded.append(entry)
             else:
                 expanded.extend(DataIO.expand_to_scan_list(entry))
+            self.progress.emit(_k)
+            if _k % 10 == 0 or _k == _nf:
+                self.status_msg.emit(f"Indexing {_k}/{_nf} files… ({len(expanded)} scans)")
 
         self.total_ready.emit(len(expanded))
 

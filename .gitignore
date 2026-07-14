@@ -40,3 +40,6 @@ diagnostics/parallel_shift_bench/*.out
 
 # 진단 도구 출력 이미지 (코드만 추적, 재생성 가능한 PNG 제외)
 tools/*.png
+
+# Alpha Pass1 중간산물 캐시(재생성 가능 — 커밋 금지)
+cache/

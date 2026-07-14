@@ -54,7 +54,7 @@ Windows에서는 `CAESAR_Pro_실행.bat` 더블클릭으로도 켜진다(콘솔 
 |----|----|--------|
 | 1 | 🛠️ **Setup** | raw `.dat` 폴더 지정, 파장 보정·레퍼런스·R(반사율) 준비, 피팅 시나리오 선택 |
 | 2 | 📈 **Analysis Monitor** | RUN을 눌러 DOAS 피팅 실행, 진행 상황·실시간 농도 확인 |
-| 3 | 📂 **Result Viewer** | 산출된 결과 파일(농도 시계열) 열람·자르기·병합 |
+| 3 | 📂 **Result Lab** | 산출된 결과 파일(농도 시계열) 열람·자르기·병합·QC 재적용·계산기 |
 | 4 | 📉 **Plot Maker** | 종별 시계열/Diurnal(시간대별) 그래프 만들기·내보내기 |
 
 분석에 쓰는 거울 반사율 R 등은 Setup 탭의 **R Calibrator**(R 커브·시계열)에서 만든다.
@@ -103,8 +103,8 @@ CAESAR/
 │   ├── worker.py              ← 분석 QThread 워커 (AnalysisWorker)
 │   ├── r_workers.py           ← R Calibrator 백그라운드 워커 (rt_precompute·r_trend lazy)
 │   ├── ui_alpha_gen.py        ← Alpha Generator 팝업 (raw → *_alpha_trace.dat)
-│   ├── ui_result_viewer.py    ← 결과 뷰어 (Result Viewer)
-│   ├── ui_plot_maker.py       ← Plot Maker (시계열/Diurnal 플롯)
+│   ├── ui_result_viewer.py    ← 결과 뷰어 (Result Lab)
+│   ├── ui_plot_maker/         ← Plot Maker 패키지 (widget/modes/core/data/processing)
 │   ├── ui_peak_trend.py       ← Setup 탭 피크 트렌드 뷰어 (flag별 시계열)
 │   ├── result_viewer_io.py    ← 결과 뷰어 IO 헬퍼
 │   ├── dlg_dir.py             ← 파일 다이얼로그 '버튼별 최근 디렉토리' 헬퍼
@@ -213,7 +213,8 @@ python diagnostics/fwhm_r_check.py --mode hot
 
 > 자세한 내용은 `core/raw_parser.py` 와 `tools/r_trend_monitor.py` 상단 docstring 참조
 
-- **col1** : 센티초(centiseconds) 단위. UTC 초가 아님.
-- **타임스탬프** : 파일 `mtime` 사용 (DAQ가 파일 열 때 기록, 1시간 간격).
+- **col0·col1** : bytepack 시각 — `(col0<<16)|col1` = 연초(1/1 00:00) 기준 센티초(0.01초) 카운터.
+- **타임스탬프** : 행별 bytepack 시각 사용 (박사님 `.mat`의 doy와 std=0.0000s 일치 검증).
+  파일 `mtime`은 bytepack을 못 읽을 때의 폴백일 뿐이다.
 - **flag=500** : ZA(Zero Air) 스캔 → R 계산 사용
 - **flag=510** : He(Helium) 스캔 → R 계산 사용

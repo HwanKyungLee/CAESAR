@@ -422,7 +422,9 @@ class MonitorWidget(QWidget):
             self.curve_items[f"{name}_data"].setData(x_plot, residual + gas_fit)
             self.curve_items[f"{name}_fit"].setData(x_plot, gas_fit)
             
-        self.curve_items["poly_raw"].setData(x_plot, intensity_raw)
+        # Polynomial Baseline 뷰: 점 = 브로드밴드 신호(diff_data + poly = signal−etalon),
+        # 선 = 피팅된 폴리. intensity_poly가 0이 아니면 폴리가 실제 적용된 것.
+        self.curve_items["poly_raw"].setData(x_plot, intensity_raw + intensity_poly)
         self.curve_items["poly_fit"].setData(x_plot, intensity_poly)
         self.curve_items["residual"].setData(x_plot, residual)
 

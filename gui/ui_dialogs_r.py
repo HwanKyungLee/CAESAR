@@ -454,8 +454,17 @@ class RCalibratorDialog(QDialog):
             r_start = float(qs.value(f"r_calib/ch{ch}/r_start", fit_s))
             r_end   = float(qs.value(f"r_calib/ch{ch}/r_end",   fit_e))
 
-            tz_h   = 9 if str(cfg.get('input_tz', '')).startswith('KST') else 0
-            tz_str = "KST" if tz_h == 9 else "UTC"
+            # 좌패널 'Time shift'(출력 시각에 더할 시프트) → R-calc는 '데이터의 UTC
+            # 오프셋'이 필요(부호 반대). 레거시 'input_tz' 문자열(KST(+9))도 호환.
+            _tsv = cfg.get('time_shift_h', cfg.get('input_tz', 0.0))
+            if isinstance(_tsv, (int, float)):
+                _shift = float(_tsv)
+            elif str(_tsv).strip().upper().startswith('KST'):
+                _shift = -9.0
+            else:
+                _shift = 0.0
+            tz_h   = -_shift                       # 데이터 UTC 오프셋 = −(출력 시프트)
+            tz_str = f"UTC{tz_h:+g}" if tz_h else "UTC"
 
             raw_dir = qs.value(f"r_calib/ch{ch}/raw_dir", "")
             raw_ch  = int(qs.value(f"r_calib/ch{ch}/raw_ch", 1))

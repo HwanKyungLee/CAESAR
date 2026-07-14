@@ -137,14 +137,20 @@ class CAESARAnalyzer(QMainWindow):
             "Default: auto-distributed by alpha header channel number (# channel=N) → leave empty (campaign-independent).\n"
             "Override label for special cases only: maps alpha matching filename/header label/'ch{N}' to this channel.")
         _chtab_bar.addWidget(self._ed_ch_datalabel)
-        _chtab_bar.addWidget(QLabel("TZ:"))
-        self.cb_input_tz = QComboBox()
-        self.cb_input_tz.addItems(["UTC", "KST(+9)"])
-        self.cb_input_tz.setFixedWidth(int(80 * self._s))
-        self.cb_input_tz.setToolTip(
-            "Timezone of this channel's data (instrument time). Output times (result Time·conc tab) unified to UTC.\n"
-            "If KST(+9), result times are shifted −9h to UTC. (Cold Jun·Hot Jun=UTC, Hot May=KST)")
-        _chtab_bar.addWidget(self.cb_input_tz)
+        _chtab_bar.addWidget(QLabel("Time shift:"))
+        self.spin_time_shift = QDoubleSpinBox()
+        self.spin_time_shift.setRange(-24.0, 24.0)
+        self.spin_time_shift.setDecimals(1)
+        self.spin_time_shift.setSingleStep(1.0)
+        self.spin_time_shift.setValue(0.0)
+        self.spin_time_shift.setSuffix(" h")
+        self.spin_time_shift.setFixedWidth(int(72 * self._s))
+        self.spin_time_shift.setToolTip(
+            "Hours to add to this channel's timestamps in the output (result Time·conc tab).\n"
+            "Pure time shift — no timezone labels. 0 = leave times exactly as recorded.\n"
+            "e.g. instrument logged local time but you want UTC output → enter the negative of\n"
+            "your UTC offset (Korea local = UTC+9 → enter −9). Half-hours (e.g. −9.5) allowed.")
+        _chtab_bar.addWidget(self.spin_time_shift)
         _chtab_bar.addWidget(QLabel("Gas T:"))
         self.spin_gas_temp = QDoubleSpinBox()
         self.spin_gas_temp.setRange(0.0, 600.0)
@@ -403,7 +409,7 @@ class CAESARAnalyzer(QMainWindow):
         self.chk_allow_neg = QCheckBox("± Neg")
         self.chk_allow_neg.setToolTip(
             "Checked: gas coefficient lower bound 0→−∞ (NNLS off). Noise of near-zero gases can go negative,\n"
-            "removing positive-rectification bias → unbiased PNs difference. Default = off (force ≥0).")
+            "removing positive-rectification bias → unbiased PNs difference. Default = on (unbiased).")
         self.chk_allow_neg.setChecked(True)
 
         self.ref_props = {}
@@ -426,7 +432,7 @@ class CAESARAnalyzer(QMainWindow):
             "Checked: for 'Unstable' rows above the threshold (OK RMS Threshold) or below the SNR floor,\n"
             "set gas concentration to NaN to exclude from time-series·stats·export. Reason shown in Status.\n"
             "Rows where the fit failed (clouds/low light; e.g. NO2 runs negative while CHOCHO·H2O rise to offset)\n"
-            "are filtered automatically. Standard DOAS QA/QC. Default = on.")
+            "are filtered automatically. Standard DOAS QA/QC. Default = off (flag-only philosophy — enable to exclude).")
         self.chk_qc.setChecked(False)
         self.spin_qc_k = QDoubleSpinBox()
         self.spin_qc_k.setRange(0.0, 30.0)
@@ -2710,7 +2716,10 @@ class CAESARAnalyzer(QMainWindow):
             lambda tot: setattr(self, '_alpha_total', max(1, int(tot))))
         self._alpha_export_worker.progress.connect(
             lambda n, lbl=cfg['label']: self._alpha_on_progress(n, lbl, n_ch_tot))
-        self._alpha_export_worker.status_msg.connect(lambda m: print(f"[AlphaExport] {m}"))
+        # 로그(print) + GUI 상태줄/팝업 둘 다 — Indexing/cache/saved 진행이 사용자에게 보이게
+        self._alpha_export_worker.status_msg.connect(
+            lambda m, _lbl=cfg['label']: (print(f"[AlphaExport] {m}"),
+                                          self._alpha_status(f"📁 [{_lbl}] {m}")))
         self._alpha_export_worker.finished.connect(
             lambda res, lbl=cfg['label']: self._on_alpha_channel_done(res, lbl))
         self._alpha_export_worker.start()
@@ -3577,12 +3586,30 @@ class CAESARAnalyzer(QMainWindow):
         folder_path = QFileDialog.getExistingDirectory(self, "Select Measurement Folder (incl. subfolders)", self._dlg_dir('data'))
         if folder_path:
             self._dlg_dir('data', folder_path)
-            import glob as _glob
             valid_extensions = ('.dat', '.txt', '.csv')
-            files = []
-            for ext in valid_extensions:
-                files += _glob.glob(os.path.join(folder_path, f'*{ext}'))
-                files += _glob.glob(os.path.join(folder_path, '**', f'*{ext}'), recursive=True)
+            # os.walk + 가지치기: '_'로 시작하는 폴더(_archive/_derived/_autosave 등)와
+            # legacy_unified(옛 알파 리네임 사본)는 스캔 제외 — 안 하면 같은 스캔이
+            # 여러 벌(신규+사본+아카이브) 쓸려 들어와 중복 경고+수천 파일 렉.
+            # 그 폴더를 보고 싶으면 '직접' 루트로 고르면 됨(루트 자체는 가지치기 안 함).
+            _SKIP_DIRS = {'legacy_unified'}
+            # 측정(raw) 또는 알파 파일만: 둘 다 'YYYY-MM-DD-NNN'으로 시작한다
+            # (raw=2026-05-18-001.dat, 알파=2026-05-18-001_ANs_alpha_trace.dat).
+            # FWHM_Analysis_·Calib_·Ref_ 같은 분석/레퍼런스 파일은 이 접두가 아니라
+            # 제외 — 안 막으면 알파처럼 스캔으로 오인돼 핏이 오염된다(2026-07-09 FWHM 사고).
+            import re as _re_meas
+            _MEAS_RE = _re_meas.compile(r'^\d{4}-\d{2}-\d{2}-\d+')
+            files, _n_skip = [], 0
+            for _root, _dirs, _names in os.walk(folder_path):
+                _dirs[:] = [d for d in _dirs
+                            if not d.startswith('_') and d not in _SKIP_DIRS]
+                for _fn in _names:
+                    if _fn.lower().endswith(valid_extensions):
+                        if _MEAS_RE.match(_fn):
+                            files.append(os.path.join(_root, _fn))
+                        else:
+                            _n_skip += 1
+            if _n_skip:
+                self.status.setText(f"⚠ Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref 등)")
             # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지
             files = sorted(set(files), key=lambda f: (os.path.basename(f), f))
             if not files:
@@ -4226,7 +4253,7 @@ class CAESARAnalyzer(QMainWindow):
                 funit_ch = cfg.get('fit_unit', 'nm')
                 fnm_lo_ch = float(cfg.get('fit_start_nm', 435.0))
                 fnm_hi_ch = float(cfg.get('fit_end_nm', 480.0))
-                tz_ch = cfg.get('input_tz', 'UTC')
+                tz_val_ch = cfg.get('time_shift_h', cfg.get('input_tz', 0.0))
                 gtemp_ch = float(cfg.get('gas_temp', 0.0) or 0.0)
                 wl_ch = cfg.get('wl_path', '')
                 lbl_ch = (cfg.get('data_label') or '').strip()
@@ -4258,7 +4285,7 @@ class CAESARAnalyzer(QMainWindow):
                 p0_ch, lo_ch, hi_ch = p0, bounds_low, bounds_high
                 funit_ch = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
                 fnm_lo_ch = self.spin_fit_start_nm.value(); fnm_hi_ch = self.spin_fit_end_nm.value()
-                tz_ch = self.cb_input_tz.currentText() if hasattr(self, 'cb_input_tz') else 'UTC'
+                tz_val_ch = self.spin_time_shift.value() if hasattr(self, 'spin_time_shift') else 0.0
                 gtemp_ch = float(self.spin_gas_temp.value()) if hasattr(self, 'spin_gas_temp') else 0.0
                 wl_ch = getattr(self, 'loaded_wl_path', '')
                 lbl_ch = self._ed_ch_datalabel.text().strip() if hasattr(self, '_ed_ch_datalabel') else ''
@@ -4301,8 +4328,8 @@ class CAESARAnalyzer(QMainWindow):
             w.fit_unit = funit_ch
             w.fit_lo_nm = fnm_lo_ch
             w.fit_hi_nm = fnm_hi_ch
-            # 입력 TZ → UTC 변환(KST면 결과 시각 −9h)
-            w.tz_offset_sec = -9 * 3600 if str(tz_ch).upper().startswith('KST') else 0
+            # 채널 시각에 그대로 더할 시프트(시간→초). 순수 시간이동, TZ 라벨 없음.
+            w.tz_offset_sec = int(round(self._time_shift_hours(tz_val_ch) * 3600))
             # 가스온도 오버라이드(>0이면 ppb 밀도보정에 그 온도 사용; 0=자동 HK)
             w.gas_temp_override = gtemp_ch if gtemp_ch > 0 else None
             w.temperature = self.spin_temp.value()
@@ -4342,7 +4369,7 @@ class CAESARAnalyzer(QMainWindow):
                 f"   range px {pmin}-{pmax} ({funit_ch}) · Poly{cfg.get('poly_deg', self.spin_poly_deg.value()) if ch != self._active_channel and self._channel_configs.get(ch) else self.spin_poly_deg.value()}\n"
                 f"   refs {len(_gases)}: {', '.join(_gases)}\n"
                 f"   {self._shsq_text(_gases, rp_ch)}\n"
-                f"   TZ {tz_ch} · GasT {_gt}")
+                f"   Shift {self._time_shift_hours(tz_val_ch):+g}h · GasT {_gt}")
             self._workers.append(w)
 
         if not self._workers:
@@ -5198,12 +5225,14 @@ class CAESARAnalyzer(QMainWindow):
                     return (f"# Channel {int(ch)} ({lbl}) settings: {tag}  "
                             f"gas_temp={cfg.get('gas_temp', 0)}°C  refs={','.join(g for g in self.engine.gas_list)}")
 
-                # ── 세팅 '버킷' 폴더: (데이터 날짜) / (±Neg) / (QC) 3단으로 자동 라우팅 ──
-                # 날짜(캠페인)로 먼저 묶고 그 안에서 세팅 비교. 같은 세팅이면 같은 폴더에 누적
-                # → 저장할 때마다 폴더가 늘지 않는다(손정리 자동화).
+                # ── 세팅 '버킷' 폴더: (하루) / (±Neg) / (QC) 3단으로 자동 라우팅 ──
+                # 핏은 스캔 단위 독립이므로 결과를 날짜별로 잘라 저장해도 무손실.
+                # 하루=폴더 하나 → 로드 기간이 달라도 겹치는 범위 폴더가 생기지 않고,
+                # 같은 날+같은 세팅을 재핏하면 같은 자리로 가되 기존 파일은 _archive/로
+                # 자동 이동(비파괴 — 이전 버전 전부 보존). 날짜 경계는 행 타임스탬프 그대로.
                 # 폴더로 가르는 건 날짜·±Neg·QC뿐. 나머지 결과변경 세팅(window/poly/shift/λ 등)은
                 # 파일명과 .dat 인라인 헤더에 남으므로 머지/슬라이스 후에도 확인 가능.
-                date_bucket = _drange or now_str                    # 데이터 날짜범위 YYMMDD[-YYMMDD]
+                from core.result_io import archive_existing, clean_stem
                 neg_bucket = "neg_o" if allow_neg_on else "neg_x"   # neg_o=음수허용, neg_x=0하한
                 if qc_on and qc_k > 0:
                     qc_bucket = f"QCk{qc_k:g}"
@@ -5213,33 +5242,52 @@ class CAESARAnalyzer(QMainWindow):
                     qc_bucket = "QCoff"
 
                 chans = sorted(df['Channel'].dropna().unique()) if 'Channel' in df.columns else []
-                parent_dir = os.path.dirname(path) or (self._dlg_dir('save') or '.')
-                run_dir = os.path.join(parent_dir, date_bucket, neg_bucket, qc_bucket)
-                os.makedirs(run_dir, exist_ok=True)
+                base_dir = os.path.dirname(path) or (self._dlg_dir('save') or '.')
+                _tt_all = pd.to_datetime(df['Time'], errors='coerce')
+                day_keys = _tt_all.dt.strftime('%y%m%d').where(_tt_all.notna(), 'nodate')
 
-                written = []
-                if len(chans) > 1:
-                    for ch in chans:
-                        sub = df[df['Channel'] == ch]
-                        lbl, tag = self._channel_settings_tag(int(ch))
-                        fname = f"{_drange}_{lbl}_{tag}{ext}".lstrip('_')
-                        _write_df(sub, os.path.join(run_dir, fname), _ch_header(ch))
-                        written.append(f"CH{int(ch)} → {fname}  ({len(sub)} rows)")
-                else:
-                    fname = os.path.basename(path)
-                    _write_df(df, os.path.join(run_dir, fname))
-                    written.append(f"{fname}  ({len(df)} rows)")
+                written, n_files, n_archived = [], 0, 0
+                user_stem = clean_stem(path)   # 단일채널 때 사용자가 고른 이름(날짜프리픽스 제거)
+                for day_tag in sorted(day_keys.unique()):
+                    dsub = df[day_keys == day_tag]
+                    run_dir = os.path.join(base_dir, day_tag, neg_bucket, qc_bucket)
+                    os.makedirs(run_dir, exist_ok=True)
+                    if len(chans) > 1:
+                        for ch in chans:
+                            ssub = dsub[dsub['Channel'] == ch]
+                            if ssub.empty:
+                                continue
+                            lbl, tag = self._channel_settings_tag(int(ch))
+                            fname = f"{day_tag}_{lbl}_{tag}{ext}".lstrip('_')
+                            fpath = os.path.join(run_dir, fname)
+                            if archive_existing(fpath, base_dir):
+                                n_archived += 1
+                            _write_df(ssub, fpath, _ch_header(ch))
+                            n_files += 1
+                            written.append(f"{day_tag} CH{int(ch)} → {fname}  ({len(ssub)} rows)")
+                    else:
+                        fname = f"{day_tag}_{user_stem}{ext}"
+                        fpath = os.path.join(run_dir, fname)
+                        if archive_existing(fpath, base_dir):
+                            n_archived += 1
+                        _write_df(dsub, fpath)
+                        n_files += 1
+                        written.append(f"{fname}  ({len(dsub)} rows)")
 
-                bucket_disp = os.path.join(date_bucket, neg_bucket, qc_bucket)
+                n_days = day_keys.nunique()
+                arch_note = f", {n_archived} previous → _archive" if n_archived else ""
+                bucket_disp = os.path.join(neg_bucket, qc_bucket)
                 if auto:
-                    self.status.setText(f"💾 Auto-saved → [{bucket_disp}] ({len(written)} file)")
+                    self.status.setText(
+                        f"💾 Auto-saved → {n_days} day(s)/[{bucket_disp}] ({n_files} file{arch_note})")
                 else:
+                    _shown = written if len(written) <= 12 else written[:12] + [f"… +{len(written)-12} more"]
                     QMessageBox.information(
                         self, "Success",
-                        "🎉 Saved to the settings bucket folder!\n\n"
-                        f"📁 {run_dir}\n"
-                        f"   (±Neg={allow_neg} / QC={qc_str})\n\n"
-                        "Saved files:\n  " + "\n  ".join(written) +
+                        "🎉 Saved per-day into settings bucket folders!\n\n"
+                        f"📁 {base_dir}\\{{YYMMDD}}\\{bucket_disp}\n"
+                        f"   (±Neg={allow_neg} / QC={qc_str} / {n_days} day(s), {n_files} file(s){arch_note})\n\n"
+                        "Saved files:\n  " + "\n  ".join(_shown) +
                         "\n\n※ All settings are written in each .dat's top # header — preserved through merge/slice.")
                 
             except Exception as e:
@@ -5481,6 +5529,21 @@ class CAESARAnalyzer(QMainWindow):
         self._active_channel = None
         self._channel_tabbar.removeTab(idx)
 
+    @staticmethod
+    def _time_shift_hours(val):
+        """저장값 → 출력 시각에 그대로 더할 시프트(시간, float).
+        신규 포맷은 float. 레거시 'input_tz' 문자열 호환: 'KST(+9)'는 옛 동작(출력 −9h)과
+        같게 −9.0, 그 외/'UTC'/빈값은 0.0으로 매핑."""
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip().upper()
+        if s.startswith('KST'):
+            return -9.0
+        try:
+            return float(s.replace('UTC', '').replace('H', '').strip() or 0)
+        except ValueError:
+            return 0.0
+
     def _capture_config(self):
         """현재 UI/엔진 설정 전체를 dict로 캡처 — 채널 전환·복사·시나리오 저장에 재사용.
         (레퍼런스 경로·배율, wavecal, 픽셀/nm 핏레인지, poly/step/λ/robust/kalman, cavity)"""
@@ -5492,7 +5555,7 @@ class CAESARAnalyzer(QMainWindow):
             "wl_path": getattr(self, 'loaded_wl_path', ""),
             "refs": refs_data,
             "data_label": self._ed_ch_datalabel.text().strip() if hasattr(self, '_ed_ch_datalabel') else "",
-            "input_tz": self.cb_input_tz.currentText() if hasattr(self, 'cb_input_tz') else "UTC",
+            "time_shift_h": self.spin_time_shift.value() if hasattr(self, 'spin_time_shift') else 0.0,
             "gas_temp": self.spin_gas_temp.value() if hasattr(self, 'spin_gas_temp') else 0.0,
             "f_min": self.txt_min.text(),
             "f_max": self.txt_max.text(),
@@ -5516,8 +5579,9 @@ class CAESARAnalyzer(QMainWindow):
         self.txt_max.setText(str(scenario.get("f_max", "")))
         if hasattr(self, '_ed_ch_datalabel'):
             self._ed_ch_datalabel.setText(scenario.get("data_label", ""))
-        if hasattr(self, 'cb_input_tz'):
-            self.cb_input_tz.setCurrentText(scenario.get("input_tz", "UTC"))
+        if hasattr(self, 'spin_time_shift'):
+            self.spin_time_shift.setValue(
+                self._time_shift_hours(scenario.get("time_shift_h", scenario.get("input_tz", 0.0))))
         if hasattr(self, 'spin_gas_temp'):
             self.spin_gas_temp.setValue(scenario.get("gas_temp", 0.0))
         if "fit_start_nm" in scenario:

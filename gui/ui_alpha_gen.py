@@ -173,20 +173,25 @@ class AlphaGeneratorDialog(QDialog):
         if not d:
             return
         dlg_dir("alpha_gen_raw", d)
-        import glob as _glob
         import re as _re
         exts = (".dat", ".txt", ".csv")
-        def _is_raw(f):
-            if not (f.lower().endswith(exts) and os.path.isfile(f)):
-                return False
-            rel = os.path.relpath(f, d).lower()
-            # 알파 산출물 폴더/파일은 raw가 아님 — 재귀 수집에서 제외
-            if (os.sep + 'alpha') in (os.sep + rel) or '_alpha_trace' in rel:
-                return False
-            return True
-        # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지(전체경로 정렬 X)
-        files = sorted((f for f in _glob.glob(os.path.join(d, "**", "*"), recursive=True)
-                        if _is_raw(f)), key=lambda f: os.path.basename(f))
+        # os.walk 로 수집(파일마다 stat 하는 glob "**/*" 대비 빠름) + 'alpha' 출력
+        # 하위트리는 아예 내려가지 않게 가지치기 → 대형 폴더 선택 시 메인스레드 블로킹 완화.
+        from PyQt6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            files = []
+            for _root, _dirs, _names in os.walk(d):
+                _dirs[:] = [_dd for _dd in _dirs if _dd.lower() != 'alpha']  # 알파 출력 제외
+                for _fn in _names:
+                    # 측정 파일(YYYY-MM-DD-NNN)만 — Ref/FWHM/Calib/merge 등 잡파일은 여기서
+                    # 걸러 날짜선택 다이얼로그에도 안 뜨게 한다(그런 파일이 알파에 섞이면 오염).
+                    if self._RAW_NAME_RE.match(_fn):
+                        files.append(os.path.join(_root, _fn))
+            # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지(전체경로 정렬 X)
+            files.sort(key=lambda f: os.path.basename(f))
+        finally:
+            QApplication.restoreOverrideCursor()
         if not files:
             QMessageBox.warning(self, "None", "No raw files (.dat/.txt/.csv) found in the folder (incl. subfolders).")
             return
@@ -206,11 +211,28 @@ class AlphaGeneratorDialog(QDialog):
         if files:
             self._add(files)
 
+    # 측정(raw) 파일명 규칙: YYYY-MM-DD-NNN.dat/.txt/.csv. FWHM_Analysis_*·Calib_* 등
+    # 분석/출력 파일이 raw 폴더에 섞여 있어도 알파 입력에서 자동 제외한다(그런 파일을
+    # 스캔으로 오인 파싱하면 이상 데이터가 주입돼 그 뒤 전 기간 알파가 오염된다 —
+    # 2026-07-09 FWHM_Analysis_20260523_cold.dat 사고).
+    import re as _re_mod
+    _RAW_NAME_RE = _re_mod.compile(r'^\d{4}-\d{2}-\d{2}-\d+\.(?:dat|txt|csv)$', _re_mod.I)
+
     def _add(self, files):
+        skipped = []
         for f in files:
+            if not self._RAW_NAME_RE.match(os.path.basename(f)):
+                skipped.append(os.path.basename(f))
+                continue
             if f not in self._raw_files:
                 self._raw_files.append(f)
                 self._list.addItem(os.path.basename(f))
+        if skipped:
+            _shown = skipped if len(skipped) <= 8 else skipped[:8] + [f"… +{len(skipped)-8}개"]
+            QMessageBox.warning(
+                self, "측정 파일 아님 — 제외됨",
+                "다음 파일은 측정 파일 형식(YYYY-MM-DD-NNN)이 아니라 알파 입력에서 제외했습니다"
+                "(FWHM/Calib 등 분석 파일을 넣으면 알파가 오염됩니다):\n\n  " + "\n  ".join(_shown))
         self._lbl_status.setText(f"{len(self._raw_files)} raw file(s) selected")
         # 채널 수 감지 → 핏세팅 탭 매핑 행 갱신
         if self._raw_files:
