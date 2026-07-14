@@ -103,7 +103,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar, px_min, px_max, poly_deg)
     c = vp[len(vp) // 2]
     ef = fitter.detect_etalon_frequency(vp, a, poly_deg, 0.02, 0.40)
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(rp, 0.0, [0.0, 1.0], 0.5)
-    t0.append(0.0); lb.append(-np.pi); ub.append(np.pi)
+    # (구식 etalon 위상 append 제거 — doas_fit가 sin·cos 선형열로 처리, theta는 shift/squeeze만)
     out = fitter.execute_varpro_fit(vp, a, np.eye(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, c, 1.0, rp, T_C, 0.0, False)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out

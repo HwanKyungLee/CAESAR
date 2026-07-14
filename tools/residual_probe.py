@@ -69,7 +69,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar):
     vp_center = vp_pixel[len(vp_pixel) // 2]
     ef = fitter.detect_etalon_frequency(vp_pixel, a, POLY_DEG, 0.02, 0.40)
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(rp, 0.0, [0.0, 1.0], STEP_LIMIT)
-    t0.append(0.0); lb.append(-np.pi); ub.append(np.pi)
+    # (구식 etalon 위상 append 제거 — doas_fit가 sin·cos 선형열로 처리, theta는 shift/squeeze만)
     out = fitter.execute_varpro_fit(
         vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
         POLY_DEG, ef, vp_center, 1.0, rp, T_C, LAM, ROBUST)
@@ -157,7 +157,7 @@ def main():
     print(f"etalon angular freq = {ef:.4f} rad/px  (period {2*np.pi/ef:.1f} px)")
 
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(rp, 0.0, [0.0, 1.0], STEP_LIMIT)
-    t0.append(0.0); lb.append(-np.pi); ub.append(np.pi)
+    # (구식 etalon 위상 append 제거 — doas_fit가 sin·cos 선형열로 처리, theta는 shift/squeeze만)
     out = fitter.execute_varpro_fit(
         vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
         POLY_DEG, ef, vp_center, 1.0, rp, T_C, LAM, ROBUST)

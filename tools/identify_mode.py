@@ -22,7 +22,9 @@ files = files[:: max(1, len(files)//18)][:18]
 eng = fitter = wl0 = None; R = []
 for fp in files:
     w, a, T, P = load_alpha(fp)
-    if eng is None: eng = build_engine(ch, w); fitter = DoasFitter(eng)
+    # build_engine 시그니처가 (refdir, wave)로 바뀜(residual_compare 리팩토링) —
+    # 구식 (ch_dict, wave) 호출은 TypeError. Cold 채널 refdir='cold' 고정.
+    if eng is None: eng = build_engine("cold", w); fitter = DoasFitter(eng)
     wl, resid, *_ = fit_one(eng, fitter, rp, w, a, T, P, pmin, pmax, poly)
     if wl0 is None: wl0 = wl
     if len(resid) == len(wl0): R.append(resid)
