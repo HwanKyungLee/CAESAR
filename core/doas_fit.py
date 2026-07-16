@@ -20,6 +20,11 @@ from scipy.linalg import lstsq as scipy_lstsq
 from scipy.optimize import least_squares, lsq_linear
 from numpy.polynomial import chebyshev
 
+# etalon–기체 공선성 경고 문턱 |r| — 이 이상이면 두 계수가 얽혀 오차가 부풀 수
+# 있음을 보고한다(개선작업지시_2026-07 §B 제안값 0.5). 핏을 막거나 값을 바꾸지
+# 않는다 — 검증≠필터.
+ETALON_CORR_WARN = 0.5
+
 
 class DoasFitter:
     def __init__(self, engine):
@@ -89,6 +94,148 @@ class DoasFitter:
             peak_f = fft_freqs[valid_mask][np.argmax(np.abs(fft_vals[valid_mask]))]
             return 2.0 * np.pi * peak_f
         return 0.50
+
+    # ──────────────────────────────────────────────────────────────────
+    def etalon_collinearity(self, pixel_idx, fixed_e_f, poly_order, ref_properties,
+                            temperature=25.0, fit_sign=1.0,
+                            opt_shifts=None, opt_squeezes=None, absolute_center=None):
+        """Etalon–기체 공선성 진단 — **보고 전용, 핏 불변**(검증≠필터).
+
+        etalon 제거는 sin(f·x)/cos(f·x) 두 열을 핏 기저에 추가하는 방식(필터 아님·
+        신호 삭제 없음)이지만, 핏 창 안에서 어떤 기체 지문이 우연히 주파수 f 성분과
+        닮으면 두 계수가 공선성으로 얽혀 오차가 부풀고 농도가 흔들릴 수 있다.
+        이 함수는 그 정도를 정량 보고한다.
+
+        방법 (differential 공간 — 완만한 성분은 poly가 흡수하므로 poly 사영 제거
+        후 비교해야 의미가 있다):
+          1) 최종 설계행렬과 동일한 기체 열(shift/squeeze/T보정/활성창 반영)과
+             etalon sin/cos 열을 만든다.
+          2) 모든 열에서 Chebyshev 배경(poly_order)을 최소제곱 사영으로 제거.
+          3) r  = 각 기체 열과 etalon 2차원 부분공간의 **다중 상관계수**
+                  (0~1; 위상 자유 사인파라 부호는 무의미).
+          4) VIF = 잔차공간 [기체들+etalon] 상관행렬 역행렬 대각(분산팽창계수).
+             vif_no_etalon(etalon 열 제외)과의 비가 'etalon이 유발한 팽창'이다.
+
+        반환 dict:
+          per_gas: {gas: {"r": float, "vif": float, "vif_no_etalon": float}}
+          e_f: 사용한 각주파수, warn: |r| > ETALON_CORR_WARN 인 기체 목록
+        비활성/영-노름 열은 NaN. 실패해도 예외를 밖으로 던지지 않는 건 호출부 책임."""
+        pixel_idx = np.asarray(pixel_idx, dtype=float)
+        n = len(pixel_idx)
+        gases = list(self.engine.gas_list)
+        if absolute_center is None:
+            absolute_center = pixel_idx[len(pixel_idx) // 2]
+        if opt_shifts is None:
+            opt_shifts = [0.0] * len(gases)
+        if opt_squeezes is None:
+            opt_squeezes = [1.0] * len(gases)
+
+        # 기체 열 — execute_varpro_fit 최종 설계행렬과 동일 구성
+        t_corr = {}
+        for name in gases:
+            props = ref_properties.get(name, {})
+            t_ref = float(props.get("t_ref", 25.0))
+            t_coeff = float(props.get("t_coeff", 0.0))
+            t_corr[name] = 1.0 + t_coeff * (temperature - t_ref) / 100.0
+        gas_cols = []
+        for i, name in enumerate(gases):
+            if not self.gas_active_in_window(ref_properties, name, pixel_idx):
+                gas_cols.append(np.zeros(n))
+                continue
+            px_sh = (pixel_idx - absolute_center) * opt_squeezes[i] + absolute_center + opt_shifts[i]
+            col = fit_sign * self.engine.interpolators[name](px_sh) / self.engine.scaling_factors[name]
+            gas_cols.append(np.asarray(col, dtype=float) * t_corr[name])
+
+        x_min, x_max = pixel_idx[0], pixel_idx[-1]
+        x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
+        T = (chebyshev.chebvander(x_mapped, poly_order)
+             if poly_order >= 0 else np.zeros((n, 0)))
+        et_cols = [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
+
+        def _depoly(v):
+            """poly 사영 제거 → differential 성분."""
+            if T.shape[1] == 0:
+                return v.copy()
+            coef, *_ = np.linalg.lstsq(T, v, rcond=None)
+            return v - T @ coef
+
+        g_res = [_depoly(g) for g in gas_cols]
+        e_res = [_depoly(e) for e in et_cols]
+
+        def _unit(v, ref_norm=None):
+            """단위노름 정규화. differential 노름이 원래 노름 대비 1e-8 미만이면
+            'poly에 전부 흡수됨'(퇴화) — 진단 무의미 → 무효 처리."""
+            nv = float(np.linalg.norm(v))
+            base = float(ref_norm) if ref_norm is not None else 1.0
+            if nv <= 1e-300 or (ref_norm is not None and nv < 1e-8 * max(base, 1e-300)):
+                return np.zeros_like(v), 0.0
+            return v / nv, nv
+
+        # etalon 잔차 부분공간의 정규직교기저
+        E = np.column_stack(e_res)
+        Q, R_ = np.linalg.qr(E)
+        rank = int(np.sum(np.abs(np.diag(R_)) > 1e-12 * max(1.0, np.abs(R_[0, 0]))))
+        Q = Q[:, :rank]
+
+        per_gas = {}
+        unit_cols, unit_ok = [], []
+        for g, g0 in zip(g_res, gas_cols):
+            u, nv = _unit(g, ref_norm=np.linalg.norm(g0))
+            unit_cols.append(u)
+            unit_ok.append(nv > 0)
+        eu = [_unit(e)[0] for e in e_res if _unit(e)[1] > 0]
+
+        def _vif(target_u, others_u):
+            """VIF = 1/(1−R²), R² = target(단위노름)을 others로 회귀한 설명력.
+            (상관행렬 pinv는 특이행렬에서 null-space를 잘라 VIF를 과소평가 —
+            완전 공선일수록 작아지는 역설이 있어 직접 회귀로 계산한다.)"""
+            if not others_u:
+                return 1.0
+            A = np.column_stack(others_u)
+            beta, *_ = np.linalg.lstsq(A, target_u, rcond=None)
+            resid = target_u - A @ beta
+            r2 = min(max(1.0 - float(resid @ resid), 0.0), 1.0)
+            return float(1.0 / max(1.0 - r2, 1e-12))
+
+        for i, name in enumerate(gases):
+            if not unit_ok[i] or rank == 0:
+                per_gas[name] = {"r": float("nan"), "vif": float("nan"),
+                                 "vif_no_etalon": float("nan")}
+                continue
+            u = unit_cols[i]
+            r = float(np.linalg.norm(Q.T @ u))          # 다중 상관계수 (0~1)
+            others = [unit_cols[k] for k in range(len(gases))
+                      if k != i and unit_ok[k]]
+            per_gas[name] = {"r": min(r, 1.0),
+                             "vif": _vif(u, others + eu),
+                             "vif_no_etalon": _vif(u, others)}
+
+        warn = [g for g, d in per_gas.items()
+                if np.isfinite(d["r"]) and d["r"] > ETALON_CORR_WARN]
+        return {"per_gas": per_gas, "e_f": float(fixed_e_f), "warn": warn}
+
+    @staticmethod
+    def format_etalon_collinearity(diag):
+        """진단 dict → 한 줄 문자열 (Test Fit 팝업·결과 헤더 공용)."""
+        if not diag or not diag.get("per_gas"):
+            return "etalon-gas collinearity: n/a"
+        parts = []
+        for g, d in diag["per_gas"].items():
+            if not np.isfinite(d["r"]):
+                parts.append(f"{g} r=n/a")
+                continue
+            s = f"{g} r={d['r']:.2f}"
+            if np.isfinite(d["vif"]):
+                s += f" (VIF {d['vif']:.1f})"
+            if g in diag.get("warn", []):
+                s += " ⚠"
+            parts.append(s)
+        line = (f"etalon-gas collinearity (f={diag['e_f']:.3f} rad/px): "
+                + ",  ".join(parts))
+        if diag.get("warn"):
+            line += (f"  [⚠ |r|>{ETALON_CORR_WARN:g}: coefficients entangled — "
+                     f"errors inflate; fit NOT modified]")
+        return line
 
     # ──────────────────────────────────────────────────────────────────
     def setup_fit_parameters(self, ref_properties, initial_shift_center,

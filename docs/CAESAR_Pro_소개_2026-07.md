@@ -523,12 +523,16 @@ NO₂·CHOCHO·H₂O"라는 박사님 세팅을 클릭 한 번에 그대로 재�
    Calibrator·α 생성 로그에 항상 경고로 보고. 문턱 산정 근거·실측 영향
    (CH1 0.157% 구간만 변화, CH2/콜드 0.000%)은
    `docs/step_guard_threshold_2026-07.md` 참조.
-8. **Etalon–기체 공선성 진단** — etalon sin/cos 열은 필터가 아니라 회귀 성분
-   이라 신호를 삭제하지 않지만, 기체 지문이 우연히 그 주파수와 닮으면 공선성
-   으로 오차가 부푼다. 상관계수·VIF를 Test Fit과 결과 헤더에 보고하는 진단을
-   추가 예정(핏 결과는 바꾸지 않음).
+8. **Etalon–기체 공선성 진단** — **완료(2026-07-16)**. differential 공간
+   (poly 사영 제거 후) 기체↔etalon 부분공간 다중상관 r + VIF를
+   `core/doas_fit.py etalon_collinearity()`로 계산, Test Fit 팝업 한 줄과
+   결과 파일 `# Etalon-Gas Collinearity` 헤더에 보고(|r|>0.5 경고 —
+   핏 결과는 바꾸지 않음). 캠페인 콜드 시나리오 실측: 실제 etalon 주파수
+   (5.4 px 주기)에서 세 기체 모두 r≈0.000·팽창 ×1.00, 검출 밴드 전체 최악
+   r=0.15(문턱의 30%) — `docs/etalon_collinearity_2026-07.md` 참조.
 
-이 중 7·8과 6의 CI/매뉴얼은 `docs/개선작업지시_2026-07.md`에 실행 계획이 있다.
+이 중 6의 CI/매뉴얼은 `docs/개선작업지시_2026-07.md`에 실행 계획이 있다
+(7·8은 완료).
 
 ---
 

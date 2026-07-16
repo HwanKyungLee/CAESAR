@@ -3237,14 +3237,28 @@ class CAESARAnalyzer(QMainWindow):
                 sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
                 ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
 
+            # etalon–기체 공선성 진단(보고 전용, 핏 불변) — RUN과 동일한 FFT 검출
+            # 주파수(워커 기본 밴드 0.02~0.40 rad/px)에서 평가. 실패해도 팝업은 뜬다.
+            try:
+                e_f_diag = fitter.detect_etalon_frequency(
+                    vp_pixel, a, self.spin_poly_deg.value(), 0.02, 0.40)
+                collin = fitter.etalon_collinearity(
+                    vp_pixel, e_f_diag, self.spin_poly_deg.value(), rp,
+                    temperature=T_C, fit_sign=1.0,
+                    opt_shifts=opt_shifts, opt_squeezes=opt_squeezes,
+                    absolute_center=vp_center)
+            except Exception:
+                collin = None
+
             self._show_test_fit_popup(fp, wl, a, full_model, resid, gas_models,
-                                      ppb, opt_shifts, opt_squeezes, rms, T_C, P_mbar)
+                                      ppb, opt_shifts, opt_squeezes, rms, T_C, P_mbar,
+                                      collin=collin)
         except Exception as e:
             import traceback
             QMessageBox.critical(self, "Test Fit failed", f"{e}\n\n{traceback.format_exc()[-600:]}")
 
     def _show_test_fit_popup(self, fp, wl, data, model, resid, gas_models,
-                             ppb, shifts, squeezes, rms, T_C, P_mbar):
+                             ppb, shifts, squeezes, rms, T_C, P_mbar, collin=None):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel
         import pyqtgraph as pg
         dlg = QDialog(self)
@@ -3257,6 +3271,16 @@ class CAESARAnalyzer(QMainWindow):
             f"<b>ppb:</b> {gtxt}    <b>RMS:</b> {rms:.2e}    "
             f"<b>Shift:</b> {shifts[0]:+.2f}px  <b>Squeeze:</b> {squeezes[0]:.4f}    "
             f"T={T_C:.1f}°C P={P_mbar:.0f}mb"))
+        # etalon–기체 공선성 한 줄(보고 전용) — |r|>문턱이면 주황 강조
+        if collin is not None:
+            from core.doas_fit import DoasFitter as _DF
+            _cl = QLabel(_DF.format_etalon_collinearity(collin))
+            if collin.get("warn"):
+                _cl.setStyleSheet("color:#E65100;font-weight:bold;")
+            else:
+                _cl.setStyleSheet("color:#555;")
+            _cl.setWordWrap(True)
+            lay.addWidget(_cl)
         _pal = ["#388E3C", "#7B1FA2", "#0097A7", "#C2185B", "#5D4037"]
         gms = [(gi, nm, gas_models[gi]) for gi, nm in enumerate(self.engine.gas_list)
                if gas_models and gi < len(gas_models) and gas_models[gi] is not None
@@ -5183,6 +5207,24 @@ class CAESARAnalyzer(QMainWindow):
                 except Exception:
                     span_str = _drange or "(unknown)"
 
+                # ── etalon–기체 공선성 진단(보고 전용, 핏 불변) ──
+                # 이번 런이 실제 쓴 etalon 주파수(Params.etalon_freq)에서, 현재
+                # 핏창·poly·레퍼런스로 differential 공간 r·VIF를 계산해 헤더에 기록.
+                # (shift/squeeze는 0/1 — 서브픽셀 이동은 r에 영향 미미)
+                collin_line = "n/a (engine not ready or no etalon freq)"
+                try:
+                    _ef = next((float(r.get('Params', {}).get('etalon_freq', 0.0))
+                                for r in self.results
+                                if r.get('Params', {}).get('etalon_freq')), 0.0)
+                    if _ef > 0 and self.engine.is_engine_ready():
+                        from core.doas_fit import DoasFitter as _DF
+                        _pi = np.arange(f_min_px, f_max_px + 1, dtype=float)
+                        _diag = _DF(self.engine).etalon_collinearity(
+                            _pi, _ef, poly_deg, getattr(self, 'ref_props', {}))
+                        collin_line = _DF.format_etalon_collinearity(_diag)
+                except Exception as _ce:
+                    collin_line = f"n/a ({_ce})"
+
                 header_lines = [
                     "# ==========================================================",
                     "# CAESAR Pro Analysis Report",
@@ -5205,6 +5247,7 @@ class CAESARAnalyzer(QMainWindow):
                     f"# Purge Gas RL Factor: {self.spin_rl_factor.value():.4f}  (1.0 = no correction; CAESAR CH1=0.9330 CH2=0.9950 CH3=0.9968)",
                     f"# Measurement Flags: Ambient={self.txt_flag_amb.text().strip()}, ZA={self.txt_flag_za.text().strip()}, He={self.txt_flag_he.text().strip()}",
                     f"# Reference Constraints: {sh_str}, {sq_str}",
+                    f"# Etalon-Gas Collinearity (diagnostic only, fit unchanged): {collin_line}",
                     "# ==========================================================\n"
                 ]
 
