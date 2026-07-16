@@ -271,6 +271,13 @@ class _ChannelRWorker(QThread):
                             self.log.emit(
                                 f"[{label}] 🔄 α npz +{n_new} new knots "
                                 f"(total {n_tot}) → {_os.path.basename(npz_path)}")
+                            # 계단 가드: 머지된 npz에서 계단 후보 감지 → 경고 로그
+                            # (보고만 — knot은 건드리지 않음. 분절은 α 생성 시 적용)
+                            try:
+                                for _ln in RTP.step_report(npz_path)["lines"]:
+                                    self.log.emit(f"[{label}] {_ln}")
+                            except Exception as _se:
+                                self.log.emit(f"[{label}] step-guard report failed: {_se}")
                             # 중간 빈 날(달력상 knot 0개) 탐지 → 로그 + GUI 팝업용 첨부
                             npz_gaps = RTP.find_date_gaps(npz_path)
                             if npz_gaps:

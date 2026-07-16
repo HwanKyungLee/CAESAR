@@ -157,20 +157,26 @@ def compute_rt_knots(raw_dir, wave_nm, config: RTConfig, file_list=None,
 
 
 def save_rt(path, knot_sec, omr_d, wave_nm, label="", config: RTConfig = None,
-            processed_files=None):
+            processed_files=None, manual_breaks_sec=None):
     """R(t) knot을 npz로 저장. label/config는 출처 추적용(알파는 안 읽음).
-    processed_files: 이미 처리된 파일명 목록 — 증분 추가 시 재처리 방지."""
+    processed_files: 이미 처리된 파일명 목록 — 증분 추가 시 재처리 방지.
+    manual_breaks_sec: 운영자 지정 분절 시각(연초기준 초) — 청소/재정렬 등 아는
+    이벤트에서 R(t) 보간을 강제 분절(core.step_guard). knot은 건드리지 않는다."""
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     cfg_json = json.dumps(asdict(config)) if config is not None else "{}"
     pf_json  = json.dumps(sorted(processed_files) if processed_files else [])
+    mb = np.asarray(sorted(set(float(b) for b in (manual_breaks_sec or []))),
+                    dtype=np.float64)
     np.savez_compressed(path, label=str(label), config=cfg_json,
                         processed_files_json=pf_json,
-                        knot_sec=knot_sec, omr_d=omr_d, wave_nm=wave_nm)
+                        knot_sec=knot_sec, omr_d=omr_d, wave_nm=wave_nm,
+                        manual_breaks_sec=mb)
 
 
 def load_rt(path):
-    """저장된 R(t) 로드. 반환 dict: knot_sec, omr_d, wave_nm (+ label, config 메타).
-    알파 워커는 knot_sec/omr_d/wave_nm 만 사용한다."""
+    """저장된 R(t) 로드. 반환 dict: knot_sec, omr_d, wave_nm (+ label, config,
+    manual_breaks_sec 메타). 알파 워커는 knot_sec/omr_d/wave_nm/manual_breaks_sec
+    를 사용한다(수동 분절이 없으면 빈 배열 — 기존 npz와 호환)."""
     z = np.load(path, allow_pickle=False)
     out = {"knot_sec": z["knot_sec"], "omr_d": z["omr_d"], "wave_nm": z["wave_nm"]}
     out["label"] = str(z["label"]) if "label" in z else ""
@@ -183,7 +189,100 @@ def load_rt(path):
             json.loads(str(z["processed_files_json"])) if "processed_files_json" in z else [])
     except Exception:
         out["processed_files"] = []
+    out["manual_breaks_sec"] = (
+        np.asarray(z["manual_breaks_sec"], dtype=float)
+        if "manual_breaks_sec" in z else np.array([], dtype=float))
     return out
+
+
+# ── 계단 가드 (step guard) — 수동 분절 저장 + 감지 리포트 ──────────────────────
+
+def npz_year(z_or_path, default=None):
+    """npz의 knot_sec 기준 연도 — processed_files 파일명(YYYY-MM-DD)에서 추출.
+    (bytepack 시각은 연초기준 초라 연도가 npz 자체엔 없음.)"""
+    import re as _re
+    z = load_rt(z_or_path) if isinstance(z_or_path, str) else z_or_path
+    for bn in z.get("processed_files", []):
+        m = _re.search(r"(\d{4})-\d{2}-\d{2}", str(bn))
+        if m:
+            return int(m.group(1))
+    return default
+
+
+def parse_break_datetimes(texts, year):
+    """'YYYY-MM-DD HH:MM[:SS]' 문자열들 → 연초기준 초 목록. 빈/파싱불가 항목은
+    ValueError (조용히 버리면 운영자가 분절이 안 걸린 걸 모른다)."""
+    from datetime import datetime as _dtm
+    base = _dtm(int(year), 1, 1)
+    out = []
+    for t in texts:
+        t = str(t).strip()
+        if not t:
+            continue
+        dt = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = _dtm.strptime(t, fmt)
+                break
+            except ValueError:
+                continue
+        if dt is None:
+            raise ValueError(f"unrecognized break time: '{t}' (use YYYY-MM-DD HH:MM)")
+        out.append((dt - base).total_seconds())
+    return out
+
+
+def set_manual_breaks(npz_path, break_secs):
+    """npz의 수동 분절 시각을 **교체** 저장한다(knot/omr_d는 그대로).
+    break_secs: 연초기준 초 목록(빈 목록 = 분절 해제). 반환: 저장된 목록."""
+    z = load_rt(npz_path)
+    cfg = None
+    try:
+        c = z.get("config") or {}
+        if c:
+            cfg = RTConfig(**{k: (tuple(v) if k == "fit_window_nm" else v)
+                              for k, v in c.items()})
+    except Exception:
+        cfg = None
+    save_rt(npz_path, z["knot_sec"], z["omr_d"], z["wave_nm"],
+            label=z.get("label", ""), config=cfg,
+            processed_files=z.get("processed_files", []),
+            manual_breaks_sec=break_secs)
+    return sorted(set(float(b) for b in (break_secs or [])))
+
+
+def step_report(npz_path):
+    """npz knot 시계열의 계단 후보 감지 리포트(읽기 전용).
+
+    반환 dict:
+      candidates : core.step_guard.detect_step_candidates 결과
+      threshold  : 사용된 적응 문턱
+      manual     : 저장된 수동 분절 시각 목록(연초기준 초)
+      lines      : 로그용 문자열 목록(시각은 npz 연도로 ISO 변환)
+    """
+    from datetime import datetime as _dtm, timedelta as _tdl
+    from core.step_guard import (knot_scalar_metric, detect_step_candidates,
+                                 format_step_report)
+    z = load_rt(npz_path)
+    ks = np.asarray(z["knot_sec"], dtype=float)
+    manual = list(np.asarray(z.get("manual_breaks_sec", []), dtype=float))
+    if ks.size < 2:
+        return {"candidates": [], "threshold": None, "manual": manual, "lines": []}
+    m = knot_scalar_metric(z["omr_d"], wave_nm=z["wave_nm"],
+                           fit_window_nm=(z.get("config") or {}).get("fit_window_nm"))
+    cands, thr = detect_step_candidates(ks, m)
+    yr = npz_year(z)
+    if yr:
+        base = _dtm(yr, 1, 1)
+        x2s = lambda s: (base + _tdl(seconds=float(s))).strftime("%m-%d %H:%M")
+    else:
+        x2s = lambda s: f"doy {s / 86400.0 + 1.0:.3f}"
+    lines = format_step_report(cands, threshold=thr, x_to_str=x2s,
+                               kind=f"R(t) {os.path.basename(npz_path)}")
+    if manual:
+        lines.append("[STEP GUARD] manual breaks: "
+                     + ", ".join(x2s(b) for b in sorted(manual)))
+    return {"candidates": cands, "threshold": thr, "manual": manual, "lines": lines}
 
 
 # ── 날짜 갭 탐지 ────────────────────────────────────────────────────────────
@@ -427,6 +526,7 @@ def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
     ex_ks = np.array([], dtype=np.float64)
     ex_od = np.zeros((0, npix), dtype=np.float64)
     done_set = set()
+    ex_breaks = []
     label = ex_label if ex_label is not None else config.label
     if os.path.exists(npz_path):
         try:
@@ -434,6 +534,7 @@ def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
             ex_ks    = ex["knot_sec"]
             ex_od    = ex["omr_d"]
             done_set = set(ex.get("processed_files", []))
+            ex_breaks = list(np.asarray(ex.get("manual_breaks_sec", []), dtype=float))
             label    = ex.get("label") or label
         except Exception as e:
             print(f"  [merge] failed to load existing npz -> creating new: {e}")
@@ -445,7 +546,8 @@ def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
         # 유효 R 없었어도 processed_files 갱신(재처리 방지)
         if len(ex_ks) > 0:
             save_rt(npz_path, ex_ks, ex_od, wave_nm,
-                    label=label, config=config, processed_files=all_processed)
+                    label=label, config=config, processed_files=all_processed,
+                    manual_breaks_sec=ex_breaks)
         return 0, len(ex_ks)
 
     new_od = np.asarray(new_od, dtype=np.float64)
@@ -464,7 +566,8 @@ def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
     merged_od = merged_od[uniq]
 
     save_rt(npz_path, merged_ks, merged_od, wave_nm,
-            label=label, config=config, processed_files=all_processed)
+            label=label, config=config, processed_files=all_processed,
+            manual_breaks_sec=ex_breaks)
     return len(new_ks), len(merged_ks)
 
 

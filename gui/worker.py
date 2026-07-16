@@ -1358,8 +1358,6 @@ class AlphaExportWorker(QThread):
             self.finished.emit(f"ERROR: {e}")
 
     def _run_inner(self):
-        from scipy.interpolate import PchipInterpolator
-
         os.makedirs(self.output_dir, exist_ok=True)
         wave_nm = self.wave_nm
         n_pix   = len(wave_nm)
@@ -1700,17 +1698,27 @@ class AlphaExportWorker(QThread):
                         _n_rej = int((~_ok).sum())
                         _kg, _kd, _leff_k = _kg[_ok], _kd[_ok], _leff_k[_ok]
                     if len(_kg) >= 2:
-                        _pchip_omr = PchipInterpolator(_kg, _kd, extrapolate=False)
-                        _g0, _g1 = _kg[0], _kg[-1]
-                        _d0, _d1 = _kd[0], _kd[-1]
-                        # 경계 밖은 최근접 인젝션 R을 상수로(I0 PCHIP과 동일 정책)
-                        def omr_interp(g, _p=_pchip_omr, _a=_g0, _b=_g1, _ed0=_d0, _ed1=_d1):
-                            if g <= _a:
-                                return _ed0
-                            if g >= _b:
-                                return _ed1
-                            return np.asarray(_p(g), dtype=float)
-                        _rt_str = (f"R(t) {len(_kg)} knots  "
+                        # 계단 가드: 자체 R(t)도 계단 후보에서 PCHIP 분절(경계 밖
+                        # 최근접 상수 정책은 SegmentedPchip에 내장 — 기존과 동일).
+                        # 축이 gidx(스캔 인덱스)라 수동 분절(초 단위)은 rt_path
+                        # 경로 전용 — 여기선 자동 감지만.
+                        from core.step_guard import (
+                            knot_scalar_metric as _sg_metric2,
+                            detect_step_candidates as _sg_detect2,
+                            SegmentedPchip as _SegPchip2,
+                            format_step_report as _sg_fmt2)
+                        _sg_c2, _sg_t2 = _sg_detect2(_kg, _sg_metric2(_kd))
+                        _pchip_omr = _SegPchip2(
+                            _kg, _kd, break_x=[c['x_break'] for c in _sg_c2])
+                        def omr_interp(g, _p=_pchip_omr):
+                            return _p(float(g))
+                        for _ln in _sg_fmt2(_sg_c2, threshold=_sg_t2,
+                                            x_to_str=lambda v: f"scan#{v:.0f}",
+                                            kind="self R(t)"):
+                            self.status_msg.emit(_ln)
+                        _seg2 = (f", {_pchip_omr.n_segments} seg"
+                                 if _pchip_omr.n_segments > 1 else "")
+                        _rt_str = (f"R(t) {len(_kg)} knots{_seg2}  "
                                    f"Leff={_leff_k.min():.2f}~{_leff_k.max():.2f} km "
                                    f"(median {np.median(_leff_k):.2f}, {_n_rej} rej)")
                         for _fp in amb_index:
@@ -1759,17 +1767,33 @@ class AlphaExportWorker(QThread):
             za_arr = np.array(za_spectra,  dtype=float)   # (N_za, N_pix)
             za_t   = np.array(za_t_list,   dtype=float)
             za_p   = np.array(za_p_list,   dtype=float)
-            pchip_i0 = PchipInterpolator(za_x, za_arr, extrapolate=False)
-            pchip_t  = PchipInterpolator(za_x, za_t,   extrapolate=False)
-            pchip_p  = PchipInterpolator(za_x, za_p,   extrapolate=False)
+            # 계단 가드: I₀도 LED 조절/재정렬 같은 계단이 knot 사이에 오면 PCHIP이
+            # 램프로 뭉갠다 → ZA 블록 평균강도로 계단 후보를 감지해 분절.
+            # T/P는 계단지표가 아니지만 I₀와 같은 경계로 분절해 일관성 유지
+            # (break 없으면 기존 PCHIP과 동일 출력 = 무회귀).
+            from core.step_guard import (
+                detect_step_candidates as _sg_detect_i0,
+                SegmentedPchip as _SegPchip_i0,
+                format_step_report as _sg_fmt_i0)
+            _i0_metric = np.nanmean(za_arr, axis=1)
+            _i0_cands, _i0_thr = _sg_detect_i0(za_x, _i0_metric)
+            _i0_breaks = [c['x_break'] for c in _i0_cands]
+            pchip_i0 = _SegPchip_i0(za_x, za_arr, break_x=_i0_breaks)
+            pchip_t  = _SegPchip_i0(za_x, za_t,   break_x=_i0_breaks)
+            pchip_p  = _SegPchip_i0(za_x, za_p,   break_x=_i0_breaks)
             # 경계 밖 외삽은 최근접 ZA를 상수로 사용
             za_x_min, za_x_max = za_x[0], za_x[-1]
             i0_first, i0_last  = za_arr[0],  za_arr[-1]
             t_first,  t_last   = float(za_t[0]),  float(za_t[-1])
             p_first,  p_last   = float(za_p[0]),  float(za_p[-1])
+            _i0_seg = (f", {pchip_i0.n_segments} segments"
+                       if pchip_i0.n_segments > 1 else "")
             self.status_msg.emit(
                 f"[PCHIP] built I₀ interpolator from {len(za_gidx)} ZA measurements  "
-                f"(global idx {za_gidx[0]}~{za_gidx[-1]})")
+                f"(global idx {za_gidx[0]}~{za_gidx[-1]}{_i0_seg})")
+            for _ln in _sg_fmt_i0(_i0_cands, threshold=_i0_thr,
+                                  x_to_str=lambda v: f"scan#{v:.0f}", kind="I0(t)"):
+                self.status_msg.emit(_ln)
 
         # ── Best R-calibration: median across all valid candidates ─────────────
         if calib_candidates:
@@ -1800,6 +1824,18 @@ class AlphaExportWorker(QThread):
                 _ks = np.asarray(_rt['knot_sec'], dtype=float)
                 _od = np.asarray(_rt['omr_d'], dtype=float)
                 _rw = np.asarray(_rt['wave_nm'], dtype=float)
+                # 계단 가드 감지는 픽셀축 슬라이스 **전에** — R-fit 신뢰창(config)
+                # 기준 스칼라로 봐야 하고, 창이 알파 핏창과 다를 수 있다.
+                from core.step_guard import (
+                    knot_scalar_metric as _sg_metric,
+                    detect_step_candidates as _sg_detect,
+                    SegmentedPchip as _SegPchip,
+                    format_step_report as _sg_fmt)
+                _sg_m = _sg_metric(_od, wave_nm=_rw,
+                                   fit_window_nm=(_rt.get('config') or {}).get('fit_window_nm'))
+                _sg_cands, _sg_thr = _sg_detect(_ks, _sg_m)
+                _sg_manual = list(np.asarray(_rt.get('manual_breaks_sec', []), dtype=float))
+                _sg_breaks = sorted([c['x_break'] for c in _sg_cands] + _sg_manual)
                 # 픽셀축 정합: 저장 omr_d(보통 full 2048) → 현재 wave_nm.
                 if _od.shape[1] == n_pix and np.allclose(_rw[:n_pix], wave_nm, atol=1e-3):
                     pass
@@ -1810,20 +1846,36 @@ class AlphaExportWorker(QThread):
                     _od = np.array([np.interp(wave_nm, _rw, row) for row in _od])
                 _od = np.maximum(_od, 1e-12)
                 if len(_ks) >= 2:
-                    _prt = PchipInterpolator(_ks, _od, extrapolate=False)
-                    _s0, _s1, _e0, _e1 = _ks[0], _ks[-1], _od[0], _od[-1]
-                    def rt_omr_interp(sec, _p=_prt, _a=_s0, _b=_s1, _x0=_e0, _x1=_e1):
+                    # 계단 경계에서 분절된 PCHIP — break 없으면 기존과 동일 출력.
+                    _prt = _SegPchip(_ks, _od, break_x=_sg_breaks)
+                    def rt_omr_interp(sec, _p=_prt):
                         if not np.isfinite(sec):
                             return None
-                        if sec <= _a:
-                            return _x0
-                        if sec >= _b:
-                            return _x1
-                        return np.asarray(_p(sec), dtype=float)
+                        return _p(sec)
+                    _seg_note = (f", {_prt.n_segments} segments"
+                                 if _prt.n_segments > 1 else "")
                     rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} "
-                                     f"({len(_ks)} knots)")
+                                     f"({len(_ks)} knots{_seg_note})")
                     self.status_msg.emit(
-                        f"[R(t) load] {len(_ks)} knots ({os.path.basename(self.rt_path)})")
+                        f"[R(t) load] {len(_ks)} knots{_seg_note} "
+                        f"({os.path.basename(self.rt_path)})")
+                    _fp0 = self.file_list[0] if self.file_list else None
+                    if isinstance(_fp0, tuple):
+                        _fp0 = _fp0[0]
+                    _yr0 = DataIO._file_year(_fp0) if _fp0 else None
+                    if _yr0:
+                        from datetime import datetime as _sgdt, timedelta as _sgtd
+                        _b0 = _sgdt(int(_yr0), 1, 1)
+                        _x2s = lambda s: (_b0 + _sgtd(seconds=float(s))).strftime('%m-%d %H:%M')
+                    else:
+                        _x2s = lambda s: f"doy {s / 86400.0 + 1.0:.3f}"
+                    for _ln in _sg_fmt(_sg_cands, threshold=_sg_thr, x_to_str=_x2s,
+                                       kind="R(t)"):
+                        self.status_msg.emit(_ln)
+                    if _sg_manual:
+                        self.status_msg.emit(
+                            "[STEP GUARD] manual breaks applied: "
+                            + ", ".join(_x2s(b) for b in sorted(_sg_manual)))
                 elif len(_ks) == 1:
                     _only = _od[0]
                     def rt_omr_interp(sec, _o=_only):

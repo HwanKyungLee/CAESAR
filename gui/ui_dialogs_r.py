@@ -261,6 +261,20 @@ class RCalibratorDialog(QDialog):
         btn_verify.clicked.connect(self._verify_npz)
         self._btn_rt_verify = btn_verify
         btn_row.addWidget(btn_verify)
+
+        # 계단 가드 수동 분절 — 운영자가 아는 이벤트(거울 청소/재정렬 시각)를
+        # npz에 기록하면 α 생성 시 그 시각에서 R(t) PCHIP 보간이 강제 분절된다.
+        btn_breaks = QPushButton("⛓  R(t) Breaks…")
+        btn_breaks.setStyleSheet(
+            "background-color:#5D4037;color:white;font-weight:bold;height:36px;")
+        btn_breaks.setToolTip(
+            "Manual step-change breaks for R(t) interpolation (step guard).\n"
+            "Enter known events (mirror cleaning / realignment) as datetimes;\n"
+            "alpha generation will NOT interpolate across these times.\n"
+            "Knots are never deleted — only the interpolation is segmented.")
+        btn_breaks.clicked.connect(self._edit_manual_breaks)
+        self._btn_rt_breaks = btn_breaks
+        btn_row.addWidget(btn_breaks)
         main.addLayout(btn_row)
 
         # ── 진행 표시줄 ────────────────────────────────────────────────────────
@@ -673,6 +687,63 @@ class RCalibratorDialog(QDialog):
     def _lock_rt_buttons(self, locked):
         self._btn_rt_export.setEnabled(not locked)
         self._btn_rt_verify.setEnabled(not locked)
+        self._btn_rt_breaks.setEnabled(not locked)
+
+    # ── 계단 가드: 수동 분절 편집 ───────────────────────────────────────────
+    def _edit_manual_breaks(self):
+        """채널별 R_<ch>.npz의 수동 분절 시각을 편집한다(step guard).
+        knot/omr_d는 건드리지 않고 manual_breaks_sec 메타만 교체 저장.
+        α 생성 시 이 시각에서 R(t) PCHIP 보간이 강제 분절된다."""
+        import os as _os
+        from PyQt6.QtWidgets import QInputDialog
+        RTP = self._rt_import()
+        if RTP is None:
+            return
+        tasks = self._build_rt_tasks(RTP)
+        if not tasks:
+            QMessageBox.warning(self, "Input error",
+                                "Set a left-panel channel (incl. wavecal) + raw folder.")
+            return
+        for label, _raw_dir, _wave, _rtcfg, _flist, npz_path in tasks:
+            if not _os.path.exists(npz_path):
+                self._log.append(f"[breaks] [{label}] no npz yet — skipped")
+                continue
+            try:
+                year = RTP.npz_year(npz_path)
+                z = RTP.load_rt(npz_path)
+            except Exception as e:
+                self._log.append(f"[breaks] [{label}] npz load failed: {e}")
+                continue
+            if year is None:
+                self._log.append(f"[breaks] [{label}] year unknown (no processed file "
+                                 f"names) — cannot edit breaks by datetime")
+                continue
+            from datetime import datetime as _dtm, timedelta as _tdl
+            base = _dtm(year, 1, 1)
+            cur = "\n".join(
+                (base + _tdl(seconds=float(s))).strftime("%Y-%m-%d %H:%M")
+                for s in sorted(z.get("manual_breaks_sec", [])))
+            text, ok = QInputDialog.getMultiLineText(
+                self, f"R(t) manual breaks — {label}",
+                f"[{label}] one datetime per line (YYYY-MM-DD HH:MM).\n"
+                "Interpolation will not cross these times. Empty = no manual breaks.",
+                cur)
+            if not ok:
+                continue
+            try:
+                secs = RTP.parse_break_datetimes(text.splitlines(), year)
+                saved = RTP.set_manual_breaks(npz_path, secs)
+            except Exception as e:
+                QMessageBox.warning(self, "Breaks error", f"[{label}] {e}")
+                continue
+            self._log.append(
+                f"[breaks] [{label}] {len(saved)} manual break(s) saved → "
+                f"{_os.path.basename(npz_path)}")
+            try:
+                for _ln in RTP.step_report(npz_path)["lines"]:
+                    self._log.append(f"[{label}] {_ln}")
+            except Exception:
+                pass
 
     # ── 전체 재계산(Rebuild) ────────────────────────────────────────────────
     def _export_rt_for_alpha(self):
@@ -799,6 +870,14 @@ class RCalibratorDialog(QDialog):
                 detail_lines += [f"    {b}" for b in unc[:200]]
                 if len(unc) > 200:
                     detail_lines.append(f"    … (+{len(unc) - 200} more)")
+
+            # 계단 가드 — 후보/수동 분절 보고(읽기 전용; knot은 그대로)
+            try:
+                srep = RTP.step_report(npz_path)
+                for ln in srep["lines"]:
+                    summary_lines.append(f"      • {ln}")
+            except Exception as e:
+                summary_lines.append(f"      • step-guard report failed: {e}")
 
         msg = QMessageBox(self)
         msg.setWindowTitle("Verify npz")
