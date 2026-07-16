@@ -53,9 +53,11 @@ WAVECAL_TOL_NM  = 0.25
 # 체크 프레임워크
 # ─────────────────────────────────────────────────────────────────────────────
 CHECKS = []
-def check(name):
+def check(name, needs_data=True):
+    """needs_data=False = 머신-로컬 데이터 파일 없이 도는 순수 코드 검증
+    (CI가 `--no-data`로 이 항목만 분리 실행한다)."""
     def deco(fn):
-        CHECKS.append((name, fn)); return fn
+        CHECKS.append((name, fn, needs_data)); return fn
     return deco
 
 class Skip(Exception):
@@ -135,7 +137,7 @@ def c_ref_ils():
 
 
 # ── 4. Rayleigh 물리: σ_ZA 가 문헌값과 맞나 (King factor 회귀 감지) ──────────
-@check("Rayleigh 물리 (King factor)")
+@check("Rayleigh 물리 (King factor)", needs_data=False)
 def c_rayleigh():
     from core.physics import RayleighPhysics
     N0 = 2.6867811e19
@@ -212,12 +214,16 @@ def c_fit():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-def main():
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    no_data = "--no-data" in argv
+    checks = [(n, f) for n, f, nd in CHECKS if not (no_data and nd)]
     print("=" * 64)
-    print(" CAESAR 파이프라인 자동 검증")
+    print(" CAESAR 파이프라인 자동 검증"
+          + ("  [--no-data: 데이터 비의존 항목만]" if no_data else ""))
     print("=" * 64)
     n_pass = n_warn = n_fail = n_skip = 0
-    for name, fn in CHECKS:
+    for name, fn in checks:
         try:
             status, msg = fn()
         except Skip as e:

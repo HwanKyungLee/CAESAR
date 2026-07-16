@@ -1,0 +1,57 @@
+# CAESAR Pro CI — 데이터 없이 돌 수 있는 검증만 (개선작업지시_2026-07 §C-2)
+#
+# 1인 개발 bus-factor 완화: 커밋마다 아래를 자동 확인해 '고치다 조용히 깨지는'
+# 회귀(bit-rot·물리식 회귀)를 빨간불로 띄운다. 측정 데이터가 필요한 검증
+# (raw 파싱 대조·웨이브칼·R·핏 출력)은 로컬에서 validate_pipeline(전체 모드)로.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen   # GUI 모듈 headless 임포트/렌더
+      MPLBACKEND: Agg
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # PyQt6 offscreen 구동에 필요한 시스템 라이브러리 (Qt 플랫폼 플러그인)
+      - name: Install Qt system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libglib2.0-0 libdbus-1-3 libfontconfig1 \
+            libxkbcommon0 libxkbcommon-x11-0
+
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt
+
+      # 전 모듈 임포트 스모크 — core/gui/tools/diagnostics/calibration 의 모든 .py
+      - name: Import smoke test
+        run: python tools/ci_import_smoke.py
+
+      # 데이터 비의존 파이프라인 검증 (Rayleigh King factor 골든값 등)
+      - name: validate_pipeline --no-data
+        run: python tools/validate_pipeline.py --no-data
+
+      # 합성 데이터 단위테스트 (계단 가드 · etalon 공선성 진단)
+      - name: Step guard unit tests
+        run: python tools/test_step_guard.py
+
+      - name: Etalon collinearity unit tests
+        run: python tools/test_etalon_collinearity.py
+
+      # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
+      - name: validate_plotmaker
+        run: python tools/validate_plotmaker.py
