@@ -1,5 +1,7 @@
 # CAESAR Pro
 
+[![CI](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml/badge.svg)](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml)
+
 쇄빙연구선 **아라온(Araon)** 선상에서 측정한 광학 분광 데이터로 대기 중 미량 기체
 (NO₂, CHOCHO 등) 농도를 산출하는 데스크톱 분석 프로그램(PyQt6 GUI)이다.
 
@@ -9,6 +11,7 @@
 
 > **처음 보는 사람**은 [설치](#설치)와 [빠른 시작](#빠른-시작-gui-사용-흐름)만 읽으면 앱을 켤 수 있고,
 > [용어 사전](#용어-사전)에 분야 약어를 풀어 두었다.
+> **운용자**(캠페인 데이터 처리 순서)는 [`docs/매뉴얼_조작순서.md`](docs/매뉴얼_조작순서.md)를 보면 되고,
 > **코드를 고칠 사람**은 그 아래 [폴더 구조](#폴더-구조)·[임포트 구조](#임포트-구조)를 보면 된다.
 
 ---
@@ -205,6 +208,14 @@ python tools/r_batch_calculator.py
 ```
 python diagnostics/fwhm_r_check.py --mode cold
 python diagnostics/fwhm_r_check.py --mode hot
+```
+
+**코드 수정 후 회귀 검증** (CI가 커밋마다 데이터 비의존 부분을 자동 실행)
+```
+python tools/validate_pipeline.py            # 전체(측정 데이터 있는 머신)
+python tools/validate_pipeline.py --no-data  # 데이터 없이 (CI와 동일)
+python tools/ci_import_smoke.py              # 전 모듈 임포트 스모크
+python tools/validate_plotmaker.py           # 시각화 수정 시 (24항목)
 ```
 
 ---
