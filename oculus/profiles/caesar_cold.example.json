@@ -1,0 +1,61 @@
+{
+  "profile_id": "caesar_cold_2026yeosu",
+  "profile_version": "1.0.0",
+  "description": "CAESAR Cold-cavity raw layout (2026 Yeosu). PRIMARY=NO2 cell 1채널. core/raw_parser.py의 VALUE-INSPECTION 기록에서 파생한 기본 프로파일 — 값은 캠페인별로 복제·조정.",
+  "instrument": "CAESAR",
+
+  "match": {
+    "n_columns": 6179,
+    "filename_glob": "*Cold*.dat"
+  },
+
+  "header": {
+    "time_bytepack": { "hi_col": 0, "lo_col": 1, "epoch": "year_start", "unit": "centiseconds" },
+    "exposure_col": 2,
+    "ccd_temp": { "col": 3, "scale": 0.01, "unit": "degC" },
+    "state_flag_col": 4
+  },
+
+  "flags": {
+    "atmosphere": [1],
+    "za": [500],
+    "he": [510],
+    "za_wait": [502],
+    "za_end": [503],
+    "he_wait": [512],
+    "he_end": [513],
+    "header": [0]
+  },
+
+  "spectrum_block_width": 2048,
+
+  "channels": [
+    { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
+    { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null },
+    { "id": "ch_noise2", "label": "noise",       "role": "noise",  "columns": [4101, 6148] }
+  ],
+
+  "autodetect": {
+    "first_spectrum_col": 5,
+    "signal_min_max": 5000,
+    "warmup_scans": 5
+  },
+
+  "hk": {
+    "start_col": 6149,
+    "fields": [
+      { "key": "sentinel",     "label": "sentinel?",       "rel": 6,  "scale": 1,      "unit": "raw",  "nominal": 15250 },
+      { "key": "p_cavity",     "label": "Cavity P",        "rel": 11, "scale": 0.6895, "unit": "mbar", "nominal": 1000, "alert": { "warn": [960, 1040], "alarm": [900, 1100] } },
+      { "key": "t_cavity",     "label": "Cavity T",        "rel": 24, "scale": 0.01,   "unit": "degC", "nominal": 24,   "alert": { "warn": [20, 28] } },
+      { "key": "t_spectrometer","label": "Spectrometer T", "rel": 25, "scale": 0.01,   "unit": "degC" }
+    ]
+  },
+
+  "saturation": { "adc_max": 60000 },
+
+  "cadence": {
+    "scan_interval_sec": 1,
+    "file_rollover_sec": 3600,
+    "liveness_grace_sec": 10
+  }
+}

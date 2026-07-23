@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caesar/oculus/profiles/_schema.json",
+  "title": "Oculus Instrument Profile",
+  "description": "하나의 CAESAR raw 파일 레이아웃을 서술하는 프로파일. Cold/Hot/PNs 같은 명칭은 이 파일 안의 label(표시용)로만 존재하고, 파싱·경보 로직은 여기 선언된 열지도/밴드/flag 규약만 본다. 로직 코드에 채널 의미를 하드코딩하지 않는다.",
+  "type": "object",
+  "required": ["profile_id", "profile_version", "match", "header", "flags", "channels", "hk", "cadence"],
+  "additionalProperties": false,
+  "properties": {
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "프로파일 고유 id (파일명과 일치 권장)."
+    },
+    "profile_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "프로파일 스키마가 아니라 이 '구성 서술'의 버전(semver)."
+    },
+    "description": { "type": "string" },
+    "instrument": { "type": "string", "description": "장비명(예: CAESAR)." },
+
+    "match": {
+      "type": "object",
+      "description": "감시 폴더의 raw 파일을 이 프로파일로 라우팅하는 규칙. n_columns가 1차(견고), filename_glob은 보조.",
+      "additionalProperties": false,
+      "properties": {
+        "n_columns": { "type": "integer", "minimum": 5, "description": "raw 한 행의 총 열 수(가장 신뢰도 높은 판별 신호)." },
+        "filename_glob": { "type": "string", "description": "파일명 매칭(예: '*Hot*.dat'). n_columns 보조." }
+      },
+      "anyOf": [
+        { "required": ["n_columns"] },
+        { "required": ["filename_glob"] }
+      ]
+    },
+
+    "header": {
+      "type": "object",
+      "description": "CAESAR 공통 선두 열들. 채널 구성이 바뀌어도 대체로 안정적.",
+      "required": ["time_bytepack", "state_flag_col"],
+      "additionalProperties": false,
+      "properties": {
+        "time_bytepack": {
+          "type": "object",
+          "description": "행별 시각. bytepack = (raw[hi_col]<<16)|raw[lo_col]. year_start 기준 센티초(0.01s) 카운터라 실제 벽시계는 파일의 연도를 알아야 복원.",
+          "required": ["hi_col", "lo_col"],
+          "additionalProperties": false,
+          "properties": {
+            "hi_col": { "type": "integer", "minimum": 0 },
+            "lo_col": { "type": "integer", "minimum": 0 },
+            "epoch": { "type": "string", "enum": ["year_start"], "default": "year_start" },
+            "unit": { "type": "string", "enum": ["centiseconds"], "default": "centiseconds" }
+          }
+        },
+        "exposure_col": { "type": "integer", "minimum": 0 },
+        "ccd_temp": { "$ref": "#/$defs/scaled_field", "description": "CCD 온도 열(스케일·단위 포함)." },
+        "state_flag_col": { "type": "integer", "minimum": 0, "description": "측정 상태 flag 열." }
+      }
+    },
+
+    "flags": {
+      "type": "object",
+      "description": "상태 flag의 '의미 역할' → flag 숫자값 매핑. 현재 CAESAR는 1/500/510이나 값은 여기서만 정의한다.",
+      "additionalProperties": false,
+      "properties": {
+        "atmosphere": { "$ref": "#/$defs/flag_values", "description": "대기 측정(농도 피팅 대상)." },
+        "za": { "$ref": "#/$defs/flag_values", "description": "Zero Air(안정) — R 산출." },
+        "he": { "$ref": "#/$defs/flag_values", "description": "Helium(안정) — R 산출." },
+        "za_wait": { "$ref": "#/$defs/flag_values", "description": "ZA 전이/퍼지(R에 쓰지 않음)." },
+        "za_end": { "$ref": "#/$defs/flag_values" },
+        "he_wait": { "$ref": "#/$defs/flag_values" },
+        "he_end": { "$ref": "#/$defs/flag_values" },
+        "header": { "$ref": "#/$defs/flag_values", "description": "파일 헤더/시작 마커." }
+      }
+    },
+
+    "spectrum_block_width": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "스펙트럼 한 블록의 픽셀 수(현 CAESAR 2048). autodetect의 stride."
+    },
+
+    "channels": {
+      "type": "array",
+      "description": "스펙트럼 블록 목록. columns를 비우면 autodetect로 채운다.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "role"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "채널 안정 식별자(로직이 참조). 라벨과 별개." },
+          "label": { "type": "string", "description": "표시용 이름(예: 'PNs','ANs','NO2'). 로직이 이 문자열에 의존하면 안 됨." },
+          "role": { "type": "string", "enum": ["signal", "noise"], "description": "signal만 피팅/감시 대상, noise는 무시." },
+          "columns": {
+            "type": "array",
+            "description": "절대 열 범위 [start, end] (양끝 포함). 생략 시 autodetect.",
+            "items": { "type": "integer", "minimum": 0 },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "reference_scenario": {
+            "type": ["string", "null"],
+            "description": "이 채널의 경량 DOAS에 쓸 시나리오/레퍼런스 세트(M3에서 채움)."
+          }
+        }
+      }
+    },
+
+    "autodetect": {
+      "type": "object",
+      "description": "columns 미지정 채널을 첫 N스캔의 블록별 최대값으로 signal/noise 분류. 근거: raw_parser VALUE-INSPECTION(신호≈3~5만, 노이즈≈700~900).",
+      "additionalProperties": false,
+      "properties": {
+        "first_spectrum_col": { "type": "integer", "minimum": 0, "description": "스펙트럼 블록이 시작하는 첫 열." },
+        "signal_min_max": { "type": "number", "description": "블록 최대값이 이 값 이상이면 signal로 판정." },
+        "warmup_scans": { "type": "integer", "minimum": 1, "default": 5 }
+      }
+    },
+
+    "hk": {
+      "type": "object",
+      "description": "Housekeeping 열지도. start_col + 각 필드의 rel(상대 오프셋). 어떤 열이 무엇인지·단위·정상밴드를 전부 여기서 정의.",
+      "required": ["start_col", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "start_col": { "type": "integer", "minimum": 0, "description": "HK 블록 첫 열의 절대 인덱스." },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "rel"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "HK 필드 안정 식별자." },
+              "label": { "type": "string", "description": "표시용 이름." },
+              "rel": { "type": "integer", "minimum": 0, "description": "start_col 기준 상대 오프셋." },
+              "scale": { "type": "number", "default": 1, "description": "물리값 = raw*scale + offset (예: ÷100 → 0.01, 압력 ×0.6895)." },
+              "offset": { "type": "number", "default": 0 },
+              "unit": { "type": "string", "description": "물리 단위(degC, mbar 등)." },
+              "nominal": { "type": "number", "description": "기대 정상값(대시보드 기준선·밴드 유도용)." },
+              "alert": {
+                "type": "object",
+                "description": "경보 밴드(선택). 생략 시 '표시만, 경보 없음'. warn 이탈=P2, alarm 이탈=P1.",
+                "additionalProperties": false,
+                "properties": {
+                  "warn": { "$ref": "#/$defs/band" },
+                  "alarm": { "$ref": "#/$defs/band" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "saturation": {
+      "type": "object",
+      "description": "스펙트럼 포화 판정.",
+      "additionalProperties": false,
+      "properties": {
+        "adc_max": { "type": "number", "description": "이 값 초과 픽셀은 포화(현 CAESAR ≈60000)." }
+      }
+    },
+
+    "cadence": {
+      "type": "object",
+      "description": "정상 데이터 유입 리듬(liveness 경보 기준).",
+      "required": ["scan_interval_sec"],
+      "additionalProperties": false,
+      "properties": {
+        "scan_interval_sec": { "type": "number", "exclusiveMinimum": 0, "description": "기대 스캔(행) 간격(현 CAESAR 1초)." },
+        "file_rollover_sec": { "type": "number", "exclusiveMinimum": 0, "description": "기대 파일 rollover 주기(현 CAESAR 3600초)." },
+        "liveness_grace_sec": { "type": "number", "exclusiveMinimum": 0, "description": "이 시간 넘도록 새 행 없으면 측정 정지(P0)." }
+      }
+    }
+  },
+
+  "$defs": {
+    "scaled_field": {
+      "type": "object",
+      "required": ["col"],
+      "additionalProperties": false,
+      "properties": {
+        "col": { "type": "integer", "minimum": 0 },
+        "scale": { "type": "number", "default": 1 },
+        "offset": { "type": "number", "default": 0 },
+        "unit": { "type": "string" }
+      }
+    },
+    "flag_values": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "minItems": 1
+    },
+    "band": {
+      "type": "array",
+      "description": "[lo, hi] 정상 범위. 이 밖이면 경보. null 끝값은 한쪽 무제한.",
+      "items": { "type": ["number", "null"] },
+      "minItems": 2,
+      "maxItems": 2
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "profile_id": "caesar_hot_2026yeosu",
+  "profile_version": "1.0.0",
+  "description": "CAESAR Hot-cavity raw layout (2026 Yeosu). PRIMARY=PNs cell('좌측'), SECONDARY=ANs cell('우측') 2채널. core/raw_parser.py의 VALUE-INSPECTION 기록에서 파생 — 값은 캠페인별로 복제·조정.",
+  "instrument": "CAESAR",
+
+  "match": {
+    "n_columns": 6181,
+    "filename_glob": "*Hot*.dat"
+  },
+
+  "header": {
+    "time_bytepack": { "hi_col": 0, "lo_col": 1, "epoch": "year_start", "unit": "centiseconds" },
+    "exposure_col": 2,
+    "ccd_temp": { "col": 3, "scale": 0.01, "unit": "degC" },
+    "state_flag_col": 4
+  },
+
+  "flags": {
+    "atmosphere": [1],
+    "za": [500],
+    "he": [510],
+    "za_wait": [502],
+    "za_end": [503],
+    "he_wait": [512],
+    "he_end": [513],
+    "header": [0]
+  },
+
+  "spectrum_block_width": 2048,
+
+  "channels": [
+    { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
+    { "id": "ch_pns",    "label": "PNs",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null },
+    { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148], "reference_scenario": null }
+  ],
+
+  "autodetect": {
+    "first_spectrum_col": 5,
+    "signal_min_max": 5000,
+    "warmup_scans": 5
+  },
+
+  "hk": {
+    "start_col": 6149,
+    "fields": [
+      { "key": "templed1",          "label": "LED1 temp",     "rel": 0,  "scale": 0.01,   "unit": "degC", "alert": { "warn": [15, 45] } },
+      { "key": "templed2",          "label": "LED2 temp",     "rel": 1,  "scale": 0.01,   "unit": "degC", "alert": { "warn": [15, 45] } },
+      { "key": "oven_ans_setpoint", "label": "ANs oven SP",   "rel": 2,  "scale": 0.01,   "unit": "degC", "nominal": 300, "alert": { "warn": [295, 305], "alarm": [285, 315] } },
+      { "key": "preheater",         "label": "Preheater T",   "rel": 4,  "scale": 0.01,   "unit": "degC", "nominal": 38 },
+      { "key": "oven_pns_setpoint", "label": "PNs oven SP",   "rel": 5,  "scale": 0.01,   "unit": "degC", "nominal": 180, "alert": { "warn": [175, 185], "alarm": [165, 195] } },
+      { "key": "cell_heater",       "label": "Cell heater SP","rel": 6,  "scale": 0.01,   "unit": "degC", "nominal": 75 },
+      { "key": "p_pns_cavity",      "label": "PNs cavity P",  "rel": 13, "scale": 0.6895, "unit": "mbar", "nominal": 965, "alert": { "warn": [930, 1000], "alarm": [880, 1050] } },
+      { "key": "p_ans_cavity",      "label": "ANs cavity P",  "rel": 15, "scale": 0.6895, "unit": "mbar", "nominal": 915, "alert": { "warn": [880, 950], "alarm": [830, 1000] } },
+      { "key": "tempcell1",         "label": "Cell temp 1",   "rel": 25, "scale": 0.01,   "unit": "degC" },
+      { "key": "tempcell2",         "label": "Cell temp 2",   "rel": 26, "scale": 0.01,   "unit": "degC" },
+      { "key": "tempcell3",         "label": "Cell temp 3",   "rel": 27, "scale": 0.01,   "unit": "degC" },
+      { "key": "t_spectrometer",    "label": "Spectrometer T","rel": 28, "scale": 0.01,   "unit": "degC" }
+    ]
+  },
+
+  "saturation": { "adc_max": 60000 },
+
+  "cadence": {
+    "scan_interval_sec": 1,
+    "file_rollover_sec": 3600,
+    "liveness_grace_sec": 10
+  }
+}
