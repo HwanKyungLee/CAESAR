@@ -427,6 +427,14 @@ def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,
         if os.path.basename(path).startswith("_"):
             continue
         profiles.append(load_profile(path, validate=validate, schema=schema))
+    # 중복 profile_id 방지 — by_id/route가 조용히 첫 번째만 쓰는 footgun 차단
+    # (열수 중복은 정당할 수 있어 막지 않는다: filename_glob로 구분 가능)
+    seen: dict = {}
+    for p in profiles:
+        if p.profile_id in seen:
+            raise ProfileError(
+                f"중복 profile_id '{p.profile_id}': {seen[p.profile_id]} vs {p.source_path}")
+        seen[p.profile_id] = p.source_path
     return profiles
 
 

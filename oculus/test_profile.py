@@ -13,8 +13,11 @@
 
 사용: python oculus/test_profile.py  → 전부 PASS면 exit 0
 """
+import json
 import os
+import shutil
 import sys
+import tempfile
 from datetime import datetime
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,6 +72,27 @@ def test_invalid_profile():
         except ProfileError:
             raised = True
         check(f"reject: {why}", raised)
+
+
+def test_duplicate_profile_id():
+    print("[3b] 중복 profile_id → ProfileError")
+    from oculus.profile import DEFAULT_PROFILE_DIR
+    src = os.path.join(DEFAULT_PROFILE_DIR, "caesar_hot.example.json")
+    with open(src, encoding="utf-8") as fh:
+        d = json.load(fh)  # 유효 프로파일 (같은 id로 두 파일 생성)
+    tmp = tempfile.mkdtemp(prefix="oculus_prof_")
+    try:
+        for name in ("a.json", "b.json"):
+            with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
+                json.dump(d, fh)
+        raised = False
+        try:
+            load_profiles(tmp)
+        except ProfileError:
+            raised = True
+        check("같은 id 프로파일 2개 → reject", raised)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_routing():
@@ -188,7 +212,8 @@ def test_time_bytepack():
 
 
 def main():
-    for t in (test_load_and_validate, test_invalid_profile, test_routing,
+    for t in (test_load_and_validate, test_invalid_profile,
+              test_duplicate_profile_id, test_routing,
               test_flags, test_channels, test_hk_conversion_and_bands,
               test_saturation, test_autodetect, test_time_bytepack):
         t()
