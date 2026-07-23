@@ -1,4 +1,6 @@
-# CAESAR Pro
+# Augur
+
+> **CAESAR** BBCEAS 미량기체 분석 소프트웨어 (구 "CAESAR Pro"). 랩 통합 관측시스템 **ARGUS** 아래, 계측기 **CAESAR**의 데이터를 농도로 확정하는 분석 프로그램이다.
 
 [![CI](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml/badge.svg)](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml)
 
@@ -34,7 +36,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Windows에서는 `CAESAR_Pro_실행.bat` 더블클릭으로도 켜진다(콘솔 없이 GUI만 뜨고,
+Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없이 GUI만 뜨고,
 크래시 로그는 `logs/crash.log` 에 쌓인다). HITRAN 라인리스트("🌐 Generate from HITRAN"
 버튼, Reference Generator에서 새 단면을 만들 때만 필요)는 처음 쓸 때 인터넷으로 받아
 `hitran_data/` 에 캐시되고(저장소에는 포함되지 않음, 사용자별) 이후로는 캐시만 쓴다.
@@ -89,7 +91,7 @@ CAESAR/
 ├── main.py                    ← GUI 진입점 (python main.py)
 ├── Argos.png                  ← 스플래시 스크린 이미지
 ├── requirements.txt           ← 의존성
-├── CAESAR_Pro_실행.bat        ← Windows 실행 배치
+├── Augur_실행.bat             ← Windows 실행 배치
 │
 ├── core/                      ← 공용 연산·IO 모듈 (패키지)
 │   ├── raw_parser.py          ← raw .dat 컬럼 레이아웃 단일 출처(single source of truth)

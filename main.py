@@ -55,7 +55,7 @@ if __name__ == '__main__':
 
     # Print a loading message at the bottom-center of the splash image
     splash.showMessage(
-        f"Loading CAESAR Pro v{__version__} Engine...",
+        f"Loading Augur v{__version__} Engine...",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
         Qt.GlobalColor.white
     )
