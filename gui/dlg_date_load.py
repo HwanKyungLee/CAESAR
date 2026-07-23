@@ -23,29 +23,46 @@ _DAY_DIR = re.compile(r'^\d{6}$')
 
 # ── 스캔/머지 로직(GUI 무관 — 단위테스트 가능) ─────────────────────────────
 
+def _scan_day_root(droot: str, day: str, cfg: str, out: dict) -> None:
+    """하나의 {YYMMDD} 폴더({neg}/{QC}/*.dat)를 스캔해 out에 채운다.
+    키 = (cfg, stem, neg, qc). cfg='' 는 config 폴더 없는 레거시 flat 트리."""
+    for neg in ('neg_o', 'neg_x'):
+        nd = os.path.join(droot, neg)
+        if not os.path.isdir(nd):
+            continue
+        for qc in sorted(os.listdir(nd)):
+            qd = os.path.join(nd, qc)
+            if not qc.startswith('QC') or not os.path.isdir(qd):
+                continue
+            for f in sorted(os.listdir(qd)):
+                if not f.lower().endswith('.dat'):
+                    continue
+                stem = re.sub(r'^\d{6}_', '', os.path.splitext(f)[0])
+                out.setdefault((cfg, stem, neg, qc), {})[day] = os.path.join(qd, f)
+
+
 def scan_daily_tree(base: str) -> dict:
-    """일별 버킷 트리 스캔 → {(stem, neg, qc): {'YYMMDD': 파일경로}}.
-    stem = 파일명에서 날짜 프리픽스·확장자 제거(= 종/세팅 태그)."""
+    """핏 버킷 트리 스캔 → {(cfg, stem, neg, qc): {'YYMMDD': 파일경로}}.
+    두 구조를 모두 인식(하위호환):
+      • 신규:  base/{fit-config}/{YYMMDD}/{neg}/{QC}/*.dat   (cfg = config 폴더명)
+      • 레거시: base/{YYMMDD}/{neg}/{QC}/*.dat                (cfg = '')
+    stem = 파일명에서 날짜 프리픽스·확장자 제거(= 채널/세팅 태그)."""
     out: dict = {}
     if not base or not os.path.isdir(base):
         return out
     for name in sorted(os.listdir(base)):
-        droot = os.path.join(base, name)
-        if not _DAY_DIR.match(name) or not os.path.isdir(droot):
+        top = os.path.join(base, name)
+        if not os.path.isdir(top):
             continue
-        for neg in ('neg_o', 'neg_x'):
-            nd = os.path.join(droot, neg)
-            if not os.path.isdir(nd):
-                continue
-            for qc in sorted(os.listdir(nd)):
-                qd = os.path.join(nd, qc)
-                if not qc.startswith('QC') or not os.path.isdir(qd):
-                    continue
-                for f in sorted(os.listdir(qd)):
-                    if not f.lower().endswith('.dat'):
-                        continue
-                    stem = re.sub(r'^\d{6}_', '', os.path.splitext(f)[0])
-                    out.setdefault((stem, neg, qc), {})[name] = os.path.join(qd, f)
+        if _DAY_DIR.match(name):                 # 레거시 flat: base/{YYMMDD}/...
+            _scan_day_root(top, name, '', out)
+        elif name in ('_archive', '_derived'):   # 특수 폴더는 config 폴더 아님
+            continue
+        else:                                    # config 폴더: base/{cfg}/{YYMMDD}/...
+            for day in sorted(os.listdir(top)):
+                droot = os.path.join(top, day)
+                if _DAY_DIR.match(day) and os.path.isdir(droot):
+                    _scan_day_root(droot, day, name, out)
     return out
 
 
@@ -61,9 +78,9 @@ def load_range(base: str, key: tuple, files_by_date: dict,
         return None
     if len(files) == 1:
         return files[0]
-    stem, neg, qc = key
+    cfg, stem, neg, qc = key
     span = f"{days[0]}-{days[-1]}"
-    out = os.path.join(base, '_derived', span, neg, qc,
+    out = os.path.join(base, '_derived', cfg, span, neg, qc,
                        f"{stem}_merge{len(files)}_{span}.dat")
     if os.path.exists(out) and os.path.getmtime(out) > max(map(os.path.getmtime, files)):
         return out
@@ -103,7 +120,7 @@ class DateLoadDialog(QDialog):
         self._ed_base.editingFinished.connect(self._rescan)
         row.addWidget(self._ed_base, 1)
         b = QPushButton("📁")
-        b.setToolTip("일별 버킷({YYMMDD}/{neg}/{QC}/)이 있는 fitting 최상위 폴더")
+        b.setToolTip("핏 버킷({핏config}/{YYMMDD}/{neg}/{QC}/ 또는 레거시 {YYMMDD}/...)이 있는 fitting 최상위 폴더")
         b.clicked.connect(self._browse)
         row.addWidget(b)
         v.addLayout(row)
@@ -154,19 +171,20 @@ class DateLoadDialog(QDialog):
         self._tree = scan_daily_tree(base)
         self._list.clear()
         if not self._tree:
-            self._lbl.setText("일별 버킷({YYMMDD}/{neg}/{QC}/*.dat)을 찾지 못했습니다 — 폴더를 확인하세요.")
+            self._lbl.setText("핏 버킷({핏config}/{YYMMDD}/{neg}/{QC}/*.dat 또는 레거시 {YYMMDD}/...)을 찾지 못했습니다 — 폴더를 확인하세요.")
             return
         all_days = sorted({d for m in self._tree.values() for d in m})
         self._d0.setDate(_qdate(all_days[0]))
         self._d1.setDate(_qdate(all_days[-1]))
         from datetime import datetime
-        for key in sorted(self._tree, key=lambda k: (k[0], k[1], k[2])):
-            stem, neg, qc = key
+        for key in sorted(self._tree, key=lambda k: (k[0], k[1], k[2], k[3])):
+            cfg, stem, neg, qc = key
             days = sorted(self._tree[key])
             # 최근 저장시각 — 재핏 직후 어떤 시리즈가 갱신됐는지 한눈에
             last = max(os.path.getmtime(p) for p in self._tree[key].values())
+            cfg_disp = f"{cfg} · " if cfg else ""
             it = QListWidgetItem(
-                f"{stem}   [{neg}/{qc}]   {days[0]}~{days[-1]} · {len(days)}d"
+                f"{cfg_disp}{stem}   [{neg}/{qc}]   {days[0]}~{days[-1]} · {len(days)}d"
                 f"   💾 {datetime.fromtimestamp(last):%m-%d %H:%M}")
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Unchecked)
@@ -197,9 +215,9 @@ class DateLoadDialog(QDialog):
             try:
                 p = load_range(base, key, self._tree[key], d0, d1)
             except Exception as e:                       # 컬럼 불일치 등 — 다른 시리즈는 계속
-                errors.append(f"{key[0]}: {e}")
+                errors.append(f"{key[1]}: {e}")
                 continue
-            (paths if p else skipped).append(p if p else key[0])
+            (paths if p else skipped).append(p if p else key[1])
         if errors:
             QMessageBox.warning(self, "Load by date", "머지 실패:\n" + "\n".join(errors))
         if not paths:

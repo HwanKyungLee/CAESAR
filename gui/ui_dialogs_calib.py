@@ -881,7 +881,8 @@ class RangeSelectorDialog(QDialog):
     apply_channel = pyqtSignal(int, float, float, bool)   # (channel, lo, hi, is_nm)
 
     def __init__(self, data_path, pixel_min, pixel_max, engine, channels=None,
-                 channel_paths=None, active_channel=None):
+                 channel_paths=None, active_channel=None, channel_files=None,
+                 chosen_files=None, channel_ranges=None):
         super().__init__()
         self.setWindowTitle("🔍 Fit Range Selector")
         _s = _ui_scale()
@@ -894,9 +895,22 @@ class RangeSelectorDialog(QDialog):
         self.max_sel = int(pixel_max)
         self._channels = channels or []   # [(ch, label), ...] — 채널별 적용 시
         self._channel_paths = channel_paths or {}   # {ch: 대표 스펙트럼 경로}
+        self._channel_files = channel_files or {}   # {ch: 전체 파일 리스트} — File콤보/★Score용
+        # {ch: 고정 파일} — ★Score/수동 선택이 채널전환·재실행에도 유지되게(app_window 소유 dict).
+        self._chosen_files = chosen_files if chosen_files is not None else {}
+        # {ch: (lo, hi, is_nm)} — 채널별 핏레인지. 채널 전환 시 그 채널 범위를 표시하고,
+        # 드래그하면 '현재 채널'것만 갱신(예전엔 min_sel/max_sel가 전역이라 전 채널이
+        # 마지막으로 만진 범위를 공유했다).
+        self._channel_ranges = dict(channel_ranges) if channel_ranges else {}
         self._active_channel = active_channel
+        self._ref_line = None
         self._sel_lo = self._sel_hi = None
         self._sel_is_nm = False
+
+        # 활성 채널에 고정된 파일이 있으면 그걸로 시작(대표파일 대신)
+        pinned = self._pick_file_for_channel(active_channel)
+        if pinned and os.path.isfile(pinned):
+            self.data_path = pinned
 
         self.x = None
         self.y = None
@@ -904,6 +918,39 @@ class RangeSelectorDialog(QDialog):
 
         self.setup_ui()
         self.load_plot()
+
+    def _sync_range_from_channel(self):
+        """현재 채널의 저장된 핏레인지 → min_sel/max_sel(이 파일 파장축 기준 픽셀).
+        nm로 보관하므로 채널별 wavecal 차이가 자동 반영된다. 없으면 그대로 둔다."""
+        try:
+            chi = int(self._current_channel())
+        except (TypeError, ValueError):
+            return
+        rng = self._channel_ranges.get(chi)
+        if not rng:
+            return
+        lo_v, hi_v, is_nm = rng
+        if is_nm and getattr(self, '_wave_mode', False):
+            w = np.asarray(self.x, dtype=float)
+            if w.size:
+                a = int(np.argmin(np.abs(w - float(lo_v))))
+                b = int(np.argmin(np.abs(w - float(hi_v))))
+                self.min_sel, self.max_sel = (a, b) if a <= b else (b, a)
+        elif not is_nm:
+            self.min_sel = int(min(lo_v, hi_v))
+            self.max_sel = int(max(lo_v, hi_v))
+
+    def _pick_file_for_channel(self, ch):
+        """채널의 표시 파일 선택: 고정(★Score/수동)이 있으면 우선, 없으면 대표(중간) 파일."""
+        try:
+            chi = int(ch)
+        except (TypeError, ValueError):
+            return None
+        chosen = self._chosen_files.get(chi)
+        files = self._channel_files.get(chi, [])
+        if chosen and chosen in files:
+            return chosen
+        return self._channel_paths.get(chi)
 
     def setup_ui(self):
         # Main Vertical Layout
@@ -917,6 +964,20 @@ class RangeSelectorDialog(QDialog):
         self.combo.addItems(["None"] + self.engine.gas_list)
         self.combo.currentTextChanged.connect(self.update_ref)
         top_layout.addWidget(self.combo)
+
+        # Δα: 전 파장 고역통과(가우시안 베이스라인 제거)로 차등구조만 표시 — NO2
+        # 레퍼런스와 피크 위치를 1:1로 대조하며 범위를 고를 수 있게. 표시 전용.
+        # CH3처럼 광대역이 구조의 수백 배인 α도 이걸 켜면 구조가 드러난다.
+        self.chk_diff = QCheckBox("Δα (detrend)")
+        self.chk_diff.setToolTip(
+            "Alpha display only: remove the broadband baseline (Gaussian high-pass, ~4nm)\n"
+            "over the FULL spectrum and show the differential structure — same idea as the\n"
+            "DOAS fit's polynomial. Defined at all wavelengths, so wheel zoom-out shows\n"
+            "structure beyond the fit range too. Lets you match peaks 1:1 against the\n"
+            "reference overlay. Display-only; the actual fit is unaffected.")
+        self.chk_diff.setChecked(True)   # 알파 열면 바로 구조가 보이게 기본 ON (raw α는 체크 해제)
+        self.chk_diff.toggled.connect(lambda _c: self.load_plot())
+        top_layout.addWidget(self.chk_diff)
 
         # 적용 채널 — 선택한 범위를 이 채널의 nm 범위로 설정(멀티채널 시)
         self.combo_ch = None
@@ -934,6 +995,30 @@ class RangeSelectorDialog(QDialog):
             # 채널 바꾸면 그 채널 대표 스펙트럼으로 그래프 갱신
             self.combo_ch.currentIndexChanged.connect(self._on_channel_combo)
             top_layout.addWidget(self.combo_ch)
+
+        # 파일 선택 + ★Score: 대표파일(기본=중간)을 바꿔볼 수 있고, ★Score가 이 채널의
+        # 파일들을 NO2 정렬 상관으로 채점해 최적 파일을 추천·자동선택한다.
+        # 날짜 하드코딩 flag 없이, 06-17(+85px) 같은 밀린 날이 낮은 점수로 드러남.
+        self.combo_file = None
+        self.btn_score = None
+        if self._channel_files:
+            top_layout.addSpacing(12)
+            top_layout.addWidget(QLabel("File:"))
+            self.combo_file = QComboBox()
+            self.combo_file.setMinimumWidth(230)
+            self.combo_file.setToolTip("Representative file to display (default: middle of the list)")
+            self.combo_file.currentIndexChanged.connect(self._on_file_combo)
+            top_layout.addWidget(self.combo_file)
+            self.btn_score = QPushButton("★ Score")
+            self.btn_score.setToolTip(
+                "Score every alpha file of this channel: correlation r of its median Δα\n"
+                "against the NO2 reference within the current pixel band.\n"
+                "High r = NO2 structure present & wavelength-aligned. Low r = shifted day\n"
+                "(e.g. cold 06-17 +85px), contaminated, or no NO2. Best file is auto-selected.\n"
+                "Data-driven recommendation — nothing is deleted or flagged.")
+            self.btn_score.clicked.connect(self._score_files)
+            top_layout.addWidget(self.btn_score)
+            self._populate_file_combo()
 
         top_layout.addStretch(1)
         top_layout.addWidget(QLabel("🖱️ Left: Select Range | Right: Pan | Wheel: Zoom"))
@@ -953,12 +1038,18 @@ class RangeSelectorDialog(QDialog):
         btns_layout = QHBoxLayout()
         self.b_apply = QPushButton("Apply Range")
         self.b_apply.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; height: 35px;")
+        # Apply는 범위만 반영하고 창은 열어둔다(여러 채널·범위를 이어서 조정 가능).
+        # 실제 닫기는 Close 버튼으로만.
         self.b_apply.clicked.connect(self.emit_apply)
-        
+        # 적용 피드백(창이 안 닫히므로 반영됐는지 알 수 있게)
+        self.lbl_applied = QLabel("")
+        self.lbl_applied.setStyleSheet("color:#2E7D32; font-weight:bold; padding:0 8px;")
+
         self.b_close = QPushButton("Close")
         self.b_close.clicked.connect(self.reject)
-        
+
         btns_layout.addWidget(self.b_apply)
+        btns_layout.addWidget(self.lbl_applied, 1)
         btns_layout.addWidget(self.b_close)
         self.main_layout.addLayout(btns_layout)
 
@@ -1024,41 +1115,25 @@ class RangeSelectorDialog(QDialog):
         return False
 
     def _load_alpha_trace_for_display(self):
-        """alpha_trace.dat의 첫 데이터행 α 스펙트럼을 표시용으로 로드.
+        """alpha_trace.dat 전체 스캔의 '중앙값 α 스펙트럼'을 표시용으로 로드.
+
+        (기존엔 첫 데이터행 1개만 그렸는데, 첫 스캔은 정착스캔(빈 전환 직후 캐비티
+        미충전)인 경우가 잦아 파일 내 최악의 노이즈 스캔이 그대로 표시되곤 했다 —
+        실측 hot/ch2 8파일 중 4파일에서 row0가 최악/차악. 중앙값은 정착스캔을
+        자동으로 무시하고 노이즈가 ~√N배 줄어 NO2 흡수구조가 보인다.
+        파서는 Result Lab과 공용(gui.result_viewer_io.read_alpha_trace).)
 
         반환 (pixel_idx_for_ref, alpha, file_wave_nm):
           · file_wave_nm : 파일 자체 헤더 파장(표시 x축)
           · pixel_idx_for_ref : 파일 파장 → engine 픽셀 매핑(레퍼런스 overlay 정렬용).
             engine 파장축이 없으면 0..n-1.
         """
-        wave = None
-        alpha = None
-        alpha_start = 3
-        with open(self.data_path, "r", encoding="utf-8", errors="replace") as f:
-            for ln in f:
-                if ln.startswith("# wavelength_nm:"):
-                    wave = np.array([float(v) for v in ln.split(":", 1)[1].strip().split("\t")
-                                     if v.strip()], dtype=float)
-                    continue
-                if ln.lower().startswith("row_idx"):
-                    cols = ln.rstrip("\n").split("\t")
-                    fp = next((i for i, c in enumerate(cols) if c.startswith("px")), None)
-                    if fp is not None:
-                        alpha_start = fp
-                    continue
-                if ln.startswith("#"):
-                    continue
-                p = ln.rstrip().split("\t")
-                if len(p) > alpha_start:
-                    try:
-                        alpha = np.array([float(x) for x in p[alpha_start:]], dtype=float)
-                        break
-                    except ValueError:
-                        continue
-        if alpha is None:
+        from gui.result_viewer_io import read_alpha_trace
+        wave, _ids, a = read_alpha_trace(self.data_path)
+        if a.size == 0:
             raise RuntimeError("No alpha_trace data rows found")
-        if wave is None or len(wave) != len(alpha):
-            wave = np.arange(len(alpha), dtype=float)
+        alpha = np.nanmedian(a, axis=0)
+        self._alpha_nscans = int(a.shape[0])   # load_plot 레전드 라벨용
         wax = getattr(self.engine, "_wave_axis", None)
         if wax is not None and len(wave):
             wax = np.asarray(wax, dtype=float).flatten()
@@ -1069,22 +1144,147 @@ class RangeSelectorDialog(QDialog):
             eng_px = np.arange(len(alpha), dtype=float)
         return eng_px, alpha, wave
 
+    def _current_channel(self):
+        if getattr(self, 'combo_ch', None):
+            return self.combo_ch.currentData()
+        return self._active_channel
+
+    def _populate_file_combo(self):
+        """File 콤보를 현재 채널의 파일 리스트로 채우고 현재 파일을 선택 표시."""
+        if getattr(self, 'combo_file', None) is None:
+            return
+        ch = self._current_channel()
+        try:
+            files = self._channel_files.get(int(ch), []) if ch is not None else []
+        except (TypeError, ValueError):
+            files = []
+        self.combo_file.blockSignals(True)
+        self.combo_file.clear()
+        for f in files:
+            self.combo_file.addItem(os.path.basename(f), f)
+        if self.data_path in files:
+            self.combo_file.setCurrentIndex(files.index(self.data_path))
+        self.combo_file.blockSignals(False)
+
+    def _on_file_combo(self, _idx):
+        """File 콤보에서 다른 파일 선택 → 그 파일로 그래프 갱신 + 이 채널의 고정 파일로 기록."""
+        if getattr(self, 'combo_file', None) is None:
+            return
+        p = self.combo_file.currentData()
+        if not p:
+            return
+        ch = self._current_channel()
+        try:
+            self._chosen_files[int(ch)] = p   # 채널별 고정(재실행에도 유지)
+        except (TypeError, ValueError):
+            pass
+        if p != self.data_path:
+            self.data_path = p
+            self.load_plot()
+
+    def _score_files(self):
+        """현재 채널의 알파 파일들을 채점: 현재 픽셀밴드에서 median Δα vs NO2 레퍼런스
+        상관 r. 콤보 라벨에 점수를 달고 최고점 파일을 자동 선택한다.
+        r 낮음 = 파장 밀림(예: 콜드 06-17 +85px)·오염·NO2 부재 — 날짜 하드코딩 없이
+        데이터로 걸러진다. 원본은 건드리지 않음(추천만)."""
+        from gui.result_viewer_io import read_alpha_trace
+        ch = self._current_channel()
+        try:
+            files = self._channel_files.get(int(ch), []) if ch is not None else []
+        except (TypeError, ValueError):
+            files = []
+        if not files or self.btn_score is None:
+            return
+        ref_name = 'NO2' if 'NO2' in self.engine.interpolators else \
+                   (next(iter(self.engine.interpolators), None))
+        if ref_name is None:
+            self.btn_score.setText("★ no ref")
+            return
+        ref = np.asarray(self.engine.interpolators[ref_name](np.arange(2048, dtype=float)),
+                         dtype=float)
+
+        def _dt_idx(v, band):
+            x = np.arange(len(band), dtype=float)
+            vv = np.asarray(v, dtype=float)[band]
+            fin = np.isfinite(vv)
+            if int(fin.sum()) < 20:
+                return None
+            c = np.polyfit(x[fin], vv[fin], 5)
+            out = np.full_like(vv, np.nan)
+            out[fin] = vv[fin] - np.polyval(c, x[fin])
+            return out
+
+        scores = []
+        for i, f in enumerate(files):
+            self.btn_score.setText(f"★ {i + 1}/{len(files)}")
+            QApplication.processEvents()
+            s = None
+            try:
+                if "alpha_trace" in os.path.basename(f).lower() or self._is_alpha_trace(f):
+                    _w, _ids, a = read_alpha_trace(f)
+                    if a.size:
+                        y = np.nanmedian(a, axis=0)
+                        n = min(len(y), len(ref))
+                        lo, hi = sorted((min(self.min_sel, n - 1), min(self.max_sel, n - 1)))
+                        band = np.arange(lo, hi + 1)
+                        dy = _dt_idx(y[:n], band)
+                        dr = _dt_idx(ref[:n], band)
+                        if dy is not None and dr is not None:
+                            fin = np.isfinite(dy) & np.isfinite(dr)
+                            if int(fin.sum()) > 20:
+                                s = float(np.corrcoef(dy[fin], dr[fin])[0, 1])
+            except Exception:
+                s = None
+            scores.append(s)
+        self.btn_score.setText("★ Score")
+
+        best_i, best_s = None, None
+        self.combo_file.blockSignals(True)
+        for k, (f, s) in enumerate(zip(files, scores)):
+            base = os.path.basename(f)
+            self.combo_file.setItemText(k, f"r={s:+.2f}  {base}" if s is not None else f"—  {base}")
+            if s is not None and (best_s is None or s > best_s):
+                best_i, best_s = k, s
+        self.combo_file.blockSignals(False)
+        if best_i is not None:
+            # 최고점 파일을 이 채널의 고정 파일로 기록(재실행·채널전환에도 유지)
+            try:
+                self._chosen_files[int(ch)] = files[best_i]
+            except (TypeError, ValueError):
+                pass
+            if best_i != self.combo_file.currentIndex():
+                self.combo_file.setCurrentIndex(best_i)   # → _on_file_combo가 로드
+            else:
+                self.data_path = files[best_i]
+                self.load_plot()
+
     def _on_channel_combo(self, _idx):
         """'적용 채널' 변경 → 그 채널의 대표 스펙트럼으로 그래프 재로딩."""
         if not self.combo_ch:
             return
         ch = self.combo_ch.currentData()
-        p = self._channel_paths.get(int(ch)) if ch is not None else None
+        p = self._pick_file_for_channel(ch)   # 고정(★Score/수동) 우선, 없으면 대표
         if p and p != self.data_path:
             self.data_path = p
-            self.load_plot()
+        self._populate_file_combo()
+        self.load_plot()
 
     def load_plot(self):
         """Loads selected data, plots it on a nm axis (if calibration available), and activates SpanSelector."""
         try:
             file_wave = None
+            plot_label = 'Measured Spectrum'
+            is_alpha = False
+            self._diff_active = False   # update_ref가 참조: Δα 모드면 레퍼런스를 같은 축에 스케일 오버레이
             if "alpha_trace" in os.path.basename(self.data_path).lower() or self._is_alpha_trace(self.data_path):
+                is_alpha = True
                 pixel_idx, intensity_raw, file_wave = self._load_alpha_trace_for_display()
+                plot_label = f'α median ({getattr(self, "_alpha_nscans", 0)} scans)'
+                if getattr(self, 'chk_diff', None) and self.chk_diff.isChecked():
+                    xd = file_wave if file_wave is not None else np.asarray(pixel_idx, float)
+                    intensity_raw = self._detrend_band(xd, intensity_raw)
+                    plot_label = f'Δα detrend ({getattr(self, "_alpha_nscans", 0)} scans)'
+                    self._diff_active = True
             elif DataIO.is_araon_mega_matrix(self.data_path):
                 pixel_idx, intensity_raw = self._load_araon_spectrum_for_display()
             else:
@@ -1103,19 +1303,27 @@ class RangeSelectorDialog(QDialog):
                 self.x = wave
                 self._wave_mode = True
                 xlabel = "Wavelength (nm)"
-                # Convert current pixel selection → nm for the initial display marker
-                n = len(wave)
-                x0 = wave[min(self.min_sel, n - 1)]
-                x1 = wave[min(self.max_sel, n - 1)]
             else:
                 self.x = pixel_idx
                 self._wave_mode = False
                 xlabel = "Pixel Index"
+
+            # 현재 채널의 핏레인지를 '이 채널의 파장축'에 매핑 → min_sel/max_sel 갱신.
+            # 채널마다 wavecal이 달라 같은 nm도 픽셀이 다르므로 nm 기준으로 보관·환산한다.
+            self._sync_range_from_channel()
+
+            if self._wave_mode:
+                n = len(self.x)
+                x0 = self.x[min(self.min_sel, n - 1)]
+                x1 = self.x[min(self.max_sel, n - 1)]
+            else:
                 x0, x1 = self.min_sel, self.max_sel
 
             self.ax.clear()
-            self.ax.plot(self.x, self.y, 'k-', alpha=0.6, label='Measured Spectrum')
-            self.ax.axvspan(x0, x1, alpha=0.15, color='steelblue', label='Current Range')
+            self.ax.plot(self.x, self.y, 'k-', alpha=0.6, label=plot_label)
+            # 파란 'Current Range' 스팬 — 드래그(on_select)로 갱신되게 참조 보관
+            self._range_span = self.ax.axvspan(x0, x1, alpha=0.15, color='steelblue',
+                                               label='Current Range')
             self.ax.set_xlabel(xlabel)
             self.ax.legend(loc='upper right', fontsize=8)
 
@@ -1131,6 +1339,11 @@ class RangeSelectorDialog(QDialog):
             # 데이터가 실제로 있는 파장대로 줌(패딩/외삽으로 생긴 0 구간 제외)
             # → 0~500 전체가 아니라 400~500처럼 신호 있는 밴드에 맞춤
             self._zoom_x_to_data()
+            # α/Δα 표시면 현재 핏레인지 밴드로 x·y 추가 줌 — 무광 가장자리 노이즈가
+            # NO2 흡수구조(~1e-8)의 수십~수백 배라 풀스케일에선 구조가 납작해짐.
+            # (Δα는 전 파장에 정의되므로 여기서 줌아웃하면 밴드 밖 구조도 보인다)
+            if is_alpha:
+                self._zoom_alpha_to_band(x0, x1)
 
         except Exception as e:
             # Surface the failure ON the canvas instead of silently leaving it blank
@@ -1162,6 +1375,55 @@ class RangeSelectorDialog(QDialog):
         except Exception:
             pass
 
+    def _detrend_band(self, xdisp, y):
+        """'전 파장' 고역통과로 광대역 베이스라인을 빼 차등구조(Δα)만 남긴다.
+
+        가우시안 σ=90px(≈4.3nm) 저역 베이스라인을 빼는 방식 — 광대역(수십 nm,
+        CH3급 hump 포함)은 제거되고 NO2 차등굴곡(2~4nm)은 보존된다(골든 콜드 실측
+        r=0.90, 밴드한정 poly5의 0.95와 등가 수준). 전 파장에 정의되므로 휠 줌아웃
+        하면 핏레인지 밖 구조도 그대로 보인다(이전 밴드한정 방식은 밖이 NaN이라
+        줌아웃해도 빈 화면이었음). NaN은 nan-aware 정규화로 처리. 표시 전용.
+        표본 부족/실패 시 원본 그대로 반환."""
+        try:
+            yv = np.asarray(y, dtype=float)
+            fin = np.isfinite(yv)
+            if int(fin.sum()) < 50:
+                return y
+            sigma = 90.0
+            y0 = np.where(fin, yv, 0.0)
+            m = fin.astype(float)
+            base = gaussian_filter1d(y0, sigma) / np.maximum(gaussian_filter1d(m, sigma), 1e-12)
+            return np.where(fin, yv - base, np.nan)
+        except Exception:
+            return y
+
+    def _zoom_alpha_to_band(self, x0, x1):
+        """α 표시 시 현재 핏레인지 ±35% 패딩 창으로 x·y 줌.
+
+        y는 창 안 데이터의 0.5~99.5 퍼센타일(핫픽셀 스파이크 1~2개가 다시 스케일을
+        먹지 않게 robust)로 잡는다. 전체 스펙트럼은 휠줌아웃/우클릭 팬으로 언제든
+        볼 수 있음 — 초기 화면만 'NO2 피크가 보이는' 밴드 뷰로."""
+        try:
+            xv = np.asarray(self.x, dtype=float)
+            yv = np.asarray(self.y, dtype=float)
+            lo, hi = (x0, x1) if x0 <= x1 else (x1, x0)
+            pad = (hi - lo) * 0.35
+            if pad <= 0:
+                return
+            xa, xb = lo - pad, hi + pad
+            sel = np.isfinite(xv) & np.isfinite(yv) & (xv >= xa) & (xv <= xb)
+            if int(sel.sum()) < 10:
+                return
+            ylo, yhi = np.percentile(yv[sel], [0.5, 99.5])
+            m = (yhi - ylo) * 0.2
+            if m <= 0:
+                return
+            self.ax.set_xlim(xa, xb)
+            self.ax.set_ylim(ylo - m, yhi + m)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
     def update_ref(self, name):
         """Draws the selected reference gas spectrum on the secondary Y-axis.
 
@@ -1171,24 +1433,69 @@ class RangeSelectorDialog(QDialog):
         self.x is in nm or pixels. (The previous code fed nm straight into a
         pixel-domain interpolator, so the overlay was sampled at the wrong place.)
         """
+        # Δα 모드에서 같은 축(ax)에 그렸던 레퍼런스 라인 제거(콤보 변경 시 누적 방지)
+        if getattr(self, '_ref_line', None) is not None:
+            try:
+                self._ref_line.remove()
+            except Exception:
+                pass
+            self._ref_line = None
         self.ax2.clear()
+        show_ax2 = False   # Δα 모드/레퍼런스 없음이면 우측 트윈축을 숨긴다(의미 없는 0~1 축 잔상 제거)
 
         px = getattr(self, '_pixel_idx', None)
         if name in self.engine.interpolators and px is not None:
             y_ref = self.engine.interpolators[name](np.asarray(px, dtype=float))
-            self.ax2.plot(self.x, y_ref, 'r--', alpha=0.8, label=f'Ref: {name}')
+            if getattr(self, '_diff_active', False):
+                # Δα 모드 '고도화 오버레이': 레퍼런스도 같은 밴드 poly5로 디트렌드한 뒤
+                # 측정 Δα에 최소제곱 스케일해 '같은 축'에 겹친다 → 피크 1:1 대조
+                # (미니 핏 프리뷰). 트윈축 대신 동일 스케일이라 진폭까지 비교 가능.
+                ref_d = self._detrend_band(np.asarray(self.x, dtype=float),
+                                           np.asarray(y_ref, dtype=float))
+                ym = np.asarray(self.y, dtype=float)
+                # 스케일은 '핏레인지 안'에서만 최소제곱 — 무광 가장자리 노이즈가
+                # 스케일을 오염하지 않게. 그린 곡선은 전 파장(줌아웃 대조용).
+                n_ = len(ym)
+                lo_, hi_ = sorted((min(self.min_sel, n_ - 1), min(self.max_sel, n_ - 1)))
+                bm = np.zeros(n_, dtype=bool)
+                bm[lo_:hi_ + 1] = True
+                fin = np.isfinite(ref_d) & np.isfinite(ym) & bm
+                denom = float(np.dot(ref_d[fin], ref_d[fin])) if fin.any() else 0.0
+                if denom > 0:
+                    s = float(np.dot(ref_d[fin], ym[fin])) / denom
+                    (self._ref_line,) = self.ax.plot(
+                        self.x, ref_d * s, 'r--', alpha=0.85, lw=1.2,
+                        label=f'Ref {name} (scaled)')
+            else:
+                self.ax2.plot(self.x, y_ref, 'r--', alpha=0.8, label=f'Ref: {name}')
 
-            yfin = y_ref[np.isfinite(y_ref)]
-            if yfin.size and (yfin.max() - yfin.min()) > 1e-65:
-                margin = (yfin.max() - yfin.min()) * 0.1
-                self.ax2.set_ylim(yfin.min() - margin, yfin.max() + margin)
+                yfin = y_ref[np.isfinite(y_ref)]
+                if yfin.size and (yfin.max() - yfin.min()) > 1e-65:
+                    margin = (yfin.max() - yfin.min()) * 0.1
+                    self.ax2.set_ylim(yfin.min() - margin, yfin.max() + margin)
 
-            self.ax2.legend(loc='upper left', fontsize=8)
+                # 우측 축의 절대값(단면적 ~1e-19)은 범위선택에 무의미하고, 그 지수
+                # 오프셋(1e-19)이 좌축 오프셋(1e-8)과 좌상단에서 겹쳐 '1e-89'로 뭉쳤다.
+                # → 눈금·오프셋 숨기고 빨간 곡선(피크 위치)만 남긴다. 좌축=α 스케일 유지.
+                self.ax2.tick_params(axis='y', which='both',
+                                     left=False, right=False, labelright=False)
+                self.ax2.yaxis.get_offset_text().set_visible(False)
+                self.ax2.legend(loc='upper left', fontsize=8)
+                show_ax2 = True   # 원시(raw) α + 레퍼런스일 때만 우측 곡선을 그림
+
+        # Δα 모드거나 레퍼런스가 없으면 우측 트윈축을 통째로 숨김 → 좌측(1e-8)만 남아
+        # y스케일이 실제 표시값과 일치하고, '0~1 잔상 축'·오프셋 겹침이 사라진다.
+        self.ax2.set_visible(show_ax2)
+
+        if getattr(self, '_diff_active', False):
+            # 같은 축 오버레이 추가/제거를 레전드에 반영
+            self.ax.legend(loc='upper right', fontsize=8)
 
         self.canvas.draw()
 
     def on_select(self, val_min, val_max):
-        """Stores pixel indices(+원래 드래그 값) of the dragged range."""
+        """Stores pixel indices(+원래 드래그 값) of the dragged range,
+        그리고 파란 'Current Range' 스팬을 드래그한 범위로 즉시 갱신."""
         lo, hi = (val_min, val_max) if val_min <= val_max else (val_max, val_min)
         self._sel_is_nm = bool(getattr(self, '_wave_mode', False))
         self._sel_lo, self._sel_hi = float(lo), float(hi)
@@ -1201,13 +1508,44 @@ class RangeSelectorDialog(QDialog):
         else:
             self.min_sel = int(lo)
             self.max_sel = int(hi)
+        # 드래그한 범위는 '현재 채널'에만 기록 → 다른 채널은 자기 범위를 유지
+        try:
+            self._channel_ranges[int(self._current_channel())] = (
+                float(lo), float(hi), bool(self._sel_is_nm))
+        except (TypeError, ValueError):
+            pass
+        self._redraw_range_span(lo, hi)
+
+    def _redraw_range_span(self, lo, hi):
+        """파란 'Current Range' 음영을 (lo,hi) 표시좌표로 다시 그린다(드래그 반영).
+        y줌은 건드리지 않고 스팬만 교체."""
+        try:
+            if getattr(self, '_range_span', None) is not None:
+                self._range_span.remove()
+            self._range_span = self.ax.axvspan(lo, hi, alpha=0.15, color='steelblue')
+            self.canvas.draw_idle()
+        except Exception:
+            pass
 
     def emit_apply(self):
-        """선택 범위를 메인에 전달하고 닫는다. 채널콤보가 있으면 그 채널의 nm 범위로."""
-        if self.combo_ch is not None and self._sel_lo is not None:
+        """선택 범위를 메인에 전달한다(창은 닫지 않음 — 닫기는 Close 버튼).
+        채널콤보가 있으면 그 채널의 nm 범위로 적용."""
+        rng = None
+        if self.combo_ch is not None:
+            try:
+                rng = self._channel_ranges.get(int(self.combo_ch.currentData()))
+            except (TypeError, ValueError):
+                rng = None
+        if rng is not None:
+            # 항상 '현재 채널'의 현재 범위를 적용 — 이전 채널 드래그값(_sel_lo)이
+            # 엉뚱한 채널에 적용되던 문제 방지.
             ch = self.combo_ch.currentData()
-            self.apply_channel.emit(int(ch), self._sel_lo, self._sel_hi, self._sel_is_nm)
+            lo_v, hi_v, is_nm = rng
+            self.apply_channel.emit(int(ch), float(lo_v), float(hi_v), bool(is_nm))
+            unit = "nm" if is_nm else "px"
+            self.lbl_applied.setText(
+                f"✓ Applied CH{ch}: {float(lo_v):.1f}–{float(hi_v):.1f} {unit}")
         else:
             self.apply_range.emit(self.min_sel, self.max_sel)
-        self.accept()
+            self.lbl_applied.setText(f"✓ Applied: px {self.min_sel}–{self.max_sel}")
 

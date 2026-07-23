@@ -1,4 +1,5 @@
 import os
+import re
 import math
 import datetime
 import json
@@ -28,7 +29,7 @@ from .ui_dialogs import *
 
 class CAESARAnalyzer(QMainWindow):
     """
-    Main Window Controller for CAESAR Pro v1.0.
+    Main Window Controller for Augur v1.0 (CAESAR 분석 소프트웨어, 구 "CAESAR Pro").
     Integrates and commands all modules (Engine, Generators, Calibrations, Worker Threads, and Monitors).
     """
     # ══════════════════════════════════════════════════════════════════════
@@ -78,7 +79,7 @@ class CAESARAnalyzer(QMainWindow):
         from core.data_io import ui_scale
         s = ui_scale()
         self._s = s
-        self.setWindowTitle(f'CAESAR Pro v{__version__}')
+        self.setWindowTitle(f'Augur v{__version__}')
         # 시작 크기만 모니터 작업영역 안으로 제한(작은 화면에서 잘리지 않게).
         # setMaximumSize로 잠그면 '최대화' 자체가 막히므로 쓰지 않는다 —
         # 내용발 창 팽창은 왼쪽 스크롤(AsNeeded)이 이미 차단함.
@@ -3893,14 +3894,39 @@ class CAESARAnalyzer(QMainWindow):
         tb = self._channel_tabbar
         channels = [(tb.tabData(i), tb.tabText(i)) for i in range(tb.count())]
         # 채널별 대표 스펙트럼 경로 — '적용 채널' 바꾸면 그 채널 데이터로 그래프 갱신
+        # channel_files: 전체 리스트 → 다이얼로그의 File 콤보/★Score(추천)용
         channel_paths = {}
+        channel_files = {}
         for ch, _lbl in channels:
             flist = self._channel_files.get(ch)
             if flist:
                 channel_paths[int(ch)] = self._entry_filepath(flist[len(flist) // 2])
+                channel_files[int(ch)] = [self._entry_filepath(e) for e in flist]
+        # Vis.에서 ★Score/수동으로 고른 '채널별 대표 알파'를 세션 내내 기억 —
+        # 다이얼로그는 매번 새로 만들어지므로 선택을 여기(app_window)에 보관해 넘긴다.
+        if not hasattr(self, '_vis_chosen_alpha'):
+            self._vis_chosen_alpha = {}
+        # 채널별 핏레인지(nm) — 다이얼로그가 채널 전환 시 그 채널의 범위를 보여주게.
+        # (활성 채널은 스핀박스, 나머지는 채널 config 스냅샷에서)
+        channel_ranges = {}
+        for ch, _lbl in channels:
+            try:
+                if ch == self._active_channel:
+                    lo_nm = float(self.spin_fit_start_nm.value())
+                    hi_nm = float(self.spin_fit_end_nm.value())
+                else:
+                    cfg = self._channel_configs.get(ch) or {}
+                    lo_nm = float(cfg.get('fit_start_nm', 435.0))
+                    hi_nm = float(cfg.get('fit_end_nm', 480.0))
+                channel_ranges[int(ch)] = (lo_nm, hi_nm, True)
+            except (TypeError, ValueError):
+                pass
         self.sel_dlg = RangeSelectorDialog(mid_file, mn, mx, self.engine, channels=channels,
                                            channel_paths=channel_paths,
-                                           active_channel=self._active_channel)
+                                           active_channel=self._active_channel,
+                                           channel_files=channel_files,
+                                           chosen_files=self._vis_chosen_alpha,
+                                           channel_ranges=channel_ranges)
         self.sel_dlg.apply_range.connect(self.update_range)
         self.sel_dlg.apply_channel.connect(self._set_channel_range_from_selector)
         self.sel_dlg.exec()
@@ -3969,9 +3995,9 @@ class CAESARAnalyzer(QMainWindow):
         return ch, lbl
 
     def _channel_data_groups(self):
-        """채널별 데이터 파일 그룹. **기본: 알파 헤더의 채널 인덱스(# channel=N)로 자동
-        분배** → 캠페인 무관(라벨 타이핑 불필요). 채널 config에 data_label을 적어두면 그게
-        우선(파일명/헤더 label/채널index 어느 거로든 매칭). 둘 다 없으면 기존 _alpha_groups."""
+        """채널별 데이터 파일 그룹. **알파 헤더의 채널 인덱스(# channel=N)가 최우선**
+        → 캠페인 무관(라벨 타이핑 불필요). 헤더 인덱스가 없을 때만 data_label로 매칭
+        (파일명/헤더 label/채널index 어느 거로든). 둘 다 없으면 기존 _alpha_groups."""
         if self._active_channel in self._channel_configs:
             self._channel_configs[self._active_channel] = self._capture_config()
         labels = {ch: ((cfg.get('data_label') or '').strip().lower())
@@ -3983,14 +4009,18 @@ class CAESARAnalyzer(QMainWindow):
             name = os.path.basename(str(fp)).lower()
             hdr_ch, hdr_lbl = self._alpha_file_meta(fp)
             assigned = None
-            # 1) 사용자가 적은 data_label override(파일명/헤더label/'chN' 매칭)
-            for ch, lbl in labels.items():
-                if lbl and (lbl in name or lbl == hdr_lbl or lbl == f"ch{ch}"):
-                    assigned = ch
-                    break
-            # 2) 기본: 헤더 채널 인덱스 → 같은 번호 탭(generic)
-            if assigned is None and hdr_ch in tab_chs:
+            # 1) 알파 헤더의 채널 인덱스(# channel=N)가 최우선 — 유일하게 권위 있는 값.
+            #    라벨은 표시용 문자열이라 언제든 바뀔 수 있고, 라벨을 먼저 보면
+            #    "파일명 _ANs_ ↔ 다른 탭의 data_label 'ANs'" 처럼 교차 매칭돼
+            #    ROI1 알파가 ch2로 들어가는 사고가 난다(2026-07 실제 발생 위험).
+            if hdr_ch in tab_chs:
                 assigned = hdr_ch
+            # 2) 헤더 인덱스가 없을 때(일반 raw 입력 등)만 data_label로 매칭
+            if assigned is None:
+                for ch, lbl in labels.items():
+                    if lbl and (lbl in name or lbl == hdr_lbl or lbl == f"ch{ch}"):
+                        assigned = ch
+                        break
             if assigned is not None:
                 groups.setdefault(assigned, []).append(entry)
         if groups:
@@ -5070,6 +5100,27 @@ class CAESARAnalyzer(QMainWindow):
         gtag = f"_gT{int(gasT)}" if gasT > 0 else ""
         return lbl, f"{win}_Poly{poly}_{sh}{gtag}"
 
+    def _fit_config_folder(self, chans):
+        """저장에 포함된 채널들의 핏 윈도우를 결합한 최상위 폴더명.
+        예: ch1_429.5~461.9__ch2_444.1~470.6__ch3_438.4~475.8
+        탐색기에서 폴더만 봐도 '어떤 윈도우로 핏한 자료인지' 즉시 식별 가능.
+        (poly/shift/λ 등 나머지 세팅은 파일명 태그·헤더에 그대로 남는다.)"""
+        parts = []
+        for ch in chans:
+            cfg = self._channel_configs.get(int(ch)) or {}
+            if cfg.get('fit_unit') == 'px':
+                seg = f"px{cfg.get('f_min', '?')}-{cfg.get('f_max', '?')}"
+            else:
+                try:
+                    seg = (f"{float(cfg.get('fit_start_nm', 0)):.1f}"
+                           f"~{float(cfg.get('fit_end_nm', 0)):.1f}")
+                except Exception:
+                    seg = "win?"
+            parts.append(f"ch{int(ch)}_{seg}")
+        name = "__".join(parts) if parts else "fit"
+        # 윈도우 금지문자만 치환(~ 는 허용) — 폴더명 안전
+        return re.sub(r'[<>:"/\\|?*]', '_', name)
+
     # ══════════════════════════════════════════════════════════════════════
     # §13 저장 + 결과뷰어 연동
     # ══════════════════════════════════════════════════════════════════════
@@ -5227,7 +5278,7 @@ class CAESARAnalyzer(QMainWindow):
 
                 header_lines = [
                     "# ==========================================================",
-                    "# CAESAR Pro Analysis Report",
+                    "# Augur Analysis Report",
                     f"# Generated: {current_time}",
                     f"# Code Version: {_codever()}",
                     f"# Data Period: {span_str}",
@@ -5290,6 +5341,10 @@ class CAESARAnalyzer(QMainWindow):
 
                 chans = sorted(df['Channel'].dropna().unique()) if 'Channel' in df.columns else []
                 base_dir = os.path.dirname(path) or (self._dlg_dir('save') or '.')
+                # 최상위 '핏 config' 폴더 = 저장에 포함된 채널들의 윈도우 결합.
+                # 서로 다른 윈도우 실험이 최상위에서 깔끔히 분리되고, 그 안은
+                # 기존 날짜/±Neg/QC 3단을 그대로 유지 → 날짜 로더 무손실.
+                cfg_folder = self._fit_config_folder(chans if len(chans) else [self._active_channel])
                 _tt_all = pd.to_datetime(df['Time'], errors='coerce')
                 day_keys = _tt_all.dt.strftime('%y%m%d').where(_tt_all.notna(), 'nodate')
 
@@ -5297,7 +5352,7 @@ class CAESARAnalyzer(QMainWindow):
                 user_stem = clean_stem(path)   # 단일채널 때 사용자가 고른 이름(날짜프리픽스 제거)
                 for day_tag in sorted(day_keys.unique()):
                     dsub = df[day_keys == day_tag]
-                    run_dir = os.path.join(base_dir, day_tag, neg_bucket, qc_bucket)
+                    run_dir = os.path.join(base_dir, cfg_folder, day_tag, neg_bucket, qc_bucket)
                     os.makedirs(run_dir, exist_ok=True)
                     if len(chans) > 1:
                         for ch in chans:
@@ -5326,13 +5381,13 @@ class CAESARAnalyzer(QMainWindow):
                 bucket_disp = os.path.join(neg_bucket, qc_bucket)
                 if auto:
                     self.status.setText(
-                        f"💾 Auto-saved → {n_days} day(s)/[{bucket_disp}] ({n_files} file{arch_note})")
+                        f"💾 Auto-saved → {cfg_folder}/{n_days} day(s)/[{bucket_disp}] ({n_files} file{arch_note})")
                 else:
                     _shown = written if len(written) <= 12 else written[:12] + [f"… +{len(written)-12} more"]
                     QMessageBox.information(
                         self, "Success",
-                        "🎉 Saved per-day into settings bucket folders!\n\n"
-                        f"📁 {base_dir}\\{{YYMMDD}}\\{bucket_disp}\n"
+                        "🎉 Saved into fit-config folder (per day / settings bucket)!\n\n"
+                        f"📁 {base_dir}\\{cfg_folder}\\{{YYMMDD}}\\{bucket_disp}\n"
                         f"   (±Neg={allow_neg} / QC={qc_str} / {n_days} day(s), {n_files} file(s){arch_note})\n\n"
                         "Saved files:\n  " + "\n  ".join(_shown) +
                         "\n\n※ All settings are written in each .dat's top # header — preserved through merge/slice.")
