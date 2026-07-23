@@ -212,7 +212,9 @@ def _file_bytepack_kst(filepath: str, ts_tz) -> datetime:
 
     bytepack=(col0<<16)|col1 = 연초기준 centisecond(박사님 doy와 동일). col1 단독이
     아니라 col0(상위워드)까지 합쳐 wrap을 정확히 처리한다. ts_tz는 채널별 instrument
-    clock 관례(Cold=UTC, Hot=KST)이며, 이를 KST 로 정규화해 Cold/Hot 시간축을 일치시킨다.
+    clock 오프셋 보정용. **[정정 2026-07] Cold·Hot 계기 시계는 동기이고 둘 다 실제
+    KST보다 −8h(=UTC+1). 옛 "Cold=UTC/Hot=KST" 가정은 폐기** — ts_tz=0(무변환)이
+    맞고, KST 표시는 +8h를 별도 적용. (memory: campaign-clock-offset-plus8-2026-07)
     실패 시 파일 mtime 폴백.
     """
     try:
@@ -492,7 +494,10 @@ def save_dat(results: list[dict], out_path: str) -> None:
             fh.write(f"# R_fit_window_nm=mixed: {sorted(_winset)}\n")
         else:
             fh.write(f"# R_fit_window_nm=none (full CCD pixels)\n")
-        fh.write("timestamp(KST)\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
+        # 주의: 여기 timestamp는 계기 기록시각(bytepack)이다. 실제 KST = 기록시각 + 8h
+        # (여수2026 계기 시계 = UTC+1, memory: campaign-clock-offset-plus8-2026-07).
+        # 리트리벌·R(t) 보간은 이 축에서 자기정합이므로 값에는 영향 없음(표시 라벨만 주의).
+        fh.write("timestamp(inst=KST-8h)\tfilename\tR_mean\tR_std\tR_min\tR_max\tLeff_mean_km\tvalid_frac_pct\tn_ZA\tn_He\n")
         for r in results:
             fh.write(
                 f"{r['timestamp'].strftime('%Y-%m-%d %H:%M')}\t"
