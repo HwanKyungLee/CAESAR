@@ -45,6 +45,10 @@ jobs:
       - name: validate_pipeline --no-data
         run: python tools/validate_pipeline.py --no-data
 
+      # Oculus 인스트루먼트 프로파일 로더 단위테스트 (합성 raw 행)
+      - name: Oculus profile unit tests
+        run: python oculus/test_profile.py
+
       # 합성 데이터 단위테스트 (계단 가드 · etalon 공선성 진단)
       - name: Step guard unit tests
         run: python tools/test_step_guard.py

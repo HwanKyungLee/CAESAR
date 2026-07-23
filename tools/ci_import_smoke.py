@@ -33,7 +33,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 # 스캔 대상 최상위 폴더 (campaigns는 별도 의존성(scikit-learn 등)이라 제외)
-SCAN_DIRS = ["core", "gui", "tools", "diagnostics", "calibration"]
+SCAN_DIRS = ["core", "gui", "tools", "diagnostics", "calibration", "oculus"]
 
 # 임포트 제외 목록 — {상대경로(슬래시): 사유}. 늘리기 전에 정말 최상위 실행이
 # 필요한 스크립트인지 먼저 의심할 것(가능하면 __main__ 가드로 고치는 게 맞다).
