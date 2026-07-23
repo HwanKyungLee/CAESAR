@@ -1,6 +1,6 @@
 # Augur
 
-> **CAESAR** BBCEAS 미량기체 분석 소프트웨어 (구 "CAESAR Pro"). 랩 통합 관측시스템 **ARGUS** 아래, 계측기 **CAESAR**의 데이터를 농도로 확정하는 분석 프로그램이다.
+> **CAESAR** BBCEAS 미량기체 분석 소프트웨어 (구 "CAESAR Pro"). 랩 통합 관측시스템 **ARGUS** 아래, 계측기 **CAESAR**의 데이터를 농도로 확정하는 분석 프로그램이다. (측정 중 실시간 감시는 별도 프로그램 **Oculus**가 맡는다 — 설계: [`docs/Oculus_설계_2026-07.md`](docs/Oculus_설계_2026-07.md))
 
 [![CI](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml/badge.svg)](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml)
 
