@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml/badge.svg)](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml)
 
-쇄빙연구선 **아라온(Araon)** 선상에서 측정한 광학 분광 데이터로 대기 중 미량 기체
+측정한 광학 분광 데이터 대기 중 미량 기체
 (NO₂, CHOCHO 등) 농도를 산출하는 데스크톱 분석 프로그램(PyQt6 GUI)이다.
 
 장비(BBCEAS, 아래 [용어](#용어-사전) 참조)가 1시간마다 떨궈주는 raw `.dat` 파일을
