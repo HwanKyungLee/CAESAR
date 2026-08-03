@@ -37,7 +37,7 @@
 
   "autodetect": {
     "first_spectrum_col": 5,
-    "signal_min_max": 5000,
+    "signal_min_max": 2500,
     "warmup_scans": 5
   },
 

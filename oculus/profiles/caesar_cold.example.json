@@ -37,16 +37,16 @@
 
   "autodetect": {
     "first_spectrum_col": 5,
-    "signal_min_max": 5000,
+    "signal_min_max": 2500,
     "warmup_scans": 5
   },
 
   "hk": {
     "start_col": 6149,
     "fields": [
-      { "key": "sentinel",     "label": "sentinel?",       "rel": 6,  "scale": 1,      "unit": "raw",  "nominal": 15250 },
+      { "key": "sentinel",     "label": "sentinel?",       "rel": 6,  "scale": 1,      "unit": "raw" },
       { "key": "p_cavity",     "label": "Cavity P",        "rel": 11, "scale": 0.6895, "unit": "mbar", "nominal": 1000, "alert": { "warn": [960, 1040], "alarm": [900, 1100] } },
-      { "key": "t_cavity",     "label": "Cavity T",        "rel": 24, "scale": 0.01,   "unit": "degC", "nominal": 24,   "alert": { "warn": [20, 28] } },
+      { "key": "t_cavity",     "label": "Cavity T",        "rel": 24, "scale": 0.01,   "unit": "degC", "nominal": 28.8, "alert": { "warn": [15, 40] } },
       { "key": "t_spectrometer","label": "Spectrometer T", "rel": 25, "scale": 0.01,   "unit": "degC" }
     ]
   },
