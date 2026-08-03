@@ -90,9 +90,18 @@ Observed cycle (2026-06-02 Hot, one full calibration ≈ 2 min 15 s, ~30 s/step)
 
   1 → 512 → 510 → 513 → 501 → 502 → 500 → 503 → 1
 
-R calculation should use **500 / 510** (the injecting = measurement window),
-NOT the setflow/wait steps. The legacy ``r_batch_calculator.py`` constant
-``FLAG_ZA = [502]`` is wrong and should be migrated to ``[500]``.
+R calculation must use **500 / 510** (the injecting = measurement window),
+NOT the setflow/wait steps.
+
+**Why (settled, do not re-litigate).** ``502`` / ``512`` are *wait-before*: the
+cell is still being filled, so the gas column is not yet the pure ZA/He the
+Rayleigh extinction equation assumes. Measured intensity there differs from the
+injecting window by ~5 % (Cold: 42184 at 500 vs 40068 at 502), which propagates
+straight into R and inflates its noise.
+
+``tools/r_batch_calculator.py`` once hardcoded ``FLAG_ZA = [502]``; that bug is
+**already fixed** — it now imports ``FLAG_ZA``/``FLAG_HE`` from this module, so
+500/510 is the single source of truth. Nothing left to migrate.
 
 .. note::
    ``501`` / ``511`` / ``100`` were absent from this file's earlier flag table and
