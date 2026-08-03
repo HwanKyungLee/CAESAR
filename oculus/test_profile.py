@@ -120,6 +120,11 @@ def test_flags():
     check("flag 510 → he", hot.flag_role(510) == "he")
     check("flag 502 → za_wait", hot.flag_role(502) == "za_wait")
     check("미정의 flag 777 → None", hot.flag_role(777) is None)
+    # 회귀: 2026-06-02 교정 시퀀스에서 관측된 flag 전부가 매핑돼야 한다
+    # (501은 raw_parser 문서에 없던 값 — 513→501→502 위치로 발견)
+    for f in (1, 500, 501, 502, 503, 510, 512, 513):
+        check(f"교정시퀀스 flag {f} 매핑됨", hot.flag_role(f) is not None,
+              "미정의 → 대시보드에서 '알 수 없음'으로 뜸")
 
 
 def test_channels():
@@ -167,12 +172,27 @@ def test_hk_conversion_and_bands():
     readout = hot.hk.read(row)
     check("HK.read 오븐 심각도 None(180 정상)", readout["oven_pns_setpoint"][1] is None)
 
+    # 구간 한정 밴드 — 교정 중 오경보 회귀 (2026-06-02 실측: He 주입 시 ANs압 916→970)
+    pa = hot.hk.field("p_ans_cavity")
+    check("압력 밴드가 atmosphere 한정", pa.phases == ("atmosphere",), f"got {pa.phases}")
+    check("He 구간 970mbar → 경보 없음", pa.evaluate(970.8, "he") is None)
+    check("ZA전이 구간 970mbar → 경보 없음", pa.evaluate(970.8, "za_wait") is None)
+    check("대기 구간 970mbar → warn(민감도 유지)", pa.evaluate(970.8, "atmosphere") == "warn")
+    check("phase 모르면 보수적으로 평가", pa.evaluate(970.8, None) == "warn")
+    # phases 없는 필드는 구간 무관하게 평가
+    ov = hot.hk.field("oven_pns_setpoint")
+    check("phases 없으면 구간 무관", ov.evaluate(160.0, "he") == "alarm")
+
 
 def test_saturation():
     print("[7] 포화 판정")
     hot = ProfileSet.load_default().by_id(HOT_ID)
-    check("60001 픽셀 → 포화", hot.is_saturated([100, 60001, 200]) is True)
+    check("64001 픽셀 → 포화", hot.is_saturated([100, 64001, 200]) is True)
     check("정상 픽셀 → 비포화", hot.is_saturated([100, 200, 59000]) is False)
+    # 회귀: He 교정 스캔은 공기보다 산란이 적어 정상적으로 61,000+까지 밝다.
+    # 임계가 60000이면 모든 He 스캔이 오경보가 났다(2026-06-02 실측 최대 61,387).
+    check("He 스캔 실측 61387 → 포화 아님(오경보 회귀)",
+          hot.is_saturated([50000, 61387, 48000]) is False)
 
 
 def test_autodetect():

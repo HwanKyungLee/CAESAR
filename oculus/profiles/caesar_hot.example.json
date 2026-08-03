@@ -20,6 +20,7 @@
     "atmosphere": [1],
     "za": [500],
     "he": [510],
+    "za_start": [501],
     "za_wait": [502],
     "za_end": [503],
     "he_wait": [512],
@@ -50,8 +51,8 @@
       { "key": "preheater",         "label": "Preheater T",   "rel": 4,  "scale": 0.01,   "unit": "degC", "nominal": 38 },
       { "key": "oven_pns_setpoint", "label": "PNs oven SP",   "rel": 5,  "scale": 0.01,   "unit": "degC", "nominal": 180, "alert": { "warn": [175, 185], "alarm": [165, 195] } },
       { "key": "cell_heater",       "label": "Cell heater SP","rel": 6,  "scale": 0.01,   "unit": "degC", "nominal": 75 },
-      { "key": "p_pns_cavity",      "label": "PNs cavity P",  "rel": 13, "scale": 0.6895, "unit": "mbar", "nominal": 965, "alert": { "warn": [930, 1000], "alarm": [880, 1050] } },
-      { "key": "p_ans_cavity",      "label": "ANs cavity P",  "rel": 15, "scale": 0.6895, "unit": "mbar", "nominal": 915, "alert": { "warn": [880, 950], "alarm": [830, 1000] } },
+      { "key": "p_pns_cavity",      "label": "PNs cavity P",  "rel": 13, "scale": 0.6895, "unit": "mbar", "nominal": 965, "alert": { "warn": [930, 1000], "alarm": [880, 1050], "phases": ["atmosphere"] } },
+      { "key": "p_ans_cavity",      "label": "ANs cavity P",  "rel": 15, "scale": 0.6895, "unit": "mbar", "nominal": 915, "alert": { "warn": [880, 950], "alarm": [830, 1000], "phases": ["atmosphere"] } },
       { "key": "tempcell1",         "label": "Cell temp 1",   "rel": 25, "scale": 0.01,   "unit": "degC" },
       { "key": "tempcell2",         "label": "Cell temp 2",   "rel": 26, "scale": 0.01,   "unit": "degC" },
       { "key": "tempcell3",         "label": "Cell temp 3 (미연결)", "rel": 27, "scale": 0.01, "unit": "degC" },
@@ -60,7 +61,7 @@
     ]
   },
 
-  "saturation": { "adc_max": 60000 },
+  "saturation": { "adc_max": 64000 },
 
   "cadence": {
     "scan_interval_sec": 1,

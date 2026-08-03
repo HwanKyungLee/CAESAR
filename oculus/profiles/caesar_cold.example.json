@@ -20,6 +20,7 @@
     "atmosphere": [1],
     "za": [500],
     "he": [510],
+    "za_start": [501],
     "za_wait": [502],
     "za_end": [503],
     "he_wait": [512],
@@ -46,7 +47,7 @@
     "fields": [
       { "key": "unknown_rel0",  "label": "미상 온도? (rel0)", "rel": 0,  "scale": 0.01,   "unit": "degC" },
       { "key": "sentinel",     "label": "sentinel?",       "rel": 6,  "scale": 1,      "unit": "raw" },
-      { "key": "p_cavity",     "label": "Cavity P",        "rel": 11, "scale": 0.6895, "unit": "mbar", "nominal": 1000, "alert": { "warn": [960, 1040], "alarm": [900, 1100] } },
+      { "key": "p_cavity",     "label": "Cavity P",        "rel": 11, "scale": 0.6895, "unit": "mbar", "nominal": 1000, "alert": { "warn": [960, 1040], "alarm": [900, 1100], "phases": ["atmosphere"] } },
       { "key": "t_cavity",     "label": "Cavity T",        "rel": 24, "scale": 0.01,   "unit": "degC", "nominal": 28.8, "alert": { "warn": [15, 40] } },
       { "key": "t_spectrometer","label": "Spectrometer T", "rel": 25, "scale": 0.01,   "unit": "degC" },
       { "key": "unknown_rel28", "label": "미상 온도? (rel28)", "rel": 28, "scale": 0.01, "unit": "degC" },
@@ -54,7 +55,7 @@
     ]
   },
 
-  "saturation": { "adc_max": 60000 },
+  "saturation": { "adc_max": 64000 },
 
   "cadence": {
     "scan_interval_sec": 1,

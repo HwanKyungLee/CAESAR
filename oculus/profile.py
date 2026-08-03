@@ -175,13 +175,26 @@ class HKField:
     nominal: Optional[float] = None
     warn: Optional[tuple] = None   # (lo, hi)
     alarm: Optional[tuple] = None  # (lo, hi)
+    phases: Optional[tuple] = None  # 밴드가 유효한 flag 역할들 (None=전 구간)
 
     def value(self, row: Sequence[float], hk_start: int) -> float:
         return float(row[hk_start + self.rel]) * self.scale + self.offset
 
-    def evaluate(self, phys_value: float):
+    def applies_to(self, phase: Optional[str]) -> bool:
+        """이 필드의 밴드를 주어진 측정 구간(flag 역할)에서 평가해야 하는지.
+
+        `phases`가 지정된 필드는 그 구간에서만 경보한다 — 교정 중에는 장비가 의도적으로
+        off-nominal이 되므로(He 주입 시 캐비티압 상승 등) 대기 측정용 밴드를 그대로 적용하면
+        매 교정 사이클마다 오경보가 난다. phase를 모르면(None) 보수적으로 평가한다."""
+        if self.phases is None or phase is None:
+            return True
+        return phase in self.phases
+
+    def evaluate(self, phys_value: float, phase: Optional[str] = None):
         """물리값의 경보 심각도. alarm 밴드 이탈=SEVERITY_ALARM, warn 이탈=SEVERITY_WARN,
-        아니면 None. 밴드가 없는 필드는 항상 None(표시만)."""
+        아니면 None. 밴드가 없거나 이 구간에 해당하지 않으면 None(표시만)."""
+        if not self.applies_to(phase):
+            return SEVERITY_NONE
         if self.alarm is not None and not _band_check(phys_value, self.alarm):
             return SEVERITY_ALARM
         if self.warn is not None and not _band_check(phys_value, self.warn):
@@ -193,11 +206,12 @@ class HKField:
         alert = d.get("alert") or {}
         warn = tuple(alert["warn"]) if "warn" in alert else None
         alarm = tuple(alert["alarm"]) if "alarm" in alert else None
+        phases = tuple(alert["phases"]) if "phases" in alert else None
         return cls(key=d["key"], rel=int(d["rel"]),
                    scale=float(d.get("scale", 1.0)), offset=float(d.get("offset", 0.0)),
                    unit=d.get("unit"), label=d.get("label"),
                    nominal=(float(d["nominal"]) if "nominal" in d else None),
-                   warn=warn, alarm=alarm)
+                   warn=warn, alarm=alarm, phases=phases)
 
 
 @dataclass(frozen=True)
@@ -211,12 +225,15 @@ class HK:
                 return f
         return None
 
-    def read(self, row: Sequence[float]) -> dict:
-        """{key: (물리값, 심각도)} 한 번에. 대시보드·경보 공통 입력."""
+    def read(self, row: Sequence[float], phase: Optional[str] = None) -> dict:
+        """{key: (물리값, 심각도)} 한 번에. 대시보드·경보 공통 입력.
+
+        `phase`(= 그 행의 flag 역할)를 넘기면 구간 한정 밴드가 올바르게 적용된다.
+        교정 구간에서 대기용 밴드가 오경보를 내지 않도록 **항상 넘기는 것을 권장**한다."""
         out = {}
         for f in self.fields:
             v = f.value(row, self.start_col)
-            out[f.key] = (v, f.evaluate(v))
+            out[f.key] = (v, f.evaluate(v, phase))
         return out
 
     @classmethod
