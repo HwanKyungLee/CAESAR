@@ -54,8 +54,9 @@
       { "key": "p_ans_cavity",      "label": "ANs cavity P",  "rel": 15, "scale": 0.6895, "unit": "mbar", "nominal": 915, "alert": { "warn": [880, 950], "alarm": [830, 1000] } },
       { "key": "tempcell1",         "label": "Cell temp 1",   "rel": 25, "scale": 0.01,   "unit": "degC" },
       { "key": "tempcell2",         "label": "Cell temp 2",   "rel": 26, "scale": 0.01,   "unit": "degC" },
-      { "key": "tempcell3",         "label": "Cell temp 3",   "rel": 27, "scale": 0.01,   "unit": "degC" },
-      { "key": "t_spectrometer",    "label": "Spectrometer T","rel": 28, "scale": 0.01,   "unit": "degC" }
+      { "key": "tempcell3",         "label": "Cell temp 3 (미연결)", "rel": 27, "scale": 0.01, "unit": "degC" },
+      { "key": "t_spectrometer",    "label": "Spectrometer T (0 응답)","rel": 28, "scale": 0.01, "unit": "degC" },
+      { "key": "unknown_rel31",     "label": "미상 온도? (rel31)", "rel": 31, "scale": 0.01, "unit": "degC" }
     ]
   },
 
