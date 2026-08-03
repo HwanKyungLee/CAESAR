@@ -115,14 +115,20 @@ def test_routing():
 def test_flags():
     print("[4] Flags.role_of")
     hot = ProfileSet.load_default().by_id(HOT_ID)
-    check("flag 1 → atmosphere", hot.flag_role(1) == "atmosphere")
-    check("flag 500 → za", hot.flag_role(500) == "za")
-    check("flag 510 → he", hot.flag_role(510) == "he")
-    check("flag 502 → za_wait", hot.flag_role(502) == "za_wait")
+    # LabVIEW 규약: 5xx=Zero Air, 51x=He / x00 inject·x01 setflow·x02 wait-before·x03 wait-after
+    check("flag 1 → sampling", hot.flag_role(1) == "sampling")
+    check("flag 100 → shutdown", hot.flag_role(100) == "shutdown")
+    check("flag 500 → za_inject", hot.flag_role(500) == "za_inject")
+    check("flag 501 → za_setflow", hot.flag_role(501) == "za_setflow")
+    check("flag 502 → za_wait_before", hot.flag_role(502) == "za_wait_before")
+    check("flag 503 → za_wait_after", hot.flag_role(503) == "za_wait_after")
+    check("flag 510 → he_inject", hot.flag_role(510) == "he_inject")
+    check("flag 511 → he_setflow", hot.flag_role(511) == "he_setflow")
+    check("flag 513 → he_wait_after", hot.flag_role(513) == "he_wait_after")
     check("미정의 flag 777 → None", hot.flag_role(777) is None)
     # 회귀: 2026-06-02 교정 시퀀스에서 관측된 flag 전부가 매핑돼야 한다
     # (501은 raw_parser 문서에 없던 값 — 513→501→502 위치로 발견)
-    for f in (1, 500, 501, 502, 503, 510, 512, 513):
+    for f in (1, 100, 500, 501, 502, 503, 510, 511, 512, 513):
         check(f"교정시퀀스 flag {f} 매핑됨", hot.flag_role(f) is not None,
               "미정의 → 대시보드에서 '알 수 없음'으로 뜸")
 
@@ -174,14 +180,14 @@ def test_hk_conversion_and_bands():
 
     # 구간 한정 밴드 — 교정 중 오경보 회귀 (2026-06-02 실측: He 주입 시 ANs압 916→970)
     pa = hot.hk.field("p_ans_cavity")
-    check("압력 밴드가 atmosphere 한정", pa.phases == ("atmosphere",), f"got {pa.phases}")
-    check("He 구간 970mbar → 경보 없음", pa.evaluate(970.8, "he") is None)
-    check("ZA전이 구간 970mbar → 경보 없음", pa.evaluate(970.8, "za_wait") is None)
-    check("대기 구간 970mbar → warn(민감도 유지)", pa.evaluate(970.8, "atmosphere") == "warn")
+    check("압력 밴드가 atmosphere 한정", pa.phases == ("sampling",), f"got {pa.phases}")
+    check("He 구간 970mbar → 경보 없음", pa.evaluate(970.8, "he_inject") is None)
+    check("ZA wait-before 구간 970mbar → 경보 없음", pa.evaluate(970.8, "za_wait_before") is None)
+    check("대기 구간 970mbar → warn(민감도 유지)", pa.evaluate(970.8, "sampling") == "warn")
     check("phase 모르면 보수적으로 평가", pa.evaluate(970.8, None) == "warn")
     # phases 없는 필드는 구간 무관하게 평가
     ov = hot.hk.field("oven_pns_setpoint")
-    check("phases 없으면 구간 무관", ov.evaluate(160.0, "he") == "alarm")
+    check("phases 없으면 구간 무관", ov.evaluate(160.0, "he_inject") == "alarm")
 
 
 def test_saturation():
