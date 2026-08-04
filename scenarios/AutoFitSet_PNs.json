@@ -1,0 +1,51 @@
+{
+  "wl_path": "C:\\Doasis_Work\\Output\\wv_cal\\roi2\\Calib_20260619_Hg_400-499nm_Poly2.txt",
+  "refs": [
+    {
+      "name": "H2O",
+      "path": "C:\\Doasis_Work\\Output\\wv_cal\\roi2\\Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat",
+      "mult": -12
+    },
+    {
+      "name": "NO2",
+      "path": "C:\\Doasis_Work\\Output\\wv_cal\\roi2\\Ref_NO2_Dynamic-ILS-Applied.dat",
+      "mult": 0
+    }
+  ],
+  "data_label": "PNs",
+  "time_shift_h": 0.0,
+  "gas_temp": 0.0,
+  "f_min": "794",
+  "f_max": "1396",
+  "fit_start_nm": 439.0,
+  "fit_end_nm": 468.01,
+  "fit_unit": "px",
+  "poly_deg": 2,
+  "step_limit": 0.75,
+  "ref_props": {
+    "NO2": {
+      "sh_mode": "Limit",
+      "sh_val": "-6.0, 4.0",
+      "sq_mode": "Limit",
+      "sq_val": "-0.0139, 0.0099",
+      "t_ref": 25.0,
+      "t_coeff": 0.0,
+      "active_bands_nm": ""
+    },
+    "H2O": {
+      "sh_mode": "Link",
+      "sh_val": "NO2",
+      "sq_mode": "Link",
+      "sq_val": "NO2",
+      "t_ref": 25.0,
+      "t_coeff": 0.0,
+      "active_bands_nm": ""
+    }
+  },
+  "tikhonov_lambda": 0.0,
+  "use_robust": false,
+  "kalman_q": 0.0005,
+  "kalman_r": 0.05,
+  "cavity_d": 51.8,
+  "rl_factor": 1.0
+}

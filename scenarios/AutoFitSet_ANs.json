@@ -1,0 +1,65 @@
+{
+  "wl_path": "C:\\Doasis_Work\\Output\\wv_cal\\roi1\\Calib_20260619_Hg_400-499nm_Poly2.txt",
+  "refs": [
+    {
+      "name": "CHOCHO",
+      "path": "C:\\Doasis_Work\\Output\\wv_cal\\roi1\\Ref_CHOCHO_Dynamic-ILS-Applied.dat",
+      "mult": 0
+    },
+    {
+      "name": "H2O",
+      "path": "C:\\Doasis_Work\\Output\\wv_cal\\roi1\\Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat",
+      "mult": -12
+    },
+    {
+      "name": "NO2",
+      "path": "C:\\Doasis_Work\\Output\\wv_cal\\roi1\\Ref_NO2_Dynamic-ILS-Applied.dat",
+      "mult": 0
+    }
+  ],
+  "data_label": "ANs",
+  "time_shift_h": 0.0,
+  "gas_temp": 0.0,
+  "f_min": "589",
+  "f_max": "1355",
+  "fit_start_nm": 428.99,
+  "fit_end_nm": 466.02,
+  "fit_unit": "px",
+  "poly_deg": 3,
+  "step_limit": 0.5,
+  "ref_props": {
+    "NO2": {
+      "sh_mode": "Center",
+      "sh_val": "-5.25, 3.75",
+      "sq_mode": "Limit",
+      "sq_val": "-0.003, 0.003",
+      "t_ref": 25.0,
+      "t_coeff": 0.0,
+      "active_bands_nm": ""
+    },
+    "CHOCHO": {
+      "sh_mode": "Link",
+      "sh_val": "NO2",
+      "sq_mode": "Link",
+      "sq_val": "NO2",
+      "t_ref": 25.0,
+      "t_coeff": 0.0,
+      "active_bands_nm": ""
+    },
+    "H2O": {
+      "sh_mode": "Link",
+      "sh_val": "NO2",
+      "sq_mode": "Link",
+      "sq_val": "NO2",
+      "t_ref": 25.0,
+      "t_coeff": 0.0,
+      "active_bands_nm": ""
+    }
+  },
+  "tikhonov_lambda": 0.0,
+  "use_robust": false,
+  "kalman_q": 0.0005,
+  "kalman_r": 0.05,
+  "cavity_d": 51.8,
+  "rl_factor": 1.0
+}
