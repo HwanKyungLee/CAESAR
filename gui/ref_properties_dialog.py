@@ -113,21 +113,29 @@ class RefPropertiesDialog(QDialog):
                 if mode == "Link" and str(val) in linkable_gases:
                     w_link.setCurrentText(str(val))
                 stack.addWidget(w_link)
-                
+
+                # Page 4: Center Mode ("중심, 반폭") — 허용창을 0이 아니라 **선언된 중심**에
+                # 앵커한다. Limit은 항상 0에서 출발해 step_limit씩 걸어 들어가므로, 0에서 먼
+                # 실제 shift(예: 핫 -5.25px)를 쓰려면 범위가 0을 품어야 해 그만큼 느슨해졌다.
+                w_center = QLineEdit("0.0, 1.0" if mode != "Center" else str(val))
+                w_center.setPlaceholderText("중심, 반폭  (예: -5.25, 1.9)")
+                stack.addWidget(w_center)
+
                 # Set initial visible page based on the current mode
                 if mode == "Free": stack.setCurrentIndex(0)
                 elif mode == "Limit": stack.setCurrentIndex(1)
                 elif mode == "Fix": stack.setCurrentIndex(2)
                 elif mode == "Link": stack.setCurrentIndex(3)
+                elif mode == "Center": stack.setCurrentIndex(4)
                 else: stack.setCurrentIndex(1) # Default to Limit
                 
-                return stack, w_free, w_limit, w_fix, w_link
+                return stack, w_free, w_limit, w_fix, w_link, w_center
 
             # --- Shift Configuration ---
             cmb_sh = QComboBox()
-            cmb_sh.addItems(["Free", "Limit", "Fix", "Link"]) 
+            cmb_sh.addItems(["Free", "Limit", "Fix", "Link", "Center"])
             cmb_sh.setCurrentText(props.get("sh_mode", "Limit"))
-            stack_sh, sh_fre, sh_lim, sh_fix, sh_lnk = create_dynamic_cell(props.get("sh_mode", "Limit"), props.get("sh_val", ""))
+            stack_sh, sh_fre, sh_lim, sh_fix, sh_lnk, sh_ctr = create_dynamic_cell(props.get("sh_mode", "Limit"), props.get("sh_val", ""))
             
             # Automatically switch the stacked widget page when combo box changes
             cmb_sh.currentIndexChanged.connect(stack_sh.setCurrentIndex)
@@ -137,9 +145,9 @@ class RefPropertiesDialog(QDialog):
             
             # --- Squeeze Configuration ---
             cmb_sq = QComboBox()
-            cmb_sq.addItems(["Free", "Limit", "Fix", "Link"]) 
+            cmb_sq.addItems(["Free", "Limit", "Fix", "Link"])   # squeeze는 1.0 기준이라 Center 불필요
             cmb_sq.setCurrentText(props.get("sq_mode", "Fix"))
-            stack_sq, sq_fre, sq_lim, sq_fix, sq_lnk = create_dynamic_cell(props.get("sq_mode", "Fix"), props.get("sq_val", ""))
+            stack_sq, sq_fre, sq_lim, sq_fix, sq_lnk, _sq_ctr = create_dynamic_cell(props.get("sq_mode", "Fix"), props.get("sq_val", ""))
             
             cmb_sq.currentIndexChanged.connect(stack_sq.setCurrentIndex)
             
@@ -176,6 +184,7 @@ class RefPropertiesDialog(QDialog):
             # Save widget references for data extraction
             self.param_widgets[gas] = {
                 "sh_cmb": cmb_sh, "sh_lim": sh_lim, "sh_fix": sh_fix, "sh_lnk": sh_lnk,
+                "sh_ctr": sh_ctr,
                 "sq_cmb": cmb_sq, "sq_lim": sq_lim, "sq_fix": sq_fix, "sq_lnk": sq_lnk,
                 "t_ref_spin": t_ref_spin, "t_coeff_spin": t_coeff_spin,
                 "bands_edit": bands_edit,
@@ -200,6 +209,7 @@ class RefPropertiesDialog(QDialog):
             if sh_mode == "Free": sh_val = "Free" # Ignore text field if Free
             elif sh_mode == "Limit": sh_val = w["sh_lim"].text()
             elif sh_mode == "Fix": sh_val = w["sh_fix"].text()
+            elif sh_mode == "Center": sh_val = w["sh_ctr"].text()
             else: sh_val = w["sh_lnk"].currentText() 
             
             # Extract Squeeze properties

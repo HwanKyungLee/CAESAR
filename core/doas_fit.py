@@ -249,14 +249,44 @@ class DoasFitter:
                                              "sq_mode": "Fix", "sq_val": "1.0"})
 
             sh_name = f"{gas}_sh"
-            if props["sh_mode"] == "Limit":
+            if props["sh_mode"] in ("Limit", "Center"):
                 active_vars.append(sh_name)
-                try:
-                    global_lb, global_ub = map(float, props["sh_val"].split(','))
-                except Exception:
-                    global_lb, global_ub = -3.0, 3.0
-                window_lb, window_ub = initial_shift_center - step_limit, initial_shift_center + step_limit
+                if props["sh_mode"] == "Center":
+                    # Center 모드: sh_val = "중심, 반폭". 허용창을 **선언된 중심**에 앵커한다.
+                    # Limit은 언제나 0에서 출발해 step_limit씩 걸어 들어가야 하므로, 0에서 먼
+                    # 실제 shift(예: 핫 -5.25px)를 쓰려면 범위가 0을 품어야 했고 그만큼 느슨해졌다.
+                    # Center는 첫 스캔부터 중심에서 시작하므로 범위를 실측만큼 좁게 줄 수 있다.
+                    try:
+                        c_val, half = map(float, props["sh_val"].split(','))
+                        half = abs(half)
+                    except Exception:
+                        c_val, half = 0.0, 3.0
+                    global_lb, global_ub = c_val - half, c_val + half
+                    # 스캔간 연속성은 유지: 이전 shift가 이미 창 안이면 그걸 중심으로 이어가고,
+                    # 창 밖(첫 스캔의 0 등)이면 선언된 중심에서 시작한다.
+                    anchor = (initial_shift_center
+                              if global_lb <= initial_shift_center <= global_ub else c_val)
+                else:
+                    try:
+                        global_lb, global_ub = map(float, props["sh_val"].split(','))
+                    except Exception:
+                        global_lb, global_ub = -3.0, 3.0
+                    if global_ub < global_lb:
+                        global_lb, global_ub = global_ub, global_lb
+                    anchor = initial_shift_center
+                window_lb, window_ub = anchor - step_limit, anchor + step_limit
                 sh_lb, sh_ub = max(global_lb, window_lb), min(global_ub, window_ub)
+                if sh_lb >= sh_ub:
+                    # 교집합이 비었다 = 허용범위가 현재 중심에서 step_limit 밖(예: sh_val
+                    # "-9,-1.5"인데 중심 0·step 0.5 → [-0.5,-1.5]). 예전엔 여기서 least_squares가
+                    # "lower bound must be strictly less than upper bound"로 **죽었다**.
+                    # 이제는 허용범위 쪽으로 한 스텝 다가간 창을 주어 걸어 들어가게 한다(비파괴).
+                    near = min(max(anchor, global_lb), global_ub)   # 허용범위 내 최근접점
+                    step_toward = max(min(near, anchor + step_limit), anchor - step_limit)
+                    sh_lb = max(global_lb, min(step_toward, near))
+                    sh_ub = min(global_ub, max(step_toward, near))
+                    if sh_lb >= sh_ub:                              # 여전히 퇴화면 미세폭 부여
+                        sh_lb, sh_ub = near - 1e-4, near + 1e-4
                 theta_lb.append(sh_lb); theta_ub.append(sh_ub)
                 theta0.append(max(sh_lb + 1e-5, min(sh_ub - 1e-5, current_params[0])))
             elif props["sh_mode"] == "Free":

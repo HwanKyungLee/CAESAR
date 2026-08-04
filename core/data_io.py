@@ -239,7 +239,8 @@ class DataIO:
         'cold_p':   11,   # Cold inlet pressure raw count → ×0.6895 = mbar
         'hot_p':    13,   # Hot CH1(PNs) pressure raw count → ×0.6895 = mbar (abs 6162)
         'hot_p_ans':15,   # Hot CH2(ANs) pressure raw count → ×0.6895 = mbar (abs 6164)
-        'hot_cav_t': 6,   # Cell-heater SETPOINT (~75°C) — 가스온도 아님(과냉방지용)
+        'hot_cav_t': 6,   # Cell-heater SETPOINT (~75°C) — 가스온도 아님(과냉방지용).
+                          # 최후 폴백 전용. 쓰면 ppb 가 ~15% 과대평가(아래 주석 참조).
         'cold_cav_t':24,  # Unheated cavity temperature  → /100 = °C (~24°C)
         'oven_pns': 5,    # PNs oven setpoint             → /100 = °C (~180°C)
         'oven_ans': 2,    # ANs oven setpoint             → /100 = °C (~300°C)
@@ -746,13 +747,28 @@ class DataIO:
 
                 if np.isfinite(raw_p_count):
                     env_p = float(raw_p_count) * DataIO._P_SCALE
-                # Hot: 채널별 실측 가스온도(tempcell)를 우선 사용. hot_cav_t(75°C)는
-                # 셀히터 설정값이라 ppb 밀도보정에 쓰면 NO2 과소평가(폴백으로만 유지).
+                # Hot: 채널별 실측 가스온도(tempcell)를 우선 사용.
+                # 폴백 순서 = 자기 채널 tempcell → **다른 채널 tempcell** → hot_cav_t.
+                #
+                # hot_cav_t 는 셀히터 **설정값**(~75°C)이라 실제 가스온도(~30°C)보다
+                # 45 K 높다. n_air ∝ 1/T 이므로 이걸 쓰면 ppb 가 ~15 % **과대**평가된다
+                # (이전 주석의 "과소평가"는 부호가 반대였다).
+                # 실측 2026-08-03: CH2 의 tempcell2 센서가 5/27 까지 고장이라
+                # 2026-05-18 11:43 ~ 05-27 09:44 의 CH2 스캔 12,700개(전체 17 %)가
+                # 75 °C 로 폴백 → 그 구간 CH2 농도가 +15.3 % 치우쳤다.
+                # 다른 채널의 tempcell 로 대신하면 채널간 실측 편차(CH1−CH2 ≈ 3.6 K)
+                # 만큼 ~1 % 만 치우친다 — 설정값 폴백보다 한 자릿수 낫다.
+                # ⚠️ 이 수정은 새로 생성하는 알파부터 적용된다. 기존 알파/핏은
+                #    재생성해야 반영된다.
                 if _is_hot:
-                    tc_rel = DataIO._HK_REL['tempcell1' if ch == 1 else 'tempcell2']
-                    tc = _hk(tc_rel)
-                    if np.isfinite(tc) and 0.0 < float(tc) / 100.0 < 100.0:
-                        _t_rel = tc_rel
+                    _own, _other = (('tempcell1', 'tempcell2') if ch == 1
+                                    else ('tempcell2', 'tempcell1'))
+                    for _name in (_own, _other):
+                        _rel = DataIO._HK_REL[_name]
+                        _tc = _hk(_rel)
+                        if np.isfinite(_tc) and 0.0 < float(_tc) / 100.0 < 100.0:
+                            _t_rel = _rel
+                            break
                     # CH2(ANs)는 전용 압력 컬럼(hot_p_ans, abs 6164) 사용
                     if ch == 2:
                         pv2 = _hk(DataIO._HK_REL['hot_p_ans'])

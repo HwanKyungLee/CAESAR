@@ -264,7 +264,7 @@ def recommend_squeeze(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
 
 
 def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_max,
-                         poly_deg, target="NO2", wide=15.0, quantile=0.95, floor=0.05):
+                         poly_deg, target="NO2", wide=15.0, quantile=0.95, floor=0.5):
     """`step_limit`(스캔당 최대 shift 변화) 자동 결정.
 
     ⚠️ sh_val(절대범위)과 다른 물건 — **연속 스캔 간 Δshift**에서 나와야 하므로
@@ -281,19 +281,25 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
         except Exception:                 # noqa: BLE001
             shifts.append(np.nan)
     s = np.asarray(shifts, float)
-    d = np.abs(np.diff(s))
-    d = d[np.isfinite(d)]
+    ds = np.diff(s)
+    ds = ds[np.isfinite(ds)]
+    d = np.abs(ds)
     if len(d) < 3:
         return dict(value=None, reason="연속 스캔 부족 → 추천 불가")
     if float(np.max(d)) < 1e-9:
         # shift 자체가 미결정(핏이 안 움직임)이면 '스캔당 변화량'은 정의되지 않는다.
         return dict(value=None, undetermined=True,
                     reason="shift가 미결정(Δ가 전부 0) → step_limit은 의미 없음. shift Fix 권고와 함께 판단할 것")
+    # ⚠️|Δshift|는 스캔마다 독립 시딩된 **추정 잡음**을 크게 포함한다(드리프트가 아님).
+    # 실제 드리프트 = 부호 있는 변화의 추세. 이것만 수용하면 되고, 잡음까지 허용하면
+    # step_limit이 과대해져 핏이 스캔마다 헤맬 수 있다.
+    drift = float(np.abs(np.median(ds)))                  # 스캔당 계통 변화
+    jitter = float(np.median(np.abs(ds - np.median(ds)))) * 1.4826   # 추정 잡음(σ)
     q = float(np.quantile(d, quantile))
-    rec = max(floor, float(np.ceil(q * 1.5 * 20) / 20))   # 1.5배 여유, 0.05 단위 올림
-    return dict(value=rec, q=q, median_step=float(np.median(d)), n=len(d),
-                reason=(f"연속 |Δshift| median {np.median(d):.3f}px, {int(quantile*100)}% {q:.3f}px "
-                        f"→ step_limit {rec:.2f}"))
+    rec = max(floor, float(np.ceil(drift * 3.0 * 20) / 20))          # 드리프트 3배 여유
+    return dict(value=rec, q=q, drift=drift, jitter=jitter, median_step=float(np.median(d)), n=len(d),
+                reason=(f"스캔당 드리프트 {drift:.3f}px (추정잡음 σ {jitter:.3f}px는 제외; "
+                        f"|Δ| median {np.median(d):.3f}) → step_limit {rec:.2f}"))
 
 
 def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,

@@ -274,12 +274,13 @@ def scan_windows(eng, alphas, species, wave, T_C, P_mbar,
             if pmx - pmn < 30:
                 continue
             # poly 하한 = 광대역을 걷는 최소 차수(편향), 그 이상만 후보
+            # poly 후보는 고정 범위. (예전엔 min_poly_for_broadband로 하한을 뒀는데 문턱이
+            # 과해 poly4~8만 후보가 되었다 — 같은 창에서 실제론 poly2~3이 더 좋았다.
+            # 편향은 chi가 직접 재므로 하한 휴리스틱 없이 chi+절약선택에 맡긴다.)
             pmin_deg = min_poly_for_broadband(alphas, pmn, pmx, noise=sig_px)
-            cand = polys if polys is not None else range(pmin_deg, pmin_deg + 4)
+            cand = polys if polys is not None else range(2, 10)
             noise_sl = sig_px[pmn:pmx + 1]
             for p in cand:
-                if p < pmin_deg:
-                    continue
                 A, names = design_matrix(eng, species, pmn, pmx, p, etalon_freq, shift=shift0)
                 d = predicted_sigma(A, names, noise_sl, rho, target)
                 chi = model_adequacy(A, [np.asarray(a, float)[pmn:pmx + 1]
