@@ -1,6 +1,8 @@
 # CAESAR Pro — 핏세팅 최적화 프로그램 핸드오프
 
-> 다른 세션이 이 문서 하나로 맥락을 잡고 이어가도록 정리. 작성 2026-06-30.
+> 다른 세션이 이 문서 하나로 맥락을 잡고 이어가도록 정리. 작성 2026-06-30, 최종 갱신 2026-08-04.
+> **🚀 처음 읽으면 §10(현재 상태)부터.** 그다음 §15(명세) → §2-B(신뢰 3계층) → §16(Center 모드).
+> ⚠️§1·§2는 2026-07-21 시점 기록이라 일부 문장이 이후 결론에 의해 갱신됐다(각 절의 갱신 주석 참조).
 > 저장소: `C:\Doasis_Work\CAESAR\CAESAR` (중첩 CAESAR 폴더 주의).
 > 관련 메모리: `fit-optimizer-stage1-2026-07`, `filtering-philosophy`,
 > `hot-channel-swap-ans-2026-06`, `cold-residual-fixed-pattern-2026-06`,
@@ -13,8 +15,11 @@
 안정하며 · 잔차가 흰(white) 상태를 만드는 "가장 단순한" 세팅** (Occam + 데이터 무결성 헌장).
 잔차 RMS 최소화가 목표가 **아님** — 그러면 poly↑·창잘라먹기·shift다풀기로 수렴해 농도가 물리적으로 깨짐.
 
-## 1. 현재 채택 방향 (★중요, 2026-07-21 방향전환)
-- **핏레인지 자동탐색은 폐기.** perr(핏 불확실도)가 물리를 몰라 창을 480/422nm로 스프롤 → 실제 창(438-466)과 안 맞음.
+## 1. 채택 방향 (2026-07-21 방향전환)
+> **📌 갱신(2026-08-04)**: 아래 "핏레인지 자동탐색 폐기"는 **fitting-driven(perr로 채점하는 방식)**만
+> 폐기했다는 뜻이다. 이후 **design-driven 창 설계**(핏 없이 c-optimality)를 새로 만들었고 **동작한다**
+> — `core/window_designer.py`, §14. 창 설계는 살아있는 기능이니 "창은 고정"으로 오해하지 말 것.
+- **핏레인지 자동탐색(perr 기반)은 폐기.** perr가 물리를 몰라 창을 480/422nm로 스프롤 → 실제 창(438-466)과 안 맞음.
 - **채택 = 파라미터 최적화** (refs·핏레인지는 **고정**, 사용자 FitSet json이 baseline). 창 고정이라
   degeneracy·스프롤 함정 사라져 목표함수가 신뢰 가능해짐. 사용자 우선도 ★★★★★.
 
@@ -30,6 +35,8 @@
 - **Tikhonov·Robust·Kalman** = 구조를 가리는 "화장". 기본 OFF. 최적화로 켜지 말 것.
 
 ## 2. 목적함수(진실신호) — 무엇으로 좋고 나쁨을 재나
+> **📌 갱신(2026-08-04)**: 이 절의 "모델 내부 신호만" 방침은 **§2-B(신뢰 3계층)로 대체**됐다.
+> T1(자기일관성)만으로는 과적합을 상 준다는 게 O4로 실증됨. 최종 규칙은 **§15-B**를 따를 것.
 - **모델 내부 신호만** 사용 (채널일치·박사님fit 정답 안 씀).
 - **perr**(covariance 대각의 √ = 파라미터 불확실도) + **잔차 구조**.
 - 자유도↑(poly↑·shift다풀기)면 perr가 부풀어 과적합을 자연히 벌줌.
@@ -110,19 +117,43 @@ GUI와 **동일하게** 빌드해야 결과가 일치. app_window의 `_build_eng
 - wavecal: `C:\Doasis_Work\Output\wv_cal\...`
 - FitSet json: `C:\Doasis_Work\Output\fit setting\FitSet_*.json`
 
-## 10. 착수 상태 & 다음 스텝
-- 기존 파일: `core/fit_optimizer.py`(Stage1 핏레인지+poly, 방향전환으로 참고용), `tools/optimize_fitrange.py`(CLI),
-  `tools/residual_compare.py`(load_alpha/build_engine — ⚠️§4대로 실제 핏 빌드와 다름, 주의).
-- **NEW (2026-07-22)**:
-  - `core/param_optimizer.py` — `fit_scan`(shift/squeeze/계수 반환) · `evaluate` · `optimize_poly`(무릎점)
-    · `recommend_shift`(넓게풀어 분포로 bounds 결정) · `recommend_secondary_link`(Link vs 독립).
-  - `core/fit_physics.py` — **T2 물리 심판**: `differential_collinearity` · `fitted_amount_health` · `judge_reference`.
-  - `tools/optimize_params.py` — FitSet json baseline CLI(§4 엔진빌드 복제 포함). `tools/t2_reference_check.py` — O4 판정 CLI.
-- **결정**: 기존 **Test Fit 버튼을 이 최적화 기능으로 대체**(사용자 지시 2026-07-22). 기존 핏 실행·플롯 로직 재활용.
-- 미해결: ①param_optimizer에 **T2 절대량 앵커 통합**(현재 judge_reference는 공선성+상수성만 — §2-B 3번 미반영)
-  ②Test Fit 버튼 이식 ③**콜드 핏 ill-posed 근본원인**(O4 제외 시 NO2 CV 874% — 진짜 문제, §12 부수발견)
-  ④ANs 2/3 퇴화 근본원인.
-- **PoC 증명됨**: 맨바닥 창생성은 design-driven(NO2 차등SNR×분리도cond×빛세기노이즈)이면 핏 없이 cold 438-470nm 재현 가능.
+## 10. 현재 상태 & 다음 스텝  ← **여기부터 읽으면 방향 잡힘** (갱신 2026-08-04)
+
+### 10-A. 무엇이 되는가 (동작 확인됨)
+```bash
+python tools/build_fitset.py cold|ans|pns   # ★맨바닥 FitSet 자동생성 (세팅 입력 0)
+python tools/design_window.py  cold|ans|pns # 핏창·poly 사전설계 (핏 없이)
+python tools/optimize_params.py cold|ans|pns# 기존 FitSet 기준 파라미터 최적화
+python tools/t2_reference_check.py cold     # 레퍼런스 물리 심판(O4 판정)
+```
+`build_fitset`이 최상위 진입점 — 웨이브칼+`Ref_*.dat`+알파만으로 `scenarios/AutoFitSet_*.json` 생성.
+자동 결정: **refs 취사 · mult · 핏창 · poly · shift/squeeze 정책+크기 · step_limit · Link**.
+사용자 몫(자동화 제외, 합의됨): `t_ref` · `t_coeff`(dσ/dT) · `active_bands_nm`.
+원칙 고정(최적화 금지): Neg · QC · Tikhonov · Robust · Kalman.
+
+### 10-B. 모듈 지도
+| 파일 | 역할 |
+|---|---|
+| `core/fitset_builder.py` | **오케스트레이터**(2패스) + `validate_fitset`(불변식) + `derive_mult` |
+| `core/window_designer.py` | 핏창·poly 사전설계(c-optimality MDL·chi·shift 사전추정). **핏 안 함** |
+| `core/param_optimizer.py` | shift/squeeze/step_limit/Link. **`_seed_shift` 필수**(§13-E) |
+| `core/fit_physics.py` | T2 물리 심판(차등공선성·계수상수성·**절대량 앵커**) |
+| `core/doas_fit.py` | VarPro 핏 엔진. **Center 모드 + 교집합 공백 가드**(§16) |
+| `core/fit_optimizer.py` | 구 Stage1(핏레인지 perr 탐색). **폐기·참고용**(§1 방향전환) |
+
+### 10-C. 다음 스텝 (우선순위)
+1. **Test Fit 버튼 이식** — 기존 `_test_fit`(app_window.py:3135) / `_show_test_fit_popup`(:3261)을
+   탭 구조로: **탭1 최적화 결과 + [적용]**, **탭2 1스캔 미리보기 존치**(사용자 지시).
+   워커 스레드 + 진행바 필수(표본 12스캔에 수십 초). 자동 적용 금지 — 사람 승인(§15-E 불변식4).
+2. **ANs 퇴화 분기 추적** — ANs 스캔 상당수가 95ppb/RMS19.6% 분기에 앉는다(§16-B). 사용자 실측에 직접 영향.
+3. **T3 진짜 검증** — 생성 세팅으로 실제 핏 → NO2 인젝션·채널 간 일치로 대조. (인젝션 예정)
+   ⚠️현재 "성능"은 **사용자 수동값과의 일치**로 잰 것이라 순환논리(§15-F).
+4. 웨이브칼 검증(`core/health_checks.py`)을 생성기에 연결 — 사용자 ★★ 항목, 미연결.
+5. 콜드 ill-posed 근본원인 — NO2 인젝션 후 판단(사용자 보류). 핫보다 콜드가 높은 이유도 미상.
+
+### 10-D. 이 문서 읽는 순서
+**§15(명세) → §2-B(신뢰 3계층) → §16(Center 모드) → §14(맨바닥 생성) → §13(하네스 함정)**
+나머지(§12 O4 판정, §11)는 배경.
 
 ## ★12. O4 판정 — 종결 (2026-07-22)
 **질문**: 사용자가 FitSet에서 O4를 뺀 게 옳은가(사용자 주장: O4가 과적합시킴). **결론: 사용자가 옳다. O4 제외 유지.**
@@ -359,7 +390,7 @@ squeeze는 ±0.005 범위에서 NO2에 영향 없음(3.59~3.61).
 (ANs NO2 CV 179%·창 42/64 퇴화와 일관). **코드가 아니라 ANs 자체 문제** — 별도 추적 필요.
 → 시딩(격자 RMS 최소)이 이 분기를 피하는 실질적 방어. `param_optimizer._seed_shift`가 그 역할.
 
-## 11. 이번 세션(2026-06-30)에 바뀐 것 (참고)
+## 11. 부록 — 2026-06-30 세션에 바뀐 것 (배경, 우선순위 낮음)
 핏 파이프라인/최적화와 무관하지만 코드가 바뀐 것들: Plot Maker 대폭 강화(색·스타일·에러밴드·야간음영·주석·커서·범례·템플릿·서브플롯),
 정착 스캔 제외 체크박스(`chk_settle`), Result Lab 계산기(`dlg_calculator`), α Health Fit-window 버튼, **`core/health_checks.py` 신설**.
 → 옵티마이저 관점 유효: `health_checks`(§7), `chk_settle`(§5 QC default), settling 저편향(`settling-scan-bias-and-tool-2026-06`).
