@@ -21,7 +21,7 @@ Oculus가 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 �
 1. Oculus는 이 폴더의 프로파일을 전부 로드한다.
 2. 감시 폴더에서 raw 파일을 만나면 `match`(우선 `n_columns`, 보조 `filename_glob`)로
    프로파일을 **라우팅**한다. → 한 인스턴스가 Cold·Hot 등 여러 레이아웃을 동시에 처리(§0-A.5).
-3. 매칭된 프로파일의 열지도로 헤더·채널·HK를 뽑고, `flags`로 대기/ZA/He를 구분하고,
+3. 매칭된 프로파일의 열지도로 헤더·채널·HK를 뽑고, `flags`로 측정 단계를 구분하고,
    `hk[].alert`·`saturation`·`cadence`로 경보를 판정한다.
 
 ## 필드 요약
@@ -29,19 +29,23 @@ Oculus가 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 �
 - **`match`** — 파일 → 프로파일 라우팅. `n_columns`가 1차 판별(견고), `filename_glob` 보조.
 - **`header`** — CAESAR 공통 선두 열. `time_bytepack`은 `(raw[hi]<<16)|raw[lo]` = 연초 기준
   센티초. `state_flag_col`이 측정 상태.
-- **`flags`** — **의미 역할 → flag 숫자** 매핑. 현재 CAESAR는 대기 1 / ZA 500 / He 510이지만
-  값은 여기서만 정의(로직은 `flags.za` 같은 역할 이름으로 접근).
+- **`flags`** — **의미 역할 → flag 숫자** 매핑. 역할 이름은 **열린 집합**이라 새 단계가
+  생겨도 스키마 수정 없이 받는다. 로직은 `flags.za_inject` 같은 역할 이름으로 접근하며
+  숫자를 직접 보지 않는다. (규약 표는 아래 §교정 시퀀스 참조)
 - **`channels`** — 스펙트럼 블록. `id`는 로직이 참조하는 안정 식별자, `label`은 **표시용
   문자열**(로직이 여기 의존 금지). `role`이 `signal`인 것만 피팅·감시. `columns`는 절대
   열범위 `[start, end]`(양끝 포함).
 - **`autodetect`** — `columns`를 비운 채널을, 첫 몇 스캔의 **블록별 최대값**으로 signal/noise
-  분류(신호 ≈3~5만, 노이즈 ≈700~900). 프로파일이 부분적이거나 새 구성일 때 무설정 폴백.
+  분류(실측: 신호 6,445~50,833 / 노이즈 502~1,011). 프로파일이 부분적이거나 새 구성일 때 무설정 폴백.
 - **`hk`** — Housekeeping 열지도. `start_col` + 각 필드 `rel`(상대 오프셋), `scale`/`offset`
   로 물리단위 환산(÷100 → `scale:0.01`, 압력 → `scale:0.6895`), `nominal`은 기준선,
   **`alert.warn`(→P2) / `alert.alarm`(→P1)** 밴드는 **선택**. 밴드가 없으면 "표시만, 경보
-  없음"(오탐 방지 — 확실한 것만 경보).
-- **`saturation.adc_max`** — 이 값 초과 픽셀은 포화(현 CAESAR ≈60000).
-- **`cadence`** — 정상 유입 리듬. `scan_interval_sec`(현 1초), `file_rollover_sec`(현 3600),
+  없음"(오탐 방지 — 확실한 것만 경보). **`alert.phases`**로 밴드가 유효한 측정 구간을
+  한정할 수 있다(예: `["sampling"]` → 교정 중엔 평가 안 함).
+- **`saturation.adc_max`** — 이 값 초과 픽셀은 포화. 현 CAESAR **64000**
+  (16비트 한계 65535, He 교정 구간이 정상적으로 61,387까지 밝아짐 — §교정 시퀀스 참조).
+- **`cadence`** — 정상 유입 리듬. `scan_interval_sec`(실측 ≈0.965초 = exposure 900ms + 오버헤드),
+  `file_rollover_sec`(현 3600),
   `liveness_grace_sec`(이 시간 넘게 새 행 없으면 측정 정지 → **P0**).
 
 ## 프로파일 검증
@@ -62,7 +66,7 @@ jsonschema.validate(json.load(open('oculus/profiles/caesar_hot.example.json')), 
 | `route()` 라우팅 | 두 파일 모두 올바른 프로파일 선택 ✅ |
 | bytepack 시각 | `2026-06-02 05:15:25.64` — **파일명 날짜와 일치** ✅ |
 | **스캔 간격** | **0.96~0.97 s** — 1초 케이던스 확증 ✅ |
-| flag | `1` = atmosphere ✅ |
+| flag | `1` = sampling ✅ |
 | 채널 최대값 | Hot: noise 1011 / PNs **50833** / ANs **46504**, Cold: noise 502 / NO₂ **6445** / noise 524 ✅ |
 | 자동탐지 | 선언 role과 완전 일치 (Hot `noise,signal,signal` · Cold `noise,signal,noise`) ✅ |
 | HK 환산 | ANs오븐 **299.96**°C(기대 300), PNs오븐 **180.07**°C(180), 셀히터 **74.98**°C(75), PNs압 **958.4**mbar(965), ANs압 **913.6**mbar(915), Cold캐비티압 **999.8**mbar(1000) ✅ |
@@ -122,8 +126,63 @@ Hot의 `t_spectrometer`(rel 28)가 0이고 rel31이 살아있는 건, **센서 �
 > 전부 오경보가 된다. `liveness_grace_sec`는 `exposure`에서 유도하거나(예: `exposure×3 + 여유`)
 > 넉넉히 잡아야 한다. 현재 10 s는 노출 3 s까지는 안전하다.
 
-**아직 미해결**: ZA(500)/He(510) flag가 이 샘플들에 없다(전부 atmosphere=1).
-R 감시(§1.2) 검증은 교정 스캔이 포함된 구간이 필요하다.
+## 교정 시퀀스 실측 (2026-06-02 03:52~03:54, Hot 36행)
+
+`find_flags.py`로 전환 지점만 추출해 얻은 **완전한 ZA/He 교정 1사이클**:
+
+```
+sampling(1) → he_wait_before(512) → he_inject(510) → he_wait_after(513)
+            → za_setflow(501) → za_wait_before(502) → za_inject(500) → za_wait_after(503) → sampling(1)
+```
+
+각 단계 약 30초, 전체 사이클 약 2분 15초.
+
+**flag 규약 (LabVIEW DAQ 기준, 정본)** — 5xx = Zero Air, 51x = Helium으로 **계열이 갈리고
+끝자리가 단계**를 뜻한다. 두 계열의 규칙은 동일하다:
+
+| 끝자리 | 뜻 | ZA | He |
+|---|---|---|---|
+| x00 | **injecting** ← R 산출용 측정 구간 | 500 | 510 |
+| x01 | setflow | 501 | 511 |
+| x02 | wait-before | 502 | 512 |
+| x03 | wait-after | 503 | 513 |
+
+그 외: `1` = sampling(대기 측정) · `100` = shutdown · `0` = 파일 헤더.
+
+> ⚠️ **`core/raw_parser.py`의 기존 flag 표에는 501·511·100이 아예 없었고**, `503`을
+> "ZA-end (one-row marker)"로 적어둔 것도 추측이었다(실제로는 **wait-after**).
+> 위 정본 규약으로 `raw_parser.py` 주석·상수도 함께 정정했다(기존 상수명은 호환 유지,
+> 정확한 별칭 추가).
+
+**물리 검증** — He는 공기보다 Rayleigh 산란이 훨씬 적어 투과광이 밝다:
+
+| 구간 | PNs 최대 | ANs 최대 |
+|---|---|---|
+| 대기(1) / ZA(500) | ~51,000 | ~46,700 |
+| **He(510)** | **~61,200** | **~57,900** |
+
+이 밝기 차이가 곧 R(거울 반사율) 산출의 근거다. 예상대로 동작.
+
+### 이 샘플이 잡아낸 문제 3가지 (전부 오경보 유발)
+
+1. **`flag=501` 미정의** — `raw_parser` 문서에도 없던 값. 매핑이 없으면 대시보드에
+   "알 수 없음"으로 뜬다. (처음엔 위치로만 보고 `za_start`로 추정했으나, LabVIEW 정본 규약
+   확인 결과 **`za_setflow`**가 맞다. 관측되지 않은 `511`=`he_setflow`, `100`=`shutdown`도
+   규약대로 함께 추가했다.)
+2. **포화 임계 60000이 오경보** — He 구간 PNs가 정상적으로 **61,387**까지 밝아진다.
+   60000은 `gui/monitor_widget.py`의 **UI 표시용 휴리스틱**이었지 하드웨어 사양이 아니었다
+   (16비트 한계 65535, 실측 최대와 4,148 여유). → **64000**으로 상향.
+   이대로 뒀으면 **교정할 때마다 포화 경보**가 떴을 것이다.
+3. **캐비티 압력 밴드가 오경보** — He 주입으로 ANs 캐비티압이 **916 → 970 mbar**로 정상 상승.
+   대기 기준 밴드 `[880,950]`이 매 교정마다 발화한다.
+   → 밴드를 넓혀 민감도를 잃는 대신 **`alert.phases`** 를 도입해
+   `"phases": ["sampling"]`로 **대기 측정 구간에만 적용**되도록 했다. 대기 중 970 mbar는
+   여전히 warn으로 잡힌다(민감도 유지).
+
+> **`alert.phases` 사용 규칙**: `HK.read(row, phase)`에 그 행의 flag 역할을 **반드시 넘겨야**
+> 구간 한정이 동작한다. 안 넘기면(=None) 보수적으로 전 구간 평가한다.
+> 교정 중 장비는 **의도적으로** off-nominal 상태이므로, 대기 기준 밴드를 그대로 들이대면
+> 안 된다 — 이 원칙을 지키지 않아 위 3건이 모두 오경보였다.
 
 ## 출처와 주의
 

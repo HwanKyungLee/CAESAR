@@ -60,18 +60,10 @@
 
     "flags": {
       "type": "object",
-      "description": "상태 flag의 '의미 역할' → flag 숫자값 매핑. 현재 CAESAR는 1/500/510이나 값은 여기서만 정의한다.",
-      "additionalProperties": false,
-      "properties": {
-        "atmosphere": { "$ref": "#/$defs/flag_values", "description": "대기 측정(농도 피팅 대상)." },
-        "za": { "$ref": "#/$defs/flag_values", "description": "Zero Air(안정) — R 산출." },
-        "he": { "$ref": "#/$defs/flag_values", "description": "Helium(안정) — R 산출." },
-        "za_wait": { "$ref": "#/$defs/flag_values", "description": "ZA 전이/퍼지(R에 쓰지 않음)." },
-        "za_end": { "$ref": "#/$defs/flag_values" },
-        "he_wait": { "$ref": "#/$defs/flag_values" },
-        "he_end": { "$ref": "#/$defs/flag_values" },
-        "header": { "$ref": "#/$defs/flag_values", "description": "파일 헤더/시작 마커." }
-      }
+      "description": "상태 flag의 '의미 역할' → flag 숫자값 매핑. 역할 이름은 **열린 집합**이다 — 장비/시퀀스가 바뀌면 새 역할이 생길 수 있으므로(예: 2026-06 실측에서 발견된 za_start=501) 목록을 고정하지 않는다. 로직이 의미를 부여하는 핵심 역할은 atmosphere(농도 피팅 대상) / za·he(R 산출용 안정 구간)이며, 그 외는 표시·전이 구분용이다. 관례적 이름: atmosphere, za, he, za_start, za_wait, za_end, he_start, he_wait, he_end, header.",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/flag_values" }
     },
 
     "spectrum_block_width": {
@@ -145,7 +137,13 @@
                 "additionalProperties": false,
                 "properties": {
                   "warn": { "$ref": "#/$defs/band" },
-                  "alarm": { "$ref": "#/$defs/band" }
+                  "alarm": { "$ref": "#/$defs/band" },
+                  "phases": {
+                    "type": "array",
+                    "description": "이 밴드가 유효한 flag 역할 목록(예: [\"atmosphere\"]). 교정 중에는 장비가 의도적으로 off-nominal 상태가 되므로(2026-06 실측: He 주입 시 ANs 캐비티압 916→970 mbar) 대기 측정 구간에만 유효한 밴드를 여기에 한정한다. 생략하면 모든 구간에서 평가한다. 이걸 쓰면 밴드를 넓혀 민감도를 잃지 않고도 교정 중 오경보를 막을 수 있다.",
+                    "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                    "minItems": 1
+                  }
                 }
               }
             }

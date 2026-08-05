@@ -66,18 +66,47 @@ State flag conventions
 ----------------------
 ::
 
-  flag = 0     header / file-start marker
-  flag = 1     atmosphere sampling
-  flag = 500   ZA (zero air) measurement (stable)
-  flag = 502   ZA-wait (purging, transitional)
-  flag = 503   ZA-end (one-row marker after ZA)
-  flag = 510   He measurement (stable)
-  flag = 512   He-wait (transitional)
-  flag = 513   He-end
+Authoritative semantics (from the LabVIEW DAQ side). The calibration families
+share one rule: **5xx = Zero Air, 51x = Helium**, and the last digit is the
+step within that family.
 
-R calculation should use **500 / 510** (stable measurement window), NOT the
-transitional wait flags. The legacy ``r_batch_calculator.py`` constant
-``FLAG_ZA = [502]`` is wrong and should be migrated to ``[500]``.
+::
+
+  flag = 0     header / file-start marker
+  flag = 1     sampling (atmosphere)
+  flag = 100   shutdown
+
+  ── x00 injecting · x01 setflow · x02 wait-before · x03 wait-after ──
+  flag = 500   ZA injecting     ← measurement window (R uses this)
+  flag = 501   ZA setflow
+  flag = 502   ZA wait-before
+  flag = 503   ZA wait-after
+  flag = 510   He injecting     ← measurement window (R uses this)
+  flag = 511   He setflow
+  flag = 512   He wait-before
+  flag = 513   He wait-after
+
+Observed cycle (2026-06-02 Hot, one full calibration ≈ 2 min 15 s, ~30 s/step)::
+
+  1 → 512 → 510 → 513 → 501 → 502 → 500 → 503 → 1
+
+R calculation must use **500 / 510** (the injecting = measurement window),
+NOT the setflow/wait steps.
+
+**Why (settled, do not re-litigate).** ``502`` / ``512`` are *wait-before*: the
+cell is still being filled, so the gas column is not yet the pure ZA/He the
+Rayleigh extinction equation assumes. Measured intensity there differs from the
+injecting window by ~5 % (Cold: 42184 at 500 vs 40068 at 502), which propagates
+straight into R and inflates its noise.
+
+``tools/r_batch_calculator.py`` once hardcoded ``FLAG_ZA = [502]``; that bug is
+**already fixed** — it now imports ``FLAG_ZA``/``FLAG_HE`` from this module, so
+500/510 is the single source of truth. Nothing left to migrate.
+
+.. note::
+   ``501`` / ``511`` / ``100`` were absent from this file's earlier flag table and
+   were added after ``501`` turned up in real 2026-06 data; the older
+   "ZA-end (one-row marker)" reading of ``503`` was a guess — it is *wait-after*.
 
 Time decoding
 -------------
@@ -131,28 +160,43 @@ COL_EXPOSURE = 2
 COL_TEMP_CCD = 3
 COL_FLAG = 4
 
-# State flag categories
-FLAG_HEADER  = 0
-FLAG_AMBIENT = 1
-FLAG_ZA      = 500
-FLAG_ZA_WAIT = 502
-FLAG_ZA_END  = 503
-FLAG_HE      = 510
-FLAG_HE_WAIT = 512
-FLAG_HE_END  = 513
+# State flag categories.
+# Family rule: 5xx = Zero Air, 51x = Helium;
+#              x00 injecting · x01 setflow · x02 wait-before · x03 wait-after.
+FLAG_HEADER   = 0
+FLAG_AMBIENT  = 1        # LabVIEW calls this "sampling"
+FLAG_SHUTDOWN = 100
+FLAG_ZA      = 500       # ZA injecting = measurement window
+FLAG_ZA_SETFLOW = 501
+FLAG_ZA_WAIT = 502       # wait-before
+FLAG_ZA_END  = 503       # wait-after (historical name kept for compatibility)
+FLAG_HE      = 510       # He injecting = measurement window
+FLAG_HE_SETFLOW = 511
+FLAG_HE_WAIT = 512       # wait-before
+FLAG_HE_END  = 513       # wait-after (historical name kept for compatibility)
+
+# Accurate aliases (prefer these in new code; values are identical)
+FLAG_ZA_WAIT_BEFORE = FLAG_ZA_WAIT
+FLAG_ZA_WAIT_AFTER  = FLAG_ZA_END
+FLAG_HE_WAIT_BEFORE = FLAG_HE_WAIT
+FLAG_HE_WAIT_AFTER  = FLAG_HE_END
 
 FLAG_STABLE = {FLAG_ZA, FLAG_HE}              # actual measurement windows
-FLAG_TRANSITIONAL = {FLAG_ZA_WAIT, FLAG_ZA_END, FLAG_HE_WAIT, FLAG_HE_END}
+FLAG_TRANSITIONAL = {FLAG_ZA_SETFLOW, FLAG_ZA_WAIT, FLAG_ZA_END,
+                     FLAG_HE_SETFLOW, FLAG_HE_WAIT, FLAG_HE_END}
 
 FLAG_NAMES: dict[int, str] = {
-    FLAG_HEADER:  "header",
-    FLAG_AMBIENT: "sampling",
-    FLAG_ZA:      "ZA",
-    FLAG_ZA_WAIT: "ZA-wait",
-    FLAG_ZA_END:  "ZA-end",
-    FLAG_HE:      "He",
-    FLAG_HE_WAIT: "He-wait",
-    FLAG_HE_END:  "He-end",
+    FLAG_HEADER:     "header",
+    FLAG_AMBIENT:    "sampling",
+    FLAG_SHUTDOWN:   "shutdown",
+    FLAG_ZA:         "ZA-inject",
+    FLAG_ZA_SETFLOW: "ZA-setflow",
+    FLAG_ZA_WAIT:    "ZA-wait-before",
+    FLAG_ZA_END:     "ZA-wait-after",
+    FLAG_HE:         "He-inject",
+    FLAG_HE_SETFLOW: "He-setflow",
+    FLAG_HE_WAIT:    "He-wait-before",
+    FLAG_HE_END:     "He-wait-after",
 }
 
 # Pressure raw → mbar (raw × 0.01 × 6894.73 Pa/PSI ÷ 100)
