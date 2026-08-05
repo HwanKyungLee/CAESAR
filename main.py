@@ -49,7 +49,7 @@ if __name__ == '__main__':
     # ── Splash screen ────────────────────────────────────────────────────────
     # Show the logo FIRST, before any heavy module import or window build, so it
     # appears almost instantly. Everything slow below runs while it is visible.
-    splash_pixmap = QPixmap("Argos.png")
+    splash_pixmap = QPixmap("AUGUR.png")
     splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
     splash.show()
 

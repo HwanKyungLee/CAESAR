@@ -89,7 +89,7 @@ Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없�
 ```
 CAESAR/
 ├── main.py                    ← GUI 진입점 (python main.py)
-├── Argos.png                  ← 스플래시 스크린 이미지
+├── AUGUR.png                   ← 스플래시 스크린 이미지
 ├── requirements.txt           ← 의존성
 ├── Augur_실행.bat             ← Windows 실행 배치
 │
