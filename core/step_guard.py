@@ -33,6 +33,26 @@ ADAPT_PCTL = 95.0       # 자기 변동성 백분위
 PERSIST_K = 5           # 지속성 판단 창(앞뒤 knot 수)
 
 
+def resolve_time_axis(idx_values, sec_values):
+    """PCHIP 보간축으로 스캔 인덱스 대신 실측 절대시각(초)을 쓸 수 있는지 결정한다.
+
+    배경: I₀(t)/R(t) 보간은 원래 global scan index(카운터) 위에서 이뤄졌다 — 정상
+    운영 중엔 스캔 간격이 거의 균일(≈0.97초)해 인덱스가 시간의 좋은 대리(proxy)지만,
+    파일 유실·장비 정지로 실제 경과시간과 스캔 카운트가 어긋나는 구간에서는 물리적
+    시간축(램프 감쇠·캐비티 상태는 초 단위 시간에 비례)과 인덱스축이 갈라진다.
+
+    sec_values(각 knot의 bytepack 실측 초)가 전부 유한하고 2개 이상이면 그것을 쓰고,
+    아니면(HK 파싱 실패 등 드문 경우) 기존 인덱스 축으로 안전하게 폴백한다 — 두 축을
+    섞으면 PCHIP이 단조성을 잃으므로 항상 한쪽만 전부 쓴다.
+
+    반환: (x_axis: ndarray, is_real_time: bool)."""
+    sec = np.asarray(sec_values, dtype=float)
+    idx = np.asarray(idx_values, dtype=float)
+    if sec.size >= 2 and sec.size == idx.size and np.isfinite(sec).all():
+        return sec, True
+    return idx, False
+
+
 def knot_scalar_metric(omr_d, wave_nm=None, fit_window_nm=None):
     """knot별 (N, npix) omr_d → 스칼라 시계열 m[N].
 

@@ -1380,13 +1380,15 @@ class AlphaExportWorker(QThread):
 
         # ── Pass 1: collect all ZA spectra, He spectra, ambient rows ─────────
         # ZA measurements — used to build PCHIP I₀ interpolator
-        za_gidx    = []   # global scan index of each ZA row
+        za_gidx    = []   # global scan index of each ZA row (index-axis fallback)
+        za_sec     = []   # real bytepack time (sec, start-of-year) of each ZA row — preferred axis
         za_spectra = []   # (N_pix,) intensity array per ZA
         za_t_list  = []   # ZA temperature
         za_p_list  = []   # ZA pressure
 
         # He measurements — collected for clean (block-averaged) R-calibration
         he_gidx    = []
+        he_sec     = []   # real bytepack time (sec) of each He row — preferred axis
         he_spectra = []
         he_t_list  = []
         he_p_list  = []
@@ -1441,6 +1443,21 @@ class AlphaExportWorker(QThread):
                 arr = _sec_cache[fp]
             return float(arr[ridx]) if (arr.size and ridx < arr.size) else np.nan
 
+        # 연초기준 초(sec) → 사람이 읽는 'MM-DD HH:MM' 문자열. STEP GUARD 로그가
+        # I0(t)/self R(t) 둘 다 실시각 축을 쓰게 되면서 공유(연도 조회는 1회만).
+        def _sec_to_str():
+            _fp0 = self.file_list[0] if self.file_list else None
+            if isinstance(_fp0, tuple):
+                _fp0 = _fp0[0]
+            _yr0 = DataIO._file_year(_fp0) if _fp0 else None
+            if _yr0:
+                from datetime import datetime as _sgdt, timedelta as _sgtd
+                _b0 = _sgdt(int(_yr0), 1, 1)
+                return lambda s: (_b0 + _sgtd(seconds=float(s))).strftime('%m-%d %H:%M')
+            return lambda s: f"doy {s / 86400.0 + 1.0:.3f}"
+
+        from core.step_guard import resolve_time_axis
+
         dark = self.dark   # None or 1-D array (n_pix,)
         has_dark = dark is not None
         if has_dark:
@@ -1464,10 +1481,12 @@ class AlphaExportWorker(QThread):
                       (not self.flag_amb and not is_za and not is_he))
             # 단순 수집만(R/I0는 Pass1 후 블록평균). 단일스캔 noise 커서 그대로 안 씀.
             if is_he:
-                he_gidx.append(gidx); he_spectra.append(intensity_raw.copy())
+                he_gidx.append(gidx); he_sec.append(_row_sec(fp, row_idx))
+                he_spectra.append(intensity_raw.copy())
                 he_t_list.append(env_t); he_p_list.append(env_p)
             elif is_za:
-                za_gidx.append(gidx); za_spectra.append(intensity_raw.copy())
+                za_gidx.append(gidx); za_sec.append(_row_sec(fp, row_idx))
+                za_spectra.append(intensity_raw.copy())
                 za_t_list.append(env_t); za_p_list.append(env_p)
             elif is_amb:
                 _amb_spool.write(np.ascontiguousarray(intensity_raw, dtype=np.float32).tobytes())
@@ -1561,27 +1580,32 @@ class AlphaExportWorker(QThread):
         # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.
         # 한 injection(연속 global idx)의 모든 스캔을 평균해 깨끗한 I0/R을 만든다.
         # (박사님 MATLAB Zs/Alpha 의 blockfinder 평균과 동일 접근)
-        def _block_average(gidx_list, spec_list, t_list, p_list, gap=10):
+        # gap=10 은 '같은 물리적 주입(injection)'을 스캔 카운트 연속성으로 묶는
+        # 그룹핑 기준이라 그대로 인덱스 축을 쓴다(주입 블록 자체는 항상 연속 스캔이라
+        # 인덱스=시간 순서 모두 성립) — 아래서 바뀌는 건 '블록끼리의' 위치(x축)뿐이다.
+        def _block_average(gidx_list, sec_list, spec_list, t_list, p_list, gap=10):
             if not gidx_list:
-                return [], [], [], []
+                return [], [], [], [], []
             g = np.array(gidx_list, dtype=float)
             order = np.argsort(g)
             g = g[order]
+            SEC = np.array(sec_list, dtype=float)[order]
             S = np.array(spec_list, dtype=float)[order]
             T = np.array(t_list, dtype=float)[order]
             P = np.array(p_list, dtype=float)[order]
             splits = np.where(np.diff(g) > gap)[0] + 1
-            bg = [float(np.mean(b))     for b in np.split(g, splits)]
-            bs = [np.nanmean(b, axis=0) for b in np.split(S, splits)]
-            bt = [float(np.nanmean(b))  for b in np.split(T, splits)]
-            bp = [float(np.nanmean(b))  for b in np.split(P, splits)]
-            return bg, bs, bt, bp
+            bg   = [float(np.mean(b))     for b in np.split(g, splits)]
+            bsec = [float(np.nanmean(b))  for b in np.split(SEC, splits)]
+            bs   = [np.nanmean(b, axis=0) for b in np.split(S, splits)]
+            bt   = [float(np.nanmean(b))  for b in np.split(T, splits)]
+            bp   = [float(np.nanmean(b))  for b in np.split(P, splits)]
+            return bg, bsec, bs, bt, bp
 
         n_za_raw, n_he_raw = len(za_gidx), len(he_gidx)
-        za_gidx, za_spectra, za_t_list, za_p_list = _block_average(
-            za_gidx, za_spectra, za_t_list, za_p_list)
-        he_gidx, he_spectra, he_t_list, he_p_list = _block_average(
-            he_gidx, he_spectra, he_t_list, he_p_list)
+        za_gidx, za_sec, za_spectra, za_t_list, za_p_list = _block_average(
+            za_gidx, za_sec, za_spectra, za_t_list, za_p_list)
+        he_gidx, he_sec, he_spectra, he_t_list, he_p_list = _block_average(
+            he_gidx, he_sec, he_spectra, he_t_list, he_p_list)
         self.status_msg.emit(
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
 
@@ -1646,13 +1670,17 @@ class AlphaExportWorker(QThread):
             for fp_amb in amb_index:
                 calib_info_per_file[fp_amb] = calib_str
 
-        # ── R(t): ZA마다 최근접 He 페어 → 인젝션별 (1-R)/d → gidx 시간보간 ──────────
+        # ── R(t): ZA마다 최근접 He 페어 → 인젝션별 (1-R)/d → 실시각(초) 시간보간 ──────
         # I0(PCHIP)와 대칭. He(3h)·ZA(1h) 인젝션의 R 시간변화를 보존한다. 기존엔 전
         # 인젝션을 풀링해 런당 단일 R로 뭉갰고(런 경계마다 Leff 점프, 시간정보 소실).
-        # 여기서는 각 ZA 블록을 gidx 최근접 He 블록과 페어해 reflectance_calc(동일
-        # 품질필터·5차피팅)로 omr_d를 구하고 za_gidx 위에서 보간한다. 유효 knot<2면
-        # omr_interp=None → 기존 단일 best_omr_d 로 폴백(무회귀).
+        # 여기서는 각 ZA 블록을 **실측 절대시각** 최근접 He 블록과 페어해(파일 유실·
+        # 장비정지로 스캔카운트와 실제 경과시간이 어긋나도 물리적으로 가장 가까운
+        # He를 짝짓는다) reflectance_calc(동일 품질필터·5차피팅)로 omr_d를 구하고
+        # 그 실시각 위에서 보간한다. 실측 시각이 없는(HK 파싱 실패 등) 드문 경우만
+        # 기존 스캔 인덱스 축·페어링으로 폴백(무회귀). 유효 knot<2면 omr_interp=None
+        # → 기존 단일 best_omr_d 로 폴백.
         omr_interp = None
+        _omr_axis_is_sec = False   # _omr_d_at()이 omr_interp을 sec/gidx 중 뭘로 부를지
         # rt_path(R calibrator 프리컴퓨트 npz)가 있으면 아래 _omr_d_at이 그걸(rt_omr_interp)
         # 우선 쓰므로, 여기서 ZA 블록마다 reflectance_calc(5차 polyfit)로 자체 R(t)를 만드는
         # 건 헛수고다 → 스킵. (rt 로드 실패 시엔 best_omr_d 단일 R로 폴백.)
@@ -1662,11 +1690,16 @@ class AlphaExportWorker(QThread):
             except Exception:
                 _RC = None
             if _RC is not None:
-                _he_g = np.asarray(he_gidx, dtype=float)
+                _za_key, _za_sec_ok = resolve_time_axis(za_gidx, za_sec)
+                _he_key, _he_sec_ok = resolve_time_axis(he_gidx, he_sec)
+                _pair_use_sec = _za_sec_ok and _he_sec_ok
+                if not _pair_use_sec:   # 두 축이 안 맞으면 인덱스로 통일(무회귀)
+                    _za_key = np.asarray(za_gidx, dtype=float)
+                    _he_key = np.asarray(he_gidx, dtype=float)
                 _roi_lo, _roi_hi = float(np.nanmin(wave_nm)), float(np.nanmax(wave_nm))
                 _knots = []
-                for _i, _gz in enumerate(za_gidx):
-                    _j = int(np.argmin(np.abs(_he_g - _gz)))   # 최근접 He 블록
+                for _i in range(len(za_gidx)):
+                    _j = int(np.argmin(np.abs(_he_key - _za_key[_i])))   # 최근접 He 블록
                     _rc1 = _RC(cavity_len=self.cavity_len, rl_factor=self.rl_factor)
                     _rc1.add_za_spectrum(za_spectra[_i], za_t_list[_i], za_p_list[_i])
                     _rc1.add_he_spectrum(he_spectra[_j], he_t_list[_j], he_p_list[_j])
@@ -1677,7 +1710,7 @@ class AlphaExportWorker(QThread):
                     except Exception:
                         continue   # 품질 미달 페어 skip (전환스캔·dropout 등)
                     _od = np.maximum(np.asarray(_od, dtype=float), 1e-12)
-                    _knots.append((float(_gz), _od))
+                    _knots.append((float(_za_key[_i]), _od))
                 if len(_knots) >= 2:
                     _knots.sort(key=lambda k: k[0])
                     _kg = np.array([k[0] for k in _knots], dtype=float)
@@ -1700,8 +1733,9 @@ class AlphaExportWorker(QThread):
                     if len(_kg) >= 2:
                         # 계단 가드: 자체 R(t)도 계단 후보에서 PCHIP 분절(경계 밖
                         # 최근접 상수 정책은 SegmentedPchip에 내장 — 기존과 동일).
-                        # 축이 gidx(스캔 인덱스)라 수동 분절(초 단위)은 rt_path
-                        # 경로 전용 — 여기선 자동 감지만.
+                        # _kg 축은 위에서 정해진 대로 실시각(초, 가능하면) 또는
+                        # 스캔인덱스(폴백) — 수동 분절(초 단위, rt_path 경로 전용)과
+                        # 달리 여기는 자동 감지만.
                         from core.step_guard import (
                             knot_scalar_metric as _sg_metric2,
                             detect_step_candidates as _sg_detect2,
@@ -1710,15 +1744,18 @@ class AlphaExportWorker(QThread):
                         _sg_c2, _sg_t2 = _sg_detect2(_kg, _sg_metric2(_kd))
                         _pchip_omr = _SegPchip2(
                             _kg, _kd, break_x=[c['x_break'] for c in _sg_c2])
-                        def omr_interp(g, _p=_pchip_omr):
-                            return _p(float(g))
+                        def omr_interp(x, _p=_pchip_omr):
+                            return _p(float(x))
+                        _omr_axis_is_sec = _pair_use_sec
+                        _x2s_self = _sec_to_str() if _pair_use_sec else (lambda v: f"scan#{v:.0f}")
                         for _ln in _sg_fmt2(_sg_c2, threshold=_sg_t2,
-                                            x_to_str=lambda v: f"scan#{v:.0f}",
+                                            x_to_str=_x2s_self,
                                             kind="self R(t)"):
                             self.status_msg.emit(_ln)
                         _seg2 = (f", {_pchip_omr.n_segments} seg"
                                  if _pchip_omr.n_segments > 1 else "")
-                        _rt_str = (f"R(t) {len(_kg)} knots{_seg2}  "
+                        _axis_note = "real-time" if _pair_use_sec else "scan-index fallback"
+                        _rt_str = (f"R(t) {len(_kg)} knots{_seg2} [{_axis_note}]  "
                                    f"Leff={_leff_k.min():.2f}~{_leff_k.max():.2f} km "
                                    f"(median {np.median(_leff_k):.2f}, {_n_rej} rej)")
                         for _fp in amb_index:
@@ -1754,6 +1791,7 @@ class AlphaExportWorker(QThread):
             return out
 
         # ── Build PCHIP I₀ interpolator ───────────────────────────────────────
+        _i0_axis_is_sec = False   # 아래 static-fallback 분기에선 안 씀 — 호출부 기본값
         if len(za_gidx) < 2:
             # Fallback: single static ZA (original behaviour)
             self.status_msg.emit(f"[WARN] {len(za_gidx)} ZA measurements → using static I₀")
@@ -1763,7 +1801,10 @@ class AlphaExportWorker(QThread):
             p_za_static = za_p_list[0]  if za_p_list  else 1013.25
         else:
             use_pchip = True
-            za_x   = np.array(za_gidx,    dtype=float)
+            # 실측 절대시각(초)이 전부 유효하면 그걸 보간축으로 — 파일 유실·장비정지로
+            # 스캔카운트와 실제 경과시간이 어긋나는 구간에서도 물리적으로 옳은 위치에
+            # 보간한다. HK 파싱 실패 등으로 결측이 있으면 기존 스캔 인덱스로 폴백(무회귀).
+            za_x, _i0_axis_is_sec = resolve_time_axis(za_gidx, za_sec)
             za_arr = np.array(za_spectra,  dtype=float)   # (N_za, N_pix)
             za_t   = np.array(za_t_list,   dtype=float)
             za_p   = np.array(za_p_list,   dtype=float)
@@ -1788,11 +1829,13 @@ class AlphaExportWorker(QThread):
             p_first,  p_last   = float(za_p[0]),  float(za_p[-1])
             _i0_seg = (f", {pchip_i0.n_segments} segments"
                        if pchip_i0.n_segments > 1 else "")
+            _i0_axis_note = "real time" if _i0_axis_is_sec else "scan index (real time unavailable)"
             self.status_msg.emit(
                 f"[PCHIP] built I₀ interpolator from {len(za_gidx)} ZA measurements  "
-                f"(global idx {za_gidx[0]}~{za_gidx[-1]}{_i0_seg})")
+                f"[{_i0_axis_note}]{_i0_seg}")
+            _x2s_i0 = _sec_to_str() if _i0_axis_is_sec else (lambda v: f"scan#{v:.0f}")
             for _ln in _sg_fmt_i0(_i0_cands, threshold=_i0_thr,
-                                  x_to_str=lambda v: f"scan#{v:.0f}", kind="I0(t)"):
+                                  x_to_str=_x2s_i0, kind="I0(t)"):
                 self.status_msg.emit(_ln)
 
         # ── Best R-calibration: median across all valid candidates ─────────────
@@ -1859,16 +1902,7 @@ class AlphaExportWorker(QThread):
                     self.status_msg.emit(
                         f"[R(t) load] {len(_ks)} knots{_seg_note} "
                         f"({os.path.basename(self.rt_path)})")
-                    _fp0 = self.file_list[0] if self.file_list else None
-                    if isinstance(_fp0, tuple):
-                        _fp0 = _fp0[0]
-                    _yr0 = DataIO._file_year(_fp0) if _fp0 else None
-                    if _yr0:
-                        from datetime import datetime as _sgdt, timedelta as _sgtd
-                        _b0 = _sgdt(int(_yr0), 1, 1)
-                        _x2s = lambda s: (_b0 + _sgtd(seconds=float(s))).strftime('%m-%d %H:%M')
-                    else:
-                        _x2s = lambda s: f"doy {s / 86400.0 + 1.0:.3f}"
+                    _x2s = _sec_to_str()
                     for _ln in _sg_fmt(_sg_cands, threshold=_sg_thr, x_to_str=_x2s,
                                        kind="R(t)"):
                         self.status_msg.emit(_ln)
@@ -1891,13 +1925,17 @@ class AlphaExportWorker(QThread):
             self.finished.emit("ERROR: no R-calibration or ZA spectrum")
             return
 
-        # bin의 (1-R)/d: rt_path 로드면 시각(sec) 시간보간 우선, 아니면 gidx 보간/단일값.
+        # bin의 (1-R)/d: rt_path 로드면 시각(sec) 시간보간 우선. 자체 R(t)(omr_interp)는
+        # _omr_axis_is_sec 이면 실시각(sec)으로, 실시각을 못 구했을 때만 gidx(폴백,
+        # 무회귀)로 — omr_interp이 만들어진 축과 질의 축이 반드시 일치해야 한다.
         def _omr_d_at(g, sec=None):
             if rt_omr_interp is not None and sec is not None:
                 _v = rt_omr_interp(sec)
                 if _v is not None:
                     return _v
             if omr_interp is not None:
+                if _omr_axis_is_sec and sec is not None and np.isfinite(sec):
+                    return omr_interp(float(sec))
                 return omr_interp(float(g))
             return best_omr_d
 
@@ -1980,13 +2018,16 @@ class AlphaExportWorker(QThread):
                     t_am = float(np.nanmean([x[1] for x in grp]))
                     p_am = float(np.nanmean([x[2] for x in grp]))
                     gmean = float(np.mean([x[0] for x in grp]))
+                    # I0(t) 질의점: 실시각 축이면 이 bin의 중심 절대시각(st 그리드는
+                    # 이미 실시각 정의라 이게 자연스러운 대응값), 아니면 인덱스(폴백).
+                    _i0q = float((st[b, 0] + st[b, 1]) / 2.0) if _i0_axis_is_sec else gmean
                     if use_pchip:
-                        if gmean < za_x_min:
+                        if _i0q < za_x_min:
                             i0_interp, t_i0, p_i0 = i0_first, t_first, p_first
-                        elif gmean > za_x_max:
+                        elif _i0q > za_x_max:
                             i0_interp, t_i0, p_i0 = i0_last, t_last, p_last
                         else:
-                            i0_interp, t_i0, p_i0 = pchip_i0(gmean), float(pchip_t(gmean)), float(pchip_p(gmean))
+                            i0_interp, t_i0, p_i0 = pchip_i0(_i0q), float(pchip_t(_i0q)), float(pchip_p(_i0q))
                     else:
                         i0_interp, t_i0, p_i0 = i_za_static, t_za_static, p_za_static
                     i_am_dc = self._correct_intensity(I)
@@ -2013,7 +2054,7 @@ class AlphaExportWorker(QThread):
         n_bins_total = 0
         n_saved  = 0
         pix_min  = self.pixel_min
-        i0_mode  = "PCHIP" if use_pchip else "static"
+        i0_mode  = (f"PCHIP({'t' if _i0_axis_is_sec else 'idx'})" if use_pchip else "static")
         n_za     = len(za_gidx)
 
         from datetime import datetime as _dt, timedelta as _td
@@ -2029,7 +2070,9 @@ class AlphaExportWorker(QThread):
             rows = []
             for (row_idx, gmean, rep_sec, t_am, p_am, i_am, n_avg) in _avg_ambient(_reread_amb(fp)):
                 if use_pchip:
-                    g = float(gmean)
+                    # I0(t) 질의점: 실시각 축이면 이 ambient bin의 실측 대표시각(rep_sec),
+                    # 아니면 스캔 인덱스(gmean, 폴백) — pchip_i0/t/p이 만들어진 축과 맞춰야 한다.
+                    g = float(rep_sec) if (_i0_axis_is_sec and np.isfinite(rep_sec)) else float(gmean)
                     if g < za_x_min:
                         i0_interp, t_i0, p_i0 = i0_first, t_first, p_first
                     elif g > za_x_max:

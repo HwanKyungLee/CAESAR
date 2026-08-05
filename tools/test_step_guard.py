@@ -28,7 +28,8 @@ if _TOOLS not in sys.path:
 from scipy.interpolate import PchipInterpolator
 
 from core.step_guard import (SegmentedPchip, detect_step_candidates,
-                             knot_scalar_metric, step_threshold, REL_FLOOR)
+                             knot_scalar_metric, step_threshold, REL_FLOOR,
+                             resolve_time_axis)
 
 _n_pass = 0
 _n_fail = 0
@@ -151,6 +152,25 @@ def test_vector_knots():
           np.allclose(seg(far), np.asarray(ref(far), dtype=float)))
 
 
+def test_resolve_time_axis():
+    print("[7b] resolve_time_axis: real-time preferred, index fallback on missing data")
+    idx = np.arange(10, dtype=float)
+    sec_ok = idx * 0.97 + 100.0
+    x, is_rt = resolve_time_axis(idx, sec_ok)
+    check("all-finite sec → real time chosen", is_rt and np.array_equal(x, sec_ok))
+
+    sec_gap = sec_ok.copy(); sec_gap[4] = np.nan   # 결측(HK 파싱 실패 등)
+    x, is_rt = resolve_time_axis(idx, sec_gap)
+    check("one NaN → falls back to index (never mixes axes)",
+          (not is_rt) and np.array_equal(x, idx))
+
+    x, is_rt = resolve_time_axis(idx[:1], sec_ok[:1])
+    check("single knot → index fallback (PCHIP needs >=2 anyway)", not is_rt)
+
+    x, is_rt = resolve_time_axis(idx, sec_ok[:-1])
+    check("length mismatch → index fallback", not is_rt)
+
+
 def test_npz_manual_breaks_roundtrip():
     print("[7] rt_precompute: manual_breaks_sec survive save/load/merge")
     import rt_precompute as RTP
@@ -209,7 +229,7 @@ def test_parse_datetimes():
 if __name__ == "__main__":
     for t in (test_smooth_drift_no_regression, test_step_detected_and_segmented,
               test_spike_not_detected, test_noisy_channel_suppressed,
-              test_manual_break, test_vector_knots,
+              test_manual_break, test_vector_knots, test_resolve_time_axis,
               test_npz_manual_breaks_roundtrip, test_parse_datetimes):
         t()
     print(f"\n{_n_pass} PASS · {_n_fail} FAIL")
