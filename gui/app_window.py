@@ -22,6 +22,7 @@ from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 
 from core.engine import UniversalEngine
 from .worker import AnalysisWorker, AlphaExportWorker
+from .test_fit_dialog import TestFitDialog
 from core.data_io import DataIO
 from core.paths import WV_CAL_DIR, DEFAULT_OUTPUT_DIR, resolve_ref_path
 from core.__version__ import __version__
@@ -42,7 +43,7 @@ class CAESARAnalyzer(QMainWindow):
     #   §5  알파 생성 (export + generator)
     #   §6  I0 / R 진단 (auto-extract, diagnostic plot)
     #   §7  다이얼로그 런처: ref / R / wavecal
-    #   §8  Test Fit (1-scan 미리보기)
+    #   §8  Test Fit (탭1 자동 최적화+Apply / 탭2 1-scan 미리보기 — gui/test_fit_dialog.py)
     #   §9  핏 범위 + 레퍼런스 관리
     #   §10 데이터 로드 + 채널 분배
     #   §11 분석 실행 / 워커 / autosave / closeEvent
@@ -1306,15 +1307,16 @@ class CAESARAnalyzer(QMainWindow):
             "Takes raw measurement files in a popup and generates α spectra (*_alpha_trace.dat).\n"
             "wavecal/fit-range/cavity/flags use this main window's settings.")
 
-        # Test Fit — RUN 전에 첫 알파 스캔 1개만 핏해 잔차·농도·shift를 즉석 확인.
-        # 밤샘 핏 전에 세팅 검증(콜드 8px 오정렬 같은 사고를 RUN 전에 잡음).
-        btn_test_fit = QPushButton("🧪 Test Fit (1 scan)")
+        # Test Fit — RUN 전에 세팅을 검증: 탭1(자동 파라미터 최적화 추천+Apply) +
+        # 탭2(첫 알파 스캔 1개 즉석 핏 미리보기, 기존 동작 그대로).
+        btn_test_fit = QPushButton("🧪 Test Fit")
         btn_test_fit.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
         btn_test_fit.setToolTip(
-            "Fit only the first loaded alpha scan and pop up data+model overlay,\n"
-            "residual, reference overlays, retrieved ppb and shift/squeeze.\n"
-            "Use to validate settings before a long RUN.")
-        btn_test_fit.clicked.connect(self._test_fit)
+            "Optimize tab: auto-recommend poly/shift/squeeze/step_limit from a 12-scan\n"
+            "sample (worker thread, human must click Apply).\n"
+            "Preview tab: fit only the first loaded alpha scan and show data+model\n"
+            "overlay, residual, reference overlays, retrieved ppb and shift/squeeze.")
+        btn_test_fit.clicked.connect(self._open_test_fit_dialog)
 
         lay_pipe.addWidget(btn_alpha_gen)
         lay_pipe.addWidget(btn_test_fit)
@@ -3130,11 +3132,11 @@ class CAESARAnalyzer(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load wavelength file:\n{str(e)}")
 
     # ══════════════════════════════════════════════════════════════════════
-    # §8  Test Fit (1-scan 미리보기)
+    # §8  Test Fit (탭1 자동 최적화+Apply / 탭2 1-scan 미리보기 — gui/test_fit_dialog.py)
     # ══════════════════════════════════════════════════════════════════════
-    def _test_fit(self):
-        """S-B/S-C: 첫 알파 스캔 1개만 핏 → 데이터/모델/잔차/레퍼런스 오버레이 팝업.
-        실제 핏 경로(DoasFitter + get_model_components)를 그대로 써서 RUN과 동일하게 검증."""
+    def _open_test_fit_dialog(self):
+        """🧪 Test Fit 버튼 핸들러 — 탭1(자동 파라미터 최적화)+탭2(1스캔 미리보기) 다이얼로그.
+        옛 _test_fit의 사전 가드만 여기 유지하고, 실제 계산은 각 탭이 필요할 때 수행한다."""
         from PyQt6.QtWidgets import QMessageBox
         if not self.engine.is_engine_ready():
             QMessageBox.warning(self, "Test Fit", "Lock references first.")
@@ -3143,178 +3145,149 @@ class CAESARAnalyzer(QMainWindow):
         if not files:
             QMessageBox.warning(self, "Test Fit", "Load data first.")
             return
+        TestFitDialog(self).show()
+
+    def _current_fit_px_window(self):
+        """현재 활성 채널의 핏 윈도우 설정을 단위 무관 원시값으로 반환.
+
+        반환: (unit, lo, hi). unit='px'면 lo/hi=검출기 픽셀 번호(int, 정수 텍스트박스 값
+        그대로), unit='nm'이면 lo/hi=파장(nm, float). 실제 배열 인덱스로의 변환은 호출부가
+        각자의 wave 축(파일마다 px_start가 다를 수 있음) 기준으로 한다 — 여기서 미리
+        인덱스화하면 그 축을 모르는 채로 계산하게 돼 틀릴 수 있다."""
+        unit = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
+        if unit == 'px':
+            return unit, int(self.txt_min.text()), int(self.txt_max.text())
+        return unit, self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value()
+
+    def _compute_1scan_preview(self):
+        """S-B/S-C: 첫 알파 스캔 1개만 핏 → (fp, wl, a, full_model, resid, gas_models, ppb,
+        opt_shifts, opt_squeezes, rms, T_C, P_mbar, collin) 튜플 반환(TestFitDialog 탭2용).
+        실제 핏 경로(DoasFitter + get_model_components)를 그대로 써서 RUN과 동일하게 검증.
+        실패 시 None(호출부가 사유 표시)."""
+        from PyQt6.QtWidgets import QMessageBox
+        files = self._channel_files.get(self._active_channel) or self.file_list
+        if not files:
+            return None
         fp = self._entry_filepath(files[0])
-        try:
-            # ── 알파 첫 데이터행 + 파장헤더 읽기 ──
-            wave_nm_file = None
-            alpha_start = None
-            px_start = 0
-            T_C, P_mbar = 25.0, 1013.25
-            row = None
-            with open(fp, encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    if line.startswith('# wavelength_nm'):
-                        wave_nm_file = np.array([float(x) for x in line.split(':')[1].split()])
-                    if line.startswith('#'):
-                        continue
-                    cols = line.rstrip('\n').split('\t')
-                    if cols and cols[0] == 'row_idx':
-                        idx = {c: i for i, c in enumerate(cols)}
-                        alpha_start = next(i for i, c in enumerate(cols) if c.startswith('px'))
-                        try:   # 알파의 첫 픽셀 번호(예: 'px700' → 700) — px 핏단위 슬라이스 보정용
-                            px_start = int(cols[alpha_start][2:])
-                        except ValueError:
-                            px_start = 0
-                        _iT, _iP = idx.get('T_C'), idx.get('P_mbar')
-                        continue
-                    if alpha_start is not None:
-                        row = cols
-                        break
-            if wave_nm_file is None or row is None:
-                QMessageBox.warning(self, "Test Fit",
-                                    "Not an alpha file (no wavelength header).\n"
-                                    "Test Fit currently supports alpha (*_alpha_trace.dat) input.")
-                return
-            if _iT is not None and _iT < len(row):
-                T_C = float(row[_iT])
-            if _iP is not None and _iP < len(row):
-                P_mbar = float(row[_iP])
-            n_pix = len(wave_nm_file)
-            alpha = np.array([float(v) for v in row[alpha_start:alpha_start + n_pix]], dtype=float)
+        # ── 알파 첫 데이터행 + 파장헤더 읽기 ──
+        wave_nm_file = None
+        alpha_start = None
+        px_start = 0
+        T_C, P_mbar = 25.0, 1013.25
+        row = None
+        with open(fp, encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                if line.startswith('# wavelength_nm'):
+                    wave_nm_file = np.array([float(x) for x in line.split(':')[1].split()])
+                if line.startswith('#'):
+                    continue
+                cols = line.rstrip('\n').split('\t')
+                if cols and cols[0] == 'row_idx':
+                    idx = {c: i for i, c in enumerate(cols)}
+                    alpha_start = next(i for i, c in enumerate(cols) if c.startswith('px'))
+                    try:   # 알파의 첫 픽셀 번호(예: 'px700' → 700) — px 핏단위 슬라이스 보정용
+                        px_start = int(cols[alpha_start][2:])
+                    except ValueError:
+                        px_start = 0
+                    _iT, _iP = idx.get('T_C'), idx.get('P_mbar')
+                    continue
+                if alpha_start is not None:
+                    row = cols
+                    break
+        if wave_nm_file is None or row is None:
+            QMessageBox.warning(self, "Test Fit",
+                                "Not an alpha file (no wavelength header).\n"
+                                "Test Fit currently supports alpha (*_alpha_trace.dat) input.")
+            return None
+        if _iT is not None and _iT < len(row):
+            T_C = float(row[_iT])
+        if _iP is not None and _iP < len(row):
+            P_mbar = float(row[_iP])
+        n_pix = len(wave_nm_file)
+        alpha = np.array([float(v) for v in row[alpha_start:alpha_start + n_pix]], dtype=float)
 
-            # ── 핏 윈도우 슬라이스(px/nm — 활성 채널 설정) ──
-            unit = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
-            if unit == 'px':
-                pmin, pmax = int(self.txt_min.text()), int(self.txt_max.text())
-                # px 값은 '검출기 픽셀 번호' — 알파가 px_start부터 저장돼 있으므로
-                # 배열 인덱스로는 px_start를 빼서 슬라이스(워커 _alpha_fit_slice와 동일 의미).
-                sl = slice(max(0, pmin - px_start), max(1, min(n_pix, pmax - px_start + 1)))
-            else:
-                lo, hi = self.spin_fit_start_nm.value(), self.spin_fit_end_nm.value()
-                i0 = int(np.abs(wave_nm_file - lo).argmin())
-                i1 = int(np.abs(wave_nm_file - hi).argmin())
-                sl = slice(min(i0, i1), max(i0, i1) + 1)
-            wl = wave_nm_file[sl]
-            a = alpha[sl]
+        # ── 핏 윈도우 슬라이스(px/nm — 활성 채널 설정) ──
+        unit, lo, hi = self._current_fit_px_window()
+        if unit == 'px':
+            pmin, pmax = int(lo), int(hi)
+            # px 값은 '검출기 픽셀 번호' — 알파가 px_start부터 저장돼 있으므로
+            # 배열 인덱스로는 px_start를 빼서 슬라이스(워커 _alpha_fit_slice와 동일 의미).
+            sl = slice(max(0, pmin - px_start), max(1, min(n_pix, pmax - px_start + 1)))
+        else:
+            i0 = int(np.abs(wave_nm_file - lo).argmin())
+            i1 = int(np.abs(wave_nm_file - hi).argmin())
+            sl = slice(min(i0, i1), max(i0, i1) + 1)
+        wl = wave_nm_file[sl]
+        a = alpha[sl]
 
-            # ── DoasFitter (RUN과 동일) ──
-            from core.doas_fit import DoasFitter
-            from scipy.interpolate import interp1d as _i1d
-            eng = self.engine
-            fitter = DoasFitter(eng)
-            wax = np.asarray(eng._wave_axis, dtype=float).flatten()
-            vp_pixel = np.asarray(_i1d(wax, np.arange(len(wax)), bounds_error=False,
-                                       fill_value='extrapolate')(wl), dtype=float)
-            vp_center = vp_pixel[len(vp_pixel) // 2]
-            rp = getattr(self, 'ref_props', {})
-            active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
-                rp, 0.0, [0.0, 1.0], self.spin_step_limit.value())
-            # (구식 etalon 위상 append 제거 — doas_fit가 etalon을 sin·cos 선형열로
-            #  처리한 뒤로는 위상이 비선형 파라미터가 아니다. 워커와 동일하게 theta는
-            #  shift/squeeze만. 전부 Fix면 theta=[]여도 doas_fit가 선형해 1회로 처리.)
-            out = fitter.execute_varpro_fit(
-                vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
-                self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
-                self.spin_lambda.value(), self.chk_robust.isChecked(),
-                allow_negative_gas=self.chk_allow_neg.isChecked() if hasattr(self, 'chk_allow_neg') else False)
-            opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out
-            full_model, *_ = eng.get_model_components(
-                vp_pixel, opt_shifts, opt_squeezes, gas_coeffs, poly_c,
-                etalon_amp=etal_amp, etalon_freq=0.0, etalon_phase=best_ep)
-            resid = a - full_model
-            # 가스별 기여(진짜 레퍼런스 오버레이, S-C): 핏이 내부에서 쓰는 것과 동일식
-            gas_models = []
-            for gi, nm in enumerate(eng.gas_list):
-                px_sh = (vp_pixel - vp_center) * opt_squeezes[gi] + vp_center + opt_shifts[gi]
-                try:
-                    refv = eng.interpolators[nm](px_sh) / eng.scaling_factors.get(nm, 1.0)
-                    gas_models.append(gas_coeffs[gi] * refv)
-                except Exception:
-                    gas_models.append(None)
-            rms = float(np.sqrt(np.mean(resid ** 2)))
-            n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
-            ppb = {}
-            for gi, nm in enumerate(eng.gas_list):
-                sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
-                ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
-
-            # etalon–기체 공선성 진단(보고 전용, 핏 불변) — RUN과 동일한 FFT 검출
-            # 주파수(워커 기본 밴드 0.02~0.40 rad/px)에서 평가. 실패해도 팝업은 뜬다.
+        # ── DoasFitter (RUN과 동일) ──
+        from core.doas_fit import DoasFitter
+        from scipy.interpolate import interp1d as _i1d
+        eng = self.engine
+        fitter = DoasFitter(eng)
+        wax = np.asarray(eng._wave_axis, dtype=float).flatten()
+        vp_pixel = np.asarray(_i1d(wax, np.arange(len(wax)), bounds_error=False,
+                                   fill_value='extrapolate')(wl), dtype=float)
+        vp_center = vp_pixel[len(vp_pixel) // 2]
+        rp = getattr(self, 'ref_props', {})
+        active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
+            rp, 0.0, [0.0, 1.0], self.spin_step_limit.value())
+        # (구식 etalon 위상 append 제거 — doas_fit가 etalon을 sin·cos 선형열로
+        #  처리한 뒤로는 위상이 비선형 파라미터가 아니다. 워커와 동일하게 theta는
+        #  shift/squeeze만. 전부 Fix면 theta=[]여도 doas_fit가 선형해 1회로 처리.)
+        out = fitter.execute_varpro_fit(
+            vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
+            self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
+            self.spin_lambda.value(), self.chk_robust.isChecked(),
+            allow_negative_gas=self.chk_allow_neg.isChecked() if hasattr(self, 'chk_allow_neg') else False)
+        opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out
+        full_model, *_ = eng.get_model_components(
+            vp_pixel, opt_shifts, opt_squeezes, gas_coeffs, poly_c,
+            etalon_amp=etal_amp, etalon_freq=0.0, etalon_phase=best_ep)
+        resid = a - full_model
+        # 가스별 기여(진짜 레퍼런스 오버레이, S-C): 핏이 내부에서 쓰는 것과 동일식
+        gas_models = []
+        for gi, nm in enumerate(eng.gas_list):
+            px_sh = (vp_pixel - vp_center) * opt_squeezes[gi] + vp_center + opt_shifts[gi]
             try:
-                e_f_diag = fitter.detect_etalon_frequency(
-                    vp_pixel, a, self.spin_poly_deg.value(), 0.02, 0.40)
-                collin = fitter.etalon_collinearity(
-                    vp_pixel, e_f_diag, self.spin_poly_deg.value(), rp,
-                    temperature=T_C, fit_sign=1.0,
-                    opt_shifts=opt_shifts, opt_squeezes=opt_squeezes,
-                    absolute_center=vp_center)
+                refv = eng.interpolators[nm](px_sh) / eng.scaling_factors.get(nm, 1.0)
+                gas_models.append(gas_coeffs[gi] * refv)
             except Exception:
-                collin = None
+                gas_models.append(None)
+        rms = float(np.sqrt(np.mean(resid ** 2)))
+        n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+        ppb = {}
+        for gi, nm in enumerate(eng.gas_list):
+            sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
+            ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
 
-            self._show_test_fit_popup(fp, wl, a, full_model, resid, gas_models,
-                                      ppb, opt_shifts, opt_squeezes, rms, T_C, P_mbar,
-                                      collin=collin)
-        except Exception as e:
-            import traceback
-            QMessageBox.critical(self, "Test Fit failed", f"{e}\n\n{traceback.format_exc()[-600:]}")
+        # etalon–기체 공선성 진단(보고 전용, 핏 불변) — RUN과 동일한 FFT 검출
+        # 주파수(워커 기본 밴드 0.02~0.40 rad/px)에서 평가. 실패해도 팝업은 뜬다.
+        try:
+            e_f_diag = fitter.detect_etalon_frequency(
+                vp_pixel, a, self.spin_poly_deg.value(), 0.02, 0.40)
+            collin = fitter.etalon_collinearity(
+                vp_pixel, e_f_diag, self.spin_poly_deg.value(), rp,
+                temperature=T_C, fit_sign=1.0,
+                opt_shifts=opt_shifts, opt_squeezes=opt_squeezes,
+                absolute_center=vp_center)
+        except Exception:
+            collin = None
 
-    def _show_test_fit_popup(self, fp, wl, data, model, resid, gas_models,
-                             ppb, shifts, squeezes, rms, T_C, P_mbar, collin=None):
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel
-        import pyqtgraph as pg
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Test Fit — {os.path.basename(fp)}")
-        dlg.resize(int(900 * self._s), int(720 * self._s))
-        lay = QVBoxLayout(dlg)
-        # 요약 라벨
-        gtxt = "  ".join(f"{g}={ppb[g]:.2f}" for g in ppb)
-        lay.addWidget(QLabel(
-            f"<b>ppb:</b> {gtxt}    <b>RMS:</b> {rms:.2e}    "
-            f"<b>Shift:</b> {shifts[0]:+.2f}px  <b>Squeeze:</b> {squeezes[0]:.4f}    "
-            f"T={T_C:.1f}°C P={P_mbar:.0f}mb"))
-        # etalon–기체 공선성 한 줄(보고 전용) — |r|>문턱이면 주황 강조
-        if collin is not None:
-            from core.doas_fit import DoasFitter as _DF
-            _cl = QLabel(_DF.format_etalon_collinearity(collin))
-            if collin.get("warn"):
-                _cl.setStyleSheet("color:#E65100;font-weight:bold;")
-            else:
-                _cl.setStyleSheet("color:#555;")
-            _cl.setWordWrap(True)
-            lay.addWidget(_cl)
-        _pal = ["#388E3C", "#7B1FA2", "#0097A7", "#C2185B", "#5D4037"]
-        gms = [(gi, nm, gas_models[gi]) for gi, nm in enumerate(self.engine.gas_list)
-               if gas_models and gi < len(gas_models) and gas_models[gi] is not None
-               and len(gas_models[gi]) == len(wl)]
-        sum_gas = np.sum([g for _, _, g in gms], axis=0) if gms else np.zeros_like(wl)
-        diff_data = resid + sum_gas      # = α − (poly+etalon): 베이스라인 제거한 측정 미분광학두께
+        return (fp, wl, a, full_model, resid, gas_models, ppb, opt_shifts, opt_squeezes,
+                rms, T_C, P_mbar, collin)
 
-        # ① 측정 vs 핏(가스합) — 베이스라인(다항식) 제거. 둘이 겹치면 좋은 핏.
-        pw1 = pg.PlotWidget(); pw1.setBackground('w'); pw1.showGrid(x=True, y=True, alpha=0.3)
-        pw1.addLegend(offset=(10, 6))
-        pw1.plot(wl, diff_data, pen=pg.mkPen('#1976D2', width=2), name='measured (baseline removed)')
-        pw1.plot(wl, sum_gas, pen=pg.mkPen('#D32F2F', width=1.5), name='fitted gases (Σ)')
-        pw1.setLabel('left', 'Diff α (cm⁻¹)')
-        pw1.setTitle('Measured vs fitted gases')
-        lay.addWidget(pw1, 2)
-
-        # ② 레퍼런스(가스별 핏 기여) 모음 — 각 종의 흡수 지문. 선 크기 = 기여도.
-        pw2 = pg.PlotWidget(); pw2.setBackground('w'); pw2.showGrid(x=True, y=True, alpha=0.3)
-        pw2.addLegend(offset=(10, 6))
-        for gi, nm, gm in gms:
-            pw2.plot(wl, gm, pen=pg.mkPen(_pal[gi % len(_pal)], width=1.5),
-                     name=f'{nm}  ({ppb.get(nm, float("nan")):.2f} ppb)')
-        pw2.setLabel('left', 'Diff α (cm⁻¹)')
-        pw2.setTitle('Reference contributions (per gas)')
-        lay.addWidget(pw2, 2)
-
-        # ③ 잔차 — 전체 모델 뺀 나머지. 평평한 노이즈면 좋은 핏.
-        pw3 = pg.PlotWidget(); pw3.setBackground('w'); pw3.showGrid(x=True, y=True, alpha=0.3)
-        pw3.plot(wl, resid, pen=pg.mkPen('#455A64', width=1))
-        pw3.setLabel('left', 'Residual'); pw3.setLabel('bottom', 'Wavelength (nm)')
-        pw3.setTitle(f"Residual (RMS={rms:.2e})")
-        lay.addWidget(pw3, 1)
-        dlg.show()
+    def _apply_test_fit_recommendations(self, result):
+        """TestFitDialog 탭1의 [Apply] 콜백 — 추천된 ref_props/poly/step_limit을 라이브
+        상태에 반영한다. worker가 이미 t_ref/t_coeff/active_bands_nm(사용자 몫)을 보존해
+        조립했으므로 여기서는 그대로 덮어쓰기만 하면 된다. 사람이 버튼을 눌러야만 호출됨
+        (자동 적용 금지, docs/fit_optimizer_handoff.md §15-E 불변식4)."""
+        for gas, props in result["proposed_ref_props"].items():
+            self.ref_props[gas] = dict(props)
+        self.spin_poly_deg.setValue(result["proposed_poly_deg"])
+        if result.get("proposed_step_limit") is not None:
+            self.spin_step_limit.setValue(result["proposed_step_limit"])
+        self._refresh_shsq_summary()
 
     # ══════════════════════════════════════════════════════════════════════
     # §9  핏 범위 + 레퍼런스 관리
