@@ -1252,6 +1252,234 @@ def _chunk_entry(task):
     return results
 
 
+# ─── Parallel Pass 2 (alpha 계산) ──────────────────────────────────────────────
+# AlphaExportWorker Pass 2(I0/R(t) 보간 + Rayleigh + α식 + 파일저장)를 파일 단위로
+# ProcessPoolExecutor에 태운다. Pass 1(_chunk_init류)과 동일한 원칙: 모듈 최상위
+# 함수만(중첩 클로저는 피클 불가) + initializer로 프로세스당 1회 컨텍스트 구성.
+# 핵심: pchip_i0/t/p 등은 이미 메인 프로세스에서 만든 SegmentedPchip 객체를 그대로
+# initargs로 넘긴다(피클 가능 확인됨) — 워커마다 재구성하지 않으므로 로직이 두 벌로
+# 갈라질 위험이 없다. 순차 폴백과 병렬 모두 _pass2_process_file 하나만 부른다.
+_PASS2_CTX = None
+
+
+def _correct_intensity_plain(I, dark, dark_scale_factor, offset, offset_scale_factor,
+                             stray_light_fraction):
+    """AlphaExportWorker._correct_intensity와 완전히 동일한 순수함수판(self 대신 인자로)."""
+    I = np.asarray(I, dtype=float)
+    if dark is None and offset is None and stray_light_fraction <= 1e-9:
+        return I
+    out = I.copy()
+    if dark is not None:
+        out = out - dark_scale_factor * dark
+    if offset is not None:
+        out = out - offset_scale_factor * offset
+    if stray_light_fraction > 1e-9:
+        eps = stray_light_fraction
+        out = (out - eps * np.mean(out)) / (1.0 - eps)
+    return out
+
+
+def _alpha_za_plain(T, P, za_ref):
+    """AlphaExportWorker._run_inner의 _alpha_za 클로저와 동일(za_ref=_ZA_REF를 인자로)."""
+    return za_ref * (float(P) / 1013.25) * (273.15 / (float(T) + 273.15))
+
+
+def _avg_ambient_plain(entries, avg_sec, sec_per_row=0.97):
+    """AlphaExportWorker._run_inner의 _avg_ambient 클로저와 동일(avg_sec을 인자로)."""
+    if not entries:
+        return []
+    entries = sorted(entries, key=lambda e: e[2])   # by gidx
+    g0 = entries[0][2]
+    secs = np.array([e[3] for e in entries], dtype=float)
+    use_real = np.isfinite(secs).all()
+    s0 = secs[0] if use_real else None
+    bins = {}
+    for (_fp, rid, g, sec, t, p, i) in entries:
+        if avg_sec <= 0:
+            b = len(bins)
+        elif use_real:
+            b = int((sec - s0) / avg_sec)
+        else:
+            b = int((g - g0) * sec_per_row / avg_sec)
+        bins.setdefault(b, []).append((rid, g, sec, t, p, i))
+    out = []
+    for b in sorted(bins):
+        grp = bins[b]
+        I = np.nanmean(np.array([x[5] for x in grp], dtype=float), axis=0)
+        T = float(np.nanmean([x[3] for x in grp]))
+        P = float(np.nanmean([x[4] for x in grp]))
+        gmean = float(np.mean([x[1] for x in grp]))
+        rep_sec = float(np.nanmean([x[2] for x in grp]))
+        out.append((grp[0][0], gmean, rep_sec, T, P, I, len(grp)))
+    return out
+
+
+def _reread_amb_plain(entries, spool_path, row_bytes, n_pix):
+    """AlphaExportWorker._run_inner의 _reread_amb 클로저와 동일(amb_index[fp] 전체
+    딕셔너리 대신 그 파일의 entries만 인자로 받음). 스풀은 Pass 1 종료 시 이미
+    flush+close돼 있어 여러 프로세스가 동시에 읽기 전용으로 열어도 안전하다."""
+    if not entries:
+        return []
+    seqs = [e[5] for e in entries]
+    s0, s1 = min(seqs), max(seqs)
+    cnt = s1 - s0 + 1
+    try:
+        with open(spool_path, 'rb') as fh:
+            fh.seek(s0 * row_bytes)
+            block = np.frombuffer(fh.read(cnt * row_bytes),
+                                  dtype=np.float32).reshape(cnt, n_pix)
+    except Exception:
+        return []
+    fp = entries[0][6] if len(entries[0]) > 6 else None   # 미사용(호환용) — 실제 fp는 호출부가 앎
+    out = []
+    for e in entries:
+        inten = np.asarray(block[e[5] - s0], dtype=float)
+        out.append((fp, e[0], e[1], e[2], e[3], e[4], inten))
+    return out
+
+
+def _pass2_rt_omr_call(sec, rt_pchip, rt_const):
+    """rt_omr_interp 클로저(다중/단일 knot 두 갈래)와 동일 — 비대칭을 그대로 보존한다:
+    다중knot(rt_pchip)는 sec가 유한해야만 평가하지만, 단일knot(rt_const)는 sec와
+    무관하게 항상 그 상수를 반환한다(원본 :1913-1917과 동일, '고치지' 않음)."""
+    if rt_pchip is not None:
+        if not np.isfinite(sec):
+            return None
+        return rt_pchip(sec)
+    if rt_const is not None:
+        return rt_const
+    return None
+
+
+def _pass2_omr_d_at(g, sec, rt_pchip, rt_const, omr_pchip, omr_axis_is_sec, best_omr_d):
+    """AlphaExportWorker._run_inner의 _omr_d_at 클로저와 동일(rt_omr_interp/omr_interp를
+    인자로 받은 SegmentedPchip 객체로 대체)."""
+    if (rt_pchip is not None or rt_const is not None) and sec is not None:
+        v = _pass2_rt_omr_call(sec, rt_pchip, rt_const)
+        if v is not None:
+            return v
+    if omr_pchip is not None:
+        if omr_axis_is_sec and sec is not None and np.isfinite(sec):
+            return omr_pchip(float(sec))
+        return omr_pchip(float(g))
+    return best_omr_d
+
+
+def _pass2_write_file(fp, rows, ctx):
+    """AlphaExportWorker._run_inner의 파일쓰기 블록과 동일(self.* 대신 ctx[...])."""
+    import re as _re_date
+    from datetime import datetime as _dt, timedelta as _td
+    from core.provenance import code_version as _codever
+
+    stem = os.path.splitext(os.path.basename(fp))[0]
+    _md = _re_date.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', stem)
+    _file_dir = (os.path.join(ctx['base_dir'], f"{_md.group(1)}-{_md.group(2)}-{_md.group(3)}")
+                if _md else ctx['base_dir'])
+    os.makedirs(_file_dir, exist_ok=True)
+    lbl_tag = f"_{ctx['channel_label']}" if ctx['channel_label'] else ""
+    out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
+    _yr = DataIO._file_year(fp) or 2026
+
+    def _doy_iso(sec):
+        if not np.isfinite(sec):
+            return float('nan'), ''
+        doy = sec / 86400.0 + 1.0
+        iso = (_dt(_yr, 1, 1) + _td(seconds=float(sec))).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        return doy, iso
+
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
+        f.write(f"# code={_codever()}\n")
+        f.write(f"# channel={ctx['channel']}  label={ctx['channel_label'] or 'single'}\n")
+        f.write(f"# RL_factor={ctx['rl_factor']}  d={ctx['cavity_len']} cm\n")
+        f.write(f"# I0_mode={ctx['i0_mode']}  ZA_count={ctx['n_za']}\n")
+        f.write(f"# ambient_avg_sec={ctx['avg_sec']:.0f}  (alpha after {ctx['avg_sec']:.0f}s time-average of ambient)\n")
+        dark = ctx['dark']
+        dark_note = f"mean={dark.mean():.1f}×{ctx['dark_scale_factor']:g}" if dark is not None else "None"
+        f.write(f"# dark_correction={dark_note}\n")
+        f.write(f"# offset_correction={'applied×%g' % ctx['offset_scale_factor'] if ctx['offset'] is not None else 'None'}"
+                f"  stray_light_eps={ctx['stray_light_fraction']:g}\n")
+        f.write(f"# Calibration: {ctx['rt_calib_note'] or ctx['calib_info_per_file'].get(fp, 'unknown')}\n")
+        wv_str = '\t'.join(f"{w:.4f}" for w in ctx['wave_nm'])
+        f.write(f"# wavelength_nm:\t{wv_str}\n")
+        f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
+        f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
+                '\t'.join(f"px{ctx['pix_min']+j}" for j in range(ctx['n_pix'])) + "\n")
+        for rid, rep_sec, T, P, alpha, n_avg in rows:
+            doy, iso = _doy_iso(rep_sec)
+            vals = '\t'.join(f"{v:.6e}" for v in alpha)
+            f.write(f"{rid}\t{doy:.6f}\t{iso}\t{T:.2f}\t{P:.2f}\t{vals}\n")
+    return out_path
+
+
+def _pass2_process_file(fp, entries, ctx):
+    """Pass 2 한 파일 처리 — 순차·병렬 양쪽이 부르는 유일한 구현(로직 이원화 없음).
+    반환: (fp, out_path_or_None, n_rows, error_or_None). 실패해도 예외를 던지지
+    않고 데이터로 반환한다(풀 프로세스에서 예외가 그대로 터지면 곤란하고, 순차
+    경로에서도 파일 하나 실패로 런 전체가 죽지 않게 하는 게 더 안전하다)."""
+    try:
+        raw_rows = _reread_amb_plain(entries, ctx['amb_spool_path'], ctx['row_bytes'], ctx['n_pix'])
+        # _reread_amb_plain은 entries에서 fp를 못 뽑으므로(호환 자리표시자) 여기서 채운다.
+        raw_rows = [(fp, r[1], r[2], r[3], r[4], r[5], r[6]) for r in raw_rows]
+        avg_rows = _avg_ambient_plain(raw_rows, ctx['avg_sec'])
+        rows = []
+        for (row_idx, gmean, rep_sec, t_am, p_am, i_am, n_avg) in avg_rows:
+            if ctx['use_pchip']:
+                g = float(rep_sec) if (ctx['i0_axis_is_sec'] and np.isfinite(rep_sec)) else float(gmean)
+                if g < ctx['za_x_min']:
+                    i0_interp, t_i0, p_i0 = ctx['i0_first'], ctx['t_first'], ctx['p_first']
+                elif g > ctx['za_x_max']:
+                    i0_interp, t_i0, p_i0 = ctx['i0_last'], ctx['t_last'], ctx['p_last']
+                else:
+                    i0_interp = ctx['pchip_i0'](g)
+                    t_i0 = float(ctx['pchip_t'](g))
+                    p_i0 = float(ctx['pchip_p'](g))
+            else:
+                i0_interp, t_i0, p_i0 = ctx['i_za_static'], ctx['t_za_static'], ctx['p_za_static']
+
+            i_am_dc = _correct_intensity_plain(
+                i_am, ctx['dark'], ctx['dark_scale_factor'],
+                ctx['offset'], ctx['offset_scale_factor'], ctx['stray_light_fraction'])
+            i0_s   = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
+            i_am_s = np.where(i_am_dc   > 0, i_am_dc,   1e-9).astype(float)
+
+            alpha_ref    = _alpha_za_plain(t_i0, p_i0, ctx['ZA_REF'])
+            alpha_sample = _alpha_za_plain(t_am, p_am, ctx['ZA_REF'])
+
+            omr = _pass2_omr_d_at(gmean, rep_sec, ctx['rt_omr_pchip'], ctx['rt_omr_const'],
+                                  ctx['omr_pchip'], ctx['omr_axis_is_sec'], ctx['best_omr_d'])
+            alpha = ((omr + ctx['rl_factor'] * alpha_ref) * ((i0_s - i_am_s) / i_am_s)
+                     - (alpha_sample - alpha_ref))
+            rows.append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
+
+        if not rows:
+            return (fp, None, 0, None)
+        out_path = _pass2_write_file(fp, rows, ctx)
+        return (fp, out_path, len(rows), None)
+    except Exception as e:
+        import traceback
+        return (fp, None, 0, f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+
+
+def _pass2_init(ctx):
+    """Pool initializer — 프로세스당 1회, ctx(이미 메인프로세스에서 만든 SegmentedPchip
+    객체 포함)를 전역에 저장. Pass 1/AnalysisWorker 청크핏과 동일한 BLAS 오버서브스크립션
+    가드(threadpool_limits(1))를 건다 — Pass 2는 가벼운 편이지만 공짜 안전장치라 유지."""
+    global _PASS2_CTX
+    try:
+        from threadpoolctl import threadpool_limits
+        globals()['_PASS2_TPL'] = threadpool_limits(1)
+    except Exception:
+        os.environ.setdefault('OMP_NUM_THREADS', '1')
+    _PASS2_CTX = ctx
+
+
+def _pass2_entry(task):
+    """풀 워커에서 파일 하나 처리. task=(fp, entries)."""
+    fp, entries = task
+    return _pass2_process_file(fp, entries, _PASS2_CTX)
+
+
 class AlphaExportWorker(QThread):
     """
     Alpha-only export: He/ZA 캘리브레이션 → ambient 행마다 alpha(cm-1) 계산 → 파일 저장.
@@ -1680,6 +1908,7 @@ class AlphaExportWorker(QThread):
         # 기존 스캔 인덱스 축·페어링으로 폴백(무회귀). 유효 knot<2면 omr_interp=None
         # → 기존 단일 best_omr_d 로 폴백.
         omr_interp = None
+        omr_pchip_obj = None   # Pass 2 병렬 ctx용 — omr_interp과 동일 SegmentedPchip, 클로저 대신 picklable로
         _omr_axis_is_sec = False   # _omr_d_at()이 omr_interp을 sec/gidx 중 뭘로 부를지
         # rt_path(R calibrator 프리컴퓨트 npz)가 있으면 아래 _omr_d_at이 그걸(rt_omr_interp)
         # 우선 쓰므로, 여기서 ZA 블록마다 reflectance_calc(5차 polyfit)로 자체 R(t)를 만드는
@@ -1746,6 +1975,7 @@ class AlphaExportWorker(QThread):
                             _kg, _kd, break_x=[c['x_break'] for c in _sg_c2])
                         def omr_interp(x, _p=_pchip_omr):
                             return _p(float(x))
+                        omr_pchip_obj = _pchip_omr
                         _omr_axis_is_sec = _pair_use_sec
                         _x2s_self = _sec_to_str() if _pair_use_sec else (lambda v: f"scan#{v:.0f}")
                         for _ln in _sg_fmt2(_sg_c2, threshold=_sg_t2,
@@ -1792,6 +2022,12 @@ class AlphaExportWorker(QThread):
 
         # ── Build PCHIP I₀ interpolator ───────────────────────────────────────
         _i0_axis_is_sec = False   # 아래 static-fallback 분기에선 안 씀 — 호출부 기본값
+        # Pass 2 병렬 ctx는 두 분기 중 하나만 채우는 필드를 모두 사전에 None으로
+        # 초기화해둔다(분기 무관하게 dict literal에서 항상 바인딩되어 있어야 함).
+        pchip_i0 = pchip_t = pchip_p = None
+        za_x_min = za_x_max = None
+        i0_first = i0_last = t_first = t_last = p_first = p_last = None
+        i_za_static = t_za_static = p_za_static = None
         if len(za_gidx) < 2:
             # Fallback: single static ZA (original behaviour)
             self.status_msg.emit(f"[WARN] {len(za_gidx)} ZA measurements → using static I₀")
@@ -1854,6 +2090,8 @@ class AlphaExportWorker(QThread):
         #    읽어 '시각(rep_sec)'으로 시간보간. 있으면 워커 자체 R보다 우선(단일 진실원천).
         #    채널창 기반이라 핫도 정상(자체 전체범위 R은 핫 98% 탈락·Leff 2배 오차). ──
         rt_omr_interp = None
+        rt_omr_pchip_obj = None   # Pass 2 병렬 ctx용 twin — rt_omr_interp(다중knot)과 동일 객체
+        rt_omr_const_obj = None   # Pass 2 병렬 ctx용 twin — rt_omr_interp(단일knot)과 동일 상수
         rt_calib_note = None   # rt_path 적용 시 헤더에 박을 출처(없으면 자체 R)
         if getattr(self, 'rt_path', None):
             try:
@@ -1895,6 +2133,7 @@ class AlphaExportWorker(QThread):
                         if not np.isfinite(sec):
                             return None
                         return _p(sec)
+                    rt_omr_pchip_obj = _prt
                     _seg_note = (f", {_prt.n_segments} segments"
                                  if _prt.n_segments > 1 else "")
                     rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} "
@@ -1914,10 +2153,13 @@ class AlphaExportWorker(QThread):
                     _only = _od[0]
                     def rt_omr_interp(sec, _o=_only):
                         return _o
+                    rt_omr_const_obj = _only
                     rt_calib_note = (f"external R(t) — {os.path.basename(self.rt_path)} (1 knot)")
             except Exception as e:
                 self.status_msg.emit(f"[R(t) load failed → using self R] {e}")
                 rt_omr_interp = None
+                rt_omr_pchip_obj = None
+                rt_omr_const_obj = None
 
         if ((best_omr_d is None and omr_interp is None and rt_omr_interp is None)
                 or (not use_pchip and i_za_static is None)):
@@ -2050,103 +2292,109 @@ class AlphaExportWorker(QThread):
             self.finished.emit(folder)
             return
 
-        # ── 스트리밍 Pass 2: 파일 1개씩 재읽기 → alpha 계산 → 즉시 저장 → 메모리 해제 ──
+        # ── Pass 2: 파일 단위 처리 — 순차·병렬 모두 _pass2_process_file() 하나만 부른다.
+        #    (아래 ctx는 위에서 만든 보간기·보정계수를 picklable 형태로 모은 것뿐이라
+        #    병렬/순차 출력이 이원화될 여지가 없다.) ──
         n_bins_total = 0
         n_saved  = 0
         pix_min  = self.pixel_min
         i0_mode  = (f"PCHIP({'t' if _i0_axis_is_sec else 'idx'})" if use_pchip else "static")
         n_za     = len(za_gidx)
 
-        from datetime import datetime as _dt, timedelta as _td
-        lbl_tag = f"_{self.channel_label}" if self.channel_label else ""
         base_dir = os.path.join(self.output_dir, self.channel_subdir) if self.channel_subdir else self.output_dir
         os.makedirs(base_dir, exist_ok=True)
-        import re as _re_date
 
-        for fp in amb_index:
-            if not self.is_running:
-                break
-            # 이 파일의 ambient를 재읽기 → 60s 평균 → alpha 계산(파일 1개분만 RAM에)
-            rows = []
-            for (row_idx, gmean, rep_sec, t_am, p_am, i_am, n_avg) in _avg_ambient(_reread_amb(fp)):
-                if use_pchip:
-                    # I0(t) 질의점: 실시각 축이면 이 ambient bin의 실측 대표시각(rep_sec),
-                    # 아니면 스캔 인덱스(gmean, 폴백) — pchip_i0/t/p이 만들어진 축과 맞춰야 한다.
-                    g = float(rep_sec) if (_i0_axis_is_sec and np.isfinite(rep_sec)) else float(gmean)
-                    if g < za_x_min:
-                        i0_interp, t_i0, p_i0 = i0_first, t_first, p_first
-                    elif g > za_x_max:
-                        i0_interp, t_i0, p_i0 = i0_last,  t_last,  p_last
-                    else:
-                        i0_interp = pchip_i0(g)
-                        t_i0      = float(pchip_t(g))
-                        p_i0      = float(pchip_p(g))
-                else:
-                    i0_interp = i_za_static
-                    t_i0      = t_za_static
-                    p_i0      = p_za_static
+        ctx = {
+            'use_pchip': use_pchip, 'i0_axis_is_sec': _i0_axis_is_sec,
+            'za_x_min': za_x_min, 'za_x_max': za_x_max,
+            'i0_first': i0_first, 'i0_last': i0_last,
+            't_first': t_first, 't_last': t_last,
+            'p_first': p_first, 'p_last': p_last,
+            'pchip_i0': pchip_i0, 'pchip_t': pchip_t, 'pchip_p': pchip_p,
+            'i_za_static': i_za_static, 't_za_static': t_za_static, 'p_za_static': p_za_static,
+            'dark': dark, 'dark_scale_factor': self.dark_scale_factor,
+            'offset': self.offset, 'offset_scale_factor': self.offset_scale_factor,
+            'stray_light_fraction': self.stray_light_fraction,
+            'ZA_REF': _ZA_REF,
+            'rt_omr_pchip': rt_omr_pchip_obj, 'rt_omr_const': rt_omr_const_obj,
+            'omr_pchip': omr_pchip_obj, 'omr_axis_is_sec': _omr_axis_is_sec,
+            'best_omr_d': best_omr_d, 'rl_factor': self.rl_factor,
+            'avg_sec': avg_sec,
+            'amb_spool_path': _amb_spool_path, 'row_bytes': _row_bytes, 'n_pix': n_pix,
+            'base_dir': base_dir, 'channel_subdir': self.channel_subdir,
+            'channel_label': self.channel_label,
+            'pix_min': pix_min, 'wave_nm': wave_nm,
+            'channel': self.channel, 'cavity_len': self.cavity_len,
+            'i0_mode': i0_mode, 'n_za': n_za,
+            'rt_calib_note': rt_calib_note, 'calib_info_per_file': calib_info_per_file,
+        }
 
-                i_am_dc = self._correct_intensity(i_am)
-                i0_s   = np.where(i0_interp > 0, i0_interp, 1e-9).astype(float)
-                i_am_s = np.where(i_am_dc   > 0, i_am_dc,   1e-9).astype(float)
-
-                alpha_ref    = _alpha_za(t_i0, p_i0)
-                alpha_sample = _alpha_za(t_am, p_am)
-
-                # RL은 괄호 전체를 곱한다(omr=RL·(1-R)/d → omr + RL·alpha_ref = RL·[(1-R)/d+α_ZA]).
-                alpha = ((_omr_d_at(gmean, rep_sec) + self.rl_factor * alpha_ref)
-                         * ((i0_s - i_am_s) / i_am_s)
-                         - (alpha_sample - alpha_ref))
-
-                rows.append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
-                n_bins_total += 1
-
-            if not rows:
-                continue
-            stem     = os.path.splitext(os.path.basename(fp))[0]
-            # 파일명에서 날짜(YYYY-MM-DD) 추출 → 날짜별 하위폴더에 저장(없으면 base_dir)
-            _md = _re_date.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', stem)
-            _file_dir = os.path.join(base_dir, f"{_md.group(1)}-{_md.group(2)}-{_md.group(3)}") if _md else base_dir
-            os.makedirs(_file_dir, exist_ok=True)
-            out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
-            _yr = DataIO._file_year(fp) or 2026
-            def _doy_iso(sec):
-                if not np.isfinite(sec):
-                    return float('nan'), ''
-                doy = sec / 86400.0 + 1.0
-                iso = (_dt(_yr, 1, 1) + _td(seconds=float(sec))).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-                return doy, iso
-            with open(out_path, 'w', encoding='utf-8') as f:
-                from core.provenance import code_version as _codever
-                f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
-                f.write(f"# code={_codever()}\n")
-                f.write(f"# channel={self.channel}  label={self.channel_label or 'single'}\n")
-                f.write(f"# RL_factor={self.rl_factor}  d={self.cavity_len} cm\n")
-                f.write(f"# I0_mode={i0_mode}  ZA_count={n_za}\n")
-                f.write(f"# ambient_avg_sec={self.avg_sec:.0f}  (alpha after {self.avg_sec:.0f}s time-average of ambient)\n")
-                dark_note = f"mean={dark.mean():.1f}×{self.dark_scale_factor:g}" if has_dark else "None"
-                f.write(f"# dark_correction={dark_note}\n")
-                f.write(f"# offset_correction={'applied×%g' % self.offset_scale_factor if self.offset is not None else 'None'}"
-                        f"  stray_light_eps={self.stray_light_fraction:g}\n")
-                f.write(f"# Calibration: {rt_calib_note or calib_info_per_file.get(fp, 'unknown')}\n")
-                wv_str = '\t'.join(f"{w:.4f}" for w in wave_nm)
-                f.write(f"# wavelength_nm:\t{wv_str}\n")
-                f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
-                f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
-                        '\t'.join(f"px{pix_min+j}" for j in range(n_pix)) + "\n")
-                for rid, rep_sec, T, P, alpha, n_avg in rows:
-                    doy, iso = _doy_iso(rep_sec)
-                    vals = '\t'.join(f"{v:.6e}" for v in alpha)
-                    f.write(f"{rid}\t{doy:.6f}\t{iso}\t{T:.2f}\t{P:.2f}\t{vals}\n")
+        def _finish_one(fp, out_path, n_rows, err):
+            nonlocal n_bins_total, n_saved
+            if err is not None:
+                self.status_msg.emit(f"SKIP(pass2) {os.path.basename(fp)}: {err.splitlines()[0]}")
+                return
+            if out_path is None:
+                return
+            n_bins_total += n_rows
             n_saved += 1
             # 파일별 진행상황 emit — UI가 주기적으로 숨 쉬어 '응답없음' 완화
             self.progress.emit(global_idx)
             self.status_msg.emit(
                 f"[{n_saved}/{len(amb_index)}] saved: {os.path.basename(out_path)}  "
-                f"({len(rows)} bin, {i0_mode} I₀)")
+                f"({n_rows} bin, {i0_mode} I₀)")
+
+        _use_par2 = getattr(self, 'use_parallel', True) and len(amb_index) > 1
+        _pass2_ok = False
+        if _use_par2:
+            _nproc2 = max(1, (os.cpu_count() or 4) // 2)
+            _win2 = _nproc2 * 2
+            self.status_msg.emit(f"Pass 2 (parallel {_nproc2} cores): processing {len(amb_index)} files…")
+            try:
+                import concurrent.futures as _cf2
+                with _cf2.ProcessPoolExecutor(max_workers=_nproc2, initializer=_pass2_init,
+                                              initargs=(ctx,)) as _ex2:
+                    _tasks2 = list(amb_index.items())
+                    _ti2 = 0
+                    _pending2 = set()
+                    while _ti2 < len(_tasks2) and len(_pending2) < _win2:
+                        _pending2.add(_ex2.submit(_pass2_entry, _tasks2[_ti2])); _ti2 += 1
+                    while _pending2:
+                        if not self.is_running:
+                            for _f in _pending2:
+                                _f.cancel()
+                            _ex2.shutdown(wait=False, cancel_futures=True)
+                            break
+                        # Pass 1과 동일: 0.5초마다 Stop을 확인해 큰 파일 처리 중에도 응답.
+                        _finished2, _pending2 = _cf2.wait(_pending2, timeout=0.5,
+                                                          return_when=_cf2.FIRST_COMPLETED)
+                        for _fut2 in _finished2:
+                            try:
+                                _fp2, _out2, _n2, _err2 = _fut2.result()
+                            except Exception as e:
+                                _fp2, _out2, _n2, _err2 = None, None, 0, str(e)
+                            if _fp2 is not None:
+                                _finish_one(_fp2, _out2, _n2, _err2)
+                            if _ti2 < len(_tasks2):
+                                _pending2.add(_ex2.submit(_pass2_entry, _tasks2[_ti2])); _ti2 += 1
+                _pass2_ok = True
+            except Exception as e:
+                # 풀 자체가 못 뜨는 등 인프라 실패만 여기로 옴(파일별 실패는 이미
+                # _pass2_process_file 안에서 데이터로 처리됨) → 순차로 폴백.
+                self.status_msg.emit(f"[Pass 2 parallel init failed → sequential fallback] {e}")
+
+        if not _pass2_ok:
+            # 순차 폴백(또는 use_parallel=False) — 병렬과 동일한 _pass2_process_file 하나만
+            # 부르므로 출력은 구성상 항상 동일(로직 이원화 없음).
+            for fp, entries in amb_index.items():
+                if not self.is_running:
+                    break
+                _fp3, _out3, _n3, _err3 = _pass2_process_file(fp, entries, ctx)
+                _finish_one(_fp3, _out3, _n3, _err3)
 
         _cleanup_spool()
         self.status_msg.emit(
-            f"Done: ambient {amb_count} rows → {n_bins_total} bins → {n_saved} files (streaming, low-memory)")
+            f"Done: ambient {amb_count} rows → {n_bins_total} bins → {n_saved} files"
+            f" ({'parallel' if (_use_par2 and _pass2_ok) else 'sequential'}, low-memory)")
         self.finished.emit(self.output_dir if n_saved > 0 else "ERROR: no files saved")
 
