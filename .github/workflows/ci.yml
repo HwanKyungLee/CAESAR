@@ -1,8 +1,11 @@
-# Augur CI — 데이터 없이 돌 수 있는 검증만 (개선작업지시_2026-07 §C-2)
+# Augur CI — 대부분 데이터 없이 돌 수 있는 검증 + 커밋된 소형 실데이터
+# fixture(diagnostics/alpha_pass2_parallel/fixtures/, raw 150행×2파일) 기반
+# Pass2 병렬 회귀 1건 (개선작업지시_2026-07 §C-2)
 #
 # 1인 개발 bus-factor 완화: 커밋마다 아래를 자동 확인해 '고치다 조용히 깨지는'
-# 회귀(bit-rot·물리식 회귀)를 빨간불로 띄운다. 측정 데이터가 필요한 검증
-# (raw 파싱 대조·웨이브칼·R·핏 출력)은 로컬에서 validate_pipeline(전체 모드)로.
+# 회귀(bit-rot·물리식 회귀·병렬/순차 divergence)를 빨간불로 띄운다. 캠페인
+# 규모 전체 검증(raw 파싱 대조·웨이브칼·R·핏 출력)은 로컬에서
+# validate_pipeline(전체 모드)로.
 name: CI
 
 on:
@@ -55,6 +58,10 @@ jobs:
 
       - name: Etalon collinearity unit tests
         run: python tools/test_etalon_collinearity.py
+
+      # Pass2(alpha) 병렬 vs 순차 byte-exact 회귀 — 커밋된 작은 실데이터 fixture 사용
+      - name: Pass2 parallel-vs-sequential byte-exact test
+        run: python tools/test_pass2_parallel.py
 
       # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
       - name: validate_plotmaker
