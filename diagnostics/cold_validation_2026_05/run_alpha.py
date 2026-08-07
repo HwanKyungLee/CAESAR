@@ -20,10 +20,14 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-CAESAR_REPO = r'C:\Doasis_Work\CAESAR_Pro'
+CAESAR_REPO = r'C:\Doasis_Work\CAESAR\CAESAR'
 sys.path.insert(0, CAESAR_REPO)
 from core.data_io import DataIO
 from core.physics import RayleighPhysics
+# alpha 공식 자체(강도보정 + Rayleigh 스케일링 + BBCEAS 조합)는 gui/worker.py의
+# AlphaExportWorker(Pass 2)와 물리적으로 동일해야 하므로, 손으로 다시 짜지 않고
+# 거기서 뽑아둔 순수함수를 그대로 가져다 쓴다(단일 출처 — 두 벌로 갈라질 위험 제거).
+from gui.worker import _correct_intensity_plain, _alpha_za_plain
 
 # ─── User-specified paths ────────────────────────────────────────────────────
 RAW_DIR    = r'F:\CAESAR cold\2026-05'
@@ -168,6 +172,10 @@ def compute_binned_alpha(amb, best_omr, pi0, pt, pp, bounds, wave_nm, dark=None)
     t_c   = t0 + (np.arange(n_bins) + 0.5) * BIN_SEC
     bin_idx = np.clip(((amb['t_sec'] - t0) / BIN_SEC).astype(np.int64), 0, n_bins - 1)
     n_amb = len(amb['g'])
+    # STP(0℃,1013.25mbar) 기준 σ(λ)·N0 를 1회만 계산해두고, 스캔마다는 T/P 스칼라
+    # 배율만 곱한다(AlphaExportWorker._run_inner의 _ZA_REF 최적화와 동일 — 매 스캔
+    # get_alpha_rayleigh를 다시 부르는 것과 수학적으로 완전히 동일, 결과는 안 바뀜).
+    za_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, 0.0, 1013.25, 'zero_air')
     for ai in range(n_amb):
         i_am = amb['spec'][ai]
         g    = float(amb['g'][ai])
@@ -178,11 +186,11 @@ def compute_binned_alpha(amb, best_omr, pi0, pt, pp, bounds, wave_nm, dark=None)
             i0, t_i0, p_i0 = i0_last, t_last, p_last
         else:
             i0 = pi0(g); t_i0 = float(pt(g)); p_i0 = float(pp(g))
-        i_am_dc = (i_am - dark) if dark is not None else i_am
+        i_am_dc = _correct_intensity_plain(i_am, dark, 1.0, None, 1.0, 0.0)
         i0_s   = np.where(i0      > 0, i0,      1e-9).astype(float)
         i_am_s = np.where(i_am_dc > 0, i_am_dc, 1e-9).astype(float)
-        a_ref  = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_i0, p_i0, 'zero_air')
-        a_smp  = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_am, p_am, 'zero_air')
+        a_ref  = _alpha_za_plain(t_i0, p_i0, za_ref)
+        a_smp  = _alpha_za_plain(t_am, p_am, za_ref)
         alpha = ((best_omr / RL_FACTOR + a_ref) * ((i0_s - i_am_s) / i_am_s)
                  - (a_smp - a_ref))
         bi = int(bin_idx[ai])
