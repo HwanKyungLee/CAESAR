@@ -1,11 +1,49 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-05-27** (이번 세션 — 이전 2026-05-26 노트는 §B 이하 유지)
+> 최종 업데이트: **2026-08-12** (이번 세션 — 이전 2026-05-27 노트는 §0 이하 유지)
 
 ---
 
-## 0. 이번 세션 (2026-05-27) 한 줄 요약
+## 최신 세션 (2026-08-04~12) 요약
+
+**브랜치: `claude/oculus-realtime-monitoring-pbjudz`** — origin에 push 완료, 다른 컴퓨터에선
+`git pull origin main` 한 방이면 아래 항목 전부 받아짐 (이번 세션에서 이 브랜치를 main으로 fast-forward merge).
+
+### 완료된 작업
+
+1. **Test Fit 2탭 다이얼로그** (`gui/test_fit_dialog.py`, 커밋 `5a3313b`)
+   - 탭1: 12스캔 샘플로 파라미터 자동 최적화 + Apply
+   - 탭2: 기존 1스캔 미리보기 (하위호환 유지)
+   - px_start 디텍터 오프셋 버그 수정 포함. `app_window.py`의 `_test_fit`을
+     `_compute_1scan_preview` + 헬퍼로 리팩터링, 구 Test Fit 메서드 삭제.
+   - 유닛테스트 `test_test_fit_dialog.py` 15개 통과.
+   - 상세 설계 근거: `docs/fit_optimizer_handoff.md`.
+
+2. **Pass 2 (알파 계산) 병렬화** (`gui/worker.py`, 커밋 `b492681`, `5fd08f7`, `a3f9dc2`)
+   - `AlphaExportWorker`를 `ProcessPoolExecutor` 기반 청크 병렬처리로 전환 (Pass 1과 동일 패턴 재사용).
+   - 순차 대비 byte-exact 회귀 검증 스크립트 (`diagnostics/alpha_pass2_parallel/validate_pass2_parallel.py`)
+     추가하고 CI에 자동화.
+   - `run_alpha.py` 진단 스크립트가 물리식을 재구현하지 않고 `worker.py`의 순수함수를 재사용하도록 정리
+     (단일 출처 원칙 준수).
+
+### 미완료 — 다음에 이어받을 것
+
+**α Health 탭 → 전체 파이프라인 헬스체크 전환 (착수 전)**
+- 현재 `app_window.py`의 `_alpha_qc_scan_folder`(~L1962)는 `*_alpha_trace.dat` 파일만 스캔하는
+  **알파 전용** QC. 탭 이름도 여전히 `"🩺 α Health"`.
+- 의도했던 것: raw → α → DOAS 피팅 전체 파이프라인 단계를 아우르는 헬스체크 탭으로 확장.
+- **아직 코드에 반영 안 됨** — 다음 세션에서 범위(어느 단계까지 체크할지)부터 정하고 시작할 것.
+
+### 알아둘 것 — dirty 상태로 남겨둔 것들
+
+이 세션엔 위 완료 항목과 무관한 변경도 워킹트리에 섞여 있었음 (NIER 제출용 `tools/build_nier_submission.py`
+등 수정, NO2 인젝션 실험 문서, `R_ANs.npz`/`R_PNs.npz` 바이너리). **의도적으로 커밋/merge에서 제외** —
+main엔 완료된 커밋들만 올라감. 이어받을 때 `git status`로 이 미완성 변경이 로컬에 남아있는지 확인.
+
+---
+
+## 0. 이전 세션 (2026-05-27) 한 줄 요약
 
 **CAESAR Pro의 알파+DOAS 파이프라인이 정상 작동함을 cold setup 데이터로 end-to-end 검증 완료.**
 2025-06-11 데이터의 알파 이슈는 코드 결함이 아니라 그 데이터셋의 He/ZA contrast 0.35% 문제로 판명. 부수적으로 발견한 두 가지 코드 개선사항은 PR 브랜치에 푸시 완료.
