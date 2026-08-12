@@ -1,4 +1,4 @@
-"""oculus/run_oculus.py — Oculus 진입점 (M0 유입 감시 + M1 HK 헬스 + 최소 대시보드).
+"""oculus/run_oculus.py — Oculus 진입점 (M0 유입 감시 + M1 HK + M2 R 헬스 + 대시보드).
 
 사용:
     python oculus/run_oculus.py --dir "D:\\CAESAR raw\\2026-yeosu"
@@ -19,10 +19,11 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.alert_engine import aggregate
+from oculus.alert_engine import SKIP, aggregate, worse
 from oculus.ingest_cursor import IngestCursor
 from oculus.monitors.hk_monitor import evaluate_hk
 from oculus.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
+from oculus.monitors.r_monitor import RMonitor
 from oculus.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from oculus.state_log import StateLog
 from oculus.watcher import Watcher
@@ -34,6 +35,19 @@ def _grace_sec_for(profiles: ProfileSet, routed_ids: set) -> float:
     vals = [p.cadence.liveness_grace_sec for p in profiles.profiles
             if p.profile_id in routed_ids and p.cadence.liveness_grace_sec is not None]
     return min(vals) if vals else DEFAULT_GRACE_SEC
+
+
+def _hk_value(prof, row, key):
+    """key(hk.fields[].key)로 그 행의 물리값 하나만 뽑는다. key/필드 없으면 NaN(R 계산이 알아서 실패 처리)."""
+    if not key:
+        return float("nan")
+    field = prof.hk.field(key)
+    if field is None:
+        return float("nan")
+    try:
+        return field.value(row, prof.hk.start_col)
+    except (IndexError, ValueError):
+        return float("nan")
 
 
 class OculusApp:
@@ -53,7 +67,57 @@ class OculusApp:
         self._routed_ids: set = set()
         self._hk_status: dict = {}         # {path: (status, msg, metrics)} — 최신 HK 판정
         self._hk_last_status: dict = {}    # {path: status} — 로그 중복 방지용
+        self._r_monitors: dict = {}        # {(profile_id, channel_id): RMonitor}
+        self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
+        self._r_by_channel: dict = {}      # {(profile_id, channel_id): (status, msg, metrics)}
+        self._r_status: dict = {}          # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
+        self._r_last_status: dict = {}     # {path: status} — 로그 중복 방지용
         self._last_status = None           # 종합(overall) 상태 — 로그 중복 방지용
+
+    def _get_wavecal(self, path):
+        if path not in self._wavecal_cache:
+            from tools.optimize_params import load_wavecal   # 기존 로더 재사용(3번째 사본 안 만듦)
+            self._wavecal_cache[path] = load_wavecal(path)
+        return self._wavecal_cache[path]
+
+    def _observe_reflectance(self, prof, ev, now) -> None:
+        """이 행의 프로파일에 reflectance 설정이 있는 signal 채널마다 RMonitor.observe.
+        새 R이 나온 채널이 있으면 그 파일의 combined 상태를 재계산·로그(변경시만)."""
+        touched = False
+        for ch in prof.signal_channels():
+            if ch.reflectance is None:
+                continue
+            key = (prof.profile_id, ch.id)
+            rm = self._r_monitors.get(key)
+            if rm is None:
+                rc = ch.reflectance
+                rm = RMonitor(wave_nm=self._get_wavecal(rc.wavecal_path),
+                              cavity_len_cm=rc.cavity_len_cm, rl_factor=rc.rl_factor,
+                              roi_nm=rc.roi_nm, warn_drop=rc.warn_drop, alarm_drop=rc.alarm_drop)
+                self._r_monitors[key] = rm
+            spectrum = ch.slice(ev.row)
+            temp_c = _hk_value(prof, ev.row, ch.reflectance.cavity_temp_hk)
+            press_mbar = _hk_value(prof, ev.row, ch.reflectance.cavity_pressure_hk)
+            result = rm.observe(ev.role, spectrum, temp_c, press_mbar)
+            if result is not None:
+                status, msg, metrics = result
+                self._r_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)
+                touched = True
+        if not touched:
+            return
+        entries = [self._r_by_channel[(prof.profile_id, ch.id)]
+                  for ch in prof.signal_channels()
+                  if (prof.profile_id, ch.id) in self._r_by_channel]
+        combined_status = SKIP
+        for s, _m, _mt in entries:
+            combined_status = worse(combined_status, s)
+        combined_msg = "; ".join(m for _s, m, _mt in entries)
+        self._r_status[ev.file] = (combined_status, combined_msg, {})
+        if self._r_last_status.get(ev.file) != combined_status:
+            self.state_log.append(combined_status, combined_msg, file=ev.file, kind="r")
+            if self.dashboard is not None:
+                self.dashboard.log_line(f"[{os.path.basename(ev.file)}] R {combined_status}: {combined_msg}")
+        self._r_last_status[ev.file] = combined_status
 
     def tick(self) -> None:
         events = self.watcher.poll()
@@ -73,6 +137,7 @@ class OculusApp:
                 if self.dashboard is not None:
                     self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {hk_status}: {hk_msg}")
             self._hk_last_status[ev.file] = hk_status
+            self._observe_reflectance(prof, ev, now)
         self._last_arrival = latest_arrival(events, self._last_arrival)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
@@ -81,6 +146,8 @@ class OculusApp:
         results = [("liveness", live_status, live_msg, live_metrics)]
         results += [(f"hk:{os.path.basename(p)}", s, m, mt)
                     for p, (s, m, mt) in self._hk_status.items()]
+        results += [(f"r:{os.path.basename(p)}", s, m, mt)
+                    for p, (s, m, mt) in self._r_status.items()]
         overall_status, overall_msg = aggregate(results)
 
         if overall_status != self._last_status:
@@ -94,13 +161,17 @@ class OculusApp:
             rows = {}
             for p, t in self._files_seen.items():
                 hk = self._hk_status.get(p)
-                rows[p] = (t, (now - t).total_seconds(),
-                          hk[0] if hk else None, hk[1] if hk else None)
+                r = self._r_status.get(p)
+                rows[p] = {
+                    "last_row": t, "lag": (now - t).total_seconds(),
+                    "hk_status": hk[0] if hk else None, "hk_msg": hk[1] if hk else None,
+                    "r_status": r[0] if r else None, "r_msg": r[1] if r else None,
+                }
             self.dashboard.update_files(rows)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Oculus M0+M1 — raw 유입 + HK 실시간 감시")
+    ap = argparse.ArgumentParser(description="Oculus M0+M1+M2 — raw 유입 + HK + R 실시간 감시")
     ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
                     help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")

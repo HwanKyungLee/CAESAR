@@ -34,8 +34,26 @@
 
   "channels": [
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
-    { "id": "ch_pns",    "label": "PNs",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null },
-    { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148], "reference_scenario": null }
+    { "id": "ch_pns",    "label": "PNs",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null,
+      "reflectance": {
+        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi2/Calib_20260619_Hg_400-499nm_Poly2.txt",
+        "roi_nm": [444.1, 470.6],
+        "cavity_temp_hk": "oven_pns_setpoint",
+        "cavity_pressure_hk": "p_pns_cavity",
+        "cavity_len_cm": 51.8,
+        "rl_factor": 0.933,
+        "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
+      } },
+    { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148], "reference_scenario": null,
+      "reflectance": {
+        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi1/Calib_20260619_Hg_400-499nm_Poly2.txt",
+        "roi_nm": [429.7, 466.0],
+        "cavity_temp_hk": "oven_ans_setpoint",
+        "cavity_pressure_hk": "p_ans_cavity",
+        "cavity_len_cm": 51.8,
+        "rl_factor": 0.933,
+        "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
+      } }
   ],
 
   "autodetect": {

@@ -34,7 +34,16 @@
 
   "channels": [
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
-    { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null },
+    { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null,
+      "reflectance": {
+        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260523_Hg_4line_400-497nm_Poly2.txt",
+        "roi_nm": [438.0, 476.0],
+        "cavity_temp_hk": "t_cavity",
+        "cavity_pressure_hk": "p_cavity",
+        "cavity_len_cm": 51.8,
+        "rl_factor": 0.933,
+        "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
+      } },
     { "id": "ch_noise2", "label": "noise",       "role": "noise",  "columns": [4101, 6148] }
   ],
 

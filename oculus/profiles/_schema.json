@@ -94,6 +94,28 @@
           "reference_scenario": {
             "type": ["string", "null"],
             "description": "이 채널의 경량 DOAS에 쓸 시나리오/레퍼런스 세트(M3에서 채움)."
+          },
+          "reflectance": {
+            "type": "object",
+            "description": "이 채널의 R(반사율) 실시간 산출 설정(M2, 선택). 없으면 R 모니터가 SKIP — wavecal·캐비티 HK 매핑은 캠페인/장비 구성마다 다르므로 프로파일에 둔다(§2-A).",
+            "additionalProperties": false,
+            "properties": {
+              "wavecal_path": { "type": "string", "description": "파장보정 파일 경로(nm, 1열, Augur wv_cal 형식과 동일)." },
+              "roi_nm": { "$ref": "#/$defs/band", "description": "[lo, hi] R 계산에 쓸 파장대(nm). tools/reflectance_calc.py의 roi_min/roi_max." },
+              "cavity_temp_hk": { "type": "string", "description": "이 채널 캐비티 가스온도로 쓸 hk.fields[].key." },
+              "cavity_pressure_hk": { "type": "string", "description": "이 채널 캐비티 압력으로 쓸 hk.fields[].key." },
+              "cavity_len_cm": { "type": "number", "exclusiveMinimum": 0, "default": 51.8, "description": "tools/reflectance_calc.ReflectanceCalculator의 cavity_len 기본값과 동일." },
+              "rl_factor": { "type": "number", "exclusiveMinimum": 0, "default": 0.933 },
+              "alert": {
+                "type": "object",
+                "description": "R 추세 경보(선택, R값 단위=반사율 0..1). 롤링 기준선 대비 하락폭. warn 이탈=P2(완만한 드리프트), alarm 이탈=P1(급락). 실측 튜닝 전 임시값 — §8 참조.",
+                "additionalProperties": false,
+                "properties": {
+                  "warn_drop": { "type": "number", "exclusiveMinimum": 0 },
+                  "alarm_drop": { "type": "number", "exclusiveMinimum": 0 }
+                }
+              }
+            }
           }
         }
       }
