@@ -94,7 +94,8 @@ def main():
         return
     wave = scans[0][0]
     print("\n" + "=" * 92)
-    print(f"{'항목':<16}{'자동 생성':<34}{'사용자 수동('+str(u.get('data_label'))+')':<34}")
+    # 표시 라벨은 c['label'](CLI key로 결정)을 쓴다 — u['data_label']은 json 안에서 뒤바뀌어 있을 수 있음(위 주석).
+    print(f"{'항목':<16}{'자동 생성':<34}{'사용자 수동('+c['label']+')':<34}")
     print("-" * 92)
     ur = ",".join(sorted(r["name"] for r in u["refs"]))
     ar = ",".join(sorted(r["name"] for r in cfg["refs"]))

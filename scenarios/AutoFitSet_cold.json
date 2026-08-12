@@ -29,8 +29,8 @@
   "step_limit": 0.75,
   "ref_props": {
     "NO2": {
-      "sh_mode": "Limit",
-      "sh_val": "-7.0, 6.0",
+      "sh_mode": "Center",
+      "sh_val": "-0.75, 6.75",
       "sq_mode": "Limit",
       "sq_val": "-0.0322, 0.0272",
       "t_ref": 25.0,

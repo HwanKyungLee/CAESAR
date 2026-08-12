@@ -1701,9 +1701,11 @@ class CAESARAnalyzer(QMainWindow):
         lay_trend.addWidget(self._setup_leff_pw, stretch=1)
         self._diag_tabs.addTab(tab_trend, "📈 R/Leff Trend")
 
-        # ── Tab 2: α Health — RUN 전에 알파 폴더를 사전점검(오염 알파 조기 탐지) ──
-        # 너희가 반복적으로 데인 "조용히 오염된 알파"(트렁케이트·6175 bin당 1트레이스·
-        # flatline 퇴화)를 긴 핏 전에 잡는다. wide-alpha 리더 + 폴더집계 재사용.
+        # ── Tab 2: Pipeline Health — RUN 전에 "이 산출물로 긴 핏을 돌려도 되나?"를 사전점검 ──
+        # α 폴더 스캔(너희가 반복적으로 데인 "조용히 오염된 알파" — 트렁케이트·6175 bin당
+        # 1트레이스·flatline 퇴화)에 더해, core/health_checks.py 배터리(웨이브칼·레퍼런스
+        # 공선성·Rayleigh 물리·R(t) 물리성)를 같이 돌려 전체 핏 파이프라인을 한 번에 판정한다.
+        # (기존엔 α 파일 품질만 봤다 — fit_optimizer_handoff.md §7·§10-C-4 미연결 항목 연결.)
         from PyQt6.QtWidgets import QSizePolicy
         tab_aqc = QWidget()
         lay_aqc = QVBoxLayout(tab_aqc)
@@ -1716,7 +1718,15 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_aqc_dir = QLabel("(none)")
         self.lbl_aqc_dir.setStyleSheet("color:#555;")
         self.lbl_aqc_dir.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._btn_aqc_run = QPushButton("🩺 Run Check")
+        _btn_aqc_rnpz = QPushButton("🔬 R(t) npz…")
+        _btn_aqc_rnpz.setToolTip(
+            "Optional: R_<channel>.npz (R Trend ▸ 'save R(t) for α') to physics-check R/Leff.\n"
+            "Skipped if not set.")
+        _btn_aqc_rnpz.clicked.connect(self._pipeline_qc_pick_r_npz)
+        self.lbl_aqc_rnpz = QLabel("(none)")
+        self.lbl_aqc_rnpz.setStyleSheet("color:#555;")
+        self._aqc_r_npz = None
+        self._btn_aqc_run = QPushButton("🩺 Run Pipeline Check")
         self._btn_aqc_run.setStyleSheet("font-weight:bold;")
         self._btn_aqc_run.clicked.connect(self._alpha_qc_run)
         self._aqc_folder = None
@@ -1735,17 +1745,21 @@ class CAESARAnalyzer(QMainWindow):
             lambda: self._aqc_pw.enableAutoRange(axis='xy', enable=True))
         _aqc_ctl.addWidget(_btn_aqc_dir)
         _aqc_ctl.addWidget(self.lbl_aqc_dir, stretch=1)
+        _aqc_ctl.addWidget(_btn_aqc_rnpz)
+        _aqc_ctl.addWidget(self.lbl_aqc_rnpz)
         _aqc_ctl.addWidget(self.chk_aqc_auto)
         _aqc_ctl.addWidget(self._btn_aqc_fitwin)
         _aqc_ctl.addWidget(self._btn_aqc_full)
         _aqc_ctl.addWidget(self._btn_aqc_run)
         lay_aqc.addLayout(_aqc_ctl)
 
-        self.lbl_aqc_readout = QLabel("α health: pick an alpha folder and Run Check.")
+        self.lbl_aqc_readout = QLabel(
+            "Pipeline health: pick an α folder (optional) and Run Pipeline Check — "
+            "checks α files + wavecal + references + Rayleigh + R(t).")
         self.lbl_aqc_readout.setStyleSheet(
             "color:#37474F; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
         self.lbl_aqc_readout.setWordWrap(False)
-        self.lbl_aqc_readout.setMaximumHeight(int(110 * self._s))
+        self.lbl_aqc_readout.setMaximumHeight(int(150 * self._s))
         self.lbl_aqc_readout.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Maximum)
         self.lbl_aqc_readout.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay_aqc.addWidget(self.lbl_aqc_readout)
@@ -1759,7 +1773,7 @@ class CAESARAnalyzer(QMainWindow):
         lay_aqc.addWidget(self._aqc_pw, stretch=1)
 
         self._tab_aqc = tab_aqc
-        self._diag_tabs.addTab(tab_aqc, "🩺 α Health")
+        self._diag_tabs.addTab(tab_aqc, "🩺 Pipeline Health")
 
         # ── Tab 3: FWHM Best-Match (validate sweep refs against measured α) ──
         from matplotlib.figure import Figure as _FwhmFigure
@@ -1948,7 +1962,7 @@ class CAESARAnalyzer(QMainWindow):
         alpha_mean = np.nanmean(np.array(means), axis=0)
         return ref_wl, alpha_mean, len(means)
 
-    # ── α Health / QC ──────────────────────────────────────────────────────
+    # ── Pipeline Health / QC ─────────────────────────────────────────────────
     def _alpha_qc_pick_folder(self):
         d = QFileDialog.getExistingDirectory(
             self, "Pick α folder to health-check", self._dlg_dir('aqc_dir'))
@@ -1958,6 +1972,46 @@ class CAESARAnalyzer(QMainWindow):
         self._aqc_folder = d
         self.lbl_aqc_dir.setText(f"✅ {d}")
         self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
+
+    def _pipeline_qc_pick_r_npz(self):
+        """R(t) npz(R_<channel>.npz) 선택 — core.health_checks.check_r용. 선택 안 하면 SKIP."""
+        fp, _ = QFileDialog.getOpenFileName(
+            self, "Pick R(t) npz (optional, for R physics check)",
+            self._dlg_dir('rt_path'), "R(t) npz (*.npz);;All Files (*)")
+        if not fp:
+            return
+        self._dlg_dir('rt_path', fp)
+        self._aqc_r_npz = fp
+        self.lbl_aqc_rnpz.setText(f"✅ {os.path.basename(fp)}")
+        self.lbl_aqc_rnpz.setStyleSheet("color:#2E7D32; font-weight:bold;")
+
+    def _pipeline_health_checks(self):
+        """core/health_checks.py 배터리를 현재 로드된 엔진 상태로 실행.
+        조립만 GUI 책임 — 판정 로직은 순수함수(health_checks.py)에 있어 CLI(tools/validate_pipeline.py)와 공유."""
+        from core import health_checks as HC
+        results = []
+        wave = getattr(self.engine, '_wave_axis', None)
+        wave = np.asarray(wave, dtype=float).flatten() if wave is not None else None
+        if wave is not None and wave.size > 1:
+            results.append(("wavecal", *HC.check_wavecal(wave)))
+        else:
+            results.append(("wavecal", HC.SKIP, "웨이브칼 미로드 (Setup에서 로드)", {}))
+        gas_list = list(getattr(self.engine, 'gas_list', []) or [])
+        if gas_list and wave is not None:
+            refs = {}
+            for name in gas_list:
+                interp = self.engine.interpolators.get(name)
+                if interp is not None:
+                    try:
+                        refs[name] = np.asarray(interp(wave), dtype=float)
+                    except Exception:
+                        pass
+            results.append(("references", *HC.check_references(refs, wl=wave)))
+        else:
+            results.append(("references", HC.SKIP, "레퍼런스 미로드 (Setup에서 Lock)", {}))
+        results.append(("rayleigh", *HC.check_rayleigh()))
+        results.append(("R(t)", *HC.check_r(getattr(self, '_aqc_r_npz', None))))
+        return results
 
     def _alpha_qc_scan_folder(self, folder, status_cb=None):
         """폴더(재귀) 내 모든 *_alpha_trace.dat를 단일패스로 스캔 → 건강성 통계.
@@ -2033,7 +2087,7 @@ class CAESARAnalyzer(QMainWindow):
                     dates=sorted(dates), per_file=per_file, anomalies=anomalies)
 
     def _alpha_qc_after_export(self, out_dir):
-        """Alpha Generator 완료 훅: 출력폴더를 α Health에 자동 연결하고 탭으로 포커스.
+        """Alpha Generator 완료 훅: 출력폴더를 Pipeline Health에 자동 연결하고 탭으로 포커스.
         'Auto-check' 체크 시 점검까지 자동 실행 — 생성→점검 흐름을 끊기지 않게."""
         if not out_dir or not hasattr(self, 'lbl_aqc_dir'):
             return
@@ -2048,85 +2102,103 @@ class CAESARAnalyzer(QMainWindow):
         if getattr(self, 'chk_aqc_auto', None) is not None and self.chk_aqc_auto.isChecked():
             self._alpha_qc_run()
         elif hasattr(self, 'lbl_aqc_readout'):
-            self.lbl_aqc_readout.setText("α health: folder set from last export — click 🩺 Run Check.")
+            self.lbl_aqc_readout.setText(
+                "Pipeline health: folder set from last export — click 🩺 Run Pipeline Check.")
 
     def _alpha_qc_run(self):
-        if not self._aqc_folder:
-            QMessageBox.warning(self, "α Health", "Pick an α folder first.")
-            return
+        """전체 파이프라인 헬스체크: α 폴더 스캔(선택) + wavecal/references/Rayleigh/R(t)
+        (core/health_checks.py, tools/validate_pipeline.py와 로직 공유). α 폴더는 선택사항 —
+        없으면 그 항목만 SKIP하고 나머지 4개 물리 체크는 그대로 돈다."""
+        from core import health_checks as HC
         self._btn_aqc_run.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        r = None
         try:
-            def _st(k, n):
-                self.status.setText(f"🩺 α Health scanning {k}/{n}…")
-                QApplication.processEvents()
-            r = self._alpha_qc_scan_folder(self._aqc_folder, status_cb=_st)
+            if self._aqc_folder:
+                def _st(k, n):
+                    self.status.setText(f"🩺 Pipeline Health scanning α {k}/{n}…")
+                    QApplication.processEvents()
+                r = self._alpha_qc_scan_folder(self._aqc_folder, status_cb=_st)
+            pipe_results = self._pipeline_health_checks()
         except Exception as e:
             QApplication.restoreOverrideCursor()
             self._btn_aqc_run.setEnabled(True)
-            QMessageBox.critical(self, "α Health", f"scan failed:\n{e}")
+            QMessageBox.critical(self, "Pipeline Health", f"check failed:\n{e}")
             return
         QApplication.restoreOverrideCursor()
         self._btn_aqc_run.setEnabled(True)
 
-        # ── plot: mean α + min/max envelope ──
+        # ── plot: mean α + min/max envelope (폴더 스캔했을 때만) ──
         self._aqc_pw.clear()
-        wl, mean, lo, hi = r['wl'], r['mean'], r['lo'], r['hi']
-        self._aqc_plot_data = (wl, mean, lo, hi)   # 🔍 Fit window 버튼용
-        fin = np.isfinite(wl) & np.isfinite(mean)
-        if fin.any():
-            try:
-                c_lo = pg.PlotCurveItem(wl[fin], np.where(np.isfinite(lo[fin]), lo[fin], np.nan),
-                                        pen=pg.mkPen((180, 180, 180, 120)))
-                c_hi = pg.PlotCurveItem(wl[fin], np.where(np.isfinite(hi[fin]), hi[fin], np.nan),
-                                        pen=pg.mkPen((180, 180, 180, 120)))
-                self._aqc_pw.addItem(c_lo); self._aqc_pw.addItem(c_hi)
-                self._aqc_pw.addItem(pg.FillBetweenItem(c_lo, c_hi, brush=(120, 170, 255, 50)))
-            except Exception:
-                pass
-            self._aqc_pw.plot(wl[fin], mean[fin], pen=pg.mkPen('#1565C0', width=2),
-                              name="mean α")
-        self._aqc_pw.setTitle(f"mean α + envelope — {r['n_files']} files, {r['n_scans']:,} scans")
+        if r is not None:
+            wl, mean, lo, hi = r['wl'], r['mean'], r['lo'], r['hi']
+            self._aqc_plot_data = (wl, mean, lo, hi)   # 🔍 Fit window 버튼용
+            fin = np.isfinite(wl) & np.isfinite(mean)
+            if fin.any():
+                try:
+                    c_lo = pg.PlotCurveItem(wl[fin], np.where(np.isfinite(lo[fin]), lo[fin], np.nan),
+                                            pen=pg.mkPen((180, 180, 180, 120)))
+                    c_hi = pg.PlotCurveItem(wl[fin], np.where(np.isfinite(hi[fin]), hi[fin], np.nan),
+                                            pen=pg.mkPen((180, 180, 180, 120)))
+                    self._aqc_pw.addItem(c_lo); self._aqc_pw.addItem(c_hi)
+                    self._aqc_pw.addItem(pg.FillBetweenItem(c_lo, c_hi, brush=(120, 170, 255, 50)))
+                except Exception:
+                    pass
+                self._aqc_pw.plot(wl[fin], mean[fin], pen=pg.mkPen('#1565C0', width=2),
+                                  name="mean α")
+            self._aqc_pw.setTitle(f"mean α + envelope — {r['n_files']} files, {r['n_scans']:,} scans")
+        else:
+            self._aqc_pw.setTitle("(α folder not set — file-level scan skipped)")
 
-        # ── readout ──
-        nan_files = sum(1 for p in r['per_file'] if p[2] > 0.05)
-        flat_files = sum(1 for p in r['per_file'] if p[3])
-        low_files = sum(1 for p in r['per_file']
-                        if p[1] < max(2.0, 0.3 * r['med_scans']))
-        mags = np.array([p[4] for p in r['per_file'] if np.isfinite(p[4])])
-        mag_str = (f"{np.nanmin(mags):.1e}~{np.nanmax(mags):.1e}" if len(mags) else "n/a")
-        dts = r['dates']
-        date_str = (f"{dts[0]}~{dts[-1]} ({len(dts)}d)" if dts else "n/a")
-        # 요약(사실) 줄과 경고(이상) 줄을 색으로 분리: 요약=파랑, 경고만 주황.
-        # 이상이 0이면 경고줄도 초록으로(전부 정상 신호).
-        info_lines = [
-            f"files={r['n_files']}  scans={r['n_scans']:,}  median scans/file={r['med_scans']:.0f}",
-            f"dates: {date_str}   |α| range: {mag_str}",
-        ]
-        warn_lines = [
-            f"⚠ anomalies: {len(r['anomalies'])}  (low-scan={low_files}, flatline={flat_files}, NaN>5%={nan_files})",
-        ]
-        for name, n, nf, flat, mag in r['anomalies'][:6]:
-            tag = []
-            if flat: tag.append("FLAT")
-            if n < max(2.0, 0.3 * r['med_scans']): tag.append(f"scans={n}")
-            if nf > 0.05: tag.append(f"NaN={nf*100:.0f}%")
-            warn_lines.append(f"   • {name}: {','.join(tag)}")
-        if len(r['anomalies']) > 6:
-            warn_lines.append(f"   … +{len(r['anomalies'])-6} more")
+        # ── α 폴더 스캔 결과를 같은 4단계(PASS/WARN/FAIL/SKIP)로 편입 ──
+        alpha_lines = []
+        if r is not None:
+            nan_files = sum(1 for p in r['per_file'] if p[2] > 0.05)
+            flat_files = sum(1 for p in r['per_file'] if p[3])
+            low_files = sum(1 for p in r['per_file']
+                            if p[1] < max(2.0, 0.3 * r['med_scans']))
+            mags = np.array([p[4] for p in r['per_file'] if np.isfinite(p[4])])
+            mag_str = (f"{np.nanmin(mags):.1e}~{np.nanmax(mags):.1e}" if len(mags) else "n/a")
+            dts = r['dates']
+            date_str = (f"{dts[0]}~{dts[-1]} ({len(dts)}d)" if dts else "n/a")
+            n_anom = len(r['anomalies']); n_files = max(r['n_files'], 1)
+            frac = n_anom / n_files
+            a_status = HC.PASS if n_anom == 0 else (HC.WARN if frac < 0.2 else HC.FAIL)
+            a_msg = (f"{r['n_files']} files, {r['n_scans']:,} scans, {n_anom} anomalies "
+                     f"(low-scan={low_files}, flatline={flat_files}, NaN>5%={nan_files})")
+            alpha_lines.append(f"files={r['n_files']}  scans={r['n_scans']:,}  "
+                                f"median scans/file={r['med_scans']:.0f}")
+            alpha_lines.append(f"dates: {date_str}   |α| range: {mag_str}")
+            for name, n, nf, flat, mag in r['anomalies'][:6]:
+                tag = []
+                if flat: tag.append("FLAT")
+                if n < max(2.0, 0.3 * r['med_scans']): tag.append(f"scans={n}")
+                if nf > 0.05: tag.append(f"NaN={nf*100:.0f}%")
+                alpha_lines.append(f"   • {name}: {','.join(tag)}")
+            if n_anom > 6:
+                alpha_lines.append(f"   … +{n_anom - 6} more")
+        else:
+            a_status, a_msg = HC.SKIP, "α folder not set"
+        pipe_results.insert(0, ("α files", a_status, a_msg, {}))
+
+        overall_status, overall_msg = HC.overall(pipe_results)
 
         def _esc(s):   # HTML 이스케이프 + 공백/들여쓰기 보존
-            return (s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            return (str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                      .replace(' ', '&nbsp;'))
-        INFO_C = '#1565C0'
-        WARN_C = '#E65100' if r['anomalies'] else '#2E7D32'
-        html  = [f'<span style="color:{INFO_C};">{_esc(s)}</span>' for s in info_lines]
-        html += [f'<span style="color:{WARN_C};">{_esc(s)}</span>' for s in warn_lines]
+        _CLR = {HC.PASS: '#2E7D32', HC.WARN: '#E65100', HC.FAIL: '#C62828', HC.SKIP: '#78909C'}
+        _ICON = {HC.PASS: '✅', HC.WARN: '⚠️', HC.FAIL: '❌', HC.SKIP: '⏭️'}
+        html = [f'<span style="color:{_CLR[overall_status]}; font-weight:bold;">'
+                f'{_ICON[overall_status]} {_esc(overall_msg)}</span>']
+        for name, status, msg, _m in pipe_results:
+            html.append(f'<span style="color:{_CLR[status]};">'
+                        f'{_ICON[status]} {_esc(name)}: {_esc(msg)}</span>')
+        for ln in alpha_lines:
+            html.append(f'<span style="color:{_CLR[a_status]};">{_esc(ln)}</span>')
         self.lbl_aqc_readout.setText('<br>'.join(html))
         self.lbl_aqc_readout.setStyleSheet(
             "font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
-        self.status.setText(
-            f"🩺 α Health: {r['n_files']} files, {len(r['anomalies'])} anomalies")
+        self.status.setText(f"🩺 Pipeline Health: {overall_status} — {overall_msg}")
 
     def _alpha_qc_zoom_fit(self):
         """🔍 Fit window: X를 Setup의 핏범위(start~end nm)로 줌 + 그 구간 mean α에 Y 오토핏.
@@ -2134,7 +2206,8 @@ class CAESARAnalyzer(QMainWindow):
         Y는 엔벨로프가 아니라 mean에 맞춘다(엔벨로프 기준이면 mean이 또 0처럼 눌림)."""
         data = getattr(self, '_aqc_plot_data', None)
         if not data:
-            QMessageBox.information(self, "α Health", "먼저 🩺 Run Check를 실행하세요.")
+            QMessageBox.information(self, "Pipeline Health",
+                "α 폴더를 지정하고 먼저 🩺 Run Pipeline Check를 실행하세요.")
             return
         wl, mean, _lo, _hi = data
         lo_nm = float(self.spin_fit_start_nm.value())
@@ -2143,7 +2216,7 @@ class CAESARAnalyzer(QMainWindow):
             lo_nm, hi_nm = hi_nm, lo_nm
         m = np.isfinite(wl) & np.isfinite(mean) & (wl >= lo_nm) & (wl <= hi_nm)
         if not m.any():
-            QMessageBox.information(self, "α Health",
+            QMessageBox.information(self, "Pipeline Health",
                 f"핏범위 {lo_nm:.0f}~{hi_nm:.0f} nm 안에 데이터가 없습니다.\n"
                 "Setup의 fit start/end nm를 확인하세요.")
             return
@@ -2681,7 +2754,7 @@ class CAESARAnalyzer(QMainWindow):
                     f"\n\nLocation:\n{self._alpha_out_dir}\n"
                     "Filename: {source}_{channel}_alpha_trace.dat\n"
                     "Usable in Result Viewer / Analysis (RUN).")
-            # close-the-loop: 생성한 폴더를 α Health에 자동 연결 → 점검 까먹지 않게.
+            # close-the-loop: 생성한 폴더를 Pipeline Health에 자동 연결 → 점검 까먹지 않게.
             self._alpha_qc_after_export(self._alpha_out_dir)
             return
         cfg = self._alpha_queue.pop(0)

@@ -35,12 +35,16 @@ FITSET = r"C:\Doasis_Work\Output\fit setting\FitSet_ANs[430-466nm_P4]_PNs[444-47
 GOLDEN_COLD = {f"2026-{m:02d}-{d:02d}"
                for (m, d) in [(5, x) for x in range(26, 32)] + [(6, x) for x in range(1, 14)]}
 ALPHA = r"C:\Doasis_Work\Output\alpha"
+ALPHA_BIN = "60s"   # Alpha Generator의 avg_sec=60 기본값과 일치(gui/worker.py). "10s" 폴더도 있으나 비표준.
 CHAN_ALPHA = {
-    "cold": (os.path.join(ALPHA, "cold", "*", "*_cold_alpha_trace.dat"), GOLDEN_COLD),
-    "ans":  (os.path.join(ALPHA, "hot", "ch1", "*", "*_ANs_alpha_trace.dat"), None),
-    "pns":  (os.path.join(ALPHA, "hot", "ch2", "*", "*_PNs_alpha_trace.dat"), None),
+    "cold": (os.path.join(ALPHA, ALPHA_BIN, "cold", "*", "*_cold_alpha_trace.dat"), GOLDEN_COLD),
+    "ans":  (os.path.join(ALPHA, ALPHA_BIN, "hot", "ch1", "*", "*_ANs_alpha_trace.dat"), None),
+    "pns":  (os.path.join(ALPHA, ALPHA_BIN, "hot", "ch2", "*", "*_PNs_alpha_trace.dat"), None),
 }
 LABEL2KEY = {"cold": "cold", "ans": "ans", "pns": "pns"}
+# key → wavecal 폴더명. FitSet json의 data_label은 뒤바뀔 수 있어(§14-D, 실측 확인) 신뢰 불가 —
+# 반드시 wl_path(roi1/roi2/cold)로 채널을 매칭한다. roi1=ANs, roi2=PNs.
+KEY2WLDIR = {"cold": "cold", "ans": "roi1", "pns": "roi2"}
 N_SCANS = 12
 POLYS = [2, 3, 4, 5, 6, 8]
 
@@ -83,10 +87,13 @@ def build_engine_from_config(cfg):
 
 
 def pick_channel(scen, key):
+    """wl_path(roi1/roi2/cold)로 채널 매칭. data_label은 쓰지 않는다 — FitSet json에서
+    라벨이 실제 채널과 뒤바뀌어 저장된 사례가 있다(§14-D, roi1이 'PNs'로 잘못 저장됨)."""
+    wldir = KEY2WLDIR[key]
     for ch in scen["channels"].values():
-        if str(ch.get("data_label", "")).lower() == key:
+        if wldir in str(ch.get("wl_path", "")).replace("\\", "/").split("/"):
             return ch
-    raise SystemExit(f"data_label '{key}' 채널 없음")
+    raise SystemExit(f"wl_path에 '{wldir}' 폴더를 쓰는 채널 없음 (key='{key}')")
 
 
 def gather_scans(key, n):
@@ -147,7 +154,8 @@ def main():
     target = "NO2"
 
     print("#" * 100)
-    print(f"# {ch['data_label']}  refs={list(eng.gas_list)}  창 {ch['fit_start_nm']}-{ch['fit_end_nm']}nm "
+    # 헤더는 CLI key로 표기(ch['data_label']은 json 안에서 뒤바뀌어 있을 수 있어 안 씀 — pick_channel 주석 참조).
+    print(f"# {key}  refs={list(eng.gas_list)}  창 {ch['fit_start_nm']}-{ch['fit_end_nm']}nm "
           f"(px {px_min}-{px_max})  baseline poly{poly0}  스캔 {len(scans)}/{n_total}")
     print("#" * 100)
 
