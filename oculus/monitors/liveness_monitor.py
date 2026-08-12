@@ -1,4 +1,4 @@
-"""oculus/liveness_monitor.py — raw 유입 정지 판정 (설계문서 §1.4, §5).
+"""oculus/monitors/liveness_monitor.py — raw 유입 정지 판정 (설계문서 §1.4, §5).
 
 다른 셋(농도·R·HK)의 전제 조건 — raw가 안 들어오면 볼 데이터가 없으므로
 ingest 경보가 최우선순위(P0)다(§1.4). 순수함수로 만들어 Oculus 대시보드와
@@ -6,13 +6,16 @@ ingest 경보가 최우선순위(P0)다(§1.4). 순수함수로 만들어 Oculus
 
 임계값은 코드 상수가 아니라 프로파일의 `cadence.liveness_grace_sec`에서
 온다(§5) — 캠페인·장비 구성별로 다르므로.
+
+등급 어휘(OK/P0/SKIP)는 여기서 정의하지 않고 `oculus.alert_engine`에서 가져온다 —
+hk_monitor 등 다른 모니터와 같은 어휘를 써야 대시보드/aggregate가 일관된다.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional, Sequence
 
-OK, P0, SKIP = "OK", "P0", "SKIP"
+from oculus.alert_engine import OK, P0, SKIP
 
 DEFAULT_GRACE_SEC = 10.0   # 프로파일에 liveness_grace_sec이 없을 때의 폴백
 

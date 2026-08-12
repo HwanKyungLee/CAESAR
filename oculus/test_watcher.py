@@ -21,7 +21,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from oculus.ingest_cursor import IngestCursor
-from oculus.liveness_monitor import OK, P0, SKIP, check_liveness, latest_arrival
+from oculus.monitors.liveness_monitor import check_liveness, latest_arrival
+from oculus.alert_engine import OK, P0, SKIP
 from oculus.profile import ProfileSet
 from oculus.watcher import Watcher
 

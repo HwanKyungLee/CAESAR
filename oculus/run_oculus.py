@@ -1,4 +1,4 @@
-"""oculus/run_oculus.py — Oculus 진입점 (M0: 프로파일 + 유입 감시 + 최소 대시보드).
+"""oculus/run_oculus.py — Oculus 진입점 (M0 유입 감시 + M1 HK 헬스 + 최소 대시보드).
 
 사용:
     python oculus/run_oculus.py --dir "D:\\CAESAR raw\\2026-yeosu"
@@ -19,8 +19,10 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from oculus.alert_engine import aggregate
 from oculus.ingest_cursor import IngestCursor
-from oculus.liveness_monitor import DEFAULT_GRACE_SEC, P0, check_liveness, latest_arrival
+from oculus.monitors.hk_monitor import evaluate_hk
+from oculus.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
 from oculus.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from oculus.state_log import StateLog
 from oculus.watcher import Watcher
@@ -49,34 +51,56 @@ class OculusApp:
         self._last_arrival = None          # 전체 최신 관측 벽시계 시각
         self._files_seen: dict = {}        # {path: arrival_time}
         self._routed_ids: set = set()
-        self._last_status = None
+        self._hk_status: dict = {}         # {path: (status, msg, metrics)} — 최신 HK 판정
+        self._hk_last_status: dict = {}    # {path: status} — 로그 중복 방지용
+        self._last_status = None           # 종합(overall) 상태 — 로그 중복 방지용
 
     def tick(self) -> None:
         events = self.watcher.poll()
         now = datetime.now()
         for ev in events:
             self._files_seen[ev.file] = now
-            if ev.profile_id:
-                self._routed_ids.add(ev.profile_id)
+            if not ev.profile_id:
+                continue
+            self._routed_ids.add(ev.profile_id)
+            prof = self.profiles.by_id(ev.profile_id)
+            if prof is None:
+                continue
+            hk_status, hk_msg, hk_metrics = evaluate_hk(prof, ev.row, phase=ev.role)
+            self._hk_status[ev.file] = (hk_status, hk_msg, hk_metrics)
+            if self._hk_last_status.get(ev.file) != hk_status:
+                self.state_log.append(hk_status, hk_msg, file=ev.file, **hk_metrics)
+                if self.dashboard is not None:
+                    self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {hk_status}: {hk_msg}")
+            self._hk_last_status[ev.file] = hk_status
         self._last_arrival = latest_arrival(events, self._last_arrival)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
-        status, msg, metrics = check_liveness(self._last_arrival, now, grace_sec)
+        live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec)
 
-        if status != self._last_status:
-            self.state_log.append(status, msg, **metrics)
+        results = [("liveness", live_status, live_msg, live_metrics)]
+        results += [(f"hk:{os.path.basename(p)}", s, m, mt)
+                    for p, (s, m, mt) in self._hk_status.items()]
+        overall_status, overall_msg = aggregate(results)
+
+        if overall_status != self._last_status:
+            self.state_log.append(overall_status, overall_msg, kind="overall")
             if self.dashboard is not None:
-                self.dashboard.log_line(f"{status}: {msg}")
-        self._last_status = status
+                self.dashboard.log_line(f"overall: {overall_status} — {overall_msg}")
+        self._last_status = overall_status
 
         if self.dashboard is not None:
-            self.dashboard.set_liveness(status, msg)
-            rows = {p: (t, (now - t).total_seconds()) for p, t in self._files_seen.items()}
+            self.dashboard.set_status(overall_status, overall_msg)
+            rows = {}
+            for p, t in self._files_seen.items():
+                hk = self._hk_status.get(p)
+                rows[p] = (t, (now - t).total_seconds(),
+                          hk[0] if hk else None, hk[1] if hk else None)
             self.dashboard.update_files(rows)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Oculus M0 — raw 유입 실시간 감시")
+    ap = argparse.ArgumentParser(description="Oculus M0+M1 — raw 유입 + HK 실시간 감시")
     ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
                     help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")
