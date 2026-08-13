@@ -3,7 +3,7 @@
 "O4를 넣을지 뺄지"를 안정성(Tier-1)이 아니라 물리(Tier-2: 공선성·계수상수성·트레이드오프)로
 판정한다. 결과가 사용자 직관(O4=과적합)과 맞으면 로직이 물리로 옳은 결정을 내린다는 증거.
 
-사용:  python tools/t2_reference_check.py [cold|ans|pns]
+사용:  python tools/t2_reference_check.py [키]   (키 목록은 tools/channel_map.json 참조)
 """
 import os
 import sys
@@ -22,14 +22,7 @@ sys.path.insert(0, ROOT)
 
 from core.doas_fit import DoasFitter
 from core import fit_physics as FP
-from tools import optimize_params as OP   # build_engine_from_config, pick_channel, gather_scans, nm_to_px
-
-# 각 채널 wv_cal 폴더의 O4 레퍼런스(사용자 FitSet엔 없음 → 후보로 추가)
-O4_PATH = {
-    "cold": r"C:\Doasis_Work\Output\wv_cal\cold\Ref_O4_Dynamic-ILS-Applied.dat",
-    "ans":  r"C:\Doasis_Work\Output\wv_cal\roi1\Ref_O4_Dynamic-ILS-Applied.dat",
-    "pns":  r"C:\Doasis_Work\Output\wv_cal\roi2\Ref_O4_Dynamic-ILS-Applied.dat",
-}
+from tools import optimize_params as OP   # build_engine_from_config, pick_channel, gather_scans, nm_to_px, ref_path
 
 
 def main():
@@ -44,8 +37,8 @@ def main():
     eng = OP.build_engine_from_config(ch)              # 사용자 3 refs (O4 없음)
     base_gas = list(eng.gas_list)
 
-    # 후보 O4 추가(엔진에)
-    o4p = O4_PATH[key]
+    # 후보 O4 추가(엔진에) — 각 채널 wv_cal 폴더의 O4 레퍼런스(사용자 FitSet엔 없음)
+    o4p = OP.ref_path(key, "Ref_O4_Dynamic-ILS-Applied.dat")
     if os.path.exists(o4p):
         eng.add_reference(name="O4", filepath=o4p,
                           wave_nm=np.asarray(eng._wave_axis).flatten(), multiplier=1.0)

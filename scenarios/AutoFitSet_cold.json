@@ -1,19 +1,19 @@
 {
-  "wl_path": "C:\\Doasis_Work\\Output\\wv_cal\\cold\\Calib_20260523_Hg_4line_400-497nm_Poly2.txt",
+  "wl_path": "C:/Doasis_Work/Output/wv_cal\\cold\\Calib_20260523_Hg_4line_400-497nm_Poly2.txt",
   "refs": [
     {
       "name": "CHOCHO",
-      "path": "C:\\Doasis_Work\\Output\\wv_cal\\cold\\Ref_CHOCHO_Dynamic-ILS-Applied.dat",
+      "path": "C:/Doasis_Work/Output/wv_cal\\cold\\Ref_CHOCHO_Dynamic-ILS-Applied.dat",
       "mult": 0
     },
     {
       "name": "H2O",
-      "path": "C:\\Doasis_Work\\Output\\wv_cal\\cold\\Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat",
+      "path": "C:/Doasis_Work/Output/wv_cal\\cold\\Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat",
       "mult": -12
     },
     {
       "name": "NO2",
-      "path": "C:\\Doasis_Work\\Output\\wv_cal\\cold\\Ref_NO2_Dynamic-ILS-Applied.dat",
+      "path": "C:/Doasis_Work/Output/wv_cal\\cold\\Ref_NO2_Dynamic-ILS-Applied.dat",
       "mult": 0
     }
   ],

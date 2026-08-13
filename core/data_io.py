@@ -14,8 +14,6 @@ from .raw_parser import (
     P_SCALE as _RP_P_SCALE,
     P_VALID_LO as _RP_P_LO,
     P_VALID_HI as _RP_P_HI,
-    SPEC_PRIMARY as _RP_SPEC_PRIMARY,
-    SPEC_SECONDARY as _RP_SPEC_SECONDARY,
 )
 
 
@@ -634,14 +632,6 @@ class DataIO:
                 f"Failed to read measurement file ({os.path.basename(filepath)}): {str(e)}"
             )
 
-    # Araon Mega-Matrix spectrum column offsets
-    # CH1 (ROI1 / PNs / 180°C inlet):  cols 2053–4100  (2048 px)
-    # CH2 (ROI2 / ANs / 300°C inlet):  cols 4101–6148  (2048 px)
-    # HK block starts at col 6149.
-    # Cold files have CH1 only (CH2 block is noise ~500 ADU).
-    # Blocks shared with raw_parser (SPEC_PRIMARY / SPEC_SECONDARY).
-    _CH_OFFSET = {1: _RP_SPEC_PRIMARY, 2: _RP_SPEC_SECONDARY}
-
     @staticmethod
     def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None,
                                  row_index=0, channel=1):
@@ -656,9 +646,12 @@ class DataIO:
           Column        4          →  state flag  (1=Ambient, 500~503=ZA, 510~513=He)
           HK block      6149+      →  T, P, oven temps, etc.
 
-        channel : int, 1 or 2
-            Which spectrum to extract.  Default=1 (CH1/ROI1).
-            Use channel=2 for CH2/ROI2 (ANs, hot files only).
+        channel : int, 1+
+            Which spectrum to extract.  Default=1 (CH1/ROI1). Use channel=2 for
+            CH2/ROI2 (ANs, hot files). Slicing below is structural (column-count
+            based, see `n_slots`), not hardcoded to 1-2 — a file with more active
+            channel blocks (e.g. a reconfigured instrument) works automatically;
+            only the CH1/CH2 comment above describes today's known configs.
 
         row_index selects which row (scan) to read from a multi-scan file.
         Falls back to treating the whole file as a plain 1D spectrum when the
