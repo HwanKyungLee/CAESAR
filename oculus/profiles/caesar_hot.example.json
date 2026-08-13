@@ -34,7 +34,17 @@
 
   "channels": [
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
-    { "id": "ch_pns",    "label": "PNs",         "role": "signal", "columns": [2053, 4100], "reference_scenario": null,
+    { "id": "ch_pns",    "label": "PNs",         "role": "signal", "columns": [2053, 4100],
+      "concentration": {
+        "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
+        "wl_dir": "roi2",
+        "target": "NO2",
+        "cavity_temp_hk": "oven_pns_setpoint",
+        "cavity_pressure_hk": "p_pns_cavity",
+        "throttle_sec": 10,
+        "seed_narrow_px": 2.0,
+        "alert": { "conc_min_ppb": -20, "conc_max_ppb": 50, "spike_ppb": 20, "rms_sig_alarm": 0.15, "flatline_n": 5 }
+      },
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi2/Calib_20260619_Hg_400-499nm_Poly2.txt",
         "roi_nm": [444.1, 470.6],
@@ -44,7 +54,17 @@
         "rl_factor": 0.933,
         "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
       } },
-    { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148], "reference_scenario": null,
+    { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148],
+      "concentration": {
+        "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
+        "wl_dir": "roi1",
+        "target": "NO2",
+        "cavity_temp_hk": "oven_ans_setpoint",
+        "cavity_pressure_hk": "p_ans_cavity",
+        "throttle_sec": 10,
+        "seed_narrow_px": 2.0,
+        "alert": { "conc_min_ppb": -20, "conc_max_ppb": 50, "spike_ppb": 20, "rms_sig_alarm": 0.15, "flatline_n": 5 }
+      },
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi1/Calib_20260619_Hg_400-499nm_Poly2.txt",
         "roi_nm": [429.7, 466.0],

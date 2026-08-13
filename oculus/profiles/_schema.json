@@ -91,9 +91,32 @@
             "minItems": 2,
             "maxItems": 2
           },
-          "reference_scenario": {
-            "type": ["string", "null"],
-            "description": "이 채널의 경량 DOAS에 쓸 시나리오/레퍼런스 세트(M3에서 채움)."
+          "concentration": {
+            "type": "object",
+            "description": "이 채널의 경량 DOAS 농도 피팅 설정(M3, 선택). 없으면 농도 모니터가 SKIP. 레퍼런스·핏창·poly·ref_props는 새로 안 만들고 Augur FitSet json을 그대로 가리킨다 — Augur 확정 설정과 갈라지지 않게(§2-A 채널별 파장보정·레퍼런스 매핑).",
+            "additionalProperties": false,
+            "required": ["fitset_path", "wl_dir"],
+            "properties": {
+              "fitset_path": { "type": "string", "description": "Augur FitSet json 경로 (레퍼런스·핏레인지(px)·poly·ref_props·step_limit 전부 여기서 옴)." },
+              "wl_dir": { "type": "string", "description": "FitSet 안 이 채널을 찾을 wavecal 폴더명(roi1/roi2/cold 등). data_label은 안 씀 — 뒤바뀐 사례 있음(fit_optimizer_handoff.md §14-D)." },
+              "target": { "type": "string", "default": "NO2", "description": "농도를 낼 타깃 기체." },
+              "cavity_temp_hk": { "type": "string", "description": "air_number_density 계산에 쓸 캐비티 가스온도 hk.fields[].key." },
+              "cavity_pressure_hk": { "type": "string", "description": "air_number_density 계산에 쓸 캐비티 압력 hk.fields[].key." },
+              "throttle_sec": { "type": "number", "exclusiveMinimum": 0, "default": 10, "description": "이 이상 간격으로만 재핏(매 행마다 하면 DAQ PC에 부담 — §8 CPU 예산)." },
+              "seed_narrow_px": { "type": "number", "exclusiveMinimum": 0, "default": 2.0, "description": "첫 핏 이후엔 shift 탐색을 직전 핏값 ± 이 값으로 좁힌다(속도, §1.1 '자유도 축소')." },
+              "alert": {
+                "type": "object",
+                "description": "실측 튜닝 전 임시값(§8) — 종·채널마다 현실적인 값이 다르다.",
+                "additionalProperties": false,
+                "properties": {
+                  "conc_min_ppb": { "type": "number", "description": "이보다 작으면(큰 음수) 물리적으로 불가능 → P1." },
+                  "conc_max_ppb": { "type": "number", "description": "이보다 크면 물리적으로 불가능 → P1." },
+                  "spike_ppb": { "type": "number", "exclusiveMinimum": 0, "description": "직전 값 대비 이 이상 급변하면 → P2(스파이크 의심)." },
+                  "rms_sig_alarm": { "type": "number", "exclusiveMinimum": 0, "description": "rms/sig가 이 이상이면 핏 신뢰 불가 → P1." },
+                  "flatline_n": { "type": "integer", "exclusiveMinimum": 1, "description": "이 횟수 연속 동일값이면 센서 고착 의심 → P2." }
+                }
+              }
+            }
           },
           "reflectance": {
             "type": "object",

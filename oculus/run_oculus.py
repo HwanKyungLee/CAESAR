@@ -1,4 +1,4 @@
-"""oculus/run_oculus.py — Oculus 진입점 (M0 유입 감시 + M1 HK + M2 R 헬스 + 대시보드).
+"""oculus/run_oculus.py — Oculus 진입점 (M0 유입 감시 + M1 HK + M2 R + M3 농도 + 대시보드).
 
 사용:
     python oculus/run_oculus.py --dir "D:\\CAESAR raw\\2026-yeosu"
@@ -11,6 +11,7 @@ DAQ PC에서 LabVIEW와 나란히 돌리는 걸 전제로 한다(설계문서 §
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime
@@ -19,8 +20,9 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.alert_engine import SKIP, aggregate, worse
+from oculus.alert_engine import P1, SKIP, aggregate, worse
 from oculus.ingest_cursor import IngestCursor
+from oculus.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
 from oculus.monitors.hk_monitor import evaluate_hk
 from oculus.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
 from oculus.monitors.r_monitor import RMonitor
@@ -72,6 +74,11 @@ class OculusApp:
         self._r_by_channel: dict = {}      # {(profile_id, channel_id): (status, msg, metrics)}
         self._r_status: dict = {}          # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._r_last_status: dict = {}     # {path: status} — 로그 중복 방지용
+        self._conc_monitors: dict = {}     # {(profile_id, channel_id): ConcMonitor}
+        self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
+        self._conc_by_channel: dict = {}   # {(profile_id, channel_id): (status, msg, metrics)}
+        self._conc_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
+        self._conc_last_status: dict = {}  # {path: status} — 로그 중복 방지용
         self._last_status = None           # 종합(overall) 상태 — 로그 중복 방지용
 
     def _get_wavecal(self, path):
@@ -79,6 +86,13 @@ class OculusApp:
             from tools.optimize_params import load_wavecal   # 기존 로더 재사용(3번째 사본 안 만듦)
             self._wavecal_cache[path] = load_wavecal(path)
         return self._wavecal_cache[path]
+
+    def _get_fitset_channel(self, cfg):
+        scen = self._fitset_cache.get(cfg.fitset_path)
+        if scen is None:
+            scen = json.load(open(cfg.fitset_path, encoding="utf-8"))
+            self._fitset_cache[cfg.fitset_path] = scen
+        return pick_fitset_channel(scen, cfg.wl_dir)
 
     def _observe_reflectance(self, prof, ev, now) -> None:
         """이 행의 프로파일에 reflectance 설정이 있는 signal 채널마다 RMonitor.observe.
@@ -119,6 +133,50 @@ class OculusApp:
                 self.dashboard.log_line(f"[{os.path.basename(ev.file)}] R {combined_status}: {combined_msg}")
         self._r_last_status[ev.file] = combined_status
 
+    def _observe_concentration(self, prof, ev) -> None:
+        """이 행의 프로파일에 concentration 설정이 있는 signal 채널마다 ConcMonitor.observe.
+        새 농도가 나온 채널이 있으면 그 파일의 combined 상태를 재계산·로그(변경시만)."""
+        touched = False
+        for ch in prof.signal_channels():
+            if ch.concentration is None:
+                continue
+            key = (prof.profile_id, ch.id)
+            cm = self._conc_monitors.get(key)
+            if cm is None:
+                try:
+                    fit_ch = self._get_fitset_channel(ch.concentration)
+                    cm = ConcMonitor(fit_ch, ch.concentration)
+                except Exception as e:                # noqa: BLE001
+                    self._conc_by_channel[key] = (
+                        P1, f"[{ch.label or ch.id}] 초기화 실패: {e}", {})
+                    touched = True
+                    continue
+                self._conc_monitors[key] = cm
+            spectrum = ch.slice(ev.row)
+            temp_c = _hk_value(prof, ev.row, ch.concentration.cavity_temp_hk)
+            press_mbar = _hk_value(prof, ev.row, ch.concentration.cavity_pressure_hk)
+            result = cm.observe(ev.role, spectrum, temp_c, press_mbar)
+            if result is not None:
+                status, msg, metrics = result
+                self._conc_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)
+                touched = True
+        if not touched:
+            return
+        entries = [self._conc_by_channel[(prof.profile_id, ch.id)]
+                  for ch in prof.signal_channels()
+                  if (prof.profile_id, ch.id) in self._conc_by_channel]
+        combined_status = SKIP
+        for s, _m, _mt in entries:
+            combined_status = worse(combined_status, s)
+        combined_msg = "; ".join(m for _s, m, _mt in entries)
+        self._conc_status[ev.file] = (combined_status, combined_msg, {})
+        if self._conc_last_status.get(ev.file) != combined_status:
+            self.state_log.append(combined_status, combined_msg, file=ev.file, kind="conc")
+            if self.dashboard is not None:
+                self.dashboard.log_line(
+                    f"[{os.path.basename(ev.file)}] Conc {combined_status}: {combined_msg}")
+        self._conc_last_status[ev.file] = combined_status
+
     def tick(self) -> None:
         events = self.watcher.poll()
         now = datetime.now()
@@ -138,6 +196,7 @@ class OculusApp:
                     self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {hk_status}: {hk_msg}")
             self._hk_last_status[ev.file] = hk_status
             self._observe_reflectance(prof, ev, now)
+            self._observe_concentration(prof, ev)
         self._last_arrival = latest_arrival(events, self._last_arrival)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
@@ -148,6 +207,8 @@ class OculusApp:
                     for p, (s, m, mt) in self._hk_status.items()]
         results += [(f"r:{os.path.basename(p)}", s, m, mt)
                     for p, (s, m, mt) in self._r_status.items()]
+        results += [(f"conc:{os.path.basename(p)}", s, m, mt)
+                    for p, (s, m, mt) in self._conc_status.items()]
         overall_status, overall_msg = aggregate(results)
 
         if overall_status != self._last_status:
@@ -162,16 +223,18 @@ class OculusApp:
             for p, t in self._files_seen.items():
                 hk = self._hk_status.get(p)
                 r = self._r_status.get(p)
+                conc = self._conc_status.get(p)
                 rows[p] = {
                     "last_row": t, "lag": (now - t).total_seconds(),
                     "hk_status": hk[0] if hk else None, "hk_msg": hk[1] if hk else None,
                     "r_status": r[0] if r else None, "r_msg": r[1] if r else None,
+                    "conc_status": conc[0] if conc else None, "conc_msg": conc[1] if conc else None,
                 }
             self.dashboard.update_files(rows)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Oculus M0+M1+M2 — raw 유입 + HK + R 실시간 감시")
+    ap = argparse.ArgumentParser(description="Oculus M0+M1+M2+M3 — raw 유입 + HK + R + 농도 실시간 감시")
     ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
                     help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")

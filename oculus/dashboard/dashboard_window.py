@@ -1,7 +1,7 @@
-"""oculus/dashboard/dashboard_window.py — 최소 실시간 대시보드 (설계문서 §6, M0+M1+M2).
+"""oculus/dashboard/dashboard_window.py — 최소 실시간 대시보드 (설계문서 §6, M0+M1+M2+M3).
 
 M0: 종합 상태 배지(OK/P1/P2/P0) + 파일별 최근 행 시각/지연 + append-only 로그.
-M1: 파일별 HK(밴드·포화) 상태 열. M2: 파일별 R(거울) 상태 열. 농도 패널(M3)은 나중에 탭으로.
+M1: 파일별 HK(밴드·포화) 상태 열. M2: 파일별 R(거울) 상태 열. M3: 파일별 농도 상태 열.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ _BADGE_ICON = {OK: "🟢", P2: "🟡", P1: "🟠", P0: "🔴", SKIP: "⏳"}
 _CELL_COLOR = {OK: None, P2: QColor("#B36B00"), P1: QColor("#E65100"),
               P0: QColor("red"), SKIP: None}
 
-_COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R"]
+_COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R", "Conc"]
 
 
 class DashboardWindow(QMainWindow):
@@ -49,7 +49,7 @@ class DashboardWindow(QMainWindow):
         self.table = QTableWidget(0, len(_COLUMNS))
         self.table.setHorizontalHeaderLabels(_COLUMNS)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for col in (3, 4):
+        for col in (3, 4, 5):
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -83,7 +83,8 @@ class DashboardWindow(QMainWindow):
 
     def update_files(self, rows: dict) -> None:
         """rows: {file_path: {"last_row":datetime|None, "lag":float|None,
-        "hk_status":str|None, "hk_msg":str|None, "r_status":str|None, "r_msg":str|None}}.
+        "hk_status":str|None, "hk_msg":str|None, "r_status":str|None, "r_msg":str|None,
+        "conc_status":str|None, "conc_msg":str|None}}.
         어떤 판정이든 아직 없으면 status=None으로 두면 '⏳ —'로 표시된다."""
         self.table.setRowCount(len(rows))
         for i, (path, info) in enumerate(sorted(rows.items())):
@@ -99,6 +100,7 @@ class DashboardWindow(QMainWindow):
             self.table.setItem(i, 2, lag_item)
             self.table.setItem(i, 3, self._status_item(info.get("hk_status"), info.get("hk_msg")))
             self.table.setItem(i, 4, self._status_item(info.get("r_status"), info.get("r_msg")))
+            self.table.setItem(i, 5, self._status_item(info.get("conc_status"), info.get("conc_msg")))
 
     def log_line(self, text: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
