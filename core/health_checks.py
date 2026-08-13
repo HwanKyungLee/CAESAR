@@ -53,7 +53,13 @@ def check_references(refs, wl=None, collin_warn=0.98):
         a = np.asarray(arr, float)
         if a.size == 0 or not np.isfinite(a).any():
             issues.append(f"{name}:빈/전부NaN"); continue
-        if float(np.nanstd(a)) < 1e-30:
+        # 절대 std가 아니라 **자기 피크 대비 상대** std로 평평함을 판정한다 — 종마다 원본 단위
+        # 스케일이 완전히 다르다(일반 기체 ~1e-19cm², O4는 충돌유도흡수라 ~1e-46cm⁵).
+        # 절대 문턱(예: 1e-30)은 O4처럼 피크 자체가 작은 종을 전부 "평평"으로 오판한다
+        # (실측: O4 std=1.4e-49인데 std/peak=0.22로 CHOCHO(0.16)·H2O(0.24)와 같은 급 —
+        # 진짜 구조가 있는데 절대문턱 때문에 FAIL로 잘못 걸렸었다).
+        peak = float(np.nanmax(np.abs(a))) if np.isfinite(a).any() else 0.0
+        if peak <= 0 or float(np.nanstd(a)) < 1e-6 * peak:
             issues.append(f"{name}:평평(퇴화)")
         if wl is not None and len(a) != len(np.asarray(wl)):
             issues.append(f"{name}:격자길이≠wavecal")

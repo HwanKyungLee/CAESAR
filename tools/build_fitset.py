@@ -52,6 +52,15 @@ def main():
                                consecutive_scans=consec, target="NO2",
                                label=label, progress=lambda m: print("  ·", m))
 
+    _ICON = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌", "SKIP": "⏭️"}
+    print("\n[사전검증]")
+    for name, status, msg, _metrics in rep["preflight"]:
+        print(f"  {_ICON.get(status, '?')} {name:<12s} {msg}")
+    if rep["problems"]:
+        print("\n[불변식 검사] ⚠️ 문제 발견 — 이 FitSet은 엔진에서 실행 불가할 수 있음")
+        for p in rep["problems"]:
+            print(f"  · {p}")
+
     print("\n[레퍼런스 취사]")
     for cd in rep["candidates"]:
         mark = "✓채택" if cd["name"] in rep["keep"] else "✗제외"

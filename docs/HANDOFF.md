@@ -1,7 +1,7 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-08-12** (이번 세션 — 이전 2026-05-27 노트는 §0 이하 유지)
+> 최종 업데이트: **2026-08-13** (이번 세션 — 이전 2026-05-27 노트는 §0 이하 유지)
 
 ---
 
@@ -27,13 +27,22 @@
    - `run_alpha.py` 진단 스크립트가 물리식을 재구현하지 않고 `worker.py`의 순수함수를 재사용하도록 정리
      (단일 출처 원칙 준수).
 
+### 완료 — 2026-08-13 세션에서 이어받아 끝낸 것
+
+**α Health 탭 → 전체 파이프라인 헬스체크 전환** ✅ 완료
+- `app_window.py`의 `"🩺 α Health"` 탭을 `"🩺 Pipeline Health"`로 확장. 기존 `_alpha_qc_scan_folder`
+  (알파 파일 스캔)는 그대로 두고, `core/health_checks.py`의 wavecal·references·Rayleigh·R 체크를
+  같이 돌려 PASS/WARN/FAIL/SKIP 하나로 종합 판정.
+- 같은 세션에서 `core/fitset_builder.build_fitset()`에도 `check_wavecal`/`check_references`를
+  후보 refs셋 평가 전 게이트로 연결(fit_optimizer_handoff.md §10-C.4) — 연결 과정에서
+  `check_references`의 절대-std 평평함 판정 버그(O4를 항상 퇴화로 오판)도 발견·수정.
+  `tools/test_health_checks.py` 신규.
+
 ### 미완료 — 다음에 이어받을 것
 
-**α Health 탭 → 전체 파이프라인 헬스체크 전환 (착수 전)**
-- 현재 `app_window.py`의 `_alpha_qc_scan_folder`(~L1962)는 `*_alpha_trace.dat` 파일만 스캔하는
-  **알파 전용** QC. 탭 이름도 여전히 `"🩺 α Health"`.
-- 의도했던 것: raw → α → DOAS 피팅 전체 파이프라인 단계를 아우르는 헬스체크 탭으로 확장.
-- **아직 코드에 반영 안 됨** — 다음 세션에서 범위(어느 단계까지 체크할지)부터 정하고 시작할 것.
+(현재 없음 — 위 항목까지 완료된 상태. `docs/Oculus_설계_2026-07.md` §7·§8을 보면 Oculus
+M0~M3도 이후 완료됨. NIER 제출(R0, 8/14 마감) 관련은 별도 워크플로,
+`docs/NO2_인젝션_실험_핸드오프_2026-08.md` 참조.)
 
 ### 알아둘 것 — dirty 상태로 남겨둔 것들
 
