@@ -138,7 +138,7 @@ def test_classify():
                        rms_sig_alarm=0.15, flatline_n=3)
 
     def _res(conc, rms_sig=0.05, perr_rel=0.05):
-        return dict(conc=conc, rms_sig=rms_sig, perr_rel=perr_rel)
+        return dict(conc=conc, rms_sig=rms_sig, perr_rel=perr_rel, conc_all={"NO2": conc})
 
     status, msg, m = cm._classify(_res(3.5))
     check("정상 범위 → OK", status == OK, f"{status}: {msg}")
@@ -165,7 +165,7 @@ def test_classify():
     status, msg, m = cm5._classify(_res(4.0))
     check("N회 연속 동일값 → 평탄선 P2", status == P2, f"{status}: {msg}")
 
-    status, msg, m = cm5._classify(dict(conc=float("nan"), rms_sig=0.05, perr_rel=0.05))
+    status, msg, m = cm5._classify(dict(conc=float("nan"), rms_sig=0.05, perr_rel=0.05, conc_all={}))
     check("농도 NaN → P1", status == P1, f"{status}: {msg}")
 
 

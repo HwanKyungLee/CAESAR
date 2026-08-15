@@ -120,7 +120,8 @@ class ConcMonitor:
 
     def _classify(self, result: dict):
         conc, rms_sig = result["conc"], result["rms_sig"]
-        metrics = {"conc_ppb": conc, "rms_sig": rms_sig, "perr_rel": result["perr_rel"]}
+        metrics = {"conc_ppb": conc, "rms_sig": rms_sig, "perr_rel": result["perr_rel"],
+                   "conc_all_ppb": result["conc_all"]}
         if not np.isfinite(conc):
             return P1, f"{self.cfg.target} 핏 실패(농도 NaN)", metrics
 

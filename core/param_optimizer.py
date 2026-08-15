@@ -130,10 +130,18 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
         conc *= 1.0   # perr_rel은 단위 무관(계수/계수)
         perr_rel = float(perr[gi] / abs(gco[gi])) if abs(gco[gi]) > 0 else float("inf")
 
+    # joint DOAS fit은 이미 창 안 모든 레퍼런스를 동시에 풀었으므로(gco에 전 가스 계수가
+    # 있음), target과 같은 변환식을 전 가스에 적용해 함께 반환한다 — 계산 추가비용 없음.
+    conc_all = {}
+    for gi, g in enumerate(eng.gas_list):
+        sc = eng.scaling_factors.get(g, 1.0)
+        mu = eng.multipliers.get(g, 1.0)
+        conc_all[g] = float((gco[gi] * mu / sc) / n_air * 1e9)
+
     shifts = {g: float(s) for g, s in zip(eng.gas_list, opt_sh)}
     squeezes = {g: float(s) for g, s in zip(eng.gas_list, opt_sq)}
     coeffs = {g: float(c) for g, c in zip(eng.gas_list, gco)}   # ref별 핏 계수(정규화공간)
-    return dict(conc=conc, perr_rel=perr_rel, rms=rms, sig=sig,
+    return dict(conc=conc, conc_all=conc_all, perr_rel=perr_rel, rms=rms, sig=sig,
                 rms_sig=float(rms / (sig + 1e-30)), autocorr1=autocorr1,
                 shifts=shifts, squeezes=squeezes, coeffs=coeffs, n_free=len(active))
 

@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+from collections import deque
 from datetime import datetime
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,6 +30,8 @@ from oculus.monitors.r_monitor import RMonitor
 from oculus.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from oculus.state_log import StateLog
 from oculus.watcher import Watcher
+
+TREND_MAXLEN = 300   # ponytail: 그래프 표시용 최근 N개 — 부족하면 늘릴 것
 
 
 def _grace_sec_for(profiles: ProfileSet, routed_ids: set) -> float:
@@ -80,6 +83,10 @@ class OculusApp:
         self._conc_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._conc_last_status: dict = {}  # {path: status} — 로그 중복 방지용
         self._last_status = None           # 종합(overall) 상태 — 로그 중복 방지용
+        self._conc_trend: dict = {}   # {(profile_id,ch_id): deque[(datetime, {gas: ppb})]}
+        self._r_trend: dict = {}      # {(profile_id,ch_id): deque[(datetime, float, baseline)]}
+        self._hk_trend: dict = {}     # {(profile_id,field_key): deque[(datetime,float)]}
+        self._trend_meta: dict = {}   # 채널/필드 메타(label, unit, min/max, warn/alarm) — 1회만 채움
 
     def _get_wavecal(self, path):
         if path not in self._wavecal_cache:
@@ -109,6 +116,8 @@ class OculusApp:
                               cavity_len_cm=rc.cavity_len_cm, rl_factor=rc.rl_factor,
                               roi_nm=rc.roi_nm, warn_drop=rc.warn_drop, alarm_drop=rc.alarm_drop)
                 self._r_monitors[key] = rm
+                self._trend_meta[key] = {"label": ch.label or ch.id,
+                                         "warn_drop": rc.warn_drop, "alarm_drop": rc.alarm_drop}
             spectrum = ch.slice(ev.row)
             temp_c = _hk_value(prof, ev.row, ch.reflectance.cavity_temp_hk)
             press_mbar = _hk_value(prof, ev.row, ch.reflectance.cavity_pressure_hk)
@@ -116,6 +125,8 @@ class OculusApp:
             if result is not None:
                 status, msg, metrics = result
                 self._r_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)
+                self._r_trend.setdefault(key, deque(maxlen=TREND_MAXLEN)).append(
+                    (now, metrics.get("R"), metrics.get("baseline")))
                 touched = True
         if not touched:
             return
@@ -133,7 +144,7 @@ class OculusApp:
                 self.dashboard.log_line(f"[{os.path.basename(ev.file)}] R {combined_status}: {combined_msg}")
         self._r_last_status[ev.file] = combined_status
 
-    def _observe_concentration(self, prof, ev) -> None:
+    def _observe_concentration(self, prof, ev, now) -> None:
         """이 행의 프로파일에 concentration 설정이 있는 signal 채널마다 ConcMonitor.observe.
         새 농도가 나온 채널이 있으면 그 파일의 combined 상태를 재계산·로그(변경시만)."""
         touched = False
@@ -152,6 +163,9 @@ class OculusApp:
                     touched = True
                     continue
                 self._conc_monitors[key] = cm
+                self._trend_meta[key] = {"label": ch.label or ch.id, "target": ch.concentration.target,
+                                         "conc_min_ppb": ch.concentration.conc_min_ppb,
+                                         "conc_max_ppb": ch.concentration.conc_max_ppb}
             spectrum = ch.slice(ev.row)
             temp_c = _hk_value(prof, ev.row, ch.concentration.cavity_temp_hk)
             press_mbar = _hk_value(prof, ev.row, ch.concentration.cavity_pressure_hk)
@@ -159,6 +173,8 @@ class OculusApp:
             if result is not None:
                 status, msg, metrics = result
                 self._conc_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)
+                self._conc_trend.setdefault(key, deque(maxlen=TREND_MAXLEN)).append(
+                    (now, metrics.get("conc_all_ppb", {})))
                 touched = True
         if not touched:
             return
@@ -195,8 +211,17 @@ class OculusApp:
                 if self.dashboard is not None:
                     self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {hk_status}: {hk_msg}")
             self._hk_last_status[ev.file] = hk_status
+            for fkey, (val, sev) in hk_metrics.get("readings", {}).items():
+                field = prof.hk.field(fkey)
+                if field is None or (field.warn is None and field.alarm is None):
+                    continue   # 밴드 없는 필드는 그래프에 임계선을 못 그리므로 노이즈만 늘어남
+                mkey = (ev.profile_id, fkey)
+                if mkey not in self._trend_meta:
+                    self._trend_meta[mkey] = {"label": field.label or fkey, "unit": field.unit,
+                                              "warn": field.warn, "alarm": field.alarm}
+                self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
             self._observe_reflectance(prof, ev, now)
-            self._observe_concentration(prof, ev)
+            self._observe_concentration(prof, ev, now)
         self._last_arrival = latest_arrival(events, self._last_arrival)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
@@ -231,6 +256,9 @@ class OculusApp:
                     "conc_status": conc[0] if conc else None, "conc_msg": conc[1] if conc else None,
                 }
             self.dashboard.update_files(rows)
+            self.dashboard.update_conc_trend(self._conc_trend, self._trend_meta)
+            self.dashboard.update_r_trend(self._r_trend, self._trend_meta)
+            self.dashboard.update_hk_trend(self._hk_trend, self._trend_meta)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -269,4 +297,10 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    # `python oculus/run_oculus.py`로 직접 실행하면 인터프리터가 스크립트 디렉터리(oculus/)를
+    # sys.path 맨 앞에 넣는다 — oculus/profile.py가 표준라이브러리 profile 모듈을 가려버려
+    # (pyqtgraph.debug가 cProfile을 통해 그걸 import) 대시보드 임포트가 죽는다. 패키지 임포트는
+    # 이미 위에서 _ROOT로 되므로, 이 항목만 지워도 안전.
+    _self_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path = [p for p in sys.path if os.path.abspath(p) != _self_dir]
     sys.exit(main())

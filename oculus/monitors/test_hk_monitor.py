@@ -85,6 +85,8 @@ def test_hk_ok():
     row = _hot_row(hot)
     status, msg, metrics = evaluate_hk(hot, row, phase="sampling")
     check("OK", status == OK, f"got {status}: {msg}")
+    check("readings 노출", "readings" in metrics and len(metrics["readings"]) == metrics["n_fields"],
+          f"got {metrics.get('readings')}")
 
 
 def test_hk_warn():

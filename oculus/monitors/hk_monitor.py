@@ -64,7 +64,7 @@ def evaluate_hk(profile: Profile, row, phase: Optional[str] = None):
             worst = worse(worst, P1)
 
     metrics = {"n_fields": len(readings), "n_issues": len(issues),
-              "saturated_channels": saturated}
+              "saturated_channels": saturated, "readings": readings}
     if not issues:
         return OK, f"HK 정상 ({len(readings)}개 필드)", metrics
     return worst, "; ".join(issues), metrics
