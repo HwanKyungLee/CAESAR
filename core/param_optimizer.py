@@ -21,6 +21,18 @@ import numpy as np
 from scipy.interpolate import interp1d
 from numpy.polynomial import chebyshev
 
+# §16-B(실측): 진짜 해는 |ac1| ~0.03~0.08, 퇴화 분기(넓게 푼 shift가 alias 골짜기에 빠져
+# 통계적으로만 좋아 보이는 가짜 해)는 |ac1| ~1.0. shift를 넓게 푸는 모든 추천 함수가 공유하는
+# 문턱 — 여기 한 곳에서만 정의(단일 출처 원칙, CLAUDE.md).
+AC1_DEGENERATE_THRESHOLD = 0.15
+
+# poly 사다리 표의 다중상관(multi_R_target) 경고 문턱. judge_reference의 collin_hi(fit_physics.
+# COLLIN_HI_DEFAULT=0.7)와 다른 값인 이유: 그쪽은 특정 후보 하나와의 **쌍별** |r|(레퍼런스
+# 포함/제외를 실제로 좌우), 이건 **다중**상관(모든 다른 가스 조합으로 재현되는 정도, 항상
+# 쌍별보다 크거나 같음)이라 같은 문턱을 쓰면 안 됨 — 여긴 표시용 경고일 뿐 poly를 탈락시키지
+# 않는다.
+POLY_COLLIN_R_MAX = 0.85
+
 
 def air_number_density(T_C, P_mbar):
     return 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
@@ -197,6 +209,50 @@ def optimize_poly(scans, eng, fitter, ref_props, px_min, px_max, polys,
     return rec, ladder
 
 
+def optimize_poly_joint(scans, eng, fitter, ref_props, px_min, px_max, polys,
+                        step_limit, target="NO2", wide=15.0, plateau=0.05, conc_tol=0.03,
+                        eng_px_min=None, eng_px_max=None):
+    """`optimize_poly`와 동일한 무릎점 로직이지만, **각 차수를 target shift를 넓게 푼 채**
+    평가한다. `optimize_poly`는 현재 ref_props(예: shift Fix -0.5로 경계에 박힌 값, §13-F)
+    그대로 각 차수를 채점하므로, poly 비교가 그 stale shift 오차에 오염된다 — 어떤 차수는
+    우연히 그 잘못된 shift와 잘 맞고 어떤 차수는 안 맞아 순위가 뒤틀릴 수 있다. 여기서는
+    `recommend_shift`와 같은 방식으로 매 차수마다 shift를 [-wide, wide]로 풀어 진짜 최적
+    shift에서 채점 → poly 선택과 shift 추천이 서로 독립적으로 유효해진다.
+
+    `eng_px_min`/`eng_px_max`(엔진 wave-axis 도메인, `px_min`/`px_max`와 다른 좌표계일 수
+    있음 — 호출부가 변환해서 넘긴다)를 주면 각 차수마다 `differential_collinearity`(T2,
+    핏 없는 순수 기하 진단)를 곁들여 ladder row에 `multi_R_target`을 얹는다. None이면
+    생략(기존 동작 그대로) — poly 사다리 자체의 무릎점 선택 로직은 건드리지 않는다."""
+    rp_wide = {g: dict(p) for g, p in ref_props.items()}
+    rp_wide[target] = dict(rp_wide.get(target, {}), sh_mode="Limit", sh_val=f"-{wide}, {wide}")
+    ladder = [evaluate(scans, eng, fitter, rp_wide, px_min, px_max, p, wide, target)
+              for p in polys]
+    ladder = [r for r in ladder if r.get("n_ok")]
+    if not ladder:
+        return None, []
+
+    if eng_px_min is not None and eng_px_max is not None:
+        # fit_physics.py가 top-level에서 이 모듈(fit_scan)을 임포트하므로, 여기서 모듈
+        # 최상단에 fit_physics를 임포트하면 순환임포트가 된다 — 그래서 함수 안에서 지역
+        # 임포트한다.
+        from core.fit_physics import differential_collinearity
+        for r in ladder:
+            diag = differential_collinearity(eng, list(eng.gas_list), eng_px_min, eng_px_max, r["poly"])
+            r["multi_R_target"] = diag["multiple_R"].get(target, float("nan"))
+
+    rec = ladder[-1]["poly"]
+    for i, r in enumerate(ladder):
+        rs = r["rms_sig"]
+        rs_next = ladder[i + 1]["rms_sig"] if i + 1 < len(ladder) else rs
+        conc_next = ladder[i + 1]["conc"] if i + 1 < len(ladder) else r["conc"]
+        improve = (rs - rs_next) / (abs(rs) + 1e-30)
+        conc_move = abs(conc_next - r["conc"]) / (abs(r["conc"]) + 1e-30)
+        if improve < plateau and conc_move < conc_tol:
+            rec = r["poly"]
+            break
+    return rec, ladder
+
+
 # ──────────────────────────────────────────────────────────────────────────
 def _round_bound(x, up):
     """shift bound을 사람이 읽기 좋은 값으로 여유 반올림."""
@@ -220,23 +276,32 @@ def recommend_shift(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
     at_edge = np.isfinite(med) and (wide - abs(med)) < 2 * (sig + 0.1)
     # 흔들림 지표: σ가 크면(>2px) shift가 스캔마다 튐 → 잘 안 정해짐
     jittery = np.isfinite(sig) and sig > 2.0
+    # ★퇴화 분기 감지(§16-B): 넓게 푼 shift가 alias 골짜기에 빠지면 RMS는 낮아 보여도
+    # 잔차가 안 희다(|ac1|↑). 아래 모든 반환 분기에 붙여서 호출부가 "측정된 값"인 척
+    # 넘어가지 못하게 한다(recommend_shift는 예전부터 이 체크가 아예 없었음).
+    ac1 = row.get("autocorr1", float("nan"))
+    degenerate = bool(np.isfinite(ac1) and ac1 > AC1_DEGENERATE_THRESHOLD)
+    warn = (f"⚠퇴화 분기 의심(|ac1|={ac1:.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B — "
+            "잔차가 안 흼, 통계적으로만 좋아 보이는 가짜 해일 수 있음) — " if degenerate else "")
     if not np.isfinite(med):
-        return dict(policy="Link", reason="측정불가", median=med, sigma=sig)
+        return dict(policy="Link", reason="측정불가", median=med, sigma=sig, ac1=ac1, degenerate=degenerate)
     # ★미결정 감지: bounds를 활짝 열었는데도 핏이 x0(0.0)에서 한 발도 안 움직임 →
     # 데이터가 shift를 제약하지 못한다는 뜻(타깃 신호가 약하면 발생). 이때 좁은 Limit을
     # 추천하면 "측정된 값"인 척하는 거짓말이 된다 → 자유도를 빼고 Fix + 사유를 보고.
     if abs(med) < 1e-9 and (not np.isfinite(sig) or sig < 1e-9):
         return dict(policy="Fix", value=0.0, median=med, sigma=sig, undetermined=True,
-                    reason=("데이터가 shift를 결정 못 함(bounds ±%g로 열었는데 핏이 0에서 불변) "
+                    ac1=ac1, degenerate=degenerate,
+                    reason=(warn + "데이터가 shift를 결정 못 함(bounds ±%g로 열었는데 핏이 0에서 불변) "
                             "→ 자유도 주지 말고 **Fix**. 타깃 신호가 약할 때 나타남." % wide))
     if jittery:
         return dict(policy="Fix", value=round(med, 2), median=med, sigma=sig,
-                    reason=f"shift 흔들림 σ={sig:.2f}px→고정 권고")
+                    ac1=ac1, degenerate=degenerate,
+                    reason=warn + f"shift 흔들림 σ={sig:.2f}px→고정 권고")
     lb = _round_bound(med - margin_sigma * sig, up=False)
     ub = _round_bound(med + margin_sigma * sig, up=True)
     return dict(policy="Limit", lb=lb, ub=ub, median=med, sigma=sig,
-                at_wide_edge=bool(at_edge),
-                reason=(f"핏 shift {med:.2f}±{sig:.2f}px → Limit [{lb}, {ub}]"
+                at_wide_edge=bool(at_edge), ac1=ac1, degenerate=degenerate,
+                reason=(warn + f"핏 shift {med:.2f}±{sig:.2f}px → Limit [{lb}, {ub}]"
                         + ("  ⚠넓힌 경계에도 닿음(더 넓혀야 할 수도)" if at_edge else "")))
 
 
@@ -272,24 +337,32 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
     실제 |Δshift|의 `quantile`을 여유 있게 올림 → 정상 변화는 통과, 튐은 막는다."""
     rp = {g: dict(p) for g, p in ref_props.items()}
     rp[target] = dict(rp.get(target, {}), sh_mode="Limit", sh_val=f"-{wide}, {wide}")
-    shifts = []
+    shifts, ac1s = [], []
     for (wave, alpha, T_C, P_mbar) in consecutive_scans:
         try:
             r = fit_scan(eng, fitter, rp, wave, alpha, T_C, P_mbar,
                          px_min, px_max, poly_deg, wide, target)
             shifts.append(r["shifts"].get(target, np.nan))
+            ac1s.append(r.get("autocorr1", np.nan))
         except Exception:                 # noqa: BLE001
             shifts.append(np.nan)
+            ac1s.append(np.nan)
     s = np.asarray(shifts, float)
     ds = np.diff(s)
     ds = ds[np.isfinite(ds)]
     d = np.abs(ds)
+    # ★퇴화 분기 감지(§16-B): 스캔마다 다른 alias 골짜기로 튀면 |Δshift|가 커 보여도
+    # 그건 드리프트가 아니라 잡음이다 — median |ac1|이 높으면 이 스캔블록 전체가 못 미더움.
+    finite_ac1 = [a for a in ac1s if np.isfinite(a)]
+    med_ac1 = float(np.median(finite_ac1)) if finite_ac1 else float("nan")
+    degenerate = bool(np.isfinite(med_ac1) and med_ac1 > AC1_DEGENERATE_THRESHOLD)
+    warn = (f"⚠퇴화 분기 의심(median |ac1|={med_ac1:.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B) — " if degenerate else "")
     if len(d) < 3:
-        return dict(value=None, reason="연속 스캔 부족 → 추천 불가")
+        return dict(value=None, ac1=med_ac1, degenerate=degenerate, reason=warn + "연속 스캔 부족 → 추천 불가")
     if float(np.max(d)) < 1e-9:
         # shift 자체가 미결정(핏이 안 움직임)이면 '스캔당 변화량'은 정의되지 않는다.
-        return dict(value=None, undetermined=True,
-                    reason="shift가 미결정(Δ가 전부 0) → step_limit은 의미 없음. shift Fix 권고와 함께 판단할 것")
+        return dict(value=None, undetermined=True, ac1=med_ac1, degenerate=degenerate,
+                    reason=warn + "shift가 미결정(Δ가 전부 0) → step_limit은 의미 없음. shift Fix 권고와 함께 판단할 것")
     # ⚠️|Δshift|는 스캔마다 독립 시딩된 **추정 잡음**을 크게 포함한다(드리프트가 아님).
     # 실제 드리프트 = 부호 있는 변화의 추세. 이것만 수용하면 되고, 잡음까지 허용하면
     # step_limit이 과대해져 핏이 스캔마다 헤맬 수 있다.
@@ -298,15 +371,23 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
     q = float(np.quantile(d, quantile))
     rec = max(floor, float(np.ceil(drift * 3.0 * 20) / 20))          # 드리프트 3배 여유
     return dict(value=rec, q=q, drift=drift, jitter=jitter, median_step=float(np.median(d)), n=len(d),
-                reason=(f"스캔당 드리프트 {drift:.3f}px (추정잡음 σ {jitter:.3f}px는 제외; "
+                ac1=med_ac1, degenerate=degenerate,
+                reason=(warn + f"스캔당 드리프트 {drift:.3f}px (추정잡음 σ {jitter:.3f}px는 제외; "
                         f"|Δ| median {np.median(d):.3f}) → step_limit {rec:.2f}"))
 
 
 def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
                              secondary, target="NO2", step_limit=1.0,
-                             wide=15.0, improve_min=0.05):
+                             wide=15.0, improve_min=0.05,
+                             eng_px_min=None, eng_px_max=None):
     """2차 레퍼런스를 target에 **Link vs 독립** 판정. 기본=Link(절약). 독립이 잔차를
-    의미있게(≥improve_min) 개선하고 AND 그 shift가 물리적으로 안정할 때만 독립 권고."""
+    의미있게(≥improve_min) 개선하고 AND 그 shift가 물리적으로 안정할 때만 독립 권고.
+
+    `eng_px_min`/`eng_px_max`(엔진 wave-axis 도메인)를 주면 T2 게이트를 하나 더 건다:
+    target↔secondary 차등공선성이 높으면(judge_reference와 같은 문턱) RMS가 개선되고
+    shift가 안정해 보여도 **독립 승격을 거부**한다 — 공선인 두 종을 "독립"으로 풀면 그
+    분해 자체가 임의적이라 RMS 개선이 진짜 신호 분리가 아니라 우연일 수 있기 때문
+    (§2-B: T1만으로는 이런 과적합을 못 잡는다)."""
     # (a) Link 기준선
     rp_link = {g: dict(p) for g, p in ref_props.items()}
     rp_link[secondary] = dict(rp_link.get(secondary, {}),
@@ -328,14 +409,28 @@ def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly
     stable = np.isfinite(sig) and sig < 2.0
     conc_move = abs(free["conc"] - base["conc"]) / (abs(base["conc"]) + 1e-30)
 
-    if improve >= improve_min and stable:
+    collinear, pair_r = False, float("nan")
+    if eng_px_min is not None and eng_px_max is not None:
+        from core.fit_physics import differential_collinearity, COLLIN_HI_DEFAULT
+        diag = differential_collinearity(eng, [target, secondary], eng_px_min, eng_px_max, poly_deg)
+        pair_r = diag["pairwise"].get((target, secondary), diag["pairwise"].get((secondary, target), float("nan")))
+        collinear = np.isfinite(pair_r) and pair_r > COLLIN_HI_DEFAULT
+
+    if improve >= improve_min and stable and not collinear:
         lb = _round_bound(med - 4 * sig, up=False)
         ub = _round_bound(med + 4 * sig, up=True)
         return dict(secondary=secondary, decision="Independent",
                     lb=lb, ub=ub, improve=improve, shift=(med, sig), conc_move=conc_move,
                     reason=(f"독립시 잔차 {improve*100:.0f}%↓ & shift {med:.2f}±{sig:.2f}px 안정"
                             f" → 독립 [{lb}, {ub}] (Δ농도 {conc_move*100:.1f}%)"))
+    blocked_by_collinearity = collinear and improve >= improve_min and stable
+    reason = (f"독립 이득 {improve*100:.0f}%(<{improve_min*100:.0f}%)"
+              + ("" if stable else f"·shift 불안정 σ={sig:.2f}") + " → Link 유지")
+    if blocked_by_collinearity:
+        reason = (f"⚠공선성 |r|={pair_r:.2f}>{COLLIN_HI_DEFAULT:g}({target}↔{secondary}) — "
+                  f"RMS는 {improve*100:.0f}%↓, shift도 안정이지만 두 종의 분해 자체가 임의적이라 "
+                  "독립 승격 거부, Link 유지")
     return dict(secondary=secondary, decision="Link", improve=improve,
-                shift=(med, sig), conc_move=conc_move,
-                reason=(f"독립 이득 {improve*100:.0f}%(<{improve_min*100:.0f}%)"
-                        + ("" if stable else f"·shift 불안정 σ={sig:.2f}") + " → Link 유지"))
+                shift=(med, sig), conc_move=conc_move, collinear=collinear,
+                blocked_by_collinearity=blocked_by_collinearity, pairwise_r=pair_r,
+                reason=reason)

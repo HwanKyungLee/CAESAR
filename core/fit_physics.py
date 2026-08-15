@@ -20,6 +20,9 @@ from numpy.polynomial import chebyshev
 
 from core.param_optimizer import fit_scan
 
+# judge_reference와 param_optimizer의 차등공선성 게이트가 공유하는 문턱(단일 출처 원칙).
+COLLIN_HI_DEFAULT = 0.7
+
 
 # ──────────────────────────────────────────────────────────────────────────
 def _diff_unit(vec, poly_deg):
@@ -159,7 +162,7 @@ def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg
 def judge_reference(eng, fitter, scans, ref_props_without, ref_props_with,
                     px_min, px_max, poly_deg, step_limit,
                     candidate="O4", target="NO2",
-                    collin_hi=0.7, abs_max_ratio=3.0):
+                    collin_hi=COLLIN_HI_DEFAULT, abs_max_ratio=3.0):
     """후보 레퍼런스(예: O4)를 넣을지 뺄지 **물리로** 판정(Tier-1 안정성 아님).
 
     ref_props_with는 candidate가 gas_list에 있는 엔진에 대응해야 한다(엔진은 호출부가 구성).

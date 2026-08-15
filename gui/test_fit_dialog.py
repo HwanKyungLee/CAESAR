@@ -22,13 +22,14 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
-    QPushButton, QProgressBar, QComboBox, QScrollArea, QMessageBox,
+    QPushButton, QProgressBar, QComboBox, QMessageBox, QTextEdit,
 )
 
 from core.doas_fit import DoasFitter
 import core.param_optimizer as PO
 import core.fit_physics as FP
 from core.fitset_builder import validate_fitset
+from core.param_optimizer import AC1_DEGENERATE_THRESHOLD as _AC1_DEGENERATE_THRESHOLD
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -105,6 +106,18 @@ def _resolve_px_bounds(unit: str, lo, hi, wave: np.ndarray, px_start: int) -> tu
     return pmin, pmax
 
 
+def _alpha_px_to_engine_px(wave_alpha: np.ndarray, px_min: int, px_max: int, eng) -> tuple[int, int]:
+    """`_resolve_px_bounds`가 반환하는 px_min/px_max는 **그 알파 파일 자신의** wave/alpha
+    배열 인덱스다(파일마다 px_start 오프셋이 다를 수 있음). 반면
+    `fit_physics.differential_collinearity`는 `eng.raw_references[name][px_min:px_max+1]`로
+    **엔진 자체의 wave axis**(`eng._wave_axis`) 인덱스를 기대한다 — 둘은 다른 좌표계라
+    그대로 넘기면 조용히 엉뚱한 파장 구간을 비교하게 된다. 파장(nm)을 거쳐 변환한다
+    (window_designer.scan_windows의 nm2px와 동일 패턴)."""
+    wl_lo, wl_hi = float(wave_alpha[px_min]), float(wave_alpha[px_max])
+    wax = np.asarray(eng._wave_axis, float).flatten()
+    return int(np.argmin(np.abs(wax - wl_lo))), int(np.argmin(np.abs(wax - wl_hi)))
+
+
 def _assemble_ref_props(ref_props_live: dict, gas_list, target: str, sh: dict, sq: dict, links: list):
     """core/fitset_builder.py build_fitset의 ref_props 조립(247-283행)과 동일 규칙 복제.
     target: shift Limit→Center(실측 중심 앵커, §15-E 불변식1) / 아니면 Fix. squeeze도 동일 정책.
@@ -142,6 +155,20 @@ def _assemble_ref_props(ref_props_live: dict, gas_list, target: str, sh: dict, s
     return out
 
 
+def _rp_with_recommended_shift(ref_props: dict, target: str, sh: dict) -> dict:
+    """squeeze/step_limit/link 단계가 shift 추천 **이전의 stale 값**(예: 경계에 잘린 Fix)이
+    아니라 방금 나온 추천값을 기준으로 평가되도록 target의 shift만 갈아끼운다. 최종 출력용
+    Center 변환(_assemble_ref_props)과 달리 이건 파이프라인 내부 평가용이라 Limit/Fix 그대로 둔다."""
+    out = {g: dict(p) for g, p in ref_props.items()}
+    old = out.get(target, {})
+    if sh.get("policy") == "Limit":
+        out[target] = dict(old, sh_mode="Limit", sh_val=f"{sh['lb']}, {sh['ub']}")
+    elif sh.get("policy") == "Fix":
+        out[target] = dict(old, sh_mode="Fix", sh_val=str(sh.get("value", 0.0)))
+    # policy == "Link"(측정불가)면 원래 설정 유지
+    return out
+
+
 class _TestFitOptimizerWorker(QThread):
     """12스캔 표본 위에서 param_optimizer/fit_physics 파이프라인을 실행(무거운 부분,
     수십 초) — 메인 스레드를 막지 않는다. 위젯을 직접 만지지 않고 순수 데이터만 받는다."""
@@ -171,9 +198,9 @@ class _TestFitOptimizerWorker(QThread):
         TOTAL = 9
         self.progress.emit(0, TOTAL, "표본 스캔 로딩…")
 
-        # ── 12개 균등표본(파일당 첫 행) + 최대 20개 연속표본(첫 파일들에서 연속 행) ──
+        # ── 24개 균등표본(파일당 첫 행) + 최대 40개 연속표본(첫 파일들에서 연속 행) ──
         n_files = len(self.files)
-        n_sample = min(12, n_files)
+        n_sample = min(24, n_files)
         idxs = sorted(set(int(round(k * (n_files - 1) / max(n_sample - 1, 1)))
                           for k in range(n_sample))) if n_files else []
         scans = []
@@ -193,9 +220,9 @@ class _TestFitOptimizerWorker(QThread):
 
         consec = []
         for fp in self.files:
-            if len(consec) >= 20:
+            if len(consec) >= 40:
                 break
-            wave, ps, rows = _load_alpha_rows(fp, max_rows=20 - len(consec))
+            wave, ps, rows = _load_alpha_rows(fp, max_rows=40 - len(consec))
             if wave is None:
                 continue
             for alpha, T_C, P_mbar in rows:
@@ -211,26 +238,34 @@ class _TestFitOptimizerWorker(QThread):
         fitter = DoasFitter(eng)
         step_limit = float(self.step_limit)
         poly0 = int(self.poly0)
+        # differential_collinearity(T2 게이트)는 엔진 wave-axis 도메인을 기대한다 — px_min/px_max는
+        # 이 알파 파일 로컬 도메인이라 별도로 변환해서 넘긴다(_alpha_px_to_engine_px 참조).
+        eng_px_min, eng_px_max = _alpha_px_to_engine_px(wave_ref, px_min, px_max, eng)
 
         self.progress.emit(1, TOTAL, "기준선 평가…")
         base = PO.evaluate(scans, eng, fitter, rp, px_min, px_max, poly0, step_limit, target)
 
-        self.progress.emit(2, TOTAL, "다항식 차수 탐색… (가장 오래 걸리는 단계)")
+        self.progress.emit(2, TOTAL, "다항식 차수 탐색… (차수마다 shift 재탐색, 가장 오래 걸리는 단계)")
         POLYS = [2, 3, 4, 5, 6, 8]
-        rec_poly, ladder = PO.optimize_poly(scans, eng, fitter, rp, px_min, px_max,
-                                            POLYS, step_limit, target)
+        rec_poly, ladder = PO.optimize_poly_joint(scans, eng, fitter, rp, px_min, px_max,
+                                                  POLYS, step_limit, target,
+                                                  eng_px_min=eng_px_min, eng_px_max=eng_px_max)
         poly_for_rest = rec_poly if rec_poly is not None else poly0
 
         self.progress.emit(3, TOTAL, "Shift 범위 추천…")
         sh = PO.recommend_shift(scans, eng, fitter, rp, px_min, px_max, poly_for_rest, target)
+        # squeeze/step_limit/link/health는 shift 추천 **이전**의 stale 값(예: 경계에 잘린
+        # Fix -0.5)이 아니라 방금 나온 추천을 기준으로 평가해야 한다 — 안 그러면 이 단계들이
+        # 전부 틀렸을지 모르는 shift 위에서 평가되어 자기 결과도 같이 오염된다.
+        rp_after_shift = _rp_with_recommended_shift(rp, target, sh)
 
         self.progress.emit(4, TOTAL, "Squeeze 범위 추천…")
-        sq = PO.recommend_squeeze(scans, eng, fitter, rp, px_min, px_max, poly_for_rest,
+        sq = PO.recommend_squeeze(scans, eng, fitter, rp_after_shift, px_min, px_max, poly_for_rest,
                                   target, step_limit=step_limit)
 
         self.progress.emit(5, TOTAL, "step_limit 추천…")
         if consec:
-            st = PO.recommend_step_limit(consec, eng, fitter, rp, px_min, px_max,
+            st = PO.recommend_step_limit(consec, eng, fitter, rp_after_shift, px_min, px_max,
                                          poly_for_rest, target)
         else:
             st = dict(value=None, reason="연속 스캔 표본 부족(파일이 1개뿐이거나 행이 없음)")
@@ -241,15 +276,17 @@ class _TestFitOptimizerWorker(QThread):
             if g == target:
                 continue
             links.append(PO.recommend_secondary_link(
-                scans, eng, fitter, rp, px_min, px_max, poly_for_rest,
-                secondary=g, target=target, step_limit=step_limit))
+                scans, eng, fitter, rp_after_shift, px_min, px_max, poly_for_rest,
+                secondary=g, target=target, step_limit=step_limit,
+                eng_px_min=eng_px_min, eng_px_max=eng_px_max))
 
         self.progress.emit(7, TOTAL, "물리 건전성 점검(상수종)…")
         try:
-            health = FP.fitted_amount_health(scans, eng, fitter, rp, px_min, px_max,
+            health = FP.fitted_amount_health(scans, eng, fitter, rp_after_shift, px_min, px_max,
                                              poly_for_rest, step_limit, target=target)
         except Exception as e:
             health = {"error": str(e)}
+        has_theoretical_anchor = FP.theoretical_amount(target, scans[0][2], scans[0][3]) is not None
 
         self.progress.emit(8, TOTAL, "조립 및 검증…")
         proposed_ref_props = _assemble_ref_props(rp, eng.gas_list, target, sh, sq, links)
@@ -266,6 +303,7 @@ class _TestFitOptimizerWorker(QThread):
             "base": base, "poly": {"rec": rec_poly, "ladder": ladder},
             "shift": sh, "squeeze": sq, "step_limit": st, "secondary": links,
             "health": health,
+            "has_theoretical_anchor": has_theoretical_anchor,
             "proposed_ref_props": proposed_ref_props,
             "proposed_poly_deg": poly_for_rest,
             "proposed_step_limit": proposed_step_limit,
@@ -311,7 +349,7 @@ class TestFitDialog(QDialog):
         if default:
             self._cb_target.setCurrentText(default)
         bar.addWidget(self._cb_target)
-        self._btn_run = QPushButton("▶ Run Optimizer (12-scan sample)")
+        self._btn_run = QPushButton("▶ Run Optimizer (24-scan sample, joint poly×shift search)")
         self._btn_run.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
         self._btn_run.clicked.connect(self._run_optimizer)
         bar.addWidget(self._btn_run)
@@ -326,13 +364,11 @@ class TestFitDialog(QDialog):
         self._lbl_status.setStyleSheet("color:#1565C0;")
         lay.addWidget(self._lbl_status)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        self._results_w = QWidget()
-        self._results_lay = QVBoxLayout(self._results_w)
-        self._results_lay.addStretch(1)
-        scroll.setWidget(self._results_w)
-        lay.addWidget(scroll, 1)
+        self._results_html = []
+        self._results_edit = QTextEdit()
+        self._results_edit.setReadOnly(True)
+        self._results_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay.addWidget(self._results_edit, 1)
 
         self._btn_apply = QPushButton("✅ Apply Recommendations")
         self._btn_apply.setEnabled(False)
@@ -343,23 +379,50 @@ class TestFitDialog(QDialog):
         self._tabs.addTab(page, "⚙️ Optimize")
 
     def _clear_results(self):
-        while self._results_lay.count() > 1:
-            item = self._results_lay.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+        self._results_html = []
+        self._results_edit.clear()
 
     def _add_result_label(self, html: str, warn: bool = False, err: bool = False):
-        lbl = QLabel(html)
-        lbl.setWordWrap(True)
-        lbl.setTextFormat(Qt.TextFormat.RichText)
         if err:
-            lbl.setStyleSheet("color:#C62828; font-weight:bold;")
+            color = "#C62828; font-weight:bold"
         elif warn:
-            lbl.setStyleSheet("color:#E65100; font-weight:bold;")
+            color = "#E65100; font-weight:bold"
         else:
-            lbl.setStyleSheet("color:#333;")
-        self._results_lay.insertWidget(self._results_lay.count() - 1, lbl)
+            color = "#333"
+        self._results_html.append(f"<div style='color:{color}; margin-bottom:8px;'>{html}</div>")
+        self._results_edit.setHtml("".join(self._results_html))
+
+    def _poly_ladder_table(self, ladder: list[dict], rec_poly, target: str) -> str:
+        """poly 후보 비교표. §16-B(퇴화 분기는 잔차가 5배 나쁘다)에 따라 |ac1|가 최선 대비
+        2배 이상이면 ⚠로 표시 — 사용자가 알고리즘을 맹신하지 않고 직접 눈으로 걸러낼 수 있게."""
+        if not ladder:
+            return "<b>poly ladder:</b> (no candidates evaluated)"
+        best_ac1 = min(r["autocorr1"] for r in ladder if np.isfinite(r.get("autocorr1", np.nan)))
+        rows = ["<tr><th align=left>poly</th><th align=left>n_ok</th>"
+                f"<th align=left>{target}</th><th align=left>conc CV</th>"
+                "<th align=left>RMS/sig</th><th align=left>|ac1|</th>"
+                "<th align=left>multi-R</th>"
+                f"<th align=left>{target} shift</th></tr>"]
+        for r in ladder:
+            ac1 = r.get("autocorr1", float("nan"))
+            degenerate = np.isfinite(ac1) and np.isfinite(best_ac1) and ac1 > 2 * best_ac1 and ac1 > 0.15
+            multi_r = r.get("multi_R_target", float("nan"))
+            sh_med, sh_sig = r.get("shift_dist", {}).get(target, (float("nan"), float("nan")))
+            # |ac1| 퇴화(§16-B, NLLS 탐색이 alias 골짜기에 빠짐)와 multi-R 공선성(T2, 핏 없이도
+            # 계산되는 기하학적 퇴화)은 서로 다른 원인이라 마크를 분리한다 — 둘 다 나쁘면 구조적
+            # 문제, |ac1|만 나쁘면 탐색 문제일 가능성이 높다는 진단 힌트가 된다.
+            collinear = np.isfinite(multi_r) and multi_r > PO.POLY_COLLIN_R_MAX
+            marks = ("⚠퇴화?" if degenerate else "") + ("⚠공선성?" if collinear else "")
+            mark = f" {marks}" if marks else (" ✅" if r["poly"] == rec_poly else "")
+            style = "color:#E65100;font-weight:bold" if (degenerate or collinear) else (
+                "font-weight:bold" if r["poly"] == rec_poly else "")
+            rows.append(
+                f"<tr style='{style}'><td>{r['poly']}{mark}</td><td>{r['n_ok']}</td>"
+                f"<td>{r['conc']:.3g}</td><td>{r['conc_cv']*100:.0f}%</td>"
+                f"<td>{r['rms_sig']:.3g}</td><td>{ac1:.2f}</td>"
+                f"<td>{multi_r:.2f}</td>"
+                f"<td>{sh_med:+.2f}±{sh_sig:.2f}px</td></tr>")
+        return "<table cellpadding=3 style='border-collapse:collapse'>" + "".join(rows) + "</table>"
 
     def _run_optimizer(self):
         files = self._app._channel_files.get(self._app._active_channel) or self._app.file_list
@@ -425,7 +488,27 @@ class TestFitDialog(QDialog):
         self._add_result_label(
             f"<b>Poly degree:</b> current {self._app.spin_poly_deg.value()} → "
             f"recommended <b>{poly['rec']}</b> (knee of the ladder — higher degree "
-            "doesn't reduce residual structure enough to justify the extra freedom)")
+            "doesn't reduce residual structure enough to justify the extra freedom)<br>"
+            "<i>each degree below was scored with its own freely-refit shift "
+            "(not the current possibly-clipped setting), so degrees aren't penalized "
+            "for a stale shift value</i>")
+        self._add_result_label(self._poly_ladder_table(poly["ladder"], poly["rec"], target))
+
+        # §16-B: 진짜 해는 |ac1| ~0.03-0.08, 퇴화 분기(통계적으로만 좋아 보이는 가짜 해)는
+        # ~1.0. 모든 poly 후보가 그 문턱을 넘으면 이 표본에선 shift 탐색이 통째로 퇴화 분기에
+        # 빠진 것 — 어느 poly를 골라도 결과가 신뢰 불가라는 뜻이므로 절대 문턱으로 잡아야 한다
+        # (poly끼리 상대비교만으론 전부 나쁠 때 아무것도 걸러내지 못함).
+        ladder_ac1 = [r["autocorr1"] for r in poly["ladder"] if np.isfinite(r.get("autocorr1", np.nan))]
+        best_ac1 = min(ladder_ac1) if ladder_ac1 else float("nan")
+        degenerate_all = np.isfinite(best_ac1) and best_ac1 > _AC1_DEGENERATE_THRESHOLD
+        if degenerate_all:
+            self._add_result_label(
+                "<b>⚠ 모든 poly 후보의 잔차가 백색이 아닙니다</b> (최선도 |ac1|="
+                f"{best_ac1:.2f}, 진짜 핏은 보통 0.03~0.08) — §16-B에서 확인된 "
+                "<b>퇴화 분기</b>(통계적으로만 좋아 보이는 가짜 해, 실제 O4 오염 사례에서도 "
+                "동일 패턴)와 일치합니다. 이 표본에서 나온 농도·shift 추천은 <b>신뢰하지 말 것</b> "
+                "— shift 탐색 범위를 좁히거나(현재 설정된 물리적으로 타당한 범위 근처로), 핏창/레퍼런스를 "
+                "재검토한 뒤 다시 시도하세요.", err=True)
 
         sh = result["shift"]
         cur_sh = self._app.ref_props.get(target, {})
@@ -434,7 +517,7 @@ class TestFitDialog(QDialog):
             f"{cur_sh.get('sh_val','')} → recommended {sh.get('policy')} "
             f"{result['proposed_ref_props'][target]['sh_val']}<br>"
             f"<i>{sh.get('reason','')}</i>",
-            warn=bool(sh.get("undetermined")))
+            warn=bool(sh.get("undetermined")), err=bool(sh.get("degenerate")))
 
         sq = result["squeeze"]
         self._add_result_label(
@@ -447,22 +530,32 @@ class TestFitDialog(QDialog):
         if st.get("value") is not None:
             self._add_result_label(
                 f"<b>step_limit:</b> current {self._app.spin_step_limit.value():.2f} → "
-                f"recommended <b>{st['value']:.2f}</b><br><i>{st.get('reason','')}</i>")
+                f"recommended <b>{st['value']:.2f}</b><br><i>{st.get('reason','')}</i>",
+                err=bool(st.get("degenerate")))
         else:
             self._add_result_label(
                 f"<b>step_limit:</b> keeping current ({self._app.spin_step_limit.value():.2f}) "
-                f"— <i>{st.get('reason','')}</i>")
+                f"— <i>{st.get('reason','')}</i>", err=bool(st.get("degenerate")))
 
         for d in result["secondary"]:
             g = d["secondary"]
             self._add_result_label(
-                f"<b>{g}:</b> {d.get('decision')} vs {target} — <i>{d.get('reason','')}</i>")
+                f"<b>{g}:</b> {d.get('decision')} vs {target} — <i>{d.get('reason','')}</i>",
+                err=bool(d.get("blocked_by_collinearity")))
 
         health = result.get("health") or {}
         if "error" not in health and health.get("cv"):
             cv_txt = ", ".join(f"{g}={v*100:.0f}%" for g, v in health["cv"].items())
             self._add_result_label(f"<b>Physical health (coefficient CV):</b> {cv_txt}")
+        if not result.get("has_theoretical_anchor", True):
+            self._add_result_label(
+                f"<i>Note: {target}엔 절대량 물리 앵커가 없습니다(O4만 [O2]²로 있음) — 가장 강한 "
+                "T2 게이트(절대량 기각)는 여기서 작동하지 않고, 공선성·CV 게이트만 적용됩니다.</i>")
 
+        # poly 사다리 전체 판정(degenerate_all)뿐 아니라, 그 이후 shift/step_limit 각자의
+        # 자체 판정(§16-B 문턱)도 있다 — poly는 통과했지만 shift 추천 자체가 퇴화 분기에
+        # 빠지는 경우(예: poly 사다리와 다른 시딩 경로)까지 잡으려면 OR로 합쳐야 한다.
+        any_degenerate = degenerate_all or bool(sh.get("degenerate")) or bool(st.get("degenerate"))
         problems = result["validate_problems"]
         if problems:
             self._add_result_label(
@@ -471,6 +564,10 @@ class TestFitDialog(QDialog):
             self._btn_apply.setEnabled(False)
             self._btn_apply.setToolTip("Fix the problems above (usually: widen step_limit or "
                                        "the window) before applying.")
+        elif any_degenerate:
+            self._btn_apply.setEnabled(False)
+            self._btn_apply.setToolTip("잔차가 백색이 아님(|ac1| 높음) — 퇴화 분기로 의심되어 "
+                                       "Apply 비활성화. 위 경고 참조.")
         else:
             self._btn_apply.setEnabled(True)
             self._btn_apply.setToolTip("")
@@ -503,17 +600,20 @@ class TestFitDialog(QDialog):
          rms, T_C, P_mbar, collin) = preview
 
         gtxt = "  ".join(f"{g}={ppb[g]:.2f}" for g in ppb)
-        lay.addWidget(QLabel(
+        _hdr = QLabel(
             f"<b>{os.path.basename(fp)}</b><br>"
             f"<b>ppb:</b> {gtxt}    <b>RMS:</b> {rms:.2e}    "
             f"<b>Shift:</b> {shifts[0]:+.2f}px  <b>Squeeze:</b> {squeezes[0]:.4f}    "
-            f"T={T_C:.1f}°C P={P_mbar:.0f}mb"))
+            f"T={T_C:.1f}°C P={P_mbar:.0f}mb")
+        _hdr.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay.addWidget(_hdr)
 
         if collin is not None:
             from core.doas_fit import DoasFitter as _DF
             _cl = QLabel(_DF.format_etalon_collinearity(collin))
             _cl.setStyleSheet("color:#E65100;font-weight:bold;" if collin.get("warn") else "color:#555;")
             _cl.setWordWrap(True)
+            _cl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             lay.addWidget(_cl)
 
         _pal = ["#388E3C", "#7B1FA2", "#0097A7", "#C2185B", "#5D4037"]
