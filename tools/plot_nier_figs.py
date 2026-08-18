@@ -133,7 +133,8 @@ def main():
     draw(csv=cold_csv,
          col='NO2_ppb', color='#1f77b4', ylabel=r'NO$_2$ [ppbv]',
          title='CAESAR Yeosu 2026 — NO$_2$ (cold cavity), 5-min means, KST',
-         sub='QC: Chi2 < 10  ·  negatives retained  ·  2026-06-17 flagged low quality (kept)',
+         sub='AQMS-anchored /0.922 scale correction (R0, 2026-08-12)  ·  negatives retained  ·  '
+             '2026-06-17 flagged low quality (kept)',
          out=cold_csv.replace('.csv', '.png'),
          ylim=(-3, 22), dylim=(0, 9), flagname='low_quality', day_tick=5)
 
@@ -145,9 +146,18 @@ def main():
     draw(csv=ans_csv,
          col='ANs_ppb', color='#d62728', ylabel='ANs [ppbv]',
          title='CAESAR Yeosu 2026 — ANs (alkyl nitrates), 5-min means, KST',
-         sub='UPPER LIMIT only: signal lies within the channel calibration uncertainty',
+         sub='AQMS-anchored channel scale correction (R0, 2026-08-12) -- NOT the 08-11 g=0.82 '
+             'injection (deferred pending re-validation, see CSV header)',
          out=ans_csv.replace('.csv', '.png'),
-         ylim=(-0.35, 0.55), dylim=(-0.22, 0.28), day_tick=7)
+         ylim=(-2.0, 2.0), dylim=(-1.0, 1.0), day_tick=7)
+
+    pns_csv = _find('PNs')
+    draw(csv=pns_csv,
+         col='PNs_ppb', color='#2ca02c', ylabel='PNs [ppbv]',
+         title='CAESAR Yeosu 2026 — PNs (peroxy nitrates), 5-min means, KST',
+         sub='AQMS-anchored channel scale correction (R0, 2026-08-12) -- new for this submission',
+         out=pns_csv.replace('.csv', '.png'),
+         ylim=(-6.0, 10.0), dylim=(-3.0, 5.0), day_tick=7)
 
 
 if __name__ == '__main__':

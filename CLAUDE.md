@@ -22,6 +22,7 @@
 | Oculus (실시간 감시) | [`docs/Oculus_설계_2026-07.md`](docs/Oculus_설계_2026-07.md) 전체 |
 | 그 외 Augur GUI/코어 일반 작업 | [`docs/HANDOFF.md`](docs/HANDOFF.md)(최신 세션 노트) + `README.md`의 폴더구조·임포트구조 |
 | ANs/ANs 퇴화·NIER 제출 관련 | [`docs/ANs_분석_핸드오프_2026-07-23.md`](docs/ANs_분석_핸드오프_2026-07-23.md) |
+| NO2 인젝션 실험(g 축퇴·핫채널 30% 결손 해결) | [`docs/NO2_인젝션_실험_핸드오프_2026-08.md`](docs/NO2_인젝션_실험_핸드오프_2026-08.md) 전체 |
 
 ## 절대 어기면 안 되는 원칙 (요약, 근거는 위 문서에)
 

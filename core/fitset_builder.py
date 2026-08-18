@@ -29,6 +29,7 @@ import numpy as np
 
 from core import window_designer as WD
 from core import fit_physics as FP
+from core import health_checks as HC
 from core import param_optimizer as PO
 from core.doas_fit import DoasFitter
 from core.engine import UniversalEngine
@@ -176,6 +177,27 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
     if wave is None:
         raise ValueError("wavecal 로드 실패")
 
+    # ── 사전검증(health_checks) — 후보 refs셋 평가 *전* 게이트(fit_optimizer_handoff.md §7·§10-C).
+    # 웨이브칼 손상(비단조·범위이상)이나 레퍼런스 결함(빈값·평평·격자불일치)을 여기서 못 잡으면
+    # 이후 창설계·ref취사·파라미터 추정 전부가 조용히 오염된 입력 위에서 돈다.
+    _say("사전검증(웨이브칼·레퍼런스)…")
+    wc_status, wc_msg, wc_metrics = HC.check_wavecal(wave)
+    refs_for_check = {}
+    for c in cands:
+        interp = eng.interpolators.get(c["name"])
+        if interp is not None:
+            try:
+                refs_for_check[c["name"]] = np.asarray(interp(wave), dtype=float)
+            except Exception:                 # noqa: BLE001
+                pass
+    rf_status, rf_msg, rf_metrics = HC.check_references(refs_for_check, wl=wave)
+    preflight = [("wavecal", wc_status, wc_msg, wc_metrics),
+                ("references", rf_status, rf_msg, rf_metrics)]
+    pf_status, pf_msg = HC.overall(preflight)
+    _say(f"사전검증 결과: {pf_status} — {pf_msg}")
+    if pf_status == HC.FAIL:
+        raise ValueError(f"사전검증 실패 — FitSet 생성 중단 (wavecal: {wc_msg} / references: {rf_msg})")
+
     alphas_all = np.array([s[1] for s in scans if len(s[1]) == len(wave)])
     alphas = alphas_all[:: max(1, len(alphas_all) // n_design_alphas)][:n_design_alphas]
     T_C = float(np.median([s[2] for s in scans]))
@@ -301,7 +323,7 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
         "cavity_d": cavity_d, "rl_factor": 1.0,
     }
     problems = validate_fitset(cfg, target)
-    report = dict(problems=problems,
+    report = dict(problems=problems, preflight=preflight,
                   candidates=cands, selection=sel_log, keep=keep, window=best,
                   shift=sh, squeeze=sq, step=step, links=links, meta=meta2,
                   design_rank=[r for r in rows2[:5]])

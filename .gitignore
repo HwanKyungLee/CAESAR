@@ -24,6 +24,9 @@ logs/
 # 분석 산출물 기본 저장 위치 (alpha/fitting/R/figure — 재생성 가능, 머신별)
 /output/
 
+# Oculus 런타임 상태 (커서·상태로그 — 머신별 재생성 산출물, Oculus_설계_2026-07.md §6)
+oculus_state/
+
 # 임시 patch 파일 (적용 후 남은 아티팩트)
 *.patch
 
@@ -43,3 +46,7 @@ tools/*.png
 
 # Alpha Pass1 중간산물 캐시(재생성 가능 — 커밋 금지)
 cache/
+
+# PyInstaller 빌드 산출물 (Oculus.spec으로 재생성 가능, 수백MB — git 부적합, USB로 직접 이동)
+/build/
+/dist/

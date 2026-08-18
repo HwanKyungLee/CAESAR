@@ -3,15 +3,21 @@
 사용자 FitSet json(레퍼런스·핏레인지 고정)을 baseline으로, core/param_optimizer로
 poly 차수 + ref별 shift/squeeze 정책·크기를 자동 판정한다.
 
-사용:  python tools/optimize_params.py [cold|ans|pns]   (기본 cold)
+사용:  python tools/optimize_params.py [키]   (기본 cold, 키 목록은 channel_map.json 참조)
 
 엔진 빌드는 app_window._build_engine_from_config를 **그대로 복제**(wavecal이 축,
 add_reference(wave_nm=wave, multiplier=10^mult), ILS 0) — 헤드리스=GUI 보장.
+
+채널 키(cold/ans/pns 등)는 코드에 박지 않고 `tools/channel_map.json`에서 읽는다 —
+CAESAR 한 대가 나중에 캐비티를 늘리면(예: 3채널) 그 json에 항목만 추가하면 되고
+이 파일이나 build_fitset.py/design_window.py/t2_reference_check.py(전부 이 모듈을
+재사용)를 고칠 필요가 없다.
 """
 import os
 import sys
 import json
 import glob
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -30,19 +36,48 @@ from core import param_optimizer as PO
 from tools.residual_compare import load_alpha
 
 FITSET = r"C:\Doasis_Work\Output\fit setting\FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json"
+CHANNEL_MAP_PATH = os.path.join(ROOT, "tools", "channel_map.json")
 
-# data_label → (알파 glob, 골든/표본일 필터)
-GOLDEN_COLD = {f"2026-{m:02d}-{d:02d}"
-               for (m, d) in [(5, x) for x in range(26, 32)] + [(6, x) for x in range(1, 14)]}
-ALPHA = r"C:\Doasis_Work\Output\alpha"
-CHAN_ALPHA = {
-    "cold": (os.path.join(ALPHA, "cold", "*", "*_cold_alpha_trace.dat"), GOLDEN_COLD),
-    "ans":  (os.path.join(ALPHA, "hot", "ch1", "*", "*_ANs_alpha_trace.dat"), None),
-    "pns":  (os.path.join(ALPHA, "hot", "ch2", "*", "*_PNs_alpha_trace.dat"), None),
-}
-LABEL2KEY = {"cold": "cold", "ans": "ans", "pns": "pns"}
+
+def _golden_date_set(date_range):
+    """[시작,끝] ISO 날짜 → 그 사이 모든 날짜의 {'YYYY-MM-DD',...} 집합. 없으면 None(필터 없음)."""
+    if not date_range:
+        return None
+    lo, hi = date.fromisoformat(date_range[0]), date.fromisoformat(date_range[1])
+    return {(lo + timedelta(d)).isoformat() for d in range((hi - lo).days + 1)}
+
+
+def _load_channel_map(path=CHANNEL_MAP_PATH):
+    """채널 키 → (알파 glob, 표본일 필터)/wavecal 폴더/표시라벨. 새 채널은 이 json에
+    항목만 추가하면 된다(코드 수정 불필요) — 2026-08 CAESAR 재구성 대비 정리."""
+    with open(path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    alpha_root, alpha_bin = cfg["alpha_root"], cfg.get("alpha_bin", "60s")
+    chan_alpha, key2wldir, key2label = {}, {}, {}
+    for key, c in cfg["channels"].items():
+        pattern = os.path.join(alpha_root, alpha_bin, *c["alpha_glob"].split("/"))
+        chan_alpha[key] = (pattern, _golden_date_set(c.get("golden_date_range")))
+        key2wldir[key] = c["wavecal_dir"]
+        key2label[key] = c.get("label", key)
+    return chan_alpha, key2wldir, key2label, cfg["wavecal_root"]
+
+
+CHAN_ALPHA, KEY2WLDIR, KEY2LABEL, WAVECAL_ROOT = _load_channel_map()
 N_SCANS = 12
 POLYS = [2, 3, 4, 5, 6, 8]
+
+
+def require_key(key):
+    """알 수 없는 채널 키에 바로 KeyError 대신 사용 가능한 키 목록 + 어디를 고칠지 알려준다."""
+    if key not in CHAN_ALPHA:
+        raise SystemExit(f"알 수 없는 채널 키 '{key}'. 사용 가능: {sorted(CHAN_ALPHA)} "
+                         f"(새 채널은 {CHANNEL_MAP_PATH}에 추가)")
+
+
+def ref_path(key, filename):
+    """이 채널의 wavecal 폴더 안 파일 경로(예: O4 후보 레퍼런스)."""
+    require_key(key)
+    return os.path.join(WAVECAL_ROOT, KEY2WLDIR[key], filename)
 
 
 def load_wavecal(path):
@@ -83,13 +118,19 @@ def build_engine_from_config(cfg):
 
 
 def pick_channel(scen, key):
+    """wl_path(roi1/roi2/cold)로 채널 매칭. data_label은 쓰지 않는다 — FitSet json에서
+    라벨이 실제 채널과 뒤바뀌어 저장된 사례가 있다(§14-D, roi1이 'PNs'로 잘못 저장됨)."""
+    require_key(key)
+    wldir = KEY2WLDIR[key]
     for ch in scen["channels"].values():
-        if str(ch.get("data_label", "")).lower() == key:
+        if wldir in str(ch.get("wl_path", "")).replace("\\", "/").split("/"):
             return ch
-    raise SystemExit(f"data_label '{key}' 채널 없음")
+    raise SystemExit(f"wl_path에 '{wldir}' 폴더를 쓰는 채널 없음 (key='{key}') — "
+                     f"FitSet json에 이 채널이 아직 없을 수 있음")
 
 
 def gather_scans(key, n):
+    require_key(key)
     pattern, day_filter = CHAN_ALPHA[key]
     files = sorted(glob.glob(pattern))
     if day_filter is not None:
@@ -104,6 +145,7 @@ def gather_scans(key, n):
 def gather_consecutive(key, n):
     """시간상 인접한 스캔 블록(한 폴더 내 연번) — step_limit 추정 전용.
     날짜별로 흩뿌린 표본으로 Δshift를 재면 과대추정되므로 반드시 연속으로."""
+    require_key(key)
     pattern, day_filter = CHAN_ALPHA[key]
     files = sorted(glob.glob(pattern))
     if day_filter is not None:
@@ -130,6 +172,7 @@ def nm_to_px(wave, nm):
 
 def main():
     key = (sys.argv[1] if len(sys.argv) > 1 else "cold").lower()
+    require_key(key)
     scen = json.load(open(FITSET, encoding="utf-8"))
     ch = pick_channel(scen, key)
     rp = ch["ref_props"]
@@ -147,7 +190,10 @@ def main():
     target = "NO2"
 
     print("#" * 100)
-    print(f"# {ch['data_label']}  refs={list(eng.gas_list)}  창 {ch['fit_start_nm']}-{ch['fit_end_nm']}nm "
+    # 헤더는 CLI key/channel_map 라벨로 표기(ch['data_label']은 json 안에서 뒤바뀌어 있을 수
+    # 있어 안 씀 — pick_channel 주석 참조).
+    print(f"# {key}({KEY2LABEL.get(key, key)})  refs={list(eng.gas_list)}  "
+          f"창 {ch['fit_start_nm']}-{ch['fit_end_nm']}nm "
           f"(px {px_min}-{px_max})  baseline poly{poly0}  스캔 {len(scans)}/{n_total}")
     print("#" * 100)
 

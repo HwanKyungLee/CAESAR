@@ -124,13 +124,81 @@ class Flags:
 
 
 @dataclass(frozen=True)
+class ReflectanceConfig:
+    """채널별 R(반사율) 실시간 산출 설정(M2, 선택). 없으면 r_monitor가 SKIP.
+    물리 계산 자체는 tools/reflectance_calc.ReflectanceCalculator(단일 출처)가 한다 —
+    여기는 그 함수가 필요로 하는 채널별 입력(wavecal·캐비티 HK 필드·ROI·경보 임계)만 서술."""
+    wavecal_path: Optional[str] = None
+    roi_nm: Optional[tuple] = None          # (lo, hi) nm
+    cavity_temp_hk: Optional[str] = None    # hk.fields[].key
+    cavity_pressure_hk: Optional[str] = None
+    cavity_len_cm: float = 51.8
+    rl_factor: float = 0.933
+    warn_drop: Optional[float] = None
+    alarm_drop: Optional[float] = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReflectanceConfig":
+        alert = d.get("alert") or {}
+        roi = d.get("roi_nm")
+        return cls(
+            wavecal_path=d.get("wavecal_path"),
+            roi_nm=(tuple(float(v) for v in roi) if roi else None),
+            cavity_temp_hk=d.get("cavity_temp_hk"),
+            cavity_pressure_hk=d.get("cavity_pressure_hk"),
+            cavity_len_cm=float(d.get("cavity_len_cm", 51.8)),
+            rl_factor=float(d.get("rl_factor", 0.933)),
+            warn_drop=(float(alert["warn_drop"]) if "warn_drop" in alert else None),
+            alarm_drop=(float(alert["alarm_drop"]) if "alarm_drop" in alert else None),
+        )
+
+
+@dataclass(frozen=True)
+class ConcentrationConfig:
+    """채널별 경량 DOAS 농도 피팅 설정(M3, 선택). 없으면 conc_monitor가 SKIP.
+    레퍼런스·핏창·poly·ref_props는 여기서 새로 정의하지 않고 Augur FitSet json을
+    그대로 가리킨다(fitset_path+wl_dir) — Augur 확정 설정과 갈라지지 않게."""
+    fitset_path: str
+    wl_dir: str
+    target: str = "NO2"
+    cavity_temp_hk: Optional[str] = None
+    cavity_pressure_hk: Optional[str] = None
+    throttle_sec: float = 10.0
+    seed_narrow_px: float = 2.0
+    conc_min_ppb: Optional[float] = None
+    conc_max_ppb: Optional[float] = None
+    spike_ppb: Optional[float] = None
+    rms_sig_alarm: Optional[float] = None
+    flatline_n: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ConcentrationConfig":
+        alert = d.get("alert") or {}
+        return cls(
+            fitset_path=d["fitset_path"],
+            wl_dir=d["wl_dir"],
+            target=d.get("target", "NO2"),
+            cavity_temp_hk=d.get("cavity_temp_hk"),
+            cavity_pressure_hk=d.get("cavity_pressure_hk"),
+            throttle_sec=float(d.get("throttle_sec", 10.0)),
+            seed_narrow_px=float(d.get("seed_narrow_px", 2.0)),
+            conc_min_ppb=(float(alert["conc_min_ppb"]) if "conc_min_ppb" in alert else None),
+            conc_max_ppb=(float(alert["conc_max_ppb"]) if "conc_max_ppb" in alert else None),
+            spike_ppb=(float(alert["spike_ppb"]) if "spike_ppb" in alert else None),
+            rms_sig_alarm=(float(alert["rms_sig_alarm"]) if "rms_sig_alarm" in alert else None),
+            flatline_n=(int(alert["flatline_n"]) if "flatline_n" in alert else None),
+        )
+
+
+@dataclass(frozen=True)
 class Channel:
     """스펙트럼 블록. id=로직이 참조하는 안정 식별자, label=표시용 문자열(로직 의존 금지)."""
     id: str
     role: str  # 'signal' | 'noise'
     label: Optional[str] = None
     columns: Optional[tuple] = None  # (start, end) 절대 열, 양끝 포함
-    reference_scenario: Optional[str] = None
+    reflectance: Optional[ReflectanceConfig] = None
+    concentration: Optional[ConcentrationConfig] = None
 
     @property
     def is_signal(self) -> bool:
@@ -148,7 +216,10 @@ class Channel:
         cols = d.get("columns")
         return cls(id=d["id"], role=d["role"], label=d.get("label"),
                    columns=(tuple(int(c) for c in cols) if cols else None),
-                   reference_scenario=d.get("reference_scenario"))
+                   reflectance=(ReflectanceConfig.from_dict(d["reflectance"])
+                               if "reflectance" in d else None),
+                   concentration=(ConcentrationConfig.from_dict(d["concentration"])
+                                 if "concentration" in d else None))
 
 
 def _band_check(value: float, band: Optional[Sequence]) -> bool:

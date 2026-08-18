@@ -1698,14 +1698,21 @@ class AlphaExportWorker(QThread):
         # 따라서 분류/스풀/R수집 로직은 한 글자도 이동하지 않는다(무회귀 보장).
         def _process_scan(fp, row_idx, intensity_raw, state_flag, env_t, env_p, gidx):
             nonlocal n_default_tp, _amb_spool_n, amb_count, done_scans
+            # flag=0 은 헤더/파일-시작 마커(raw_parser.FLAG_HEADER)로, 파일당 딱 1행뿐인
+            # 비측정 행이다(스펙트럼이 65535 sentinel로 포화돼 있고 HK도 없음). 예전엔
+            # is_amb 판정에서 무조건 ambient로 잡아 알파 첫 스캔이 이 쓰레기 행이 되고,
+            # 거기서 시작한 Shift가 이후 스캔들을 ±5px 경계까지 끌고 가는 원인이었다
+            # (2026-08-10 NO2 인젝션 재현으로 발견). 측정이 아니므로 세 분류 어디에도
+            # 넣지 않고 건너뛴다.
+            if state_flag == 0:
+                return
             # HK 미복구 폴백 감지: 실측 P는 raw_count×0.6895라 정확히 1013.25가 될 수
             # 없으므로 env_p==1013.25는 'HK 읽기 실패→기본값' 신호. 가시화용 카운트.
             if env_p == 1013.25:
                 n_default_tp += 1
             is_za  = state_flag in self.flag_za
             is_he  = state_flag in self.flag_he
-            is_amb = (state_flag == 0 or
-                      (self.flag_amb and state_flag in self.flag_amb) or
+            is_amb = ((self.flag_amb and state_flag in self.flag_amb) or
                       (not self.flag_amb and not is_za and not is_he))
             # 단순 수집만(R/I0는 Pass1 후 블록평균). 단일스캔 noise 커서 그대로 안 씀.
             if is_he:
@@ -1861,7 +1868,16 @@ class AlphaExportWorker(QThread):
                     rc.add_za_spectrum(s, t, p)
                 for s, t, p in zip(he_spectra, he_t_list, he_p_list):
                     rc.add_he_spectrum(s, t, p)
-                roi_lo, roi_hi = float(np.nanmin(wave_nm)), float(np.nanmax(wave_nm))
+                # ROI는 이 채널의 실제 fit 범위(pixel_min:pixel_max)로 좁혀야 한다.
+                # wave_nm 전체(400~499nm대)로 잡으면 스펙트럼 앞쪽 다크/노이즈 구간이
+                # 섞여 들어와 He/ZA contrast의 median이 음수로 끌려간다(2026-08-10 NO2
+                # 인젝션 재현 중 발견 — fit window 안에서는 contrast +6~+22%로 정상인데
+                # 전체 범위로 재면 -15%가 나와 R-cal이 거짓으로 실패했음).
+                _pmin = max(0, int(self.pixel_min))
+                _pmax = min(len(wave_nm) - 1, int(self.pixel_max) - 1) if self.pixel_max else len(wave_nm) - 1
+                roi_lo, roi_hi = float(wave_nm[_pmin]), float(wave_nm[_pmax])
+                if roi_lo > roi_hi:
+                    roi_lo, roi_hi = roi_hi, roi_lo
                 _w, _rraw, r_fit, omr_d_fit = rc.calculate(
                     wave_nm, min_valid_fraction=0.30, roi_min=roi_lo, roi_max=roi_hi)
                 omr_d_fit = np.maximum(np.asarray(omr_d_fit, dtype=float), 1e-12)
@@ -1925,7 +1941,11 @@ class AlphaExportWorker(QThread):
                 if not _pair_use_sec:   # 두 축이 안 맞으면 인덱스로 통일(무회귀)
                     _za_key = np.asarray(za_gidx, dtype=float)
                     _he_key = np.asarray(he_gidx, dtype=float)
-                _roi_lo, _roi_hi = float(np.nanmin(wave_nm)), float(np.nanmax(wave_nm))
+                _pmin2 = max(0, int(self.pixel_min))
+                _pmax2 = min(len(wave_nm) - 1, int(self.pixel_max) - 1) if self.pixel_max else len(wave_nm) - 1
+                _roi_lo, _roi_hi = float(wave_nm[_pmin2]), float(wave_nm[_pmax2])
+                if _roi_lo > _roi_hi:
+                    _roi_lo, _roi_hi = _roi_hi, _roi_lo
                 _knots = []
                 for _i in range(len(za_gidx)):
                     _j = int(np.argmin(np.abs(_he_key - _za_key[_i])))   # 최근접 He 블록

@@ -1,7 +1,51 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-08-12** (이번 세션 — 이전 2026-05-27 노트는 §0 이하 유지)
+> 최종 업데이트: **2026-08-14** (이번 세션 — 이전 2026-05-27 노트는 §0 이하 유지)
+
+---
+
+## 2026-08-14 세션 — 멀티채널 결과 테이블 더블클릭 리플레이 버그 3건
+
+`app_window.py`의 `on_table_double_click`(결과행 더블클릭 → 오른쪽 Analysis Monitor에 fit
+리플레이)이 멀티채널 모드에서 사실상 항상 조용히 실패하던 걸 발견·수정. 전부 같은 뿌리:
+GUI가 "활성 채널" 상태를 `self.engine` / `self.file_list` / `txt_min`·`txt_max` 라는
+**공유 슬롯 하나**에 담아두고, 채널 탭 전환마다 `_channel_configs`/`_channel_files`에
+스냅숏·복원하는 구조라서, 비활성 채널의 데이터를 건드리는 코드는 매번 재구성이 필요했는데
+안 하고 있었음.
+
+1. **파일 lookup이 활성 탭 채널로만 스코프됨**: `self.file_list`는 지금 선택된 채널 탭의
+   파일만 담고 있는데, 결과 테이블은 전 채널을 한 테이블에 같이 보여줌 → 다른 채널 탭을 보는
+   동안 결과행을 더블클릭하면 "파일 못 찾음"으로 조용히 실패. `_entry_from_display_name`에
+   `file_list` 인자를 추가해 클릭한 행의 채널(`self._channel_files[ch]`)에서 찾도록 수정.
+2. **채널탭 전환 시 결과 테이블이 통째로 사라짐**: `_show_channel_files`가 탭 바꿀 때마다
+   `self.table.clearContents()`로 "그 채널의 입력파일 목록" 미리보기를 새로 그려서, 피팅
+   끝낸 뒤 탭을 바꾸면 결과가 화면에서 사라진 것처럼 보였음(`self.results`엔 남아있었음).
+   `self.results`가 있으면 테이블을 건드리지 않도록 가드 추가.
+3. **비활성 채널 리플레이가 활성 탭의 엔진/레인지로 잘못 계산됨**: `self.engine`/`txt_min`/
+   `txt_max`가 활성 탭 것만 반영하므로, 다른 채널 결과를 리플레이하면 엉뚱한 레퍼런스·wavecal·
+   핏레인지로 재계산되고 있었음. `_build_engine_from_config`(원래 병렬 fit worker용으로 있던
+   함수)를 재사용해 클릭한 결과 채널의 임시 엔진을 만들어 리플레이하도록 수정.
+
+부수적으로: 파일명에서 스캔 row index를 항상 0으로 가정하던 버그도 같이 발견·수정
+(`_row_index_from_display_name` 신설 — 테이블 표시명 끝의 `[NNNN]`에서 실제 row를 파싱),
+그리고 `on_table_double_click`이 raw 파일을 원시 `DataIO.load_measurement`(고정 컬럼수
+CSV 파서)로 읽어서 `alpha_trace.dat`(가변 컬럼) 형식에서 tokenizing 에러가 나던 것도
+`DataIO.load_measurement_with_hk`(alpha_trace/Mega-Matrix/1D 전부 처리)로 통일해 해결.
+
+**후속 회귀 (같은 세션에서 바로 발견·수정)**: 위 2번 가드(`self.results`가 있으면 탭 전환 시
+표를 안 건드림)가 너무 거칠었음 — 예전 Run의 stale한 `self.results`가 남아있는 채로 **새
+데이터를 로드**하면, 채널탭을 눌러도 그 채널의 새 파일목록이 안 보이고 계속 이전(첫번째) 탭의
+내용만 보여서 "채널별로 데이터가 잘 들어갔는지 확인이 안 됨" 문제가 생겼음. `_update_file_table`
+/ `_distribute_channels`(둘 다 새 데이터 로드 진입점) 맨 앞에 `self.results = []`를 추가해
+해결 — 새 파일셋을 로드하면 그 전 Run의 결과는 어차피 이 파일셋에 대한 게 아니므로 자동 무효화.
+
+**구조적 부채 (의도적으로 보류)**: 위 3버그가 전부 "GUI는 활성 채널 하나만 공유 슬롯에 담고
+스냅숏/복원"하는 설계에서 나옴. 실제 피팅 Worker는 이미 채널마다 완전히 독립된 엔진 인스턴스를
+쓰는데, 인터랙티브 GUI만 이 패턴을 안 따름. 근본 해법은 GUI도 `self._channel_engines[ch]`처럼
+채널별 영구 엔진 인스턴스를 갖고 탭 전환은 "어느 걸 보여줄지"만 바꾸는 구조로 가는 것 —
+그런데 Setup/레퍼런스락 UI 전반을 건드리는 큰 리팩터라 지금은 보류. **이런 유형("비활성 채널
+데이터를 만지면 어긋남") 버그가 더 나오면 그때 구조 개편을 검토할 것.**
 
 ---
 
@@ -27,13 +71,22 @@
    - `run_alpha.py` 진단 스크립트가 물리식을 재구현하지 않고 `worker.py`의 순수함수를 재사용하도록 정리
      (단일 출처 원칙 준수).
 
+### 완료 — 2026-08-13 세션에서 이어받아 끝낸 것
+
+**α Health 탭 → 전체 파이프라인 헬스체크 전환** ✅ 완료
+- `app_window.py`의 `"🩺 α Health"` 탭을 `"🩺 Pipeline Health"`로 확장. 기존 `_alpha_qc_scan_folder`
+  (알파 파일 스캔)는 그대로 두고, `core/health_checks.py`의 wavecal·references·Rayleigh·R 체크를
+  같이 돌려 PASS/WARN/FAIL/SKIP 하나로 종합 판정.
+- 같은 세션에서 `core/fitset_builder.build_fitset()`에도 `check_wavecal`/`check_references`를
+  후보 refs셋 평가 전 게이트로 연결(fit_optimizer_handoff.md §10-C.4) — 연결 과정에서
+  `check_references`의 절대-std 평평함 판정 버그(O4를 항상 퇴화로 오판)도 발견·수정.
+  `tools/test_health_checks.py` 신규.
+
 ### 미완료 — 다음에 이어받을 것
 
-**α Health 탭 → 전체 파이프라인 헬스체크 전환 (착수 전)**
-- 현재 `app_window.py`의 `_alpha_qc_scan_folder`(~L1962)는 `*_alpha_trace.dat` 파일만 스캔하는
-  **알파 전용** QC. 탭 이름도 여전히 `"🩺 α Health"`.
-- 의도했던 것: raw → α → DOAS 피팅 전체 파이프라인 단계를 아우르는 헬스체크 탭으로 확장.
-- **아직 코드에 반영 안 됨** — 다음 세션에서 범위(어느 단계까지 체크할지)부터 정하고 시작할 것.
+(현재 없음 — 위 항목까지 완료된 상태. `docs/Oculus_설계_2026-07.md` §7·§8을 보면 Oculus
+M0~M3도 이후 완료됨. NIER 제출(R0, 8/14 마감) 관련은 별도 워크플로,
+`docs/NO2_인젝션_실험_핸드오프_2026-08.md` 참조.)
 
 ### 알아둘 것 — dirty 상태로 남겨둔 것들
 

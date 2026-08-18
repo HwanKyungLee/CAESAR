@@ -1,0 +1,24 @@
+{
+  "_comment": "tools/optimize_params.py 등 DOAS 파라미터 최적화 CLI가 쓰는 채널 설정. 새 채널이 생기면(예: CAESAR 한 대가 3캐비티로 재구성) 여기 channels에 항목만 추가하면 된다 — Python 코드 수정 불필요. wavecal_dir/alpha_glob은 실제로 그 채널의 wavecal·알파가 저장된 폴더명과 맞아야 한다.",
+  "wavecal_root": "C:/Doasis_Work/Output/wv_cal",
+  "alpha_root": "C:/Doasis_Work/Output/alpha",
+  "alpha_bin": "60s",
+  "channels": {
+    "cold": {
+      "label": "cold",
+      "wavecal_dir": "cold",
+      "alpha_glob": "cold/*/*_cold_alpha_trace.dat",
+      "golden_date_range": ["2026-05-26", "2026-06-13"]
+    },
+    "ans": {
+      "label": "ANs",
+      "wavecal_dir": "roi1",
+      "alpha_glob": "hot/ch1/*/*_ANs_alpha_trace.dat"
+    },
+    "pns": {
+      "label": "PNs",
+      "wavecal_dir": "roi2",
+      "alpha_glob": "hot/ch2/*/*_PNs_alpha_trace.dat"
+    }
+  }
+}

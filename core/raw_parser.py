@@ -153,6 +153,26 @@ SPEC_CH2_UV  = SPEC_SECONDARY      # MATLAB "ch2"
 
 HK_START = META_COLS + 2 * CH_PIXELS                  # 6149
 
+
+def spec_blocks_for_ncols(ncols: int) -> dict[str, tuple[int, int]]:
+    """등록 안 된(cold/hot 둘 다 아닌) raw 구성을 위한 구조적 폴백.
+
+    CAESAR는 캐비티 수가 재구성될 수 있다(2025년엔 실제로 3채널 빌드가 있었다 —
+    이 파일 위 SPEC_BLOCK_A 주석 참조; 2026 cold/hot는 그 중 1~2개만 씀).
+    `_detect_layout`이 아는 두 ncols(6179/6181) 중 어느 쪽도 아니면, 여기서
+    META_COLS 이후를 CH_PIXELS 폭으로 순서대로 채널 블록을 추론한다 —
+    `core/data_io.py`의 `_detect_n_channels_from_row`/동적 슬롯 계산과 같은 트릭
+    (HK 블록 폭이 CH_PIXELS보다 훨씬 작다는 전제, 현재 30~32컬럼이라 성립).
+
+    HK 맵은 여기서 못 만든다 — 실제 센서 배치는 열 수만으론 안 나온다(추측하면
+    조용히 틀린 HK를 만드는 게 더 위험). 새 구성의 HK 레이아웃이 확인되면
+    `_detect_layout`에 그 ncols 항목을 추가할 것. 어떤 블록이 실제 신호를 담고
+    있는지(신호 vs 노이즈)도 이 함수는 모른다 — 그건 `DataIO._detect_n_channels_from_row`가
+    이미 하는 일이라 여기서 중복 구현하지 않는다."""
+    n_slots = max(0, (ncols - META_COLS) // CH_PIXELS)
+    return {f"ch{i}": (META_COLS + (i - 1) * CH_PIXELS, META_COLS + i * CH_PIXELS)
+            for i in range(1, n_slots + 1)}
+
 # Standard meta columns
 COL_TIME_LO = 0
 COL_TIME_HI = 1
@@ -342,10 +362,14 @@ class RawParser:
                 },
                 mtime=mtime,
             )
+        # 등록 안 된 구성(예: 세 번째 캐비티가 켜진 CAESAR) — HK는 모르지만 스펙트럼
+        # 블록은 구조적으로 추론해서 R 계산 등 스펙트럼 레벨 도구는 그대로 돌게 한다.
+        # 실제 HK 레이아웃이 확인되면 위에 (ncols, kind, HotHKMap류) 항목을 추가할 것.
+        blocks = spec_blocks_for_ncols(ncols)
         return FileLayout(
-            path=path, ncols=ncols, kind="unknown",
+            path=path, ncols=ncols, kind=f"unknown({len(blocks)}ch structural)",
             hk_map={},
-            spec_blocks={},
+            spec_blocks=blocks,
             mtime=mtime,
         )
 
@@ -520,5 +544,6 @@ __all__ = [
     "FLAG_STABLE", "FLAG_TRANSITIONAL", "FLAG_NAMES",
     "SPEC_PRIMARY", "SPEC_SECONDARY", "SPEC_BLOCK_A",
     "SPEC_CH1_NO2", "SPEC_CH2_UV",   # legacy aliases
+    "spec_blocks_for_ncols",         # 미등록 구성용 구조적 폴백
     "P_SCALE", "LABVIEW_REF_SEC_2026", "LABVIEW_EPOCH", "KST",
 ]

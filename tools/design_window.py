@@ -2,7 +2,7 @@
 
 완전 처음 피팅하는 상황을 전제: 레퍼런스 + 웨이브칼 + 알파만으로 창·poly를 추천한다.
 
-사용:  python tools/design_window.py [cold|ans|pns]
+사용:  python tools/design_window.py [키]   (키 목록은 tools/channel_map.json 참조)
 """
 import os
 import sys
@@ -68,9 +68,7 @@ def main():
 
     # 레퍼런스 취사(핏 없이): O4를 넣으면 이득인가?
     print(f"\n[레퍼런스 취사 — 핏 없이 판단]")
-    o4p = {"cold": r"C:\Doasis_Work\Output\wv_cal\cold\Ref_O4_Dynamic-ILS-Applied.dat",
-           "ans": r"C:\Doasis_Work\Output\wv_cal\roi1\Ref_O4_Dynamic-ILS-Applied.dat",
-           "pns": r"C:\Doasis_Work\Output\wv_cal\roi2\Ref_O4_Dynamic-ILS-Applied.dat"}[key]
+    o4p = OP.ref_path(key, "Ref_O4_Dynamic-ILS-Applied.dat")
     if os.path.exists(o4p) and "O4" not in eng.gas_list:
         eng.add_reference(name="O4", filepath=o4p,
                           wave_nm=np.asarray(eng._wave_axis).flatten(), multiplier=1.0)
