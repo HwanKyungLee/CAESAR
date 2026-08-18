@@ -40,7 +40,7 @@ RAW_DAT = os.path.join(DROPBOX, r"CAESAR_Hot\2026-05\2026-05-18-001.dat")
 RAW_MAT = os.path.join(DROPBOX, r"CAESAR_Hot\2026-05\2026-05-18-001.mat")
 WAVECAL = os.path.join(OUT, r"wv_cal\cold\Calib_20260523_Hg_4line_400-497nm_Poly2.txt")
 ILS_REF = os.path.join(OUT, r"wv_cal\cold\Ref_NO2_Dynamic-ILS-Applied.dat")
-RAW_XS  = r"C:\Doasis_Work\Reference raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt"
+RAW_XS  = r"C:\Doasis_Work\reference_raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt"
 R_NPZ   = os.path.join(OUT, r"R\R_cold.npz")
 # 일별 버킷 구조({config}/{YYMMDD}/{neg}/{QC}) — 2* 패턴이라 _archive/_derived는 안 걸림.
 # config 폴더명은 사용자 실측 콜드 핏창(438.4-475.8nm, §13-B)과 일치하는 걸 고정.

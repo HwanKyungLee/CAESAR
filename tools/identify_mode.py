@@ -46,8 +46,8 @@ def candidate(path):
     f = interp1d(wref, iref, kind="cubic", bounds_error=False, fill_value="extrapolate")
     return hp(f(wl0))
 
-O4 = candidate(r"C:\Doasis_Work\Reference raw\O4_ThalmanVolkamer(2013)_293K_335.749-600.802nm.txt")
-NO2 = candidate(r"C:\Doasis_Work\Reference raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt")
+O4 = candidate(r"C:\Doasis_Work\reference_raw\O4_ThalmanVolkamer(2013)_293K_335.749-600.802nm.txt")
+NO2 = candidate(r"C:\Doasis_Work\reference_raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt")
 M = hp(mean_r); P1 = hp(mode1)
 
 def corr(a, b): return float(np.corrcoef(a, b)[0, 1])
