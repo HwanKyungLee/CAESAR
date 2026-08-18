@@ -3781,6 +3781,7 @@ class CAESARAnalyzer(QMainWindow):
                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if ret != QMessageBox.StandardButton.Yes:
             return False
+        self.results = []   # 새로 분배한 파일셋에 대한 결과가 아니므로 이전 Run 결과 무효화
         for ch, key in mapping.items():
             # 파일명(날짜+스캔) 기준 정렬 — 폴더가 흩어져도 시간순 보장(전체경로 정렬 X)
             self._channel_files[ch] = sorted(groups[key], key=lambda f: os.path.basename(f))
@@ -3841,9 +3842,33 @@ class CAESARAnalyzer(QMainWindow):
         """Returns the scan row index (0 for single-scan / plain files)."""
         return entry[1] if isinstance(entry, tuple) else 0
 
-    def _entry_from_display_name(self, display_name):
-        """Finds the file_list entry whose display name matches display_name."""
-        return next((e for e in self.file_list if self._entry_display_name(e) == display_name), None)
+    @staticmethod
+    def _row_index_from_display_name(display_name):
+        """Table display names always end in ' [NNNN]' (worker.py appends the scan's
+        real row index even for single-scan files — see _write_row_cells/'File').
+        A plain (non-tuple) file_list entry has no row index of its own, so pull the
+        actual scan row straight out of that suffix instead of assuming 0 — a multi-
+        scan file (Mega-Matrix/alpha_trace) needs the real row to re-load the right
+        scan, not just its first one."""
+        m = re.search(r'\[(\d+)\]\s*$', display_name)
+        return int(m.group(1)) if m else 0
+
+    def _entry_from_display_name(self, display_name, file_list=None):
+        """Finds the file_list entry for display_name's file, ignoring the trailing
+        ' [NNNN]' scan-row suffix for plain entries (which don't carry a row index —
+        use _row_index_from_display_name for that).
+
+        file_list defaults to self.file_list (the currently active channel tab's
+        files) but callers that already know which channel the display_name belongs
+        to (e.g. a multi-channel results table row) should pass that channel's own
+        list explicitly — self.file_list only ever holds one channel's files."""
+        for e in (self.file_list if file_list is None else file_list):
+            if isinstance(e, tuple):
+                if self._entry_display_name(e) == display_name:
+                    return e
+            elif display_name.startswith(os.path.basename(e) + " ["):
+                return e
+        return None
 
     # ────────────────────────────────────────────────────────────────────────
 
@@ -3857,6 +3882,11 @@ class CAESARAnalyzer(QMainWindow):
         After loading, auto-detect the channel count from the first file.
         """
         self.file_list = list(file_list)          # plain strings only — no expansion here
+        # 새 데이터를 로드하면 이전 Run의 결과는 이 파일셋에 대한 게 아니므로 무효 —
+        # 지워야 _show_channel_files의 '결과 있으면 표 유지' 가드가 새로 로드한 파일목록을
+        # 계속 가리지 않는다(안 지우면 채널탭 넘겨봐도 예전 결과화면이 계속 붙어있어 다른
+        # 채널에 데이터가 제대로 들어갔는지 확인이 안 됨).
+        self.results = []
         # 로드한 데이터를 '현재 활성 채널'이 소유(자동분배 X) — RUN이 채널마다 자기 리스트로 핏
         if getattr(self, '_active_channel', None) is not None:
             self._channel_files[self._active_channel] = list(self.file_list)
@@ -5453,70 +5483,131 @@ class CAESARAnalyzer(QMainWindow):
         that file, then sends the result to the monitor — allowing you to inspect
         any individual spectrum without re-running the full analysis.
         """
+        def _fail(msg):
+            self.status.setText(f"⚠ Double-click: {msg}")
+            self.status.setStyleSheet("color: red; font-weight: bold;")
+
+        # Bring the Analysis Monitor into view regardless of which main tab the
+        # user is currently looking at — otherwise the replay can render correctly
+        # in the background while looking, from the user's seat, like nothing happened.
+        try:
+            self.main_tabs.setCurrentWidget(self._tab_pages.get(self.monitor, self.monitor))
+        except Exception:
+            pass
+
         # File name lives in col 0 normally, but col 1 when the "Ch" column is
         # prepended in multi-channel mode.
         fc = 1 if getattr(self, '_multi_channel_mode', False) else 0
         item = self.table.item(row, fc)
         if item is None:
+            _fail(f"no cell at row {row}, col {fc}")
             return
         fname = item.text()
-        entry = self._entry_from_display_name(fname)
+
+        # 클릭한 행의 채널부터 먼저 알아낸다 — 결과 테이블은 모든 채널 탭의 결과를 한
+        # 테이블에 같이 보여주지만, 그 파일 경로는 self.file_list(= 지금 선택돼 있는 채널
+        # 탭의 파일목록)가 아니라 self._channel_files[그 행의 채널]에만 들어있다. 예전엔
+        # self.file_list만 뒤져서, CH3 탭을 보고 있는 동안 CH1/CH2 결과행을 더블클릭하면
+        # "파일을 못 찾음"으로 조용히 실패했다(지금은 메시지로 뜸).
+        ch_txt = self.table.item(row, 0).text() if fc == 1 else ''
+        want_ch = int(ch_txt.replace('CH', '')) if ch_txt.startswith('CH') else None
+        search_list = self._channel_files.get(want_ch, self.file_list) if want_ch else self.file_list
+
+        entry = self._entry_from_display_name(fname, search_list)
         if not entry:
+            _fail(f"'{fname}' not found in CH{want_ch or self._active_channel}'s file list "
+                  "(switch to that channel's tab and try again)")
             return
         filepath = self._entry_filepath(entry)
-        row_idx  = self._entry_row_index(entry)
+        row_idx  = self._row_index_from_display_name(fname)
 
         # 파일명으로 결과 조회 (행 인덱스가 아니라 → 정렬/순서 어긋나도 안전).
         # 멀티채널이면 같은 파일명이 채널마다 있을 수 있으니 클릭한 행의 채널까지 일치시킨다.
-        ch_txt = self.table.item(row, 0).text() if fc == 1 else ''
-        want_ch = int(ch_txt.replace('CH', '')) if ch_txt.startswith('CH') else None
         def _match(r):
             if r.get('File') != fname:
                 return False
             return want_ch is None or int(r.get('Channel', 1)) == want_ch
         _res = (self.results[row] if (row < len(self.results) and _match(self.results[row]))
                 else next((r for r in self.results if _match(r)), None))
-        if _res is not None:
-            params = _res.get('Params')
-            if params is None:
-                return
+        if _res is None:
+            _fail(f"no stored result matches '{fname}'" + (f" CH{want_ch}" if want_ch else ""))
+            return
+        params = _res.get('Params')
+        if not params:
+            _fail(f"'{fname}' has no saved fit parameters (Status={_res.get('Status', '?')})")
+            return
 
-            # 클릭한 결과의 채널로 Monitor 표시채널을 맞춰 채널필터에 막히지 않게 한다.
+        # 클릭한 결과의 채널로 Monitor 표시채널을 맞춰 채널필터에 막히지 않게 한다.
+        ch = 1
+        try:
+            ch = int(params.get('channel', _res.get('Channel', 1)))
+            if hasattr(self.monitor, 'cb_fit_channel'):
+                self.monitor.cb_fit_channel.setCurrentIndex(max(0, min(ch - 1, self.monitor.cb_fit_channel.count() - 1)))
+        except Exception:
+            pass
+
+        # self.engine / txt_min / txt_max only ever reflect the currently active
+        # channel TAB (_apply_config swaps them on every tab switch) — if the
+        # clicked result is a different channel, replaying with them would rebuild
+        # the model using the wrong references/wavecal/fit-range. Build that
+        # channel's own (throwaway) engine instead, same as the parallel-fit
+        # workers already do via _build_engine_from_config.
+        replay_engine = self.engine
+        f_min_txt, f_max_txt = self.txt_min.text(), self.txt_max.text()
+        if ch != self._active_channel:
+            cfg = self._channel_configs.get(ch)
+            if cfg is not None:
+                try:
+                    replay_engine = self._build_engine_from_config(cfg)
+                    f_min_txt = cfg.get('f_min', f_min_txt)
+                    f_max_txt = cfg.get('f_max', f_max_txt)
+                except Exception as e:
+                    print(f"Replay: falling back to active engine for CH{ch}: {e}")
+
+        try:
+            f_min, f_max = int(f_min_txt), int(f_max_txt)
+
+            # load_measurement_with_hk handles alpha_trace.dat, Araon Mega-Matrix,
+            # and plain 1D spectra internally — unlike the naive load_measurement
+            # (fixed column-count CSV parser), which chokes on alpha_trace.dat's
+            # ragged field counts. Always route through it, passing the fit's own
+            # channel so Mega-Matrix multi-channel rows slice the right columns.
+            pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(
+                filepath, f_min, f_max, row_index=row_idx, channel=ch)
+
+            intensity_fit, _, intensity_poly, _, _ = replay_engine.get_model_components(
+                pixel_idx,
+                shifts=params['shifts'],
+                squeezes=params['squeezes'],
+                gas_coeffs=params['gas_coeffs'],
+                poly_coeffs=params['poly_coeffs'],
+                etalon_amp=params.get('etalon_amp', 0.0),
+                etalon_freq=params.get('etalon_freq', 0.0),
+                etalon_phase=params.get('etalon_phase', 0.0)
+            )
+
+            self.monitor.tabs.setCurrentIndex(0)
+
+            # Components 탭도 replay_engine의 gas_list/interpolators로 그려야 하므로
+            # monitor의 엔진 참조를 렌더링 동안만 바꿔치기하고 원복한다.
+            old_monitor_engine = self.monitor.engine
+            self.monitor.engine = replay_engine
             try:
-                ch = int(params.get('channel', _res.get('Channel', 1)))
-                if hasattr(self.monitor, 'cb_fit_channel'):
-                    self.monitor.cb_fit_channel.setCurrentIndex(max(0, min(ch - 1, self.monitor.cb_fit_channel.count() - 1)))
-            except Exception:
-                pass
-
-            try:
-                f_min, f_max = int(self.txt_min.text()), int(self.txt_max.text())
-
-                # For Araon Mega-Matrix entries use HK loader to get the correct row
-                if isinstance(entry, tuple):
-                    pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(
-                        filepath, f_min, f_max, row_index=row_idx)
-                else:
-                    pixel_idx, intensity_raw = DataIO.load_measurement(filepath, f_min, f_max)
-                
-                intensity_fit, _, intensity_poly, _, _ = self.engine.get_model_components(
-                    pixel_idx, 
-                    shifts=params['shifts'], 
-                    squeezes=params['squeezes'], 
-                    gas_coeffs=params['gas_coeffs'], 
-                    poly_coeffs=params['poly_coeffs'],
-                    etalon_amp=params.get('etalon_amp', 0.0),
-                    etalon_freq=params.get('etalon_freq', 0.0),
-                    etalon_phase=params.get('etalon_phase', 0.0)
-                )
-                
-                self.monitor.tabs.setCurrentIndex(0) 
-                
                 self.monitor.update_spectrum(
                     pixel_idx, intensity_raw, intensity_fit, intensity_poly, params, f"{fname} (Replay)"
                 )
-            except Exception as e: 
-                print(f"Double-click viewer failed to load: {e}")
+            finally:
+                self.monitor.engine = old_monitor_engine
+            view_ch = getattr(self.monitor, '_view_channel', 1)
+            if view_ch != ch:
+                _fail(f"replay is CH{ch} but Monitor 'Show channel' is stuck on CH{view_ch} "
+                      "— plot was skipped by the channel filter.")
+            else:
+                self.status.setText(f"✅ Replay: {fname} (CH{ch})")
+                self.status.setStyleSheet("color: green;")
+        except Exception as e:
+            print(f"Double-click viewer failed to load: {e}")
+            _fail(f"failed to load '{fname}': {e}")
                 
     def on_table_single_click(self, row, col):
         # 결과가 있으면 클릭만으로 그 스캔 fit 그래프(리플레이) 표시; 없으면 기존 raw 뷰어.
@@ -5551,12 +5642,9 @@ class CAESARAnalyzer(QMainWindow):
             entry = self._entry_from_display_name(fname)
             if entry:
                 fp  = self._entry_filepath(entry)
-                ri  = self._entry_row_index(entry)
+                ri  = self._row_index_from_display_name(fname)
                 try:
-                    if isinstance(entry, tuple):
-                        pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(fp, pixel_min=0, row_index=ri)
-                    else:
-                        pixel_idx, intensity_raw = DataIO.load_measurement(fp, pixel_min=0)
+                    pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(fp, pixel_min=0, row_index=ri)
                     self.monitor.plot_viewer(pixel_idx, intensity_raw, f"Meas: {fname}", 'b')
                 except Exception as e:
                     print(f"Viewer load failed: {e}")
@@ -5643,8 +5731,16 @@ class CAESARAnalyzer(QMainWindow):
         self._show_channel_files(ch)
 
     def _show_channel_files(self, ch):
-        """선택 채널이 보유한 파일 리스트를 표에 표시(소유권은 그대로)."""
+        """선택 채널이 보유한 파일 리스트를 표에 표시(소유권은 그대로).
+
+        피팅 결과가 이미 있으면(self.results) 표는 건드리지 않는다 — 멀티채널 결과 테이블은
+        모든 채널을 한 표에 같이 보여주는 게 원래 의도라(Ch 칼럼으로 구분), 탭을 바꿀 때마다
+        그 채널의 '입력 파일 목록' 미리보기로 표를 갈아치우면 방금 돌린 피팅 결과가 통째로
+        사라진 것처럼 보인다. file_list 자체는(Setup 등 다른 코드가 참조하므로) 그대로 갱신한다."""
         self.file_list = list(self._channel_files.get(ch, []))
+        if self.results:
+            self.status.setText(f"📁 CH{ch} config — results table kept ({len(self.results)} rows)")
+            return
         self.table.setRowCount(len(self.file_list))
         self.table.clearContents()
         for i, fp in enumerate(self.file_list):
