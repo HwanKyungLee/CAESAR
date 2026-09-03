@@ -1,6 +1,6 @@
 # Fit Setting Explorer 설계 정본 (2026-09)
 
-> 상태: **설계 고정 / Phase A2 및 Explorer V1 synthetic 계약 완료 / 실데이터 골든 재측정 미완료**  
+> 상태: **설계 고정 / Phase A2·Explorer V1 synthetic·external suite 계약 완료 / 내구성 있는 portable 실데이터 증거 미완료**
 > 선행 문서: `docs/fit_optimizer_handoff.md`, `docs/NO2_인젝션_실험_핸드오프_2026-08.md`,
 > `docs/ANs_분석_핸드오프_2026-07-23.md`  
 > 골든 사례와 재현 메타데이터: `docs/fit_explorer_golden_inventory_2026-09.md`
@@ -179,8 +179,8 @@ T2 tri-state, 좌표·상태·출력 충돌 방지와 JSON/no-Apply 계약을 sy
 `allow_negative_gas`가 정확한 bool로
 저장되어 있지 않으면 CLI 플래그로 추정하지 않고 재저장/마이그레이션 전까지 `ABSTAIN`한다.
 
-실데이터 골든 재현, 파일 순서/표본 교체, worker end-to-end, optional external-data suite, halving,
-plateau/closure/ranking 불변식은 아직 완료가 아니다.
+external suite 계약/schema는 완료됐지만, 내구성 있는 portable 실데이터 골든 증거와 manifest/result
+체크포인트, 파일 순서/표본 교체, worker end-to-end, halving, plateau/closure/ranking은 아직 완료가 아니다.
 
 ## 7. ML·LLM과 탐색 가속
 
@@ -199,7 +199,7 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] Explorer V1 synthetic 계약: 3×3 × 대표 4스캔 × controlled start 2개, 보수적 T2, 원자적 보고서
 - [ ] 외부 실데이터의 현재 코드/hash 기준 골든 재측정과 fixture manifest
 - [x] synthetic CI 계약 테스트
-- [ ] optional external-data suite와 명시적 SKIP/mismatch 경로
+- [x] optional external-data suite: manifest 미지정만 SKIP, 명시 manifest의 missing/hash mismatch는 FAIL
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가

@@ -1,6 +1,6 @@
 # Fit Explorer 골든 데이터 인벤토리 (2026-09)
 
-> 상태: **증거 등급·기록 규격 및 Explorer V1 synthetic 계약 고정 / 실데이터 재측정 미완료**  
+> 상태: **ROI1 로컬 재측정 후보 확인 / 내구성 있는 manifest·결과 증거 및 cold·O4 재측정 미완료**
 > 설계 정본: `docs/fit_explorer_design_2026-09.md`
 
 ## 1. 증거 라벨
@@ -54,11 +54,11 @@ robustness plateau/closure 주장과 Apply는 범위 밖이다. 실행법은 인
 
 | 사례 | 과거 관측 | 증거 해석 | 현재 상태 |
 |---|---|---|---|
-| 고정 shift 약 −6 px | NO2 약 **95.9 ppb**, RMS/signal 약 **19.6%** | 명백히 나쁜 잔차의 실패 분기 재현 후보 | `HISTORICAL`, 재측정 필요 |
-| Center/저잔차 분기 | NO2 약 **3.6 ppb**, RMS/signal 약 **3.9%** | 당시 production과 일관된 저잔차 후보; 외부 진실 아님 | `HISTORICAL` + `CANDIDATE` |
+| 고정 shift −6 px, nonnegative gas | 로컬 재측정: NO2 **95.9193 ppb**, RMS/signal **19.6327%**, \|ac1\| **0.996908** | 고잔차/퇴화 의심 분기 | `CANDIDATE` |
+| 고정 shift −6 px, signed gas | 로컬 재측정: NO2 **3.61583 ppb**, RMS/signal **3.60902%**, \|ac1\| **0.174020** | production-consistent 저잔차 후보; 외부 진실 아님 | `CANDIDATE` |
 
 따라서 문서와 테스트에서 95.9 ppb 사례는 “틀린 농도라는 T3 정답”이 아니라 **같은 스캔에서 더 나쁜
-잔차·비물리적 분기 거동을 재현하는 failure fixture**로 쓴다. 약 3.6 ppb 사례는 “진짜 해”가 아니라
+잔차·퇴화 의심 분기 거동을 재현하는 failure fixture**로 쓴다. 약 3.6 ppb 사례는 “진짜 해”가 아니라
 **production-consistent candidate**라고 부른다.
 
 재측정 시 아래를 확정한다.
@@ -74,6 +74,19 @@ robustness plateau/closure 주장과 Apply는 범위 밖이다. 실행법은 인
 - etalon on/off, 주파수 범위와 검출값
 - T/P, gas temperature override와 cavity 관련 설정
 - 후보별 농도, RMS/signal, `|ac1|`, 수렴/경계 접촉, T2 상태
+
+2026-09-03 재측정은 `2026-07-03-001_ANs_alpha_trace.dat`의 `row_index=0`(파일 내 첫 데이터행),
+원본 FitSet SHA-256 `66c5835e…08505`, alpha SHA-256 `5a54b6a5…da01f`, wavecal
+`e5213305…22067`, ordered refs `CHOCHO/H2O/NO2`(`a3fd7313…a4c92`, `bcc69cd6…3965`,
+`9a0227d1…3ab1`)로 수행했다. FitSet 원본은 수정하지 않고 별도 복사본 두 개에 정확한 bool 정책과
+원본 hash를 기록했다. 두 실행은 window detector px `599..1270`(양끝 포함), poly 4, squeeze 1.0 Fix,
+shift −6 Fix이며 정책만 달랐다. 이 비교는 95 ppb 분기가 단순히 shift만의 속성이 아니라
+**gas 계수 부호 정책과 결합된 현상**임을 보여준다. signed 저잔차 후보 역시 T3 진실값은 아니다.
+
+실행 당시 committed HEAD는 `bde77d3…33de3`였고 외부 suite/마이그레이션 도구는 아직 untracked였다.
+로컬 manifest와 결과는 머신 절대경로와 전체 입력 hash를 보존했지만 내구성 있는 비민감 증거로
+커밋되지 않았다. 따라서 위 수치는 로컬 재측정 사실을 기록한 `CANDIDATE`이며, portable manifest와
+구조화 결과를 안전하게 보존하기 전에는 `REPRODUCED`로 승격하지 않는다.
 
 현재 checkout HEAD의 기준 hash는 실행 시 manifest에 다시 기록한다. working tree가 dirty이면 HEAD만으로
 재현성을 주장하지 말고 변경 diff hash도 함께 남긴다. 과거 `seed_range=15 px`, `seed_step=0.25 px`와
@@ -114,9 +127,9 @@ CI의 **synthetic 계약 테스트**는 과학적 진실을 증명하지 않고 
 좌표·상태, 안전한 JSON/no-Apply 경계만 검사한다. pruning, graph closure/plateau와 실데이터 manifest
 재현은 아직 이 테스트가 검증하지 않는다.
 
-실측 alpha/raw/R 파일을 쓰는 검사는 **optional external-data suite**로 분리한다. 필요한 manifest 또는
-환경 경로가 없으면 성공처럼 지나가지 말고, 이유가 명시된 `SKIP`을 출력한다. 파일이 일부만 있거나
-hash가 다르면 `SKIP`이 아니라 manifest mismatch `FAIL`로 처리한다. 외부 suite 결과는 다음을 남긴다.
+실측 alpha/raw/R 파일을 쓰는 검사는 **optional external-data suite**로 분리한다. manifest 인자와
+환경변수가 모두 없을 때만 이유가 명시된 `SKIP`을 출력한다. manifest가 명시된 뒤에는 필요한 파일이
+전부 없더라도 missing 또는 hash mismatch를 `FAIL`로 처리한다. 외부 suite 결과는 다음을 남긴다.
 
 - suite 버전, 현재 git/dirty hash, fixture manifest hash
 - 수행/실패/SKIP 사례 목록과 이유
