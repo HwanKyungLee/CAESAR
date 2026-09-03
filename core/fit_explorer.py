@@ -193,16 +193,23 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-def git_provenance(root):
+def git_provenance(root, excluded_paths=()):
     def run(*args):
         return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True,
                               text=True, encoding="utf-8", errors="replace").stdout
     head = run("rev-parse", "HEAD").strip()
-    diff = run("diff", "--binary", "HEAD").replace("\r\n", "\n").encode()
+    root_real = os.path.realpath(root)
+    excluded = sorted({os.path.relpath(os.path.abspath(p), root_real).replace("\\", "/")
+                       for p in excluded_paths
+                       if os.path.commonpath((root_real, os.path.realpath(p))) == root_real})
+    pathspec = ["."] + [f":(exclude){p}" for p in excluded]
+    diff = run("diff", "--binary", "HEAD", "--", *pathspec).replace("\r\n", "\n").encode()
     untracked = sorted(run("ls-files", "--others", "--exclude-standard").splitlines())
+    untracked = [p for p in untracked if p.replace("\\", "/") not in excluded]
     return {"head": head, "tracked_diff_sha256": hashlib.sha256(diff).hexdigest(),
             "untracked": [{"path": p.replace("\\", "/"), "sha256": sha256_file(os.path.join(root, p))}
-                          for p in untracked], "dirty": bool(diff or untracked)}
+                          for p in untracked], "dirty": bool(diff or untracked),
+            "excluded_paths": excluded}
 
 
 def finite_or_none(value):

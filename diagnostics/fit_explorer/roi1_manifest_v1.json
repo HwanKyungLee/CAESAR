@@ -1,0 +1,93 @@
+{
+  "schema_version": 2,
+  "suite_version": "1.1",
+  "dependencies": [
+    {
+      "id": "legacy_fitset",
+      "role": "legacy_fitset",
+      "path": "Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
+      "sha256": "66c5835e0e8ad94aca27b90ee41334177cb57dcb70deea2a8ed2219edda08505"
+    },
+    {
+      "id": "alpha_roi1",
+      "role": "alpha",
+      "path": "Output/alpha/60s/hot/ch1/2026-07-03/2026-07-03-001_ANs_alpha_trace.dat",
+      "sha256": "5a54b6a59794f850924257cca59b7e9fd0167a43fb36a16ce56ea1dd178da01f"
+    },
+    {
+      "id": "wavecal_roi1",
+      "role": "wavecal",
+      "path": "Output/wv_cal/roi1/Calib_20260619_Hg_400-499nm_Poly2.txt",
+      "sha256": "e521330577eb27fe6afa455e15f845c37f3ffb675ea0a241694d302238522067"
+    },
+    {
+      "id": "ref_chocho",
+      "role": "reference",
+      "path": "Output/wv_cal/roi1/Ref_CHOCHO_Dynamic-ILS-Applied.dat",
+      "sha256": "a3fd73133fbe6fdc13a6af4633d4db13804c45e422b95495ca9f3cb1887a4c92"
+    },
+    {
+      "id": "ref_h2o",
+      "role": "reference",
+      "path": "Output/wv_cal/roi1/Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat",
+      "sha256": "bcc69cd66eac8586b57a769ce51bf5ab75df30db2e7bc3b5022ff187f4db3965"
+    },
+    {
+      "id": "ref_no2",
+      "role": "reference",
+      "path": "Output/wv_cal/roi1/Ref_NO2_Dynamic-ILS-Applied.dat",
+      "sha256": "9a0227d1a16fa814c5386da9d906f5eeb0893549bee71a91e8334bc11f9d3ab1"
+    }
+  ],
+  "cases": [
+    {
+      "id": "roi1_nonnegative_high_residual",
+      "evidence_role": "high_residual_candidate",
+      "source_fitset_id": "legacy_fitset",
+      "alpha_id": "alpha_roi1",
+      "wavecal_id": "wavecal_roi1",
+      "reference_ids": ["ref_chocho", "ref_h2o", "ref_no2"],
+      "expected_references": [
+        {"dependency_id": "ref_chocho", "name": "CHOCHO", "mult": 0},
+        {"dependency_id": "ref_h2o", "name": "H2O", "mult": -12},
+        {"dependency_id": "ref_no2", "name": "NO2", "mult": 0}
+      ],
+      "expected_gas_order": ["CHOCHO", "H2O", "NO2"],
+      "channel_id": "1",
+      "row_index": 0,
+      "allow_negative_gas": false,
+      "fixed_shift": -6.0,
+      "fixed_squeeze": 1.0
+    },
+    {
+      "id": "roi1_signed_low_residual",
+      "evidence_role": "low_residual_candidate",
+      "source_fitset_id": "legacy_fitset",
+      "alpha_id": "alpha_roi1",
+      "wavecal_id": "wavecal_roi1",
+      "reference_ids": ["ref_chocho", "ref_h2o", "ref_no2"],
+      "expected_references": [
+        {"dependency_id": "ref_chocho", "name": "CHOCHO", "mult": 0},
+        {"dependency_id": "ref_h2o", "name": "H2O", "mult": -12},
+        {"dependency_id": "ref_no2", "name": "NO2", "mult": 0}
+      ],
+      "expected_gas_order": ["CHOCHO", "H2O", "NO2"],
+      "channel_id": "1",
+      "row_index": 0,
+      "allow_negative_gas": true,
+      "fixed_shift": -6.0,
+      "fixed_squeeze": 1.0
+    }
+  ],
+  "assertions": [
+    {
+      "id": "roi1_policy_branch_contrast",
+      "type": "paired_branch_contrast",
+      "high_case_id": "roi1_nonnegative_high_residual",
+      "low_case_id": "roi1_signed_low_residual",
+      "source": "same hash-pinned alpha row and fit configuration; only gas coefficient sign policy differs",
+      "strictly_greater": ["conc", "rms_sig", "abs_ac1"]
+    }
+  ],
+  "assertion_scope": "qualitative behavioral ordering only; not cross-platform numeric equivalence, scientific tolerance, concentration truth, T3, or plateau evidence"
+}

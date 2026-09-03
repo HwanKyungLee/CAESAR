@@ -1,6 +1,6 @@
 # Fit Explorer 골든 데이터 인벤토리 (2026-09)
 
-> 상태: **ROI1 로컬 재측정 후보 확인 / 내구성 있는 manifest·결과 증거 및 cold·O4 재측정 미완료**
+> 상태: **ROI1 portable 재현 증거 완료 / cold·O4 재측정 미완료**
 > 설계 정본: `docs/fit_explorer_design_2026-09.md`
 
 ## 1. 증거 라벨
@@ -54,8 +54,8 @@ robustness plateau/closure 주장과 Apply는 범위 밖이다. 실행법은 인
 
 | 사례 | 과거 관측 | 증거 해석 | 현재 상태 |
 |---|---|---|---|
-| 고정 shift −6 px, nonnegative gas | 로컬 재측정: NO2 **95.9193 ppb**, RMS/signal **19.6327%**, \|ac1\| **0.996908** | 고잔차/퇴화 의심 분기 | `CANDIDATE` |
-| 고정 shift −6 px, signed gas | 로컬 재측정: NO2 **3.61583 ppb**, RMS/signal **3.60902%**, \|ac1\| **0.174020** | production-consistent 저잔차 후보; 외부 진실 아님 | `CANDIDATE` |
+| 고정 shift −6 px, nonnegative gas | 로컬 재측정: NO2 **95.9193 ppb**, RMS/signal **19.6327%**, \|ac1\| **0.996908** | 고잔차 behavioral branch | `REPRODUCED` |
+| 고정 shift −6 px, signed gas | 로컬 재측정: NO2 **3.61583 ppb**, RMS/signal **3.60902%**, \|ac1\| **0.174020** | production-consistent 저잔차 behavioral branch; 외부 진실 아님 | `REPRODUCED` |
 
 따라서 문서와 테스트에서 95.9 ppb 사례는 “틀린 농도라는 T3 정답”이 아니라 **같은 스캔에서 더 나쁜
 잔차·퇴화 의심 분기 거동을 재현하는 failure fixture**로 쓴다. 약 3.6 ppb 사례는 “진짜 해”가 아니라
@@ -78,15 +78,27 @@ robustness plateau/closure 주장과 Apply는 범위 밖이다. 실행법은 인
 2026-09-03 재측정은 `2026-07-03-001_ANs_alpha_trace.dat`의 `row_index=0`(파일 내 첫 데이터행),
 원본 FitSet SHA-256 `66c5835e…08505`, alpha SHA-256 `5a54b6a5…da01f`, wavecal
 `e5213305…22067`, ordered refs `CHOCHO/H2O/NO2`(`a3fd7313…a4c92`, `bcc69cd6…3965`,
-`9a0227d1…3ab1`)로 수행했다. FitSet 원본은 수정하지 않고 별도 복사본 두 개에 정확한 bool 정책과
-원본 hash를 기록했다. 두 실행은 window detector px `599..1270`(양끝 포함), poly 4, squeeze 1.0 Fix,
-shift −6 Fix이며 정책만 달랐다. 이 비교는 95 ppb 분기가 단순히 shift만의 속성이 아니라
+`9a0227d1…3ab1`)로 수행했다. suite는 hash-pinned 원본 FitSet을 한 번 읽고 각 case의 런타임 복사본에
+정확한 bool 정책을 주입한다. 별도 migrated FitSet 파일은 증거 의존성이 아니다. 두 실행은 window
+detector px `599..1270`(양끝 포함), poly 4, squeeze 1.0 Fix, shift −6 Fix이며 정책만 달랐다.
+이 비교는 95 ppb 분기가 단순히 shift만의 속성이 아니라
 **gas 계수 부호 정책과 결합된 현상**임을 보여준다. signed 저잔차 후보 역시 T3 진실값은 아니다.
 
-실행 당시 committed HEAD는 `bde77d3…33de3`였고 외부 suite/마이그레이션 도구는 아직 untracked였다.
-로컬 manifest와 결과는 머신 절대경로와 전체 입력 hash를 보존했지만 내구성 있는 비민감 증거로
-커밋되지 않았다. 따라서 위 수치는 로컬 재측정 사실을 기록한 `CANDIDATE`이며, portable manifest와
-구조화 결과를 안전하게 보존하기 전에는 `REPRODUCED`로 승격하지 않는다.
+내구성 있는 증거는 `diagnostics/fit_explorer/roi1_manifest_v1.json`과
+`roi1_result_v1.json`에 있다. manifest에는 데이터 루트 아래의 논리 상대경로·basename·SHA-256만
+있으며 raw/alpha/reference 파일 자체는 커밋하지 않는다. `<LOCAL_DATA_ROOT>`는
+실행 때만 `--data-root`로 주며 결과에 기록되지 않는다. 재실행은 다음과 같다.
+
+```bash
+python tools/test_fit_explorer_external.py --manifest diagnostics/fit_explorer/roi1_manifest_v1.json --data-root <LOCAL_DATA_ROOT>
+```
+
+결과는 생성 기준 commit `fd5f93d…8641b`, 그 이후 suite 변경의 tracked diff hash, manifest hash와
+artifact self-exclusion을 명시한다. 두 `REPRODUCED` 라벨은 hash-pinned 입력에서 현재 코드가 동일한
+두 **정책 상호작용의 behavioral branch**를 재실행한다는 뜻일 뿐, ROI1의 물리 채널 정체성,
+3.6 ppb의 진실성, robustness plateau 또는 full golden/T2 검증을 뜻하지 않는다.
+manifest의 회귀 판정도 nonnegative 분기의 농도·RMS/signal·`|ac1|`가 signed 분기보다 각각 크다는
+**정성적 순서 불변식**뿐이다. 이는 플랫폼 간 수치 동등성이나 과학적 tolerance를 정의하지 않는다.
 
 현재 checkout HEAD의 기준 hash는 실행 시 manifest에 다시 기록한다. working tree가 dirty이면 HEAD만으로
 재현성을 주장하지 말고 변경 diff hash도 함께 남긴다. 과거 `seed_range=15 px`, `seed_step=0.25 px`와
@@ -137,9 +149,9 @@ CI의 **synthetic 계약 테스트**는 과학적 진실을 증명하지 않고 
 
 ## 8. 아직 필요한 인벤토리 작업
 
-1. 로컬 데이터에서 ROI1 failure/production-consistent 후보의 정확한 파일·행을 다시 찾는다.
-2. 필요한 최소 행과 wavecal/reference/R 의존성을 manifest로 고정한다.
-3. 재배포 가능 여부를 확인하고, 불가하면 외부 suite 전용으로 유지한다.
+1. ~~로컬 데이터에서 ROI1 failure/production-consistent 후보의 정확한 파일·행을 다시 찾는다.~~
+2. ~~필요한 alpha·wavecal·reference·FitSet 의존성을 portable manifest로 고정한다.~~
+3. raw data는 커밋하지 않고 외부 suite 전용으로 유지한다.
 4. current code에서 fixed shift grid와 default/Center 경로를 둘 다 재측정한다.
 5. O4 사례를 동일 manifest로 재실행해 T2 tri-state와 magnitude 판정을 확인한다.
-6. 그 뒤에만 사례를 `HISTORICAL`/`CANDIDATE`에서 `REPRODUCED`로 승격한다.
+6. cold/O4는 그 뒤에만 `HISTORICAL`에서 `REPRODUCED`로 승격한다.

@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import math
 import os
+import platform
 import sys
 import time
+
+import numpy as np
+import scipy
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -19,14 +24,24 @@ from core.doas_fit import DoasFitter
 from tools.migrate_fitset_policy import sha256
 from tools.optimize_params import build_engine_from_config
 
-SCHEMA_VERSION = 1
-SUITE_VERSION = "1.0"
+SCHEMA_VERSION = 2
+SUITE_VERSION = "1.1"
 METRICS = ("conc", "rms_sig", "abs_ac1")
-ROLES = {"legacy_fitset", "migrated_fitset", "alpha", "wavecal", "reference"}
+ROLES = {"legacy_fitset", "alpha", "wavecal", "reference"}
+ASSERTION_SCOPE = ("qualitative behavioral ordering only; not cross-platform numeric equivalence, "
+                   "scientific tolerance, concentration truth, T3, or plateau evidence")
 
 
-def resolve(base, path):
-    return os.path.abspath(path if os.path.isabs(path) else os.path.join(base, path))
+def resolve(base, path, data_root=None):
+    if data_root is None:
+        return os.path.abspath(path if os.path.isabs(path) else os.path.join(base, path))
+    if os.path.isabs(path):
+        raise AssertionError("portable dependency paths must be relative")
+    root = os.path.realpath(data_root)
+    resolved = os.path.realpath(os.path.join(root, path))
+    if os.path.commonpath((root, resolved)) != root:
+        raise AssertionError("portable dependency path leaves data root")
+    return resolved
 
 
 def exact_bool(value, label):
@@ -35,16 +50,12 @@ def exact_bool(value, label):
     return value
 
 
-def validate_range(label, value):
-    if not isinstance(value, list) or len(value) != 2:
-        raise AssertionError(f"{label} must be an ordered [lo, hi] list")
-    if any(type(v) not in (int, float) or not math.isfinite(v) for v in value):
-        raise AssertionError(f"{label} bounds must be finite numbers")
-    if value[0] > value[1]:
-        raise AssertionError(f"{label} has lo > hi")
+def canonical_sha256(value):
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return hashlib.sha256(data).hexdigest()
 
 
-def validate_manifest(manifest, base):
+def validate_manifest(manifest, base, data_root=None):
     if manifest.get("schema_version") != SCHEMA_VERSION:
         raise AssertionError(f"schema_version must be {SCHEMA_VERSION}")
     if manifest.get("suite_version") != SUITE_VERSION:
@@ -68,7 +79,7 @@ def validate_manifest(manifest, base):
             int(digest, 16)
         except ValueError:
             raise AssertionError(f"{dep['id']}: invalid sha256") from None
-        dep_by_id[dep["id"]] = {**dep, "resolved_path": resolve(base, dep["path"])}
+        dep_by_id[dep["id"]] = {**dep, "resolved_path": resolve(base, dep["path"], data_root)}
     case_ids, used = set(), set()
     for case in cases:
         case_id = case.get("id")
@@ -78,18 +89,13 @@ def validate_manifest(manifest, base):
         exact_bool(case.get("allow_negative_gas"), f"{case_id}.allow_negative_gas")
         if case.get("evidence_role") not in ("high_residual_candidate", "low_residual_candidate"):
             raise AssertionError(f"{case_id}: invalid evidence_role")
-        ranges = case.get("expected_ranges")
-        if not isinstance(ranges, dict) or set(ranges) != set(METRICS):
-            raise AssertionError(f"{case_id}: expected_ranges must contain exactly {METRICS}")
-        for metric in METRICS:
-            validate_range(f"{case_id}.{metric}", ranges[metric])
         refs, expected_refs = case.get("reference_ids"), case.get("expected_references")
         if not isinstance(refs, list) or not refs or not isinstance(expected_refs, list):
             raise AssertionError(f"{case_id}: ordered references are required")
         if len(refs) != len(expected_refs):
             raise AssertionError(f"{case_id}: reference ids/specs length mismatch")
-        links = (("source_fitset_id", "legacy_fitset"), ("fitset_id", "migrated_fitset"),
-                 ("alpha_id", "alpha"), ("wavecal_id", "wavecal"))
+        links = (("source_fitset_id", "legacy_fitset"), ("alpha_id", "alpha"),
+                 ("wavecal_id", "wavecal"))
         for key, role in links:
             dep_id = case.get(key)
             if dep_id not in dep_by_id or dep_by_id[dep_id]["role"] != role:
@@ -111,6 +117,27 @@ def validate_manifest(manifest, base):
             raise AssertionError(f"{case_id}: row_index must be a nonnegative int")
         if type(case.get("fixed_shift")) not in (int, float) or not math.isfinite(case["fixed_shift"]):
             raise AssertionError(f"{case_id}: fixed_shift must be finite")
+    assertions = manifest.get("assertions")
+    if not isinstance(assertions, list) or not assertions:
+        raise AssertionError("manifest requires relational assertions")
+    if manifest.get("assertion_scope") != ASSERTION_SCOPE:
+        raise AssertionError("manifest assertion_scope is missing or changed")
+    for assertion in assertions:
+        if set(assertion) != {"id", "type", "high_case_id", "low_case_id", "source",
+                              "strictly_greater"}:
+            raise AssertionError("paired assertion contains unsupported fields")
+        if assertion.get("type") != "paired_branch_contrast":
+            raise AssertionError("unsupported assertion type")
+        if assertion.get("high_case_id") not in case_ids or assertion.get("low_case_id") not in case_ids:
+            raise AssertionError("assertion references an unknown case")
+        if assertion["high_case_id"] == assertion["low_case_id"]:
+            raise AssertionError("paired assertion requires two distinct cases")
+        if assertion.get("strictly_greater") != list(METRICS):
+            raise AssertionError(f"paired assertion must order exactly {METRICS}")
+        if "thresholds" in assertion:
+            raise AssertionError("paired behavioral assertion must not define numeric thresholds")
+        if not isinstance(assertion.get("source"), str) or not assertion["source"]:
+            raise AssertionError("paired assertion requires a source")
     if used != set(dep_by_id):
         raise AssertionError(f"unused/extra dependencies: {sorted(set(dep_by_id) - used)}")
     return dep_by_id
@@ -132,22 +159,27 @@ def public_dependency(dep):
             "name": os.path.basename(dep["resolved_path"])}
 
 
+def alpha_row_identity(path, row_index):
+    with open(path, encoding="utf-8") as fh:
+        rows = [line.rstrip("\r\n") for line in fh if line.strip() and not line.startswith("#")]
+    headings, values = rows[0].split("\t"), rows[row_index + 1].split("\t")
+    row = dict(zip(headings[:5], values[:5]))
+    return {"selection_method": "exact alpha data-row index", "row_index": row_index,
+            "exported_row_idx": int(row["row_idx"]), "doy": float(row["doy"]),
+            "datetime": row["datetime"], "state": "ambient_60s_average",
+            "state_source": "alpha export header ambient_avg_sec=60"}
+
+
 def run_case(case, dependencies):
     started = time.perf_counter()
-    with open(dependencies[case["fitset_id"]]["resolved_path"], encoding="utf-8") as fh:
+    with open(dependencies[case["source_fitset_id"]]["resolved_path"], encoding="utf-8") as fh:
         scenario = json.load(fh)
-    history = scenario.get("policy_migrations")
-    source_hash = dependencies[case["source_fitset_id"]]["sha256"].lower()
-    if (not isinstance(history, list) or not history or
-            history[-1].get("source_sha256", "").lower() != source_hash):
-        raise AssertionError(f"{case['id']}: migrated FitSet provenance/source mismatch")
     channel_id = str(case["channel_id"])
     if channel_id not in scenario.get("channels", {}):
         raise AssertionError(f"{case['id']}: channel {channel_id} is absent")
     cfg = copy.deepcopy(scenario["channels"][channel_id])
-    policy = exact_bool(cfg.get("allow_negative_gas"), f"{case['id']}.FitSet policy")
-    if policy is not case["allow_negative_gas"]:
-        raise AssertionError(f"{case['id']}: case/FitSet policy mismatch")
+    policy = exact_bool(case["allow_negative_gas"], f"{case['id']}.case policy")
+    cfg["allow_negative_gas"] = policy
     cfg["wl_path"] = dependencies[case["wavecal_id"]]["resolved_path"]
     embedded, expected_refs = cfg.get("refs", []), case["expected_references"]
     embedded_identity = [(r.get("name"), r.get("mult", 0)) for r in embedded]
@@ -175,31 +207,74 @@ def run_case(case, dependencies):
                          allow_negative_gas=policy)
     metrics = {"conc": float(result["conc"]), "rms_sig": float(result["rms_sig"]),
                "abs_ac1": abs(float(result["autocorr1"]))}
-    for metric in METRICS:
-        lo, hi = case["expected_ranges"][metric]
-        if not lo <= metrics[metric] <= hi:
-            raise AssertionError(f"{case['id']}.{metric}={metrics[metric]:.12g} outside [{lo}, {hi}]")
+    initialization = result["nonlinear_initialization"]
+    fit_identity = {"channel_id": channel_id, "fit_sign": 1.0, "W": "identity",
+                    "detector_px_inclusive": [int(cfg["f_min"]), int(cfg["f_max"])],
+                    "alpha_local_px_inclusive": [int(cfg["f_min"]) - px_start,
+                                                   int(cfg["f_max"]) - px_start],
+                    "wavelength_nm_inclusive": [float(wave[int(cfg["f_min"]) - px_start]),
+                                                  float(wave[int(cfg["f_max"]) - px_start])],
+                    "poly": int(cfg["poly_deg"]), "step_limit": float(cfg.get("step_limit", .5)),
+                    "shift": {"mode": "Fix", "value": float(case["fixed_shift"])},
+                    "squeeze": {"mode": "Fix", "value": float(case.get("fixed_squeeze", 1.0))},
+                    "effective_nonlinear": initialization,
+                    "seed_grid": {"state": "N/A", "reason": "fixed shift and squeeze"},
+                    "etalon": {"enabled": True, "search_rad_per_px": [0.02, 0.40],
+                                "detected_frequency": float(result["etalon_frequency"])},
+                    "temperature_pressure": {"T_C": float(temp), "P_mbar": float(pressure),
+                                               "source": "selected alpha row",
+                                               "scenario_gas_temp_C": float(cfg.get("gas_temp", 0.0)),
+                                               "reference_t_ref_C":
+                                               [float(props[g].get("t_ref", 25.0))
+                                                for g in engine.gas_list]}}
+    public_config = {"fit": fit_identity, "reference_order": expected_identity,
+                     "gas_order": list(engine.gas_list), "multipliers": engine_mults,
+                     "scaling_factors": [float(engine.scaling_factors[g]) for g in engine.gas_list],
+                     "allow_negative_gas": policy}
     return {"id": case["id"], "status": "PERFORMED", "evidence_role": case["evidence_role"],
             "row_index": int(case["row_index"]), "fixed_shift": float(case["fixed_shift"]),
             "allow_negative_gas": policy, "metrics": metrics,
-            "config_identity": {"channel_id": channel_id, "window_px_inclusive":
-                                [int(cfg["f_min"]), int(cfg["f_max"])],
-                                "poly": int(cfg["poly_deg"]), "reference_order": expected_identity},
-            "engine_identity": {"gas_order": list(engine.gas_list), "multipliers": engine_mults},
+            "sample_identity": alpha_row_identity(dependencies[case["alpha_id"]]["resolved_path"],
+                                                   int(case["row_index"])),
+            "config_identity": public_config, "config_sha256": canonical_sha256(public_config),
+            "engine_identity": {"gas_order": list(engine.gas_list), "multipliers": engine_mults,
+                                "scaling_factors": public_config["scaling_factors"]},
+            "t2": {"state": "UNAVAILABLE", "reason": "behavioral policy comparison has no O4 absolute anchor"},
             "elapsed_s": time.perf_counter() - started}
+
+
+def evaluate_assertions(specs, performed):
+    rows, output = {row["id"]: row for row in performed}, []
+    for spec in specs:
+        high, low = rows[spec["high_case_id"]], rows[spec["low_case_id"]]
+        observed = {metric: {"high": high["metrics"][metric], "low": low["metrics"][metric]}
+                    for metric in spec["strictly_greater"]}
+        passed = all(pair["high"] > pair["low"] for pair in observed.values())
+        output.append({"id": spec["id"], "type": spec["type"], "source": spec["source"],
+                       "contract": "qualitative ordering only; not cross-platform numeric equivalence or scientific tolerance",
+                       "strictly_greater": spec["strictly_greater"], "observed": observed,
+                       "status": "PASS" if passed else "FAIL"})
+        if not passed:
+            raise AssertionError(f"relational assertion failed: {spec['id']}")
+    return output
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=os.environ.get("CAESAR_GOLDEN_MANIFEST"))
+    parser.add_argument("--data-root", default=os.environ.get("CAESAR_GOLDEN_DATA_ROOT"),
+                        help="root for portable relative dependency paths")
     parser.add_argument("--result", help="optional structured local result JSON")
     args = parser.parse_args(argv)
     if not args.manifest:
         print("SKIP: no --manifest or CAESAR_GOLDEN_MANIFEST")
         return 0
     manifest_path = os.path.abspath(args.manifest)
+    excluded = [os.path.abspath(args.result)] if args.result else []
     report = {"schema_version": SCHEMA_VERSION, "suite_version": SUITE_VERSION,
-              "manifest_sha256": None, "git": FE.git_provenance(ROOT),
+              "manifest_sha256": None, "git": FE.git_provenance(ROOT, excluded),
+              "runtime": {"python": platform.python_version(), "platform": platform.platform(),
+                          "numpy": np.__version__, "scipy": scipy.__version__},
               "performed": [], "failed": [], "skipped": []}
     dependencies = {}
     candidate_inputs = [manifest_path]
@@ -209,13 +284,18 @@ def main(argv=None):
         report["manifest_sha256"] = sha256(manifest_path)
         with open(manifest_path, encoding="utf-8") as fh:
             manifest = json.load(fh)
-        candidate_inputs += [resolve(os.path.dirname(manifest_path), dep["path"])
+        candidate_inputs += [resolve(os.path.dirname(manifest_path), dep["path"], args.data_root)
                              for dep in manifest.get("dependencies", [])
                              if isinstance(dep, dict) and isinstance(dep.get("path"), str)]
-        dependencies = validate_manifest(manifest, os.path.dirname(manifest_path))
+        dependencies = validate_manifest(manifest, os.path.dirname(manifest_path), args.data_root)
         verify_dependencies(dependencies)
         report["dependencies"] = [public_dependency(dep) for dep in dependencies.values()]
         report["performed"] = [run_case(case, dependencies) for case in manifest["cases"]]
+        report["assertions"] = evaluate_assertions(manifest["assertions"], report["performed"])
+        report["assertion_scope"] = manifest["assertion_scope"]
+        report["generation"] = {"base_commit": report["git"]["head"],
+                                "artifact_self_excluded": bool(report["git"]["excluded_paths"]),
+                                "artifact_name": os.path.basename(args.result) if args.result else None}
     except (KeyError, OSError, TypeError, ValueError, AssertionError, json.JSONDecodeError) as exc:
         report["failed"].append({"id": "manifest_or_case", "reason": str(exc)})
         if args.result:

@@ -1,0 +1,371 @@
+{
+  "schema_version": 2,
+  "suite_version": "1.1",
+  "manifest_sha256": "91fcbd18f3f4fc7f908c0b1c0ee627e7eb626d5825f0833c74561ef85db8c568",
+  "git": {
+    "head": "fd5f93d66a19f6555e6f6b94ecd7a7f12ba8641b",
+    "tracked_diff_sha256": "363025d045fa6416edfd975a3c5d2d8a93ae4c19b34305099dfb7ecd0d416963",
+    "untracked": [
+      {
+        "path": "diagnostics/fit_explorer/roi1_manifest_v1.json",
+        "sha256": "91fcbd18f3f4fc7f908c0b1c0ee627e7eb626d5825f0833c74561ef85db8c568"
+      },
+      {
+        "path": "tools/test_fit_explorer_portable_evidence.py",
+        "sha256": "666d0ec21f95b04b7298458f35c35f7af3a799a04946007e82208c2045b1488a"
+      }
+    ],
+    "dirty": true,
+    "excluded_paths": [
+      "diagnostics/fit_explorer/roi1_result_v1.json"
+    ]
+  },
+  "runtime": {
+    "python": "3.13.14",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0"
+  },
+  "performed": [
+    {
+      "id": "roi1_nonnegative_high_residual",
+      "status": "PERFORMED",
+      "evidence_role": "high_residual_candidate",
+      "row_index": 0,
+      "fixed_shift": -6.0,
+      "allow_negative_gas": false,
+      "metrics": {
+        "conc": 95.91931862543075,
+        "rms_sig": 0.19632718036160135,
+        "abs_ac1": 0.9969080540972808
+      },
+      "sample_identity": {
+        "selection_method": "exact alpha data-row index",
+        "row_index": 0,
+        "exported_row_idx": 0,
+        "doy": 184.028329,
+        "datetime": "2026-07-03 00:40:47.644",
+        "state": "ambient_60s_average",
+        "state_source": "alpha export header ambient_avg_sec=60"
+      },
+      "config_identity": {
+        "fit": {
+          "channel_id": "1",
+          "fit_sign": 1.0,
+          "W": "identity",
+          "detector_px_inclusive": [
+            599,
+            1270
+          ],
+          "alpha_local_px_inclusive": [
+            599,
+            1270
+          ],
+          "wavelength_nm_inclusive": [
+            429.4808,
+            461.9503
+          ],
+          "poly": 4,
+          "step_limit": 0.5,
+          "shift": {
+            "mode": "Fix",
+            "value": -6.0
+          },
+          "squeeze": {
+            "mode": "Fix",
+            "value": 1.0
+          },
+          "effective_nonlinear": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "seed_grid": {
+            "state": "N/A",
+            "reason": "fixed shift and squeeze"
+          },
+          "etalon": {
+            "enabled": true,
+            "search_rad_per_px": [
+              0.02,
+              0.4
+            ],
+            "detected_frequency": 0.15894962830662643
+          },
+          "temperature_pressure": {
+            "T_C": 34.34,
+            "P_mbar": 966.56,
+            "source": "selected alpha row",
+            "scenario_gas_temp_C": 0.0,
+            "reference_t_ref_C": [
+              25.0,
+              25.0,
+              25.0
+            ]
+          }
+        },
+        "reference_order": [
+          [
+            "CHOCHO",
+            0
+          ],
+          [
+            "H2O",
+            -12
+          ],
+          [
+            "NO2",
+            0
+          ]
+        ],
+        "gas_order": [
+          "CHOCHO",
+          "H2O",
+          "NO2"
+        ],
+        "multipliers": [
+          1.0,
+          1e-12,
+          1.0
+        ],
+        "scaling_factors": [
+          5.13394107e-19,
+          8.57196505e-19,
+          7.08764811e-19
+        ],
+        "allow_negative_gas": false
+      },
+      "config_sha256": "b7e69fb873ab91600647c7d8e0dd28cf01abf33f924edbe4c604bc6ee7346194",
+      "engine_identity": {
+        "gas_order": [
+          "CHOCHO",
+          "H2O",
+          "NO2"
+        ],
+        "multipliers": [
+          1.0,
+          1e-12,
+          1.0
+        ],
+        "scaling_factors": [
+          5.13394107e-19,
+          8.57196505e-19,
+          7.08764811e-19
+        ]
+      },
+      "t2": {
+        "state": "UNAVAILABLE",
+        "reason": "behavioral policy comparison has no O4 absolute anchor"
+      },
+      "elapsed_s": 0.017040400067344308
+    },
+    {
+      "id": "roi1_signed_low_residual",
+      "status": "PERFORMED",
+      "evidence_role": "low_residual_candidate",
+      "row_index": 0,
+      "fixed_shift": -6.0,
+      "allow_negative_gas": true,
+      "metrics": {
+        "conc": 3.6158341598907544,
+        "rms_sig": 0.03609024337569437,
+        "abs_ac1": 0.17401974625433486
+      },
+      "sample_identity": {
+        "selection_method": "exact alpha data-row index",
+        "row_index": 0,
+        "exported_row_idx": 0,
+        "doy": 184.028329,
+        "datetime": "2026-07-03 00:40:47.644",
+        "state": "ambient_60s_average",
+        "state_source": "alpha export header ambient_avg_sec=60"
+      },
+      "config_identity": {
+        "fit": {
+          "channel_id": "1",
+          "fit_sign": 1.0,
+          "W": "identity",
+          "detector_px_inclusive": [
+            599,
+            1270
+          ],
+          "alpha_local_px_inclusive": [
+            599,
+            1270
+          ],
+          "wavelength_nm_inclusive": [
+            429.4808,
+            461.9503
+          ],
+          "poly": 4,
+          "step_limit": 0.5,
+          "shift": {
+            "mode": "Fix",
+            "value": -6.0
+          },
+          "squeeze": {
+            "mode": "Fix",
+            "value": 1.0
+          },
+          "effective_nonlinear": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "seed_grid": {
+            "state": "N/A",
+            "reason": "fixed shift and squeeze"
+          },
+          "etalon": {
+            "enabled": true,
+            "search_rad_per_px": [
+              0.02,
+              0.4
+            ],
+            "detected_frequency": 0.15894962830662643
+          },
+          "temperature_pressure": {
+            "T_C": 34.34,
+            "P_mbar": 966.56,
+            "source": "selected alpha row",
+            "scenario_gas_temp_C": 0.0,
+            "reference_t_ref_C": [
+              25.0,
+              25.0,
+              25.0
+            ]
+          }
+        },
+        "reference_order": [
+          [
+            "CHOCHO",
+            0
+          ],
+          [
+            "H2O",
+            -12
+          ],
+          [
+            "NO2",
+            0
+          ]
+        ],
+        "gas_order": [
+          "CHOCHO",
+          "H2O",
+          "NO2"
+        ],
+        "multipliers": [
+          1.0,
+          1e-12,
+          1.0
+        ],
+        "scaling_factors": [
+          5.13394107e-19,
+          8.57196505e-19,
+          7.08764811e-19
+        ],
+        "allow_negative_gas": true
+      },
+      "config_sha256": "a124751c3ebda233fe50cbb1698999941467245b82e9d3a3dfb306cbf140c3be",
+      "engine_identity": {
+        "gas_order": [
+          "CHOCHO",
+          "H2O",
+          "NO2"
+        ],
+        "multipliers": [
+          1.0,
+          1e-12,
+          1.0
+        ],
+        "scaling_factors": [
+          5.13394107e-19,
+          8.57196505e-19,
+          7.08764811e-19
+        ]
+      },
+      "t2": {
+        "state": "UNAVAILABLE",
+        "reason": "behavioral policy comparison has no O4 absolute anchor"
+      },
+      "elapsed_s": 0.012041700072586536
+    }
+  ],
+  "failed": [],
+  "skipped": [],
+  "dependencies": [
+    {
+      "id": "legacy_fitset",
+      "role": "legacy_fitset",
+      "sha256": "66c5835e0e8ad94aca27b90ee41334177cb57dcb70deea2a8ed2219edda08505",
+      "name": "FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json"
+    },
+    {
+      "id": "alpha_roi1",
+      "role": "alpha",
+      "sha256": "5a54b6a59794f850924257cca59b7e9fd0167a43fb36a16ce56ea1dd178da01f",
+      "name": "2026-07-03-001_ANs_alpha_trace.dat"
+    },
+    {
+      "id": "wavecal_roi1",
+      "role": "wavecal",
+      "sha256": "e521330577eb27fe6afa455e15f845c37f3ffb675ea0a241694d302238522067",
+      "name": "Calib_20260619_Hg_400-499nm_Poly2.txt"
+    },
+    {
+      "id": "ref_chocho",
+      "role": "reference",
+      "sha256": "a3fd73133fbe6fdc13a6af4633d4db13804c45e422b95495ca9f3cb1887a4c92",
+      "name": "Ref_CHOCHO_Dynamic-ILS-Applied.dat"
+    },
+    {
+      "id": "ref_h2o",
+      "role": "reference",
+      "sha256": "bcc69cd66eac8586b57a769ce51bf5ab75df30db2e7bc3b5022ff187f4db3965",
+      "name": "Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat"
+    },
+    {
+      "id": "ref_no2",
+      "role": "reference",
+      "sha256": "9a0227d1a16fa814c5386da9d906f5eeb0893549bee71a91e8334bc11f9d3ab1",
+      "name": "Ref_NO2_Dynamic-ILS-Applied.dat"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "roi1_policy_branch_contrast",
+      "type": "paired_branch_contrast",
+      "source": "same hash-pinned alpha row and fit configuration; only gas coefficient sign policy differs",
+      "contract": "qualitative ordering only; not cross-platform numeric equivalence or scientific tolerance",
+      "strictly_greater": [
+        "conc",
+        "rms_sig",
+        "abs_ac1"
+      ],
+      "observed": {
+        "conc": {
+          "high": 95.91931862543075,
+          "low": 3.6158341598907544
+        },
+        "rms_sig": {
+          "high": 0.19632718036160135,
+          "low": 0.03609024337569437
+        },
+        "abs_ac1": {
+          "high": 0.9969080540972808,
+          "low": 0.17401974625433486
+        }
+      },
+      "status": "PASS"
+    }
+  ],
+  "assertion_scope": "qualitative behavioral ordering only; not cross-platform numeric equivalence, scientific tolerance, concentration truth, T3, or plateau evidence",
+  "generation": {
+    "base_commit": "fd5f93d66a19f6555e6f6b94ecd7a7f12ba8641b",
+    "artifact_self_excluded": true,
+    "artifact_name": "roi1_result_v1.json"
+  }
+}
