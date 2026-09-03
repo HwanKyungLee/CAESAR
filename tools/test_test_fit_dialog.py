@@ -11,6 +11,7 @@
 import io
 import os
 import sys
+import warnings
 
 import numpy as np
 
@@ -21,7 +22,9 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from gui.test_fit_dialog import _resolve_px_bounds, _assemble_ref_props
+from gui.test_fit_dialog import (_TestFitOptimizerWorker, _resolve_px_bounds,
+                                 _assemble_ref_props)
+from gui.app_window import CAESARAnalyzer, _scenario_gas_policy, _channel_worker_gas_policy
 
 _n_pass = 0
 _n_fail = 0
@@ -119,11 +122,61 @@ def test_assemble_ref_props_preserves_user_fields():
     check("active_bands_nm 보존", out["NO2"]["active_bands_nm"] == "460,495", out["NO2"])
 
 
+def test_allow_negative_gas_roundtrip_policy():
+    print("[6] allow_negative_gas 저장/복원 정책")
+    for saved in (False, True):
+        restored, source = _scenario_gas_policy({"allow_negative_gas": saved}, not saved)
+        check(f"명시값 {saved} 복원", restored is saved and source == "scenario")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        restored, source = _scenario_gas_policy({}, True)
+    check("구 시나리오는 현재값 유지 + 경고", restored is True and bool(caught) and source.startswith("legacy"))
+
+    class Box:
+        def __init__(self, value): self.v = value
+        def value(self): return self.v
+        def setValue(self, value): self.v = value
+        def text(self): return str(self.v)
+        def setText(self, value): self.v = value
+        def currentText(self): return str(self.v)
+        def setCurrentText(self, value): self.v = value
+        def isChecked(self): return self.v
+        def setChecked(self, value): self.v = value
+
+    class Fake:
+        _capture_config = CAESARAnalyzer._capture_config
+        _apply_config = CAESARAnalyzer._apply_config
+        _time_shift_hours = staticmethod(lambda value: float(value))
+        _refresh_shsq_summary = lambda self: None
+
+    f = Fake()
+    f.ref_widgets = []; f.ref_props = {}; f.loaded_wl_path = ""
+    f.txt_min = Box("0"); f.txt_max = Box("1"); f.spin_fit_start_nm = Box(430.0)
+    f.spin_fit_end_nm = Box(431.0); f.cb_fit_unit = Box("px"); f.spin_poly_deg = Box(3)
+    f.spin_step_limit = Box(0.5); f.spin_lambda = Box(0.0); f.chk_robust = Box(False)
+    f.chk_allow_neg = Box(False); f.spin_kalman_q = Box(0.1); f.spin_kalman_r = Box(0.2)
+    f.spin_d_len = Box(51.8); f.spin_rl_factor = Box(1.0); f.spin_time_shift = Box(0.0)
+    f.spin_gas_temp = Box(0.0)
+    cfg = f._capture_config()
+    f.chk_allow_neg.setChecked(True)
+    f._apply_config(cfg, load_refs=False)
+    check("실제 capture→apply False roundtrip", f.chk_allow_neg.isChecked() is False)
+    policies = [_channel_worker_gas_policy(True, {"allow_negative_gas": value}, True)
+                for value in (False, True)]
+    check("두 채널 worker 정책이 각 저장값 유지", policies == [False, True])
+    try:
+        _TestFitOptimizerWorker([], None, {}, "px", 0, 1, 3, 0.5, "NO2", "false")
+        check("Test Fit non-bool 정책 거부", False)
+    except TypeError:
+        check("Test Fit non-bool 정책 거부", True)
+
+
 if __name__ == "__main__":
     for t in (test_resolve_px_bounds, test_assemble_ref_props_target_limit_to_center,
               test_assemble_ref_props_target_fix,
               test_assemble_ref_props_secondary_independent_vs_link,
-              test_assemble_ref_props_preserves_user_fields):
+              test_assemble_ref_props_preserves_user_fields,
+              test_allow_negative_gas_roundtrip_policy):
         t()
     print(f"\n{_n_pass} PASS · {_n_fail} FAIL")
     sys.exit(1 if _n_fail else 0)

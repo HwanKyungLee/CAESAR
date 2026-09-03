@@ -528,6 +528,13 @@ class DataIO:
         return wave_nm, alpha, env_t, env_p
 
     @staticmethod
+    def load_alpha_trace_row_mapped(filepath, row_index=0):
+        """Full alpha row plus its detector-pixel origin from the parsed header."""
+        _first, _t, _p, px_start, _wave = DataIO._alpha_layout(filepath)
+        wave, alpha, env_t, env_p = DataIO.load_alpha_trace_row_full(filepath, row_index)
+        return wave, alpha, env_t, env_p, int(px_start)
+
+    @staticmethod
     def expand_to_scan_list(filepath):
         """
         Expands a file path into a list of (filepath, row_index) tuples.

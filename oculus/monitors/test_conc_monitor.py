@@ -19,6 +19,7 @@ import glob
 import json
 import os
 import sys
+import warnings
 
 import numpy as np
 
@@ -63,6 +64,7 @@ def _make_monitor(**cfg_overrides):
     scen = json.load(open(OP.FITSET, encoding="utf-8"))
     fit_ch = pick_fitset_channel(scen, "cold")
     cfg_kwargs = dict(fitset_path=OP.FITSET, wl_dir="cold", target="NO2",
+                      allow_negative_gas=False,
                       throttle_sec=0.0, seed_narrow_px=2.0,
                       conc_min_ppb=-20, conc_max_ppb=50, spike_ppb=20,
                       rms_sig_alarm=0.15, flatline_n=5)
@@ -82,6 +84,29 @@ def test_pick_fitset_channel():
         check("없는 wl_dir는 예외", False, "예외 안 남")
     except ValueError:
         check("없는 wl_dir는 예외", True)
+
+
+def test_gas_policy_source_and_legacy_migration():
+    print("[6] gas policy source + legacy migration")
+    scen = json.load(open(OP.FITSET, encoding="utf-8"))
+    legacy = dict(pick_fitset_channel(scen, "cold"))
+    legacy.pop("allow_negative_gas", None)
+    cfg = ConcentrationConfig(fitset_path=OP.FITSET, wl_dir="cold",
+                              allow_negative_gas=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cm = ConcMonitor(legacy, cfg)
+    check("legacy FitSet은 profile fallback을 경고", bool(caught))
+    check("legacy provenance 기록", cm.gas_policy_provenance.startswith("legacy"))
+
+    current = dict(legacy, allow_negative_gas=False)
+    cm = ConcMonitor(current, cfg)
+    check("현재 FitSet이 정책 단일 출처", cm.gas_policy_provenance == "FitSet")
+    try:
+        ConcMonitor(dict(current, allow_negative_gas=True), cfg)
+        check("FitSet/profile 불일치 거부", False)
+    except ValueError:
+        check("FitSet/profile 불일치 거부", True)
 
 
 def test_i0_buffer_and_fit_and_throttle():
@@ -184,7 +209,8 @@ def test_fail_streak_to_p0():
 
 
 def main():
-    for t in (test_pick_fitset_channel, test_i0_buffer_and_fit_and_throttle,
+    for t in (test_pick_fitset_channel, test_gas_policy_source_and_legacy_migration,
+              test_i0_buffer_and_fit_and_throttle,
               test_throttle_blocks_immediate_refit, test_classify, test_fail_streak_to_p0):
         t()
     print(f"\nconc_monitor tests: {_n_pass} PASS · {_n_fail} FAIL")

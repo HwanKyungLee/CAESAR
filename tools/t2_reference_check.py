@@ -3,12 +3,13 @@
 "O4를 넣을지 뺄지"를 안정성(Tier-1)이 아니라 물리(Tier-2: 공선성·계수상수성·트레이드오프)로
 판정한다. 결과가 사용자 직관(O4=과적합)과 맞으면 로직이 물리로 옳은 결정을 내린다는 증거.
 
-사용:  python tools/t2_reference_check.py [키]   (키 목록은 tools/channel_map.json 참조)
+사용:  python tools/t2_reference_check.py [키] (--allow-negative-gas | --nonnegative-gas)
 """
 import os
 import sys
 import json
 import glob
+import argparse
 
 import numpy as np
 
@@ -26,9 +27,27 @@ from tools import optimize_params as OP   # build_engine_from_config, pick_chann
 
 
 def main():
-    key = (sys.argv[1] if len(sys.argv) > 1 else "cold").lower()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("key", nargs="?", default="cold")
+    policy = parser.add_mutually_exclusive_group(required=True)
+    policy.add_argument("--allow-negative-gas", action="store_true")
+    policy.add_argument("--nonnegative-gas", action="store_true")
+    parser.add_argument("--override-fitset-policy", action="store_true",
+                        help="intentionally override a conflicting policy stored in the FitSet")
+    args = parser.parse_args()
+    key = args.key.lower()
+    allow_negative_gas = args.allow_negative_gas
     scen = json.load(open(OP.FITSET, encoding="utf-8"))
     ch = OP.pick_channel(scen, key)
+    stored_policy = ch.get("allow_negative_gas")
+    if stored_policy is not None and not isinstance(stored_policy, bool):
+        parser.error("FitSet allow_negative_gas must be boolean")
+    if stored_policy is not None and stored_policy != allow_negative_gas \
+            and not args.override_fitset_policy:
+        parser.error("CLI gas policy conflicts with FitSet; use --override-fitset-policy intentionally")
+    policy_source = ("explicit CLI override of FitSet" if stored_policy is not None
+                     and stored_policy != allow_negative_gas else
+                     "FitSet confirmed by CLI" if stored_policy is not None else "explicit CLI (legacy FitSet)")
     rp = dict(ch["ref_props"])
     step_limit = float(ch.get("step_limit", 0.5))
     poly = int(ch["poly_deg"])
@@ -53,6 +72,7 @@ def main():
     px_max = OP.nm_to_px(wave0, float(ch["fit_end_nm"]))
 
     print("#" * 96)
+    print(f"# gas coefficient policy: allow_negative_gas={allow_negative_gas} ({policy_source})")
     print(f"# {ch['data_label']}  창 {ch['fit_start_nm']}-{ch['fit_end_nm']}nm  poly{poly}  "
           f"사용자refs={base_gas}  +후보 O4  스캔 {len(scans)}/{n_total}")
     print("#" * 96)
@@ -70,7 +90,9 @@ def main():
 
     # ── 2) 핏 계수 물리 건전성(O4 상수성·NO2 트레이드오프) ──
     health = FP.fitted_amount_health(scans, eng, fitter, rp_with, px_min, px_max,
-                                     poly, step_limit, target="NO2", constant_species=("O4",))
+                                     poly, step_limit, target="NO2",
+                                     constant_species=("O4",),
+                                     allow_negative_gas=allow_negative_gas)
     print("\n[2] 핏 계수 물리 건전성 (스캔 간)")
     print(f"    NO2  계수 CV = {health['target_cv']*100:.0f}%")
     for g in eng.gas_list:
@@ -92,7 +114,8 @@ def main():
     # ── 3) 판정 ──
     verdict = FP.judge_reference(eng, fitter, scans, rp, rp_with,
                                  px_min, px_max, poly, step_limit,
-                                 candidate="O4", target="NO2")
+                                 candidate="O4", target="NO2",
+                                 allow_negative_gas=allow_negative_gas)
     print("\n[3] Tier-2 물리 판정 (안정성 아님)")
     print(f"    ▶ {verdict['verdict']}")
     for r in verdict["reasons"]:

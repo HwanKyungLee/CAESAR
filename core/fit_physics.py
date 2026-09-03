@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.polynomial import chebyshev
 
-from core.param_optimizer import fit_scan
+from core.param_optimizer import fit_scan, _require_bool
 
 # judge_reference와 param_optimizer의 차등공선성 게이트가 공유하는 문턱(단일 출처 원칙).
 COLLIN_HI_DEFAULT = 0.7
@@ -106,7 +106,8 @@ def retrieved_amount(eng, coeff, species):
 
 
 def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
-                         step_limit, target="NO2", constant_species=("O4",)):
+                         step_limit, target="NO2", constant_species=("O4",), *,
+                         allow_negative_gas):
     """스캔들에 걸쳐 각 ref 핏 계수를 모아 물리 타당성 평가.
 
     반환 dict:
@@ -115,13 +116,15 @@ def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg
       target_cv            : 타깃 계수 CV
       constant_flag[ref]   : constant_species 중 CV가 타깃보다 큰가(=상수여야 하는데 더 출렁)
     """
+    allow_negative_gas = _require_bool(allow_negative_gas)
     series = {g: [] for g in eng.gas_list}
     abs_ratio_s = {g: [] for g in eng.gas_list}   # fitted N / 이론 상한(아는 종만)
     tgt = []
     for (wave, alpha, T_C, P_mbar) in scans:
         try:
             r = fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
-                         px_min, px_max, poly_deg, step_limit, target)
+                         px_min, px_max, poly_deg, step_limit, target,
+                         allow_negative_gas=allow_negative_gas)
         except Exception:                 # noqa: BLE001
             continue
         for g in eng.gas_list:
@@ -129,7 +132,7 @@ def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg
             series[g].append(c)
             theo = theoretical_amount(g, T_C, P_mbar)
             if theo:
-                abs_ratio_s[g].append(retrieved_amount(eng, c, g) / theo)
+                abs_ratio_s[g].append(abs(retrieved_amount(eng, c, g) / theo))
         tgt.append(r["coeffs"].get(target, np.nan))
 
     tgt = np.asarray(tgt, float)
@@ -161,8 +164,8 @@ def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg
 # ──────────────────────────────────────────────────────────────────────────
 def judge_reference(eng, fitter, scans, ref_props_without, ref_props_with,
                     px_min, px_max, poly_deg, step_limit,
-                    candidate="O4", target="NO2",
-                    collin_hi=COLLIN_HI_DEFAULT, abs_max_ratio=3.0):
+                    candidate="O4", target="NO2", collin_hi=COLLIN_HI_DEFAULT,
+                    abs_max_ratio=3.0, *, allow_negative_gas):
     """후보 레퍼런스(예: O4)를 넣을지 뺄지 **물리로** 판정(Tier-1 안정성 아님).
 
     ref_props_with는 candidate가 gas_list에 있는 엔진에 대응해야 한다(엔진은 호출부가 구성).
@@ -170,6 +173,7 @@ def judge_reference(eng, fitter, scans, ref_props_without, ref_props_with,
       * 창에서 target↔candidate 공선성(다중상관 포함)이 높다 → 분해 임의적 → 넣어도 못 믿음.
       * candidate 계수가 (상수여야 하는데) 출렁이거나 target과 강한 반상관 → 과적합 크러치.
       둘 중 하나라도 참이면 '제외 권고'(빼는 게 물리적으로 옳음)."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     diag = differential_collinearity(eng, list(eng.gas_list), px_min, px_max, poly_deg)
     pair = diag["pairwise"].get((target, candidate),
                                 diag["pairwise"].get((candidate, target), float("nan")))
@@ -177,7 +181,8 @@ def judge_reference(eng, fitter, scans, ref_props_without, ref_props_with,
 
     health = fitted_amount_health(scans, eng, fitter, ref_props_with,
                                   px_min, px_max, poly_deg, step_limit, target,
-                                  constant_species=(candidate,))
+                                  constant_species=(candidate,),
+                                  allow_negative_gas=allow_negative_gas)
     cand_cv = health["cv"].get(candidate, float("nan"))
     corr = health["corr_with_target"].get(candidate, float("nan"))
     abs_ratio = health.get("abs_ratio", {}).get(candidate, float("nan"))
@@ -203,6 +208,7 @@ def judge_reference(eng, fitter, scans, ref_props_without, ref_props_with,
     return dict(candidate=candidate, exclude=exclude,
                 pair_collinearity=pair, multiple_R=multR,
                 candidate_cv=cand_cv, corr_with_target=corr, abs_ratio=abs_ratio,
+                impossible=impossible,
                 target_cv=health["target_cv"], n=health["n"],
                 verdict=("제외 권고(물리)" if exclude else "포함 타당(물리)"),
                 reasons=reasons)

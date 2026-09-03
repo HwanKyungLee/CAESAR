@@ -95,10 +95,11 @@
             "type": "object",
             "description": "이 채널의 경량 DOAS 농도 피팅 설정(M3, 선택). 없으면 농도 모니터가 SKIP. 레퍼런스·핏창·poly·ref_props는 새로 안 만들고 Augur FitSet json을 그대로 가리킨다 — Augur 확정 설정과 갈라지지 않게(§2-A 채널별 파장보정·레퍼런스 매핑).",
             "additionalProperties": false,
-            "required": ["fitset_path", "wl_dir"],
+            "required": ["fitset_path", "wl_dir", "allow_negative_gas"],
             "properties": {
               "fitset_path": { "type": "string", "description": "Augur FitSet json 경로 (레퍼런스·핏레인지(px)·poly·ref_props·step_limit 전부 여기서 옴)." },
               "wl_dir": { "type": "string", "description": "FitSet 안 이 채널을 찾을 wavecal 폴더명(roi1/roi2/cold 등). data_label은 안 씀 — 뒤바뀐 사례 있음(fit_optimizer_handoff.md §14-D)." },
+              "allow_negative_gas": { "type": "boolean", "description": "가스 계수 음수 허용 정책. Augur 분석 정책과 같게 명시한다." },
               "target": { "type": "string", "default": "NO2", "description": "농도를 낼 타깃 기체." },
               "cavity_temp_hk": { "type": "string", "description": "air_number_density 계산에 쓸 캐비티 가스온도 hk.fields[].key." },
               "cavity_pressure_hk": { "type": "string", "description": "air_number_density 계산에 쓸 캐비티 압력 hk.fields[].key." },

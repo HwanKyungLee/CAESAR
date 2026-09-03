@@ -178,7 +178,8 @@ class _TestFitOptimizerWorker(QThread):
 
     def __init__(self, files: list[str], eng, ref_props: dict,
                  px_unit: str, px_lo, px_hi,
-                 poly0: int, step_limit: float, target: str):
+                 poly0: int, step_limit: float, target: str,
+                 allow_negative_gas: bool):
         super().__init__()
         self.files = files
         self.eng = eng
@@ -187,6 +188,9 @@ class _TestFitOptimizerWorker(QThread):
         self.poly0 = poly0
         self.step_limit = step_limit
         self.target = target
+        if not isinstance(allow_negative_gas, bool):
+            raise TypeError("Test Fit requires boolean allow_negative_gas")
+        self.allow_negative_gas = allow_negative_gas
 
     def run(self):
         try:
@@ -243,17 +247,20 @@ class _TestFitOptimizerWorker(QThread):
         eng_px_min, eng_px_max = _alpha_px_to_engine_px(wave_ref, px_min, px_max, eng)
 
         self.progress.emit(1, TOTAL, "기준선 평가…")
-        base = PO.evaluate(scans, eng, fitter, rp, px_min, px_max, poly0, step_limit, target)
+        base = PO.evaluate(scans, eng, fitter, rp, px_min, px_max, poly0, step_limit,
+                           target, allow_negative_gas=self.allow_negative_gas)
 
         self.progress.emit(2, TOTAL, "다항식 차수 탐색… (차수마다 shift 재탐색, 가장 오래 걸리는 단계)")
         POLYS = [2, 3, 4, 5, 6, 8]
         rec_poly, ladder = PO.optimize_poly_joint(scans, eng, fitter, rp, px_min, px_max,
                                                   POLYS, step_limit, target,
-                                                  eng_px_min=eng_px_min, eng_px_max=eng_px_max)
+                                                  eng_px_min=eng_px_min, eng_px_max=eng_px_max,
+                                                  allow_negative_gas=self.allow_negative_gas)
         poly_for_rest = rec_poly if rec_poly is not None else poly0
 
         self.progress.emit(3, TOTAL, "Shift 범위 추천…")
-        sh = PO.recommend_shift(scans, eng, fitter, rp, px_min, px_max, poly_for_rest, target)
+        sh = PO.recommend_shift(scans, eng, fitter, rp, px_min, px_max, poly_for_rest,
+                                target, allow_negative_gas=self.allow_negative_gas)
         # squeeze/step_limit/link/health는 shift 추천 **이전**의 stale 값(예: 경계에 잘린
         # Fix -0.5)이 아니라 방금 나온 추천을 기준으로 평가해야 한다 — 안 그러면 이 단계들이
         # 전부 틀렸을지 모르는 shift 위에서 평가되어 자기 결과도 같이 오염된다.
@@ -261,12 +268,14 @@ class _TestFitOptimizerWorker(QThread):
 
         self.progress.emit(4, TOTAL, "Squeeze 범위 추천…")
         sq = PO.recommend_squeeze(scans, eng, fitter, rp_after_shift, px_min, px_max, poly_for_rest,
-                                  target, step_limit=step_limit)
+                                  target, step_limit=step_limit,
+                                  allow_negative_gas=self.allow_negative_gas)
 
         self.progress.emit(5, TOTAL, "step_limit 추천…")
         if consec:
             st = PO.recommend_step_limit(consec, eng, fitter, rp_after_shift, px_min, px_max,
-                                         poly_for_rest, target)
+                                         poly_for_rest, target,
+                                         allow_negative_gas=self.allow_negative_gas)
         else:
             st = dict(value=None, reason="연속 스캔 표본 부족(파일이 1개뿐이거나 행이 없음)")
 
@@ -277,13 +286,15 @@ class _TestFitOptimizerWorker(QThread):
                 continue
             links.append(PO.recommend_secondary_link(
                 scans, eng, fitter, rp_after_shift, px_min, px_max, poly_for_rest,
-                secondary=g, target=target, step_limit=step_limit,
+                secondary=g, allow_negative_gas=self.allow_negative_gas,
+                target=target, step_limit=step_limit,
                 eng_px_min=eng_px_min, eng_px_max=eng_px_max))
 
         self.progress.emit(7, TOTAL, "물리 건전성 점검(상수종)…")
         try:
             health = FP.fitted_amount_health(scans, eng, fitter, rp_after_shift, px_min, px_max,
-                                             poly_for_rest, step_limit, target=target)
+                                             poly_for_rest, step_limit, target=target,
+                                             allow_negative_gas=self.allow_negative_gas)
         except Exception as e:
             health = {"error": str(e)}
         has_theoretical_anchor = FP.theoretical_amount(target, scans[0][2], scans[0][3]) is not None
@@ -397,14 +408,14 @@ class TestFitDialog(QDialog):
         2배 이상이면 ⚠로 표시 — 사용자가 알고리즘을 맹신하지 않고 직접 눈으로 걸러낼 수 있게."""
         if not ladder:
             return "<b>poly ladder:</b> (no candidates evaluated)"
-        best_ac1 = min(r["autocorr1"] for r in ladder if np.isfinite(r.get("autocorr1", np.nan)))
+        best_ac1 = min(abs(r["autocorr1"]) for r in ladder if np.isfinite(r.get("autocorr1", np.nan)))
         rows = ["<tr><th align=left>poly</th><th align=left>n_ok</th>"
                 f"<th align=left>{target}</th><th align=left>conc CV</th>"
                 "<th align=left>RMS/sig</th><th align=left>|ac1|</th>"
                 "<th align=left>multi-R</th>"
                 f"<th align=left>{target} shift</th></tr>"]
         for r in ladder:
-            ac1 = r.get("autocorr1", float("nan"))
+            ac1 = abs(r.get("autocorr1", float("nan")))
             degenerate = np.isfinite(ac1) and np.isfinite(best_ac1) and ac1 > 2 * best_ac1 and ac1 > 0.15
             multi_r = r.get("multi_R_target", float("nan"))
             sh_med, sh_sig = r.get("shift_dist", {}).get(target, (float("nan"), float("nan")))
@@ -446,7 +457,7 @@ class TestFitDialog(QDialog):
             paths, self._app.engine, dict(self._app.ref_props),
             unit, lo, hi,
             self._app.spin_poly_deg.value(), self._app.spin_step_limit.value(),
-            self._cb_target.currentText())
+            self._cb_target.currentText(), self._app.chk_allow_neg.isChecked())
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
@@ -482,7 +493,7 @@ class TestFitDialog(QDialog):
             f"<b>Baseline</b> (poly={self._app.spin_poly_deg.value()}): "
             f"{target}={base.get('conc', float('nan')):.3g} ppb, "
             f"RMS/sig={base.get('rms_sig', float('nan')):.3g}, "
-            f"|ac1|={base.get('autocorr1', float('nan')):.2f}")
+            f"|ac1|={abs(base.get('autocorr1', float('nan'))):.2f}")
 
         poly = result["poly"]
         self._add_result_label(
@@ -498,7 +509,7 @@ class TestFitDialog(QDialog):
         # ~1.0. 모든 poly 후보가 그 문턱을 넘으면 이 표본에선 shift 탐색이 통째로 퇴화 분기에
         # 빠진 것 — 어느 poly를 골라도 결과가 신뢰 불가라는 뜻이므로 절대 문턱으로 잡아야 한다
         # (poly끼리 상대비교만으론 전부 나쁠 때 아무것도 걸러내지 못함).
-        ladder_ac1 = [r["autocorr1"] for r in poly["ladder"] if np.isfinite(r.get("autocorr1", np.nan))]
+        ladder_ac1 = [abs(r["autocorr1"]) for r in poly["ladder"] if np.isfinite(r.get("autocorr1", np.nan))]
         best_ac1 = min(ladder_ac1) if ladder_ac1 else float("nan")
         degenerate_all = np.isfinite(best_ac1) and best_ac1 > _AC1_DEGENERATE_THRESHOLD
         if degenerate_all:

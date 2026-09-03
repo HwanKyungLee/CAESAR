@@ -36,6 +36,7 @@
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
     { "id": "ch_pns",    "label": "PNs",         "role": "signal", "columns": [2053, 4100],
       "concentration": {
+        "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
         "wl_dir": "roi2",
         "target": "NO2",
@@ -56,6 +57,7 @@
       } },
     { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148],
       "concentration": {
+        "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
         "wl_dir": "roi1",
         "target": "NO2",

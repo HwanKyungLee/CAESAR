@@ -3,12 +3,13 @@
 세팅 입력 없이 (웨이브칼 + 레퍼런스폴더 + 알파)만으로 FitSet을 만들고,
 사용자가 손으로 만든 FitSet과 나란히 비교해 **성능을 정직하게 보고**한다.
 
-사용:  python tools/build_fitset.py [키]   (키 목록은 tools/channel_map.json 참조)
+사용:  python tools/build_fitset.py [키] (--allow-negative-gas | --nonnegative-gas)
 """
 import os
 import sys
 import json
 import glob
+import argparse
 
 import numpy as np
 
@@ -34,7 +35,14 @@ def _latest_wavecal(wl_dir):
 
 
 def main():
-    key = (sys.argv[1] if len(sys.argv) > 1 else "cold").lower()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("key", nargs="?", default="cold")
+    policy = parser.add_mutually_exclusive_group(required=True)
+    policy.add_argument("--allow-negative-gas", action="store_true")
+    policy.add_argument("--nonnegative-gas", action="store_true")
+    args = parser.parse_args()
+    key = args.key.lower()
+    allow_negative_gas = args.allow_negative_gas
     OP.require_key(key)
     label = OP.KEY2LABEL.get(key, key)
     ref_dir = os.path.join(OP.WAVECAL_ROOT, OP.KEY2WLDIR[key])
@@ -50,7 +58,9 @@ def main():
 
     cfg, rep = FB.build_fitset(wl_path, ref_dir, scans, OP.load_wavecal,
                                consecutive_scans=consec, target="NO2",
-                               label=label, progress=lambda m: print("  ·", m))
+                               label=label, progress=lambda m: print("  ·", m),
+                               allow_negative_gas=allow_negative_gas)
+    print(f"# gas coefficient policy: allow_negative_gas={allow_negative_gas} (explicit CLI flag)")
 
     _ICON = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌", "SKIP": "⏭️"}
     print("\n[사전검증]")

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.optimize import lsq_linear
 from numpy.polynomial import chebyshev
 
 # §16-B(실측): 진짜 해는 |ac1| ~0.03~0.08, 퇴화 분기(넓게 푼 shift가 alias 골짜기에 빠져
@@ -34,14 +35,22 @@ AC1_DEGENERATE_THRESHOLD = 0.15
 POLY_COLLIN_R_MAX = 0.85
 
 
+def _require_bool(value):
+    if not isinstance(value, (bool, np.bool_)):
+        raise TypeError("allow_negative_gas must be an explicit bool")
+    return bool(value)
+
+
 def air_number_density(T_C, P_mbar):
     return 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
 
 
 # ──────────────────────────────────────────────────────────────────────────
 def _seed_shift(fitter, pixel_idx, optical_depth, poly_deg, ref_props, target,
-                seed_range, seed_step, sq_range=0.01, sq_step=0.001):
+                seed_range, seed_step, allow_negative_gas,
+                sq_range=0.01, sq_step=0.001):
     """전역 격자탐색으로 초기 (shift, squeeze) 추정 — 비볼록 지형 대응. 실패시 (0.0, 1.0)."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     props = ref_props.get(target, {})
     if props.get("sh_mode") not in ("Limit", "Free"):
         return 0.0, 1.0
@@ -57,7 +66,12 @@ def _seed_shift(fitter, pixel_idx, optical_depth, poly_deg, ref_props, target,
     def _rms(sh, sq):
         try:
             A = fitter.engine.get_basis_matrix(pixel_idx, float(sh), float(sq), poly_deg)
-            coef, *_ = np.linalg.lstsq(A, optical_depth, rcond=None)
+            n_gas = len(fitter.engine.gas_list)
+            lower = np.full(A.shape[1], -np.inf)
+            if not allow_negative_gas:
+                lower[:n_gas] = 0.0
+            coef = lsq_linear(A, optical_depth,
+                              bounds=(lower, np.full(A.shape[1], np.inf))).x
             return float(np.sqrt(np.mean((optical_depth - A @ coef) ** 2)))
         except Exception:                 # noqa: BLE001
             return np.inf
@@ -80,9 +94,11 @@ def _seed_shift(fitter, pixel_idx, optical_depth, poly_deg, ref_props, target,
 
 def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              px_min, px_max, poly_deg, step_limit, target="NO2",
-             seed_range=15.0, seed_step=0.25):
+             seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
+             controlled_start=None):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
     이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     sl = slice(px_min, px_max + 1)
     wl = np.asarray(wave, float)[sl]
     a = np.asarray(alpha, float)[sl]
@@ -98,17 +114,39 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     # 0에 주저앉는다. 앱은 스캔간 last_valid_shift를 이어받아 step_limit씩 걸어가지만,
     # 표본 스캔은 시간연속이 아니므로 **스캔마다 넓은 격자탐색**으로 시드를 잡는다.
     # (DoasFitter.pre_calibrate는 ±0.5 국소 격자라 여기선 부족 → 전역 격자를 직접 돈다.)
-    seed, seed_sq = _seed_shift(fitter, vp, a, poly_deg, ref_props, target, seed_range, seed_step)
-    active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
-        ref_props, seed, [seed, 1.0], step_limit)
-    # setup_fit_parameters는 squeeze theta0를 항상 1.0으로 놓으므로 시드를 직접 주입한다.
-    sq_key = f"{target}_sq"
-    if sq_key in active:
-        k = active.index(sq_key)
-        t0[k] = float(min(max(seed_sq, lb[k] + 1e-9), ub[k] - 1e-9))
+    if controlled_start is None:
+        seed, seed_sq = _seed_shift(fitter, vp, a, poly_deg, ref_props, target, seed_range,
+                                    seed_step, allow_negative_gas)
+    else:
+        if len(controlled_start) != 2 or not np.all(np.isfinite(controlled_start)):
+            raise ValueError("controlled_start must be finite (shift, squeeze)")
+        seed, seed_sq = map(float, controlled_start)
+    if controlled_start is None:
+        anchor = seed
+        active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
+            ref_props, anchor, [anchor, 1.0], step_limit)
+        sq_key = f"{target}_sq"
+        if sq_key in active:
+            k = active.index(sq_key)
+            t0[k] = float(min(max(seed_sq, lb[k] + 1e-9), ub[k] - 1e-9))
+    else:
+        # Explorer multistart changes only the target theta0. Bounds remain anchored to
+        # the same declared Center, or worker-compatible initial center 0 for Limit.
+        props = ref_props.get(target, {})
+        if props.get("sh_mode") == "Center":
+            try:
+                anchor = float(str(props.get("sh_val", "0,3")).split(",")[0])
+            except ValueError:
+                anchor = 0.0
+        else:
+            anchor = 0.0
+        initial_values = {f"{target}_sh": seed, f"{target}_sq": seed_sq}
+        active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
+            ref_props, anchor, [anchor, 1.0], step_limit, initial_values=initial_values)
     out = fitter.execute_varpro_fit(vp, a, np.eye(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
-                                    ref_props, T_C, 0.0, False)
+                                    ref_props, T_C, 0.0, False,
+                                    allow_negative_gas=allow_negative_gas)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out
 
     full, tot, base, etal, _ = eng.get_model_components(
@@ -143,7 +181,11 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     coeffs = {g: float(c) for g, c in zip(eng.gas_list, gco)}   # ref별 핏 계수(정규화공간)
     return dict(conc=conc, conc_all=conc_all, perr_rel=perr_rel, rms=rms, sig=sig,
                 rms_sig=float(rms / (sig + 1e-30)), autocorr1=autocorr1,
-                shifts=shifts, squeezes=squeezes, coeffs=coeffs, n_free=len(active))
+                shifts=shifts, squeezes=squeezes, coeffs=coeffs, n_free=len(active),
+                etalon_frequency=float(ef),
+                nonlinear_initialization={"active": list(active), "theta0": list(map(float, t0)),
+                                          "lower": list(map(float, lb)),
+                                          "upper": list(map(float, ub))})
 
 
 def _med_mad(xs):
@@ -156,13 +198,15 @@ def _med_mad(xs):
 
 
 def evaluate(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
-             step_limit, target="NO2"):
+             step_limit, target="NO2", *, allow_negative_gas):
     """스캔 샘플을 한 파라미터 세트로 핏 → 집계 지표(median 중심) + ref별 shift/squeeze 분포."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     per, fails = [], 0
     for (wave, alpha, T_C, P_mbar) in scans:
         try:
             per.append(fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
-                                px_min, px_max, poly_deg, step_limit, target))
+                                px_min, px_max, poly_deg, step_limit, target,
+                                allow_negative_gas=allow_negative_gas))
         except Exception:                 # noqa: BLE001
             fails += 1
     if not per:
@@ -176,7 +220,7 @@ def evaluate(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
         conc=conc_med,
         conc_cv=float(np.std(finite_c) / (abs(conc_med) + 1e-30)) if len(finite_c) > 1 else 0.0,
         perr_rel=_med_mad([p["perr_rel"] for p in per])[0],
-        autocorr1=_med_mad([p["autocorr1"] for p in per])[0],
+        autocorr1=_med_mad([abs(p["autocorr1"]) for p in per])[0],
         rms_sig=_med_mad([p["rms_sig"] for p in per])[0],
         n_free=per[0]["n_free"],
     )
@@ -192,13 +236,16 @@ def evaluate(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
 
 # ──────────────────────────────────────────────────────────────────────────
 def optimize_poly(scans, eng, fitter, ref_props, px_min, px_max, polys,
-                  step_limit, target="NO2", plateau=0.05, conc_tol=0.03):
+                  step_limit, target="NO2", plateau=0.05, conc_tol=0.03, *,
+                  allow_negative_gas):
     """poly 차수 사다리 → 최소 무릎점 추천(RMS 최소 아님).
 
     기준: rms/sig가 더 낮은 차수 대비 `plateau`(5%) 미만으로만 개선되고, 농도가 다음 차수와
     `conc_tol`(3%) 안에서 안정되면 그 최소 차수 채택(광대역만 걷고 NO2 구조는 안 먹는 지점).
     자유도(=차수)를 더 올릴 입증책임은 올리는 쪽 — 헌장③."""
-    ladder = [evaluate(scans, eng, fitter, ref_props, px_min, px_max, p, step_limit, target)
+    allow_negative_gas = _require_bool(allow_negative_gas)
+    ladder = [evaluate(scans, eng, fitter, ref_props, px_min, px_max, p, step_limit,
+                       target, allow_negative_gas=allow_negative_gas)
               for p in polys]
     ladder = [r for r in ladder if r.get("n_ok")]
     if not ladder:
@@ -218,8 +265,9 @@ def optimize_poly(scans, eng, fitter, ref_props, px_min, px_max, polys,
 
 
 def optimize_poly_joint(scans, eng, fitter, ref_props, px_min, px_max, polys,
-                        step_limit, target="NO2", wide=15.0, plateau=0.05, conc_tol=0.03,
-                        eng_px_min=None, eng_px_max=None):
+                        step_limit, target="NO2", wide=15.0,
+                        plateau=0.05, conc_tol=0.03,
+                        eng_px_min=None, eng_px_max=None, *, allow_negative_gas):
     """`optimize_poly`와 동일한 무릎점 로직이지만, **각 차수를 target shift를 넓게 푼 채**
     평가한다. `optimize_poly`는 현재 ref_props(예: shift Fix -0.5로 경계에 박힌 값, §13-F)
     그대로 각 차수를 채점하므로, poly 비교가 그 stale shift 오차에 오염된다 — 어떤 차수는
@@ -231,9 +279,11 @@ def optimize_poly_joint(scans, eng, fitter, ref_props, px_min, px_max, polys,
     있음 — 호출부가 변환해서 넘긴다)를 주면 각 차수마다 `differential_collinearity`(T2,
     핏 없는 순수 기하 진단)를 곁들여 ladder row에 `multi_R_target`을 얹는다. None이면
     생략(기존 동작 그대로) — poly 사다리 자체의 무릎점 선택 로직은 건드리지 않는다."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     rp_wide = {g: dict(p) for g, p in ref_props.items()}
     rp_wide[target] = dict(rp_wide.get(target, {}), sh_mode="Limit", sh_val=f"-{wide}, {wide}")
-    ladder = [evaluate(scans, eng, fitter, rp_wide, px_min, px_max, p, wide, target)
+    ladder = [evaluate(scans, eng, fitter, rp_wide, px_min, px_max, p, wide,
+                       target, allow_negative_gas=allow_negative_gas)
               for p in polys]
     ladder = [r for r in ladder if r.get("n_ok")]
     if not ladder:
@@ -271,15 +321,16 @@ def _round_bound(x, up):
 
 
 def recommend_shift(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
-                    target="NO2", wide=15.0, margin_sigma=4.0):
+                    target="NO2", wide=15.0, margin_sigma=4.0, *, allow_negative_gas):
     """TARGET shift 크기 자동 결정: **넓게 풀어 실제 핏된 shift 분포를 측정** → bounds가
     데이터에서 나온다(blind 그리드 아님). 분포가 안정하면 [median±kσ] Limit, 심하게
     흔들리면 shift가 안 정해지는 것 → Fix(median) 권고."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     rp_wide = {g: dict(p) for g, p in ref_props.items()}
     rp_wide[target] = dict(rp_wide.get(target, {}),
                            sh_mode="Limit", sh_val=f"-{wide}, {wide}")
     row = evaluate(scans, eng, fitter, rp_wide, px_min, px_max, poly_deg,
-                   step_limit=wide, target=target)
+                   step_limit=wide, allow_negative_gas=allow_negative_gas, target=target)
     med, sig = row["shift_dist"].get(target, (float("nan"), float("nan")))
     at_edge = np.isfinite(med) and (wide - abs(med)) < 2 * (sig + 0.1)
     # 흔들림 지표: σ가 크면(>2px) shift가 스캔마다 튐 → 잘 안 정해짐
@@ -288,8 +339,8 @@ def recommend_shift(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
     # 잔차가 안 희다(|ac1|↑). 아래 모든 반환 분기에 붙여서 호출부가 "측정된 값"인 척
     # 넘어가지 못하게 한다(recommend_shift는 예전부터 이 체크가 아예 없었음).
     ac1 = row.get("autocorr1", float("nan"))
-    degenerate = bool(np.isfinite(ac1) and ac1 > AC1_DEGENERATE_THRESHOLD)
-    warn = (f"⚠퇴화 분기 의심(|ac1|={ac1:.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B — "
+    degenerate = bool(np.isfinite(ac1) and abs(ac1) > AC1_DEGENERATE_THRESHOLD)
+    warn = (f"⚠퇴화 분기 의심(|ac1|={abs(ac1):.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B — "
             "잔차가 안 흼, 통계적으로만 좋아 보이는 가짜 해일 수 있음) — " if degenerate else "")
     if not np.isfinite(med):
         return dict(policy="Link", reason="측정불가", median=med, sigma=sig, ac1=ac1, degenerate=degenerate)
@@ -314,14 +365,17 @@ def recommend_shift(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
 
 
 def recommend_squeeze(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
-                      target="NO2", wide=0.05, margin_sigma=4.0, step_limit=1.0):
+                      target="NO2", wide=0.05, margin_sigma=4.0, step_limit=1.0, *,
+                      allow_negative_gas):
     """TARGET squeeze 크기 자동 결정 — shift와 동일 철학(넓게 풀어 실제 분포로 bounds).
 
     squeeze는 1.0 근방의 배율. 분포가 1.0에 붙어 폭이 무의미하게 좁으면 **Fix 1.0 권고**
     (자유도를 더할 근거 없음 — 헌장③). sq_val은 setup_fit_parameters 규약대로 1.0 기준 편차."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     rp = {g: dict(p) for g, p in ref_props.items()}
     rp[target] = dict(rp.get(target, {}), sq_mode="Limit", sq_val=f"-{wide}, {wide}")
-    row = evaluate(scans, eng, fitter, rp, px_min, px_max, poly_deg, step_limit, target)
+    row = evaluate(scans, eng, fitter, rp, px_min, px_max, poly_deg, step_limit,
+                   target, allow_negative_gas=allow_negative_gas)
     med, sig = row["sq_dist"].get(target, (float("nan"), float("nan")))
     if not np.isfinite(med):
         return dict(policy="Fix", value=1.0, reason="측정불가 → Fix 1.0")
@@ -337,19 +391,22 @@ def recommend_squeeze(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
 
 
 def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_max,
-                         poly_deg, target="NO2", wide=15.0, quantile=0.95, floor=0.5):
+                         poly_deg, target="NO2", wide=15.0, quantile=0.95, floor=0.5,
+                         *, allow_negative_gas):
     """`step_limit`(스캔당 최대 shift 변화) 자동 결정.
 
     ⚠️ sh_val(절대범위)과 다른 물건 — **연속 스캔 간 Δshift**에서 나와야 하므로
     시간상 인접한 스캔 블록을 넘겨야 한다(날짜별로 흩뿌린 표본이면 과대추정된다).
     실제 |Δshift|의 `quantile`을 여유 있게 올림 → 정상 변화는 통과, 튐은 막는다."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     rp = {g: dict(p) for g, p in ref_props.items()}
     rp[target] = dict(rp.get(target, {}), sh_mode="Limit", sh_val=f"-{wide}, {wide}")
     shifts, ac1s = [], []
     for (wave, alpha, T_C, P_mbar) in consecutive_scans:
         try:
             r = fit_scan(eng, fitter, rp, wave, alpha, T_C, P_mbar,
-                         px_min, px_max, poly_deg, wide, target)
+                         px_min, px_max, poly_deg, wide, target,
+                         allow_negative_gas=allow_negative_gas)
             shifts.append(r["shifts"].get(target, np.nan))
             ac1s.append(r.get("autocorr1", np.nan))
         except Exception:                 # noqa: BLE001
@@ -362,7 +419,7 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
     # ★퇴화 분기 감지(§16-B): 스캔마다 다른 alias 골짜기로 튀면 |Δshift|가 커 보여도
     # 그건 드리프트가 아니라 잡음이다 — median |ac1|이 높으면 이 스캔블록 전체가 못 미더움.
     finite_ac1 = [a for a in ac1s if np.isfinite(a)]
-    med_ac1 = float(np.median(finite_ac1)) if finite_ac1 else float("nan")
+    med_ac1 = float(np.median(np.abs(finite_ac1))) if finite_ac1 else float("nan")
     degenerate = bool(np.isfinite(med_ac1) and med_ac1 > AC1_DEGENERATE_THRESHOLD)
     warn = (f"⚠퇴화 분기 의심(median |ac1|={med_ac1:.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B) — " if degenerate else "")
     if len(d) < 3:
@@ -387,7 +444,7 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
 def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
                              secondary, target="NO2", step_limit=1.0,
                              wide=15.0, improve_min=0.05,
-                             eng_px_min=None, eng_px_max=None):
+                             eng_px_min=None, eng_px_max=None, *, allow_negative_gas):
     """2차 레퍼런스를 target에 **Link vs 독립** 판정. 기본=Link(절약). 독립이 잔차를
     의미있게(≥improve_min) 개선하고 AND 그 shift가 물리적으로 안정할 때만 독립 권고.
 
@@ -396,19 +453,20 @@ def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly
     shift가 안정해 보여도 **독립 승격을 거부**한다 — 공선인 두 종을 "독립"으로 풀면 그
     분해 자체가 임의적이라 RMS 개선이 진짜 신호 분리가 아니라 우연일 수 있기 때문
     (§2-B: T1만으로는 이런 과적합을 못 잡는다)."""
+    allow_negative_gas = _require_bool(allow_negative_gas)
     # (a) Link 기준선
     rp_link = {g: dict(p) for g, p in ref_props.items()}
     rp_link[secondary] = dict(rp_link.get(secondary, {}),
                               sh_mode="Link", sh_val=target,
                               sq_mode="Link", sq_val=target)
     base = evaluate(scans, eng, fitter, rp_link, px_min, px_max, poly_deg,
-                    step_limit, target)
+                    step_limit, target, allow_negative_gas=allow_negative_gas)
     # (b) 독립(넓게)
     rp_free = {g: dict(p) for g, p in ref_props.items()}
     rp_free[secondary] = dict(rp_free.get(secondary, {}),
                               sh_mode="Limit", sh_val=f"-{wide}, {wide}")
     free = evaluate(scans, eng, fitter, rp_free, px_min, px_max, poly_deg,
-                    step_limit=wide, target=target)
+                    step_limit=wide, allow_negative_gas=allow_negative_gas, target=target)
     if not base.get("n_ok") or not free.get("n_ok"):
         return dict(secondary=secondary, decision="Link", reason="평가불가")
 

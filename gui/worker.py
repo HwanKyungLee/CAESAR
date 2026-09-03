@@ -47,6 +47,7 @@ class AnalysisWorker(QThread):
         self.update_interval = update_interval
         self.delay_ms = delay_ms
         self.ref_properties = ref_properties if ref_properties is not None else {}
+        self.allow_negative_gas = None  # caller must select an explicit policy before run()
 
         # Spectrum channel: 1=CH1/ROI1/PNs (180°C), 2=CH2/ROI2/ANs (300°C), 3=CH3
         self.channel = int(channel) if channel in (1, 2, 3) else 1
@@ -188,6 +189,8 @@ class AnalysisWorker(QThread):
     def _execute_varpro_fit(self, pixel_idx, optical_depth, W_initial, active_vars, fixed_vars,
                             linked_vars, theta0, theta_lb, theta_ub, poly_order, fixed_e_f,
                             absolute_center, fit_sign, override_lam=None, override_robust=None):
+        if not isinstance(self.allow_negative_gas, bool):
+            raise TypeError("AnalysisWorker requires boolean allow_negative_gas before fitting")
         return self._doasfitter().execute_varpro_fit(
             pixel_idx, optical_depth, W_initial, active_vars, fixed_vars, linked_vars,
             theta0, theta_lb, theta_ub, poly_order, fixed_e_f, absolute_center, fit_sign,
@@ -195,7 +198,7 @@ class AnalysisWorker(QThread):
             getattr(self, 'tikhonov_lambda', 0.0),
             getattr(self, 'use_robust_fitting', False),
             override_lam, override_robust,
-            allow_negative_gas=getattr(self, 'allow_negative_gas', False))
+            allow_negative_gas=self.allow_negative_gas)
     
     # ==========================================
     # 🌟 Main Orchestrator
@@ -972,6 +975,10 @@ class AnalysisWorker(QThread):
 
     def _chunk_cfg(self):
         """Picklable config sent to each pool worker (see _chunk_init)."""
+        if not hasattr(self, 'allow_negative_gas'):
+            raise TypeError("parallel worker requires explicit allow_negative_gas")
+        if not isinstance(self.allow_negative_gas, bool):
+            raise TypeError("parallel worker allow_negative_gas must be boolean")
         nparam = len(self.params)
         return {
             'pixel_min': self.pixel_min, 'pixel_max': self.pixel_max,
@@ -982,7 +989,7 @@ class AnalysisWorker(QThread):
             'step_limit': getattr(self, 'step_limit', 0.5),
             'tikhonov_lambda': getattr(self, 'tikhonov_lambda', 0.0),
             'use_robust_fitting': getattr(self, 'use_robust_fitting', False),
-            'allow_negative_gas': getattr(self, 'allow_negative_gas', False),
+            'allow_negative_gas': self.allow_negative_gas,
             'fit_unit': getattr(self, 'fit_unit', 'nm'),
             'fit_lo_nm': getattr(self, 'fit_lo_nm', None),
             'fit_hi_nm': getattr(self, 'fit_hi_nm', None),
@@ -1228,6 +1235,8 @@ def _chunk_init(engine, cfg):
               'gas_temp_override', 'tz_offset_sec', 'etalon_freq_min', 'etalon_freq_max'):
         if k in cfg:
             setattr(w, k, cfg[k])
+    if not isinstance(w.allow_negative_gas, bool):
+        raise TypeError("parallel worker config requires boolean allow_negative_gas")
     _CHUNK_WORKER = w
 
 

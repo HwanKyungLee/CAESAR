@@ -160,6 +160,7 @@ class ConcentrationConfig:
     그대로 가리킨다(fitset_path+wl_dir) — Augur 확정 설정과 갈라지지 않게."""
     fitset_path: str
     wl_dir: str
+    allow_negative_gas: bool
     target: str = "NO2"
     cavity_temp_hk: Optional[str] = None
     cavity_pressure_hk: Optional[str] = None
@@ -174,9 +175,12 @@ class ConcentrationConfig:
     @classmethod
     def from_dict(cls, d: dict) -> "ConcentrationConfig":
         alert = d.get("alert") or {}
+        if not isinstance(d.get("allow_negative_gas"), bool):
+            raise ProfileError("concentration.allow_negative_gas must be an explicit boolean")
         return cls(
             fitset_path=d["fitset_path"],
             wl_dir=d["wl_dir"],
+            allow_negative_gas=d["allow_negative_gas"],
             target=d.get("target", "NO2"),
             cavity_temp_hk=d.get("cavity_temp_hk"),
             cavity_pressure_hk=d.get("cavity_pressure_hk"),

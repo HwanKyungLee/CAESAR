@@ -239,8 +239,9 @@ class DoasFitter:
 
     # ──────────────────────────────────────────────────────────────────
     def setup_fit_parameters(self, ref_properties, initial_shift_center,
-                             current_params, step_limit):
+                             current_params, step_limit, initial_values=None):
         """least_squares용 비선형 파라미터 리스트(shift/squeeze 모드별) 구성."""
+        initial_values = initial_values or {}
         active_vars, fixed_vars, linked_vars = [], {}, {}
         theta0, theta_lb, theta_ub = [], [], []
 
@@ -288,10 +289,12 @@ class DoasFitter:
                     if sh_lb >= sh_ub:                              # 여전히 퇴화면 미세폭 부여
                         sh_lb, sh_ub = near - 1e-4, near + 1e-4
                 theta_lb.append(sh_lb); theta_ub.append(sh_ub)
-                theta0.append(max(sh_lb + 1e-5, min(sh_ub - 1e-5, current_params[0])))
+                start = initial_values.get(sh_name, current_params[0])
+                theta0.append(max(sh_lb + 1e-5, min(sh_ub - 1e-5, start)))
             elif props["sh_mode"] == "Free":
                 active_vars.append(sh_name)
-                theta_lb.append(-np.inf); theta_ub.append(np.inf); theta0.append(initial_shift_center)
+                theta_lb.append(-np.inf); theta_ub.append(np.inf)
+                theta0.append(initial_values.get(sh_name, initial_shift_center))
             elif props["sh_mode"] == "Fix":
                 # Fix = hold the shift at the ABSOLUTE value (same units as the Limit
                 # window). Previously this was `initial_shift_center + val`, which —
@@ -316,7 +319,8 @@ class DoasFitter:
                 sq_lb = 1.0 + v_min if abs(v_min) < 0.5 else v_min
                 sq_ub = 1.0 + v_max if abs(v_max) < 0.5 else v_max
                 theta_lb.append(sq_lb); theta_ub.append(sq_ub)
-                theta0.append(max(sq_lb + 1e-5, min(sq_ub - 1e-5, 1.0)))
+                start = initial_values.get(sq_name, 1.0)
+                theta0.append(max(sq_lb + 1e-5, min(sq_ub - 1e-5, start)))
             elif props["sq_mode"] == "Free":
                 active_vars.append(sq_name)
                 theta_lb.append(0.1); theta_ub.append(10.0); theta0.append(1.0)

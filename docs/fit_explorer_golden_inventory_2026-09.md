@@ -1,0 +1,132 @@
+# Fit Explorer 골든 데이터 인벤토리 (2026-09)
+
+> 상태: **증거 등급·기록 규격 및 Explorer V1 synthetic 계약 고정 / 실데이터 재측정 미완료**  
+> 설계 정본: `docs/fit_explorer_design_2026-09.md`
+
+## 1. 증거 라벨
+
+이 문서는 관측과 해석을 섞지 않는다.
+
+- `CONTRACT`: synthetic/unit 회귀로 고정된 코드·정책 계약
+- `REPRODUCED`: 명시된 입력 hash와 설정으로 현재 코드에서 다시 실행해 확인
+- `HISTORICAL`: 과거 핸드오프에 수치가 있으나 현재 checkout/hash에서 재측정 전
+- `CANDIDATE`: 골든 fixture 후보이며 외부 진실이 아님
+- `UNRESOLVED`: 물리 정체성 또는 진실값을 현재 자료로 확정할 수 없음
+- `EXCLUDED_T3`: 검증된 독립 T3로 인정하지 않음
+
+`CANDIDATE`의 낮은 잔차나 프로덕션 일치는 농도 진실의 증명이 아니다. 재측정이 끝나기 전 과거 수치를
+정확한 현재 기대값으로 복사하지 않는다.
+
+## 2. 현재 정책 계약 — Phase A2 완료
+
+| 계약 | 증거 | 상태 |
+|---|---|---|
+| `allow_negative_gas`는 명시 bool이며 조용한 기본값이 없음 | `tools/test_fit_policy.py` | `CONTRACT` |
+| 같은 부호 정책이 seed와 최종 VARPRO fit에 전달됨 | `tools/test_fit_policy.py` | `CONTRACT` |
+| O4 계수의 부호가 음수여도 절대량은 크기로 판정 | `tools/test_fit_policy.py` | `CONTRACT` |
+| 잔차 자기상관은 `abs(ac1)`로 집계·퇴화 판정 | `tools/test_fit_policy.py`, `tools/test_test_fit_dialog.py` | `CONTRACT` |
+| 단일/채널 시나리오가 gas 부호 정책을 저장·복원하고 worker에 전달 | `tools/test_test_fit_dialog.py` | `CONTRACT` |
+| 3 window × 3 poly 후보와 서로 다른 controlled start 2개 | `tools/test_fit_explorer.py` | `CONTRACT` |
+| 두 start는 동일 유효 bounds에서 target 초깃값만 변경 | `tools/test_fit_explorer.py` | `CONTRACT` |
+| T2 입력/앵커가 불완전하면 PASS가 아니라 `UNAVAILABLE` | `tools/test_fit_explorer.py` | `CONTRACT` |
+| 좌표·상태·입력/출력 충돌 방지와 JSON/no-Apply | `tools/test_fit_explorer.py` | `CONTRACT` |
+
+이 완료 표시는 정책 단위 테스트의 완료다. 아래 실데이터 골든, worker end-to-end, plateau 판정 완료를
+뜻하지 않는다.
+
+V1 CLI는 9개 후보 × 대표 alpha 4개 × start 2개, 총 72 fit 시도를 수행한다. 후보 ranking,
+robustness plateau/closure 주장과 Apply는 범위 밖이다. 실행법은 인자를 문서에 중복 고정하지 않고
+`python tools/fit_explorer.py --help`에서 확인한다. 모든 JSON은 임시 파일을 fsync한 뒤 원자적으로
+교체하고, 평가가 실행된 보고서는 입력 파일 hash, reference/gas 순서, 표본 선택과 git
+`HEAD`/tracked diff hash/untracked manifest를 남긴다.
+구 FitSet에 `allow_negative_gas`가 정확한 bool로 저장되어 있지 않으면 임의 기본값을 쓰지 않고,
+시나리오를 재저장하거나 명시적으로 마이그레이션할 때까지 `ABSTAIN`한다.
+
+## 3. ANs/ROI1 후보 — 정체성과 진실값을 분리
+
+`roi1`/`ch1`은 이 핏 사례를 찾기 위한 **운영 alias**다. 이것이 물리적으로 ANs 셀인지 PNs 셀인지,
+또는 차분 부호가 어느 쪽인지에 관해서는 문서·하드웨어 단서가 충돌한다. 물리 정체성은
+`docs/ANs_분석_핸드오프_2026-07-23.md`에 따라 `UNRESOLVED`이며 현장 배관 확인 또는 독립 인젝션
+전에는 확정하지 않는다. 파일명 `ANs`/`PNs`와 `data_label`을 진실로 사용하지 말고 wavecal/ROI와
+원본 채널 provenance로 매칭한다.
+
+과거 기록 후보:
+
+| 사례 | 과거 관측 | 증거 해석 | 현재 상태 |
+|---|---|---|---|
+| 고정 shift 약 −6 px | NO2 약 **95.9 ppb**, RMS/signal 약 **19.6%** | 명백히 나쁜 잔차의 실패 분기 재현 후보 | `HISTORICAL`, 재측정 필요 |
+| Center/저잔차 분기 | NO2 약 **3.6 ppb**, RMS/signal 약 **3.9%** | 당시 production과 일관된 저잔차 후보; 외부 진실 아님 | `HISTORICAL` + `CANDIDATE` |
+
+따라서 문서와 테스트에서 95.9 ppb 사례는 “틀린 농도라는 T3 정답”이 아니라 **같은 스캔에서 더 나쁜
+잔차·비물리적 분기 거동을 재현하는 failure fixture**로 쓴다. 약 3.6 ppb 사례는 “진짜 해”가 아니라
+**production-consistent candidate**라고 부른다.
+
+재측정 시 아래를 확정한다.
+
+- 정확한 alpha 파일 hash, 행 identity(`row_idx`와 데이터행 순번을 구분), 날짜/시간
+- wavecal 및 모든 reference 파일 hash와 reference 순서
+- engine/scenario hash, git hash와 dirty diff 식별자
+- seed grid 전체(`seed_range`, `seed_step`, 평가 순서), 고정 shift grid
+- multiplier와 scaling factor/decade normalization
+- `allow_negative_gas`, `fit_sign`, W, window 양끝 포함 규약
+- alpha px → engine px 변환, absolute center
+- poly, shift/squeeze mode·값·bounds, step_limit
+- etalon on/off, 주파수 범위와 검출값
+- T/P, gas temperature override와 cavity 관련 설정
+- 후보별 농도, RMS/signal, `|ac1|`, 수렴/경계 접촉, T2 상태
+
+현재 checkout HEAD의 기준 hash는 실행 시 manifest에 다시 기록한다. working tree가 dirty이면 HEAD만으로
+재현성을 주장하지 말고 변경 diff hash도 함께 남긴다. 과거 `seed_range=15 px`, `seed_step=0.25 px`와
+260703 기록은 출발 후보일 뿐, 현재 코드의 고정/default 동작을 다시 측정해 확정한다.
+
+## 4. Cold/O4 후보
+
+과거 cold 사례는 O4가 T1에서 매우 좋아 보이지만 fitted amount가 물리 기대보다 수십~수백 배 커져
+T2가 기각하는 정책 사례다. 숫자(예: 89배 또는 229배)는 서로 다른 실행 문맥이 섞여 있으므로 현재
+입력 hash와 설정을 고정하기 전 단일 골든 숫자로 채택하지 않는다.
+
+골든 판정은 다음 property다.
+
+- 동일 manifest에서 O4 포함 후보가 통계 개선만으로 대표 추천을 이기지 못한다.
+- T2 절대량 계산은 계수 부호와 무관하게 magnitude를 사용한다.
+- 물리 입력이 실제로 없으면 FAIL을 날조하지 않고 `UNAVAILABLE`이다.
+- O4 제외 후보의 농도값을 외부 진실이라고 부르지 않는다.
+
+재측정 manifest에는 §3의 공통 항목과 함께 O4 이론량 식, 산소 몰분율/압력/온도, ZA가 I0에 사용된
+여부와 그 provenance를 기록한다.
+
+## 5. Cold/PNs 및 기타 후보
+
+- cold 2026-05-26 production 결과의 약 3.5 ppb 기록은 `HISTORICAL`이며 내부 재현 후보이지 T3가 아니다.
+- PNs 다수 날짜 자료는 날짜/상태 홀드아웃과 채널 매칭 후보지만, 구체 fixture는 아직 선정하지 않았다.
+- 파일 순서를 바꿔도 같은 판정이 나오는지, 표본 일부를 교체해도 같은 plateau에 남는지는 Explorer
+  구현 후 별도 property로 검증한다.
+
+## 6. T3 제외 규칙
+
+현재 NO2 인젝션/ZA/He 관련 기록은 프로토콜 또는 분석 후보이지, 이 Explorer가 사용할 수 있도록
+독립 농도·경로·보정과 hash가 검증된 골든 T3가 아니다. 따라서 모두 `EXCLUDED_T3`로 두며 Final
+판정의 외부 진실로 사용하지 않는다. T3가 없을 때 결과 라벨은 “내부적으로 강건”을 넘지 않는다.
+
+## 7. Fixture와 CI 분리
+
+CI의 **synthetic 계약 테스트**는 과학적 진실을 증명하지 않고 V1의 후보/초기화, 보수적 T2,
+좌표·상태, 안전한 JSON/no-Apply 경계만 검사한다. pruning, graph closure/plateau와 실데이터 manifest
+재현은 아직 이 테스트가 검증하지 않는다.
+
+실측 alpha/raw/R 파일을 쓰는 검사는 **optional external-data suite**로 분리한다. 필요한 manifest 또는
+환경 경로가 없으면 성공처럼 지나가지 말고, 이유가 명시된 `SKIP`을 출력한다. 파일이 일부만 있거나
+hash가 다르면 `SKIP`이 아니라 manifest mismatch `FAIL`로 처리한다. 외부 suite 결과는 다음을 남긴다.
+
+- suite 버전, 현재 git/dirty hash, fixture manifest hash
+- 수행/실패/SKIP 사례 목록과 이유
+- 각 골든 사례의 `REPRODUCED` 승격 여부
+
+## 8. 아직 필요한 인벤토리 작업
+
+1. 로컬 데이터에서 ROI1 failure/production-consistent 후보의 정확한 파일·행을 다시 찾는다.
+2. 필요한 최소 행과 wavecal/reference/R 의존성을 manifest로 고정한다.
+3. 재배포 가능 여부를 확인하고, 불가하면 외부 suite 전용으로 유지한다.
+4. current code에서 fixed shift grid와 default/Center 경로를 둘 다 재측정한다.
+5. O4 사례를 동일 manifest로 재실행해 T2 tri-state와 magnitude 판정을 확인한다.
+6. 그 뒤에만 사례를 `HISTORICAL`/`CANDIDATE`에서 `REPRODUCED`로 승격한다.

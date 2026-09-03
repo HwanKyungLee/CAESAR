@@ -3,7 +3,7 @@
 사용자 FitSet json(레퍼런스·핏레인지 고정)을 baseline으로, core/param_optimizer로
 poly 차수 + ref별 shift/squeeze 정책·크기를 자동 판정한다.
 
-사용:  python tools/optimize_params.py [키]   (기본 cold, 키 목록은 channel_map.json 참조)
+사용:  python tools/optimize_params.py [키] (--allow-negative-gas | --nonnegative-gas)
 
 엔진 빌드는 app_window._build_engine_from_config를 **그대로 복제**(wavecal이 축,
 add_reference(wave_nm=wave, multiplier=10^mult), ILS 0) — 헤드리스=GUI 보장.
@@ -17,6 +17,7 @@ import os
 import sys
 import json
 import glob
+import argparse
 from datetime import date, timedelta
 
 import numpy as np
@@ -171,10 +172,28 @@ def nm_to_px(wave, nm):
 
 
 def main():
-    key = (sys.argv[1] if len(sys.argv) > 1 else "cold").lower()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("key", nargs="?", default="cold")
+    policy = parser.add_mutually_exclusive_group(required=True)
+    policy.add_argument("--allow-negative-gas", action="store_true")
+    policy.add_argument("--nonnegative-gas", action="store_true")
+    parser.add_argument("--override-fitset-policy", action="store_true",
+                        help="intentionally override a conflicting policy stored in the FitSet")
+    args = parser.parse_args()
+    key = args.key.lower()
+    allow_negative_gas = args.allow_negative_gas
     require_key(key)
     scen = json.load(open(FITSET, encoding="utf-8"))
     ch = pick_channel(scen, key)
+    stored_policy = ch.get("allow_negative_gas")
+    if stored_policy is not None and not isinstance(stored_policy, bool):
+        parser.error("FitSet allow_negative_gas must be boolean")
+    if stored_policy is not None and stored_policy != allow_negative_gas \
+            and not args.override_fitset_policy:
+        parser.error("CLI gas policy conflicts with FitSet; use --override-fitset-policy intentionally")
+    policy_source = ("explicit CLI override of FitSet" if stored_policy is not None
+                     and stored_policy != allow_negative_gas else
+                     "FitSet confirmed by CLI" if stored_policy is not None else "explicit CLI (legacy FitSet)")
     rp = ch["ref_props"]
     step_limit = float(ch.get("step_limit", 0.5))
     poly0 = int(ch["poly_deg"])
@@ -198,7 +217,9 @@ def main():
     print("#" * 100)
 
     # ── baseline 평가 ──
-    base = PO.evaluate(scans, eng, fitter, rp, px_min, px_max, poly0, step_limit, target)
+    print(f"# gas coefficient policy: allow_negative_gas={allow_negative_gas} ({policy_source})")
+    base = PO.evaluate(scans, eng, fitter, rp, px_min, px_max, poly0, step_limit,
+                       target, allow_negative_gas=allow_negative_gas)
     print(f"[baseline] poly{poly0}: NO2={base['conc']:.1f}ppb  perr_rel={base['perr_rel']:.3f}  "
           f"rms/sig={base['rms_sig']*100:.1f}%  |ac1|={abs(base['autocorr1']):.2f}  n_free={base['n_free']}")
     for g in eng.gas_list:
@@ -207,7 +228,8 @@ def main():
 
     # ── A-1: poly 차수 무릎점 ──
     rec_poly, ladder = PO.optimize_poly(scans, eng, fitter, rp, px_min, px_max,
-                                        POLYS, step_limit, target)
+                                        POLYS, step_limit, target,
+                                        allow_negative_gas=allow_negative_gas)
     print(f"\n[poly 사다리]  (무릎점 추천 = poly{rec_poly})")
     print(f"  {'poly':>4} {'NO2ppb':>8} {'rms/sig':>8} {'|ac1|':>6} {'conc_cv':>8}")
     for r in ladder:
@@ -217,20 +239,23 @@ def main():
 
     # ── A-2: target shift 크기(넓게 풀어 분포로 결정) ──
     print(f"\n[NO2 shift 크기 자동결정]  (현재 설정 {rp[target]['sh_mode']} {rp[target]['sh_val']})")
-    sh = PO.recommend_shift(scans, eng, fitter, rp, px_min, px_max, rec_poly, target)
+    sh = PO.recommend_shift(scans, eng, fitter, rp, px_min, px_max, rec_poly,
+                            target, allow_negative_gas=allow_negative_gas)
     print(f"  → {sh['reason']}")
 
     # ── A-3: squeeze 크기 ──
     print(f"\n[NO2 squeeze 크기 자동결정]  (현재 {rp[target]['sq_mode']} {rp[target]['sq_val']})")
     sq = PO.recommend_squeeze(scans, eng, fitter, rp, px_min, px_max, rec_poly,
-                              target, step_limit=step_limit)
+                              target, step_limit=step_limit,
+                              allow_negative_gas=allow_negative_gas)
     print(f"  → {sq['reason']}")
 
     # ── A-4: step_limit (연속 스캔 블록 필요) ──
     print(f"\n[step_limit 자동결정]  (현재 {step_limit})  ※연속 스캔으로 측정")
     consec = gather_consecutive(key, 20)
     if consec:
-        st = PO.recommend_step_limit(consec, eng, fitter, rp, px_min, px_max, rec_poly, target)
+        st = PO.recommend_step_limit(consec, eng, fitter, rp, px_min, px_max, rec_poly,
+                                     target, allow_negative_gas=allow_negative_gas)
         print(f"  → {st['reason']}")
     else:
         print("  → 연속 스캔 확보 실패")
@@ -241,7 +266,8 @@ def main():
         if sec == target:
             continue
         dec = PO.recommend_secondary_link(scans, eng, fitter, rp, px_min, px_max,
-                                          rec_poly, sec, target, step_limit)
+                                          rec_poly, sec, target, step_limit,
+                                          allow_negative_gas=allow_negative_gas)
         print(f"  {sec:8s}: {dec['reason']}")
 
 

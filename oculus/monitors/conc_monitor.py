@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 from typing import Optional
+import warnings
 
 import numpy as np
 
@@ -66,6 +67,19 @@ class ConcMonitor:
         self.poly_deg = int(fit_ch["poly_deg"])
         self.step_limit = float(fit_ch.get("step_limit", 0.5))
         self.ref_props = dict(fit_ch["ref_props"])   # 원본 보존 — narrow 사본은 매 핏마다 새로
+        if "allow_negative_gas" in fit_ch:
+            fitset_policy = fit_ch["allow_negative_gas"]
+            if not isinstance(fitset_policy, bool):
+                raise TypeError("FitSet allow_negative_gas must be bool")
+            if cfg.allow_negative_gas != fitset_policy:
+                raise ValueError("Oculus profile allow_negative_gas disagrees with FitSet")
+            self.allow_negative_gas = fitset_policy
+            self.gas_policy_provenance = "FitSet"
+        else:
+            warnings.warn("legacy FitSet has no allow_negative_gas; using explicit Oculus profile policy",
+                          RuntimeWarning, stacklevel=2)
+            self.allow_negative_gas = cfg.allow_negative_gas
+            self.gas_policy_provenance = "legacy FitSet fallback: Oculus profile"
 
         self._za_buf: list = []
         self._i0: Optional[np.ndarray] = None
@@ -110,7 +124,8 @@ class ConcMonitor:
         try:
             result = PO.fit_scan(self.eng, self.fitter, self._seeded_ref_props(), self.wave,
                                  alpha, temp_c, press_mbar, self.px_min, self.px_max,
-                                 self.poly_deg, self.step_limit, self.cfg.target)
+                                 self.poly_deg, self.step_limit, self.cfg.target,
+                                 allow_negative_gas=self.allow_negative_gas)
         except Exception as e:                # noqa: BLE001
             self._fail_streak += 1
             return self._fail_status(str(e))

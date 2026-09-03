@@ -162,10 +162,11 @@ def select_references(eng, alphas, candidates, wave, T_C, P_mbar,
 def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
                  target="NO2", label="auto", cavity_d=51.8,
                  starts_nm=None, ends_nm=None, n_design_alphas=8, progress=None,
-                 use_center_mode=True):
+                 use_center_mode=True, *, allow_negative_gas):
     """맨바닥 → FitSet 채널 config. 세팅 입력 없음.
 
     scans: [(wave, alpha, T_C, P_mbar), ...]   consecutive_scans: step_limit 추정용(연속)."""
+    allow_negative_gas = PO._require_bool(allow_negative_gas)
     def _say(m):
         if progress:
             progress(m)
@@ -229,7 +230,8 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
                 FP.theoretical_amount(c["name"], T_C, P_mbar):
             v = FP.judge_reference(eng, fitter, scans[:8], rp_tmp, rp_tmp,
                                    tmp["px_min"], tmp["px_max"], tmp["poly"], 0.5,
-                                   candidate=c["name"], target=target)
+                                   candidate=c["name"], target=target,
+                                   allow_negative_gas=allow_negative_gas)
             if v["exclude"]:
                 keep.remove(c["name"])
                 for L in sel_log:
@@ -251,19 +253,24 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
     # 4) 파라미터: shift/squeeze(넓게 풀어 실측 분포로), step_limit, Link
     _say("파라미터 추정…")
     rp = _default_ref_props(keep, target, wide=12.0)
-    sh = PO.recommend_shift(scans, eng2, fitter2, rp, px_min, px_max, poly, target, wide=12.0)
-    sq = PO.recommend_squeeze(scans, eng2, fitter2, rp, px_min, px_max, poly, target,
-                              step_limit=max(abs(sh.get("lb", 1.0)), abs(sh.get("ub", 1.0)), 1.0))
+    sh = PO.recommend_shift(scans, eng2, fitter2, rp, px_min, px_max, poly,
+                            target, wide=12.0, allow_negative_gas=allow_negative_gas)
+    sq = PO.recommend_squeeze(scans, eng2, fitter2, rp, px_min, px_max, poly,
+                              target,
+                              step_limit=max(abs(sh.get("lb", 1.0)), abs(sh.get("ub", 1.0)), 1.0),
+                              allow_negative_gas=allow_negative_gas)
     step = dict(value=None, reason="연속 스캔 없음")
     if consecutive_scans:
         step = PO.recommend_step_limit(consecutive_scans, eng2, fitter2, rp,
-                                       px_min, px_max, poly, target)
+                                       px_min, px_max, poly, target,
+                                       allow_negative_gas=allow_negative_gas)
     links = []
     for s in keep:
         if s != target:
             links.append(PO.recommend_secondary_link(scans, eng2, fitter2, rp, px_min, px_max,
                                                      poly, s, target,
-                                                     step_limit=step.get("value") or 1.0))
+                                                     step_limit=step.get("value") or 1.0,
+                                                     allow_negative_gas=allow_negative_gas))
 
     # 5) 조립
     ref_props = {}
@@ -319,11 +326,13 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
         "ref_props": ref_props,
         # 원칙 고정(최적화 대상 아님)
         "tikhonov_lambda": 0.0, "use_robust": False,
+        "allow_negative_gas": bool(allow_negative_gas),
         "kalman_q": 0.0005, "kalman_r": 0.05,
         "cavity_d": cavity_d, "rl_factor": 1.0,
     }
     problems = validate_fitset(cfg, target)
     report = dict(problems=problems, preflight=preflight,
+                  policy_provenance={"allow_negative_gas": "explicit build_fitset argument"},
                   candidates=cands, selection=sel_log, keep=keep, window=best,
                   shift=sh, squeeze=sq, step=step, links=links, meta=meta2,
                   design_rank=[r for r in rows2[:5]])

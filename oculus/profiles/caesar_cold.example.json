@@ -36,6 +36,7 @@
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
     { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100],
       "concentration": {
+        "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
         "wl_dir": "cold",
         "target": "NO2",

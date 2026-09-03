@@ -3,6 +3,7 @@ import re
 import math
 import datetime
 import json
+import warnings
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
@@ -27,6 +28,24 @@ from core.data_io import DataIO
 from core.paths import WV_CAL_DIR, DEFAULT_OUTPUT_DIR, resolve_ref_path
 from core.__version__ import __version__
 from .ui_dialogs import *
+
+
+def _scenario_gas_policy(scenario, current):
+    """Restore an explicit saved policy; old files visibly preserve the current UI policy."""
+    if "allow_negative_gas" not in scenario:
+        warnings.warn("legacy scenario has no allow_negative_gas; preserving current checkbox value",
+                      RuntimeWarning, stacklevel=2)
+        return bool(current), "legacy scenario fallback: current checkbox"
+    value = scenario["allow_negative_gas"]
+    if not isinstance(value, bool):
+        raise TypeError("scenario allow_negative_gas must be bool")
+    return value, "scenario"
+
+
+def _channel_worker_gas_policy(use_cfg, cfg, live_value):
+    if not isinstance(live_value, bool):
+        raise TypeError("live allow_negative_gas must be bool")
+    return _scenario_gas_policy(cfg, live_value)[0] if use_cfg else live_value
 
 class CAESARAnalyzer(QMainWindow):
     """
@@ -3312,7 +3331,7 @@ class CAESARAnalyzer(QMainWindow):
             vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
             self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
             self.spin_lambda.value(), self.chk_robust.isChecked(),
-            allow_negative_gas=self.chk_allow_neg.isChecked() if hasattr(self, 'chk_allow_neg') else False)
+            allow_negative_gas=self.chk_allow_neg.isChecked())
         opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out
         full_model, *_ = eng.get_model_components(
             vp_pixel, opt_shifts, opt_squeezes, gas_coeffs, poly_c,
@@ -4377,6 +4396,7 @@ class CAESARAnalyzer(QMainWindow):
             # 채널별 설정 vs 공용(라이브)
             if use_cfg:
                 cfg = self._channel_configs[ch]
+                neg_ch = _channel_worker_gas_policy(True, cfg, self.chk_allow_neg.isChecked())
                 eng_ch = self._build_engine_from_config(cfg)
                 rp_ch = cfg.get('ref_props', {})
                 ng = len(eng_ch.gas_list)
@@ -4415,6 +4435,7 @@ class CAESARAnalyzer(QMainWindow):
                 kq_ch = cfg.get('kalman_q', self.spin_kalman_q.value())
                 kr_ch = cfg.get('kalman_r', self.spin_kalman_r.value())
             else:
+                neg_ch = _channel_worker_gas_policy(False, {}, self.chk_allow_neg.isChecked())
                 eng_ch = self.engine; rp_ch = getattr(self, 'ref_props', {})
                 p0_ch, lo_ch, hi_ch = p0, bounds_low, bounds_high
                 funit_ch = self.cb_fit_unit.currentText() if hasattr(self, 'cb_fit_unit') else 'nm'
@@ -4452,7 +4473,7 @@ class CAESARAnalyzer(QMainWindow):
             w.step_limit = step_ch
             w.tikhonov_lambda = lam_ch
             w.use_robust_fitting = rob_ch
-            w.allow_negative_gas = self.chk_allow_neg.isChecked() if hasattr(self, 'chk_allow_neg') else False
+            w.allow_negative_gas = neg_ch
             w.qc_enabled = self.chk_qc.isChecked() if hasattr(self, 'chk_qc') else True
             w.qc_rms_abs = self.spin_qc_rms.value() if hasattr(self, 'spin_qc_rms') else 0.0
             w.qc_snr_min = self.spin_qc_snr.value() if hasattr(self, 'spin_qc_snr') else 0.0
@@ -5811,6 +5832,7 @@ class CAESARAnalyzer(QMainWindow):
             "ref_props": dict(getattr(self, 'ref_props', {})),
             "tikhonov_lambda": self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0,
             "use_robust": self.chk_robust.isChecked() if hasattr(self, 'chk_robust') else False,
+            "allow_negative_gas": self.chk_allow_neg.isChecked(),
             "kalman_q": self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005,
             "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050,
             "cavity_d": self.spin_d_len.value() if hasattr(self, 'spin_d_len') else 100.0,
@@ -5842,6 +5864,16 @@ class CAESARAnalyzer(QMainWindow):
             self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
         if hasattr(self, 'chk_robust'):
             self.chk_robust.setChecked(scenario.get("use_robust", False))
+        if hasattr(self, 'chk_allow_neg'):
+            value, provenance = _scenario_gas_policy(
+                scenario, self.chk_allow_neg.isChecked())
+            self.chk_allow_neg.setChecked(value)
+            self._gas_policy_provenance = provenance
+            if provenance.startswith("legacy"):
+                QMessageBox.warning(
+                    self, "Legacy Fit Scenario",
+                    "This scenario does not record the ±Neg gas policy. "
+                    "The current checkbox value was preserved; verify it before running.")
         if hasattr(self, 'spin_kalman_q'):
             self.spin_kalman_q.setValue(scenario.get("kalman_q", 0.0005))
         if hasattr(self, 'spin_kalman_r'):
@@ -5933,6 +5965,17 @@ class CAESARAnalyzer(QMainWindow):
                 scenario = json.load(f)
             if isinstance(scenario, dict) and "channels" in scenario:   # v2 멀티채널
                 chans = {int(c): cfg for c, cfg in scenario["channels"].items()}
+                legacy_channels = [ch for ch, cfg in chans.items()
+                                   if "allow_negative_gas" not in cfg]
+                if legacy_channels:
+                    fallback = self.chk_allow_neg.isChecked()
+                    for ch in legacy_channels:
+                        chans[ch] = dict(chans[ch], allow_negative_gas=fallback)
+                    self._legacy_gas_policy_channels = tuple(legacy_channels)
+                    QMessageBox.warning(
+                        self, "Legacy Fit Scenario",
+                        f"Channels {legacy_channels} do not record the ±Neg policy. "
+                        f"They were explicitly migrated to the current value ({fallback}); verify before RUN.")
                 self._load_channel_scenario(chans, scenario.get("active", sorted(chans)[0]))
                 QMessageBox.information(self, "Auto-Load Success",
                                         f"🚀 {len(chans)} channels config restored (channel tabs).\n[Load Data] then RUN!")
@@ -5967,4 +6010,3 @@ class CAESARAnalyzer(QMainWindow):
                 self._switching_channel = False
                 break
         self._apply_config(chans[active], load_refs=True)
- 

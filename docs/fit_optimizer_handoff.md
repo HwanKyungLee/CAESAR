@@ -1,7 +1,9 @@
 # CAESAR Pro — 핏세팅 최적화 프로그램 핸드오프
 
-> 다른 세션이 이 문서 하나로 맥락을 잡고 이어가도록 정리. 작성 2026-06-30, 최종 갱신 2026-08-04.
-> **🚀 처음 읽으면 §10(현재 상태)부터.** 그다음 §15(명세) → §2-B(신뢰 3계층) → §16(Center 모드).
+> 다른 세션이 이 문서 하나로 맥락을 잡고 이어가도록 정리. 작성 2026-06-30, 최종 갱신 2026-09-03.
+> **🚀 처음 읽으면 §10(현재 상태)부터.** Explorer 작업은
+> `docs/fit_explorer_design_2026-09.md` → `docs/fit_explorer_golden_inventory_2026-09.md`를 먼저 읽고,
+> 현행 생성기 명세는 §15 → §2-B → §16 순서로 읽는다.
 > ⚠️§1·§2는 2026-07-21 시점 기록이라 일부 문장이 이후 결론에 의해 갱신됐다(각 절의 갱신 주석 참조).
 > 저장소: `C:\Doasis_Work\CAESAR\CAESAR` (중첩 CAESAR 폴더 주의).
 > 관련 메모리: `fit-optimizer-stage1-2026-07`, `filtering-philosophy`,
@@ -64,10 +66,11 @@
 ## 3. 사용자 실제 FitSet (baseline, 최적화 출발점)
 경로: `C:\Doasis_Work\Output\fit setting\FitSet_*.json`
 - **Cold**: 438-465.8nm / Poly4 / shift bounds(-1,1)
-- **ANs** (hot ch1, 300°C): 429.7-466nm / Poly4 / shift(-10,0.5)  ← 비대칭
-- **PNs** (hot ch2, 180°C): 444.1-470.6nm / Poly3 / shift(-5,5)
+- **roi1/ch1 (과거 ANs alias)**: 429.7-466nm / Poly4 / shift(-10,0.5)  ← 비대칭
+- **roi2/ch2 (과거 PNs alias)**: 444.1-470.6nm / Poly3 / shift(-5,5)
 - **refs = CHOCHO · H2O · NO2** (**O4 없음!**). H2O multiplier 지수 = -12 (→1e-12).
-- 채널정체성: **ch1=ANs, ch2=PNs** (ANs=CH1−CH2). `hot-channel-swap-ans-2026-06` 참조.
+- 채널명 주의: 이 문서의 **ANs(roi1/ch1)** 표기는 과거 핏 사례를 찾기 위한 운영 alias다.
+  물리적 ANs 셀 정체성과 차분 부호는 현재 미해결이며 `docs/ANs_분석_핸드오프_2026-07-23.md`를 따른다.
 
 ## 4. 헤드리스 엔진 빌드 (GUI 없이 핏 돌리려면 필수)
 GUI와 **동일하게** 빌드해야 결과가 일치. app_window의 `_build_engine_from_config` 복제:
@@ -117,7 +120,7 @@ GUI와 **동일하게** 빌드해야 결과가 일치. app_window의 `_build_eng
 - wavecal: `C:\Doasis_Work\Output\wv_cal\...`
 - FitSet json: `C:\Doasis_Work\Output\fit setting\FitSet_*.json`
 
-## 10. 현재 상태 & 다음 스텝  ← **여기부터 읽으면 방향 잡힘** (갱신 2026-08-04)
+## 10. 현재 상태 & 다음 스텝  ← **여기부터 읽으면 방향 잡힘** (갱신 2026-09-03)
 
 ### 10-A. 무엇이 되는가 (동작 확인됨)
 ```bash
@@ -142,19 +145,28 @@ python tools/t2_reference_check.py cold     # 레퍼런스 물리 심판(O4 판�
 | `core/fit_optimizer.py` | 구 Stage1(핏레인지 perr 탐색). **폐기·참고용**(§1 방향전환) |
 
 ### 10-C. 다음 스텝 (우선순위)
-1. **Test Fit 버튼 이식** — 기존 `_test_fit`(app_window.py:3135) / `_show_test_fit_popup`(:3261)을
-   탭 구조로: **탭1 최적화 결과 + [적용]**, **탭2 1스캔 미리보기 존치**(사용자 지시).
-   워커 스레드 + 진행바 필수(표본 12스캔에 수십 초). 자동 적용 금지 — 사람 승인(§15-E 불변식4).
-2. **ANs 퇴화 분기 추적** — ANs 스캔 상당수가 95ppb/RMS19.6% 분기에 앉는다(§16-B). 사용자 실측에 직접 영향.
-3. **T3 진짜 검증** — 생성 세팅으로 실제 핏 → NO2 인젝션·채널 간 일치로 대조. (인젝션 예정)
+1. ~~**Test Fit 버튼 이식**~~ — **완료**. 탭1 자동 파라미터 추천+사람 승인 Apply, 탭2 1스캔
+   미리보기, worker thread/진행 표시가 구현됐다. Explorer는 이 기능과 별도이며 자동 Apply하지 않는다.
+2. **Fit Setting Explorer Phase A/B** — 설계와 골든 인벤토리는
+   `docs/fit_explorer_design_2026-09.md`, `docs/fit_explorer_golden_inventory_2026-09.md`가 정본이다.
+   Phase A2 정책과 Explorer V1 synthetic 계약은 완료됐다. V1은 3창×3poly × 대표 4스캔 × 서로 다른
+   controlled start 2개(총 72 fit)를 동일 유효 bounds에서 실행하고, target 초깃값만 바꾼다. T2는
+   보수적으로 tri-state를 유지한다. 모든 JSON은 원자 저장하고, 평가 보고서는 코드/입력 provenance를
+   남긴다. ranking,
+   plateau/closure, Apply는 없고 다음은 현재 hash 기준 실데이터 골든 재측정이다. 사용법은
+   `python tools/fit_explorer.py --help`에서 확인한다. `allow_negative_gas`가 정확한 bool로 저장되지 않은
+   구 FitSet은 재저장/마이그레이션 전까지 `ABSTAIN`한다. worker E2E·halving도 아직 미완료다.
+3. **ANs 퇴화 분기 추적** — roi1/ch1 사례에서 95ppb/RMS19.6% 분기가 기록됐으나 물리 채널명과
+   두 농도 분기의 진실값은 독립 검증 전 확정하지 않는다(§16-B와 골든 인벤토리).
+4. **T3 진짜 검증** — 생성 세팅으로 실제 핏 → NO2 인젝션·채널 간 일치로 대조. (인젝션 예정)
    ⚠️현재 "성능"은 **사용자 수동값과의 일치**로 잰 것이라 순환논리(§15-F).
-4. ~~웨이브칼 검증(`core/health_checks.py`)을 생성기에 연결~~ — **완료(2026-08-13)**. `build_fitset()`이
+5. ~~웨이브칼 검증(`core/health_checks.py`)을 생성기에 연결~~ — **완료(2026-08-13)**. `build_fitset()`이
    엔진 구성 직후 `check_wavecal`+`check_references`를 후보 refs셋 평가 *전* 게이트로 돌린다
    (FAIL이면 예외로 생성 중단). 연결하며 실측으로 `check_references`의 진짜 버그를 하나 잡음 —
    절대 std 문턱(1e-30)이 O4(피크~1e-46, 충돌유도흡수)를 전부 "평평(퇴화)"으로 오판하고 있었다
    (std/peak 비율은 CHOCHO·H2O와 같은 급이었는데도). 자기 피크 대비 **상대** std로 고쳤다 —
    `tools/test_health_checks.py`에 회귀 테스트 있음.
-5. 콜드 ill-posed 근본원인 — NO2 인젝션 후 판단(사용자 보류). 핫보다 콜드가 높은 이유도 미상.
+6. 콜드 ill-posed 근본원인 — NO2 인젝션 후 판단(사용자 보류). 핫보다 콜드가 높은 이유도 미상.
 
 ### 10-D. 이 문서 읽는 순서
 **§15(명세) → §2-B(신뢰 3계층) → §16(Center 모드) → §14(맨바닥 생성) → §13(하네스 함정)**
@@ -222,8 +234,10 @@ nm 필드는 스테일(`fit_unit`이 "nm"여도). cold: px774-1550=438.4-475.8nm
 **DOAS의 shift 지형은 레퍼런스가 진동해 비볼록**이다. x0=0에서 `least_squares`만 돌리면 멀리 있는
 진짜 최소를 못 찾고 0에 주저앉는다 → "shift 미결정"이라는 **오진**이 나왔다(13-C는 이 오진의 산물).
 앱은 스캔간 `last_valid_shift`를 이어받아 step_limit씩 걸어가므로 도달하지만, **표본 스캔은 시간연속이
-아니므로 반드시 스캔마다 전역 격자탐색으로 시드**를 잡아야 한다(`param_optimizer._seed_shift`,
-seed_range 15px·step 0.25). `DoasFitter.pre_calibrate`는 ±0.5 국소격자라 여기선 부족.
+아니므로 표본 스캔은 스캔마다 명시적인 격자탐색으로 시드**를 잡아야 한다
+(`param_optimizer._seed_shift`). 과거 실측은 seed_range 15px·step 0.25를 썼지만 이것은 영구
+기본값/과학적 문턱이 아니다. Explorer 실행마다 실제 grid와 현재 코드 기본 동작을 manifest에 기록하고
+골든 자료에서 재측정한다. `DoasFitter.pre_calibrate`의 국소격자만으로 대체하지 않는다.
 
 **시딩 후 앱 실측과 일치(하네스 검증):**
 | 채널 | 내 하네스 | 앱 실측 | |
@@ -293,15 +307,17 @@ cold에서 O4는 **F=243.5, RSS 44.4% 감소** — 통계적으로 전 후보 �
 그런데 **절대량 89배**로 물리가 기각. → **통계(T1)를 심판으로 쓰면 반드시 과적합을 상 준다**(§2-B)의
 가장 선명한 실증. 물리 게이트가 통계를 이겨야 한다.
 
-### 14-D. ⚠️FitSet json의 data_label이 뒤바뀌어 있음
-파일상 채널1='PNs'/채널2='ANs'이지만 **실제는 채널1=ANs, 채널2=PNs**(사용자 확인 2026-07-22, json이 틀림).
-→ 툴은 **라벨이 아니라 wavecal 경로(roi1/roi2/cold)로 채널을 매칭**할 것. 라벨로 찾으면 roi1 창에 roi2
-알파를 대조하는 사고가 난다(실제 발생).
+### 14-D. ⚠️FitSet json의 data_label과 물리 채널 정체성을 동일시하지 말 것
+과거 파일 라벨과 하드웨어/물리 거동 기록이 충돌한다. **roi1/ch1, roi2/ch2는 운영 식별자일 뿐
+물리적 ANs/PNs 확정이 아니다.** 툴은 `data_label`이 아니라 wavecal/ROI와 원본 채널 provenance로
+매칭해야 한다. 최종 물리 정체성은 `docs/ANs_분석_핸드오프_2026-07-23.md`에 따라 미해결이다.
 
 ## ★15. 알고리즘 명세 (2026-07-22 정립) — **구현 전 이 절을 먼저 읽을 것**
 > 이 프로그램은 세션 내내 "터지면 고치는" 식으로 아래에서 위로 만들어졌고, 발견은 쌓였지만
 > **일관된 명세가 없었다.** 그 결과 "생성물이 엔진에서 실행 가능해야 한다"는 당연한 불변식이
 > 빠져 실행 불가한 세팅을 내보냈다(§15-E). 이 절이 그 명세다.
+> 이 절은 현행 FitSet 생성기 명세다. 여러 후보의 robustness plateau를 찾는 Explorer의 새 명세는
+> `docs/fit_explorer_design_2026-09.md`이며, 구 `core/fit_optimizer.py` 단일점수 경로를 부활시키지 않는다.
 
 ### 15-A. 목표함수 (한 문장)
 > **농도가 (창·차수를 바꿔도) 안 움직이고, shift가 물리적으로 안정하며, 잔차가 흰 상태를
@@ -379,21 +395,26 @@ cold에서 O4는 **F=243.5, RSS 44.4% 감소** — 통계적으로 전 후보 �
 - `core/fitset_builder.py` — `use_center_mode=True`(기본)면 Center로 출력. `validate_fitset`은 Center를
   0-교집합 불변식에서 면제(중심 앵커라 항상 유효).
 
-**검증**: ANs 260703, 0에서 시작 → `Center -5.25,3.75`가 **첫 스캔부터 −4.75 도달**(앱 실측 −4.95),
-NO2 3.60ppb·RMS/sig 3.9%. 같은 조건 `Limit -10,0.5`는 0에 갇힘. **회귀: validate_pipeline 4 PASS·0 FAIL.**
+**과거 검증 기록**: roi1/ch1 260703, 0에서 시작 → `Center -5.25,3.75`가 **첫 스캔부터 −4.75 도달**
+(당시 앱 실측 −4.95), NO2 3.60ppb·RMS/sig 3.9%. 같은 조건 `Limit -10,0.5`는 0에 갇혔다.
+이는 production-consistent 저잔차 후보이지 외부 진실이 아니다. 현재 hash 기준 재현 상태는
+`docs/fit_explorer_golden_inventory_2026-09.md`를 따른다.
 Limit 경로는 기존 동작 불변(여러 케이스 대조 확인).
 
 ### ★16-B. 퇴화 분기는 잔차로 식별된다 (중요)
-ANs 260703 scan1, shift를 Fix로 고정하며 스캔:
+roi1/ch1 260703 scan1의 과거 기록에서 shift를 Fix로 고정하며 스캔:
 | shift | NO2 | RMS/sig |
 |---|---|---|
-| −7.0 ~ −6.0 | **95.9** | **19.6%** ← 퇴화 분기 |
-| −5.5 ~ 0.0 | 3.2~3.6 | 3.6~8.3% ← 진짜 해 |
-**퇴화 분기는 잔차가 5배 나쁘다 → 식별 가능.** 그리고 진짜 분기 안에서 NO2는 3.2~3.6으로 안정(shift 민감도 낮음).
+| −7.0 ~ −6.0 | **95.9** | **19.6%** ← 고잔차 failure 후보 |
+| −5.5 ~ 0.0 | 3.2~3.6 | 3.6~8.3% ← production-consistent 저잔차 후보 |
+**고잔차 분기는 당시 약 5배 나빴다 → 분기 식별용 골든 후보로 유용하다.** 그러나 두 농도 중 어느
+쪽도 독립 T3 진실값이 아니며, 현재 코드와 입력 hash로 재측정하기 전 `HISTORICAL`이다.
 squeeze는 ±0.005 범위에서 NO2에 영향 없음(3.59~3.61).
 ⚠️단, 8스캔 연속 실행 시 median이 94ppb로 나온 적 있음 = **ANs 스캔 상당수가 퇴화 분기에 앉는다**
-(ANs NO2 CV 179%·창 42/64 퇴화와 일관). **코드가 아니라 ANs 자체 문제** — 별도 추적 필요.
-→ 시딩(격자 RMS 최소)이 이 분기를 피하는 실질적 방어. `param_optimizer._seed_shift`가 그 역할.
+(당시 NO2 CV 179%·창 42/64 퇴화와 일관). 원인은 아직 코드/입력/물리 채널을 분리해 확정하지 않았다.
+→ 과거 표본에서는 격자 RMS 시딩 후 이 분기를 피했지만, 이를 일반적 해결책으로 확정하지 않는다.
+Explorer의 서로 다른 controlled-start 초기화와 날짜·표본 반복에서도 재현될 때만 시딩을 실질적 방어로
+판정한다. 현 `param_optimizer._seed_shift`는 그 검증에 쓸 단일 deterministic 후보 선택 경로다.
 
 ## 11. 부록 — 2026-06-30 세션에 바뀐 것 (배경, 우선순위 낮음)
 핏 파이프라인/최적화와 무관하지만 코드가 바뀐 것들: Plot Maker 대폭 강화(색·스타일·에러밴드·야간음영·주석·커서·범례·템플릿·서브플롯),
