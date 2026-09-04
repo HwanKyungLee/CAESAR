@@ -86,6 +86,17 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     sl = slice(px_min, px_max + 1)
     wl = np.asarray(wave, float)[sl]
     a = np.asarray(alpha, float)[sl]
+
+    # ★decade 정규화(gui/worker.py 알파경로와 동일 패턴; ANs_분석_핸드오프_2026-07-23.md §6):
+    # 알파는 보통 ~1e-7 스케일인데, 이 크기 그대로 execute_varpro_fit에 넣으면
+    # scipy.optimize.least_squares의 절대 gtol(1e-8)에 걸려 objective를 1번만 부르고
+    # x0에서 바로 "수렴"으로 종료해버린다(shift/squeeze 탐색이 사실상 안 됨).
+    # O(1) 스케일로 올려 풀고, 물리 단위 계수는 아래에서 다시 나눠 되돌린다.
+    avg_a = np.mean(a)
+    scale_factor = (10 ** (-np.floor(np.log10(abs(avg_a))))
+                    if (abs(avg_a) < 1e-4 and avg_a != 0) else 1.0)
+    a_scaled = a * scale_factor
+
     wax = np.asarray(eng._wave_axis, float).flatten()
     vp = np.asarray(interp1d(wax, np.arange(len(wax)), bounds_error=False,
                              fill_value="extrapolate")(wl), float)
@@ -106,10 +117,19 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     if sq_key in active:
         k = active.index(sq_key)
         t0[k] = float(min(max(seed_sq, lb[k] + 1e-9), ub[k] - 1e-9))
-    out = fitter.execute_varpro_fit(vp, a, np.eye(len(a)), active, fixed, linked,
+    out = fitter.execute_varpro_fit(vp, a_scaled, np.eye(len(a_scaled)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
-                                    ref_props, T_C, 0.0, False)
+                                    ref_props, T_C, 0.0, False,
+                                    allow_negative_gas=True)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out
+    # 스케일된 공간에서 나온 계수·오차를 물리 단위로 되돌림(gui/worker.py와 동일 패턴).
+    # allow_negative_gas=True: 프로덕션(gui/worker.py) 알파경로와 동일 — 미량가스(CHOCHO 등)
+    # 계수를 0 이상으로 강제하면 0 근처에서 편향되고, ANs_분석_핸드오프 §6에 기록된
+    # "CHOCHO가 항상 0.00000" 증상이 이 기본값(False) 누락 때문이었다.
+    gco = np.asarray(gco, float) / scale_factor
+    poly_c = np.asarray(poly_c, float) / scale_factor
+    eamp = float(eamp) / scale_factor
+    perr = np.asarray(perr, float) / scale_factor
 
     full, tot, base, etal, _ = eng.get_model_components(
         vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp, etalon_freq=ef,
