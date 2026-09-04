@@ -101,8 +101,18 @@ manifest의 회귀 판정도 nonnegative 분기의 농도·RMS/signal·`|ac1|`�
 **정성적 순서 불변식**뿐이다. 이는 플랫폼 간 수치 동등성이나 과학적 tolerance를 정의하지 않는다.
 
 현재 checkout HEAD의 기준 hash는 실행 시 manifest에 다시 기록한다. working tree가 dirty이면 HEAD만으로
-재현성을 주장하지 말고 변경 diff hash도 함께 남긴다. 과거 `seed_range=15 px`, `seed_step=0.25 px`와
-260703 기록은 출발 후보일 뿐, 현재 코드의 고정/default 동작을 다시 측정해 확정한다.
+재현성을 주장하지 말고 변경 diff hash도 함께 남긴다.
+
+같은 hash-pinned 첫 데이터행에서 current-code 재측정을 추가했다. signed-gas 고정 shift
+`-7.0..0.0 px`(0.5 px 간격)는 각 점의 농도·RMS/signal·`|ac1|`를 관측값으로만 보존한다.
+기본 `Limit -10,0.5` 경로는 `seed_range=15 px`, `seed_step=0.25 px`의 선형-fit RMS 격자로
+초기화를 고른 뒤 최종 VarPro를 실행했다. 비교용 `Center -5.25,3.75` 경로는 격자 시딩 없이
+선언 중심에 앵커된 bounds `[-5.75,-4.75]`를 만들지만, 실제 `fit_scan()` theta0는 현재 shift 0을
+그 bounds 안으로 clip한 `-4.75001`이다. 즉 **중심에서 초기화됐다는 증거가 아니며**, 그 실제
+theta0·bounds를 그대로 기록했다. 둘 다 단일 alpha 행을
+`param_optimizer.fit_scan()`으로 실행한 **offline 관측**이며, `gui.worker`의 시간연속 carry-over,
+retry/pre-calibration, QC까지 거친 end-to-end 검증이 아니다. 따라서 이 결과는 Center의 일반 우월성,
+plateau, T2/T3 진실을 주장하지 않는다.
 
 ## 4. Cold/O4 후보
 
@@ -152,6 +162,6 @@ CI의 **synthetic 계약 테스트**는 과학적 진실을 증명하지 않고 
 1. ~~로컬 데이터에서 ROI1 failure/production-consistent 후보의 정확한 파일·행을 다시 찾는다.~~
 2. ~~필요한 alpha·wavecal·reference·FitSet 의존성을 portable manifest로 고정한다.~~
 3. raw data는 커밋하지 않고 외부 suite 전용으로 유지한다.
-4. current code에서 fixed shift grid와 default/Center 경로를 둘 다 재측정한다.
+4. ~~current code에서 fixed shift grid와 default/Center 경로를 둘 다 재측정한다.~~
 5. O4 사례를 동일 manifest로 재실행해 T2 tri-state와 magnitude 판정을 확인한다.
 6. cold/O4는 그 뒤에만 `HISTORICAL`에서 `REPRODUCED`로 승격한다.

@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "suite_version": "1.1",
+  "schema_version": 3,
+  "suite_version": "1.2",
   "dependencies": [
     {
       "id": "legacy_fitset",
@@ -77,6 +77,31 @@
       "allow_negative_gas": true,
       "fixed_shift": -6.0,
       "fixed_squeeze": 1.0
+    }
+  ],
+  "measurements": [
+    {
+      "id": "roi1_signed_fixed_shift_grid",
+      "type": "fixed_shift_grid",
+      "source_case_id": "roi1_signed_low_residual",
+      "shift_values": [-7.0, -6.5, -6.0, -5.5, -5.0, -4.5, -4.0, -3.5, -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0],
+      "fixed_squeeze": 1.0
+    },
+    {
+      "id": "roi1_signed_default_limit_path",
+      "type": "shift_path",
+      "source_case_id": "roi1_signed_low_residual",
+      "shift_mode": "Limit",
+      "shift_value": "-10, 0.5",
+      "seed_range": 15.0,
+      "seed_step": 0.25
+    },
+    {
+      "id": "roi1_signed_center_path",
+      "type": "shift_path",
+      "source_case_id": "roi1_signed_low_residual",
+      "shift_mode": "Center",
+      "shift_value": "-5.25, 3.75"
     }
   ],
   "assertions": [

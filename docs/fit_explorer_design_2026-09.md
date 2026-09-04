@@ -179,9 +179,11 @@ T2 tri-state, 좌표·상태·출력 충돌 방지와 JSON/no-Apply 계약을 sy
 `allow_negative_gas`가 정확한 bool로
 저장되어 있지 않으면 CLI 플래그로 추정하지 않고 재저장/마이그레이션 전까지 `ABSTAIN`한다.
 
-ROI1의 정책별 behavioral branch는 portable manifest/result로 재현된다. 이는 full external golden이나
-T2/plateau 증거가 아니며, 검증하는 것은 두 분기의 정성적 순서이지 플랫폼 간 수치 동등성이나
-과학적 tolerance가 아니다. 파일 순서/표본 교체, cold/O4, worker end-to-end, halving,
+ROI1의 정책별 behavioral branch와 단일행 fixed-shift grid/default Limit/Center 초기화 관측은
+portable manifest/result로 재현된다. 이는 full external golden이나 T2/plateau 증거가 아니며,
+검증하는 것은 두 분기의 정성적 순서이지 플랫폼 간 수치 동등성이나 과학적 tolerance가 아니다.
+Limit/Center 측정은 offline `param_optimizer.fit_scan()` 범위이며 worker end-to-end가 아니다.
+파일 순서/표본 교체, cold/O4, worker end-to-end, halving,
 plateau/closure/ranking은 아직 완료가 아니다.
 
 ## 7. ML·LLM과 탐색 가속

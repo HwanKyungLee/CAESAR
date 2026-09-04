@@ -47,8 +47,9 @@ def main():
         assertion = {"id": "contrast", "type": "paired_branch_contrast",
                      "high_case_id": "high", "low_case_id": "case", "source": "test",
                      "strictly_greater": ["conc", "rms_sig", "abs_ac1"]}
-        manifest = {"schema_version": 2, "suite_version": "1.1",
+        manifest = {"schema_version": 3, "suite_version": "1.2",
                     "dependencies": deps, "cases": [high_case, case], "assertions": [assertion],
+                    "measurements": [],
                     "assertion_scope": ext.ASSERTION_SCOPE}
         validated = ext.validate_manifest(manifest, td)
         ext.verify_dependencies(validated)
@@ -82,6 +83,34 @@ def main():
         expect_fail(lambda: ext.validate_manifest(bad, td), "two distinct cases")
         bad = copy.deepcopy(manifest); bad["cases"].append(copy.deepcopy(case))
         expect_fail(lambda: ext.validate_manifest(bad, td), "duplicate")
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{
+            "id": "path", "type": "shift_path", "source_case_id": "case",
+            "shift_mode": "Free", "shift_value": "-1,1"}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "Limit/Center")
+        base_path = {"id": "path", "type": "shift_path", "source_case_id": "case",
+                     "shift_mode": "Limit", "shift_value": "-1,1",
+                     "seed_range": 15.0, "seed_step": .25}
+        for value in ("-1", "-1,1,2", "nan,1"):
+            bad = copy.deepcopy(manifest); bad["measurements"] = [{**base_path, "shift_value": value}]
+            expect_fail(lambda bad=bad: ext.validate_manifest(bad, td), "exactly two finite")
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{**base_path, "shift_value": "1,-1"}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "lower bound")
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{**base_path, "seed_step": 0}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "seed_step")
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{**base_path,
+            "shift_value": "20,21", "seed_range": 15.0}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "must overlap")
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{**base_path,
+            "shift_mode": "Center", "shift_value": "-5,0"}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "halfwidth")
+        grid = {"id": "grid", "type": "fixed_shift_grid", "source_case_id": "case",
+                "shift_values": [-1.0, 0.0], "fixed_squeeze": 1.0}
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{**grid,
+            "shift_values": [0.0, -1.0]}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "strictly increasing")
+        bad = copy.deepcopy(manifest); bad["measurements"] = [{**grid,
+            "fixed_squeeze": float("inf")}]
+        expect_fail(lambda: ext.validate_manifest(bad, td), "fixed_squeeze")
         bad = copy.deepcopy(manifest); bad["dependencies"].append(
             {"id": "extra", "role": "alpha", "path": paths["alpha"], "sha256": digest(paths["alpha"])})
         expect_fail(lambda: ext.validate_manifest(bad, td), "extra dependencies")

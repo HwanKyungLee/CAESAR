@@ -1,6 +1,7 @@
 """Static consistency and privacy checks for committed ROI1 evidence."""
 import hashlib
 import json
+import math
 import os
 import sys
 import tempfile
@@ -22,7 +23,7 @@ def main():
     result_text = open(result_path, encoding="utf-8").read()
     result = json.loads(result_text)
     assert result["manifest_sha256"] == hashlib.sha256(manifest_bytes).hexdigest()
-    assert manifest["schema_version"] == result["schema_version"] == 2
+    assert manifest["schema_version"] == result["schema_version"] == 3
     assert len(manifest["cases"]) == len(result["performed"]) == 2
     assert not result["failed"] and not result["skipped"]
     assert {row["id"] for row in result["performed"]} == {case["id"] for case in manifest["cases"]}
@@ -52,6 +53,40 @@ def main():
     assert all("thresholds" not in assertion for assertion in manifest["assertions"])
     assert set(result["runtime"]) == {"python", "platform", "numpy", "scipy"}
     assert result["generation"]["artifact_self_excluded"] is True
+    measurements = {row["id"]: row for row in result["measurements"]}
+    assert set(measurements) == {spec["id"] for spec in manifest["measurements"]}
+    grid = measurements["roi1_signed_fixed_shift_grid"]
+    assert grid["execution_scope"].endswith("not worker end-to-end")
+    assert [row["fitted_shift"] for row in grid["observations"]] == grid["policy"]["shift_values"]
+    assert all(row["initialization"]["active"] == [] for row in grid["observations"])
+    limit = measurements["roi1_signed_default_limit_path"]
+    assert limit["policy"]["seed_grid"] == {
+        "range": 15.0, "step": 0.25,
+        "effective_interval": [-10.0, 0.5],
+        "selection": "minimum linear-fit RMS before final VarPro"}
+    center = measurements["roi1_signed_center_path"]
+    assert center["policy"]["seed_grid"]["state"] == "N/A"
+    assert center["initialization_scope"].startswith("Center-anchored bounds")
+    center_init = center["observations"][0]["initialization"]
+    shift_i = center_init["active"].index("NO2_sh")
+    # fit_scan supplies current shift 0; setup clamps it just inside the upper bound.
+    assert center_init["theta0"][shift_i] == center_init["upper"][shift_i] - 1e-5
+    assert center_init["theta0"][shift_i] != -5.25
+    for row in measurements.values():
+        assert row["status"] == "OBSERVED" and row["t2"]["state"] == "UNAVAILABLE"
+        assert row["fit_context"]["fit_sign"] == 1.0
+        assert row["fit_context"]["W"] == "identity"
+        assert row["fit_context"]["sample"]["datetime"]
+        for observation in row["observations"]:
+            assert all(math.isfinite(value) for value in observation["metrics"].values())
+            assert math.isfinite(observation["fitted_shift"])
+            assert math.isfinite(observation["fitted_squeeze"])
+            init = observation["initialization"]
+            assert len(init["active"]) == len(init["theta0"]) == len(init["lower"]) == len(init["upper"])
+            assert all(math.isfinite(value) for values in
+                       (init["theta0"], init["lower"], init["upper"]) for value in values)
+            assert all(lower < value < upper for lower, value, upper in
+                       zip(init["lower"], init["theta0"], init["upper"]))
     assert result["git"]["excluded_paths"] == ["diagnostics/fit_explorer/roi1_result_v1.json"]
     # An already-existing output cannot perturb provenance between reruns.
     fd, rerun_path = tempfile.mkstemp(prefix=".portable-rerun-", suffix=".json", dir=EVIDENCE)

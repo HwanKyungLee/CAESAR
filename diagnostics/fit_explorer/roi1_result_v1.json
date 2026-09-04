@@ -1,20 +1,11 @@
 {
-  "schema_version": 2,
-  "suite_version": "1.1",
-  "manifest_sha256": "91fcbd18f3f4fc7f908c0b1c0ee627e7eb626d5825f0833c74561ef85db8c568",
+  "schema_version": 3,
+  "suite_version": "1.2",
+  "manifest_sha256": "88924778ede8014c5ff56dd70e067f458a7e955726aea3fa386949826c6dbf1e",
   "git": {
-    "head": "fd5f93d66a19f6555e6f6b94ecd7a7f12ba8641b",
-    "tracked_diff_sha256": "363025d045fa6416edfd975a3c5d2d8a93ae4c19b34305099dfb7ecd0d416963",
-    "untracked": [
-      {
-        "path": "diagnostics/fit_explorer/roi1_manifest_v1.json",
-        "sha256": "91fcbd18f3f4fc7f908c0b1c0ee627e7eb626d5825f0833c74561ef85db8c568"
-      },
-      {
-        "path": "tools/test_fit_explorer_portable_evidence.py",
-        "sha256": "666d0ec21f95b04b7298458f35c35f7af3a799a04946007e82208c2045b1488a"
-      }
-    ],
+    "head": "78f3d598fffc4bdbee01536f65fd7e95589fcfa2",
+    "tracked_diff_sha256": "09751148e0f27f3ff1f0f0ca69ee2f684ce3dced9899a9ed0a3eb49b69dd3170",
+    "untracked": [],
     "dirty": true,
     "excluded_paths": [
       "diagnostics/fit_explorer/roi1_result_v1.json"
@@ -158,7 +149,7 @@
         "state": "UNAVAILABLE",
         "reason": "behavioral policy comparison has no O4 absolute anchor"
       },
-      "elapsed_s": 0.017040400067344308
+      "elapsed_s": 0.016955999890342355
     },
     {
       "id": "roi1_signed_low_residual",
@@ -291,7 +282,571 @@
         "state": "UNAVAILABLE",
         "reason": "behavioral policy comparison has no O4 absolute anchor"
       },
-      "elapsed_s": 0.012041700072586536
+      "elapsed_s": 0.012186900014057755
+    }
+  ],
+  "measurements": [
+    {
+      "id": "roi1_signed_fixed_shift_grid",
+      "type": "fixed_shift_grid",
+      "status": "OBSERVED",
+      "execution_scope": "offline single-row param_optimizer.fit_scan; not worker end-to-end",
+      "initialization_scope": "param_optimizer fit_scan initialization",
+      "source_case_id": "roi1_signed_low_residual",
+      "allow_negative_gas": true,
+      "fit_context": {
+        "poly": 4,
+        "step_limit": 0.5,
+        "detector_px_inclusive": [
+          599,
+          1270
+        ],
+        "fit_sign": 1.0,
+        "W": "identity",
+        "sample": {
+          "selection_method": "exact alpha data-row index",
+          "row_index": 0,
+          "exported_row_idx": 0,
+          "doy": 184.028329,
+          "datetime": "2026-07-03 00:40:47.644",
+          "state": "ambient_60s_average",
+          "state_source": "alpha export header ambient_avg_sec=60"
+        }
+      },
+      "policy": {
+        "shift_values": [
+          -7.0,
+          -6.5,
+          -6.0,
+          -5.5,
+          -5.0,
+          -4.5,
+          -4.0,
+          -3.5,
+          -3.0,
+          -2.5,
+          -2.0,
+          -1.5,
+          -1.0,
+          -0.5,
+          0.0
+        ],
+        "fixed_squeeze": 1.0,
+        "seed_grid": {
+          "state": "N/A",
+          "reason": "shift and squeeze are fixed"
+        }
+      },
+      "observations": [
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-7.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -7.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.5995544922784806,
+            "rms_sig": 0.038237418868939395,
+            "abs_ac1": 0.2568198821020271
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-6.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -6.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.6109532471327266,
+            "rms_sig": 0.036701339701424675,
+            "abs_ac1": 0.19905741177775205
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-6.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -6.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.6158341598907544,
+            "rms_sig": 0.03609024337569437,
+            "abs_ac1": 0.17401974625433486
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-5.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -5.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.614221933335988,
+            "rms_sig": 0.036438161168830384,
+            "abs_ac1": 0.18849397998825712
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-5.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -5.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.606158876008787,
+            "rms_sig": 0.03771833561070476,
+            "abs_ac1": 0.23825821736153893
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-4.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -4.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.5917172421785066,
+            "rms_sig": 0.039852064474333225,
+            "abs_ac1": 0.3107904492334856
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-4.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -4.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.5709842478176905,
+            "rms_sig": 0.04273256888120737,
+            "abs_ac1": 0.3920222057888176
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-3.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -3.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.5440744948140255,
+            "rms_sig": 0.046250131999789584,
+            "abs_ac1": 0.47140252056421567
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-3.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -3.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.5111142308561196,
+            "rms_sig": 0.050308708852746964,
+            "abs_ac1": 0.5431369830045536
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-2.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -2.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.4722543180798073,
+            "rms_sig": 0.05483280988591827,
+            "abs_ac1": 0.6051128147584092
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-2.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -2.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.427653679687704,
+            "rms_sig": 0.05976829235604051,
+            "abs_ac1": 0.6573548597805747
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-1.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -1.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.377493133376694,
+            "rms_sig": 0.06507981339062331,
+            "abs_ac1": 0.7008635453104098
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-1.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -1.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.3219579368666463,
+            "rms_sig": 0.07074820542007317,
+            "abs_ac1": 0.7369423160974049
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "-0.5"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": -0.5,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.2612527216809615,
+            "rms_sig": 0.0767673360532312,
+            "abs_ac1": 0.7668698055276492
+          }
+        },
+        {
+          "declared_shift": {
+            "mode": "Fix",
+            "value": "0.0"
+          },
+          "declared_squeeze": {
+            "mode": "Fix",
+            "value": "1.0"
+          },
+          "initialization": {
+            "active": [],
+            "theta0": [],
+            "lower": [],
+            "upper": []
+          },
+          "fitted_shift": 0.0,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.1955830441837274,
+            "rms_sig": 0.08314263804976005,
+            "abs_ac1": 0.7917719708136183
+          }
+        }
+      ],
+      "t2": {
+        "state": "UNAVAILABLE",
+        "reason": "ROI1 measurement has no absolute physical anchor"
+      }
+    },
+    {
+      "id": "roi1_signed_default_limit_path",
+      "type": "shift_path",
+      "status": "OBSERVED",
+      "execution_scope": "offline single-row param_optimizer.fit_scan; not worker end-to-end",
+      "initialization_scope": "param_optimizer fit_scan initialization",
+      "source_case_id": "roi1_signed_low_residual",
+      "allow_negative_gas": true,
+      "fit_context": {
+        "poly": 4,
+        "step_limit": 0.5,
+        "detector_px_inclusive": [
+          599,
+          1270
+        ],
+        "fit_sign": 1.0,
+        "W": "identity",
+        "sample": {
+          "selection_method": "exact alpha data-row index",
+          "row_index": 0,
+          "exported_row_idx": 0,
+          "doy": 184.028329,
+          "datetime": "2026-07-03 00:40:47.644",
+          "state": "ambient_60s_average",
+          "state_source": "alpha export header ambient_avg_sec=60"
+        }
+      },
+      "policy": {
+        "shift_mode": "Limit",
+        "shift_value": "-10, 0.5",
+        "seed_grid": {
+          "range": 15.0,
+          "step": 0.25,
+          "effective_interval": [
+            -10.0,
+            0.5
+          ],
+          "selection": "minimum linear-fit RMS before final VarPro"
+        }
+      },
+      "observations": [
+        {
+          "declared_shift": {
+            "mode": "Limit",
+            "value": "-10, 0.5"
+          },
+          "declared_squeeze": {
+            "mode": "Limit",
+            "value": "-0.005, 0.005"
+          },
+          "initialization": {
+            "active": [
+              "NO2_sh",
+              "NO2_sq"
+            ],
+            "theta0": [
+              -6.0,
+              0.998
+            ],
+            "lower": [
+              -6.5,
+              0.995
+            ],
+            "upper": [
+              -5.5,
+              1.005
+            ]
+          },
+          "fitted_shift": -6.0,
+          "fitted_squeeze": 0.998,
+          "metrics": {
+            "conc": 3.6149817532941944,
+            "rms_sig": 0.03591773683976723,
+            "abs_ac1": 0.1651663131613539
+          }
+        }
+      ],
+      "t2": {
+        "state": "UNAVAILABLE",
+        "reason": "ROI1 measurement has no absolute physical anchor"
+      }
+    },
+    {
+      "id": "roi1_signed_center_path",
+      "type": "shift_path",
+      "status": "OBSERVED",
+      "execution_scope": "offline single-row param_optimizer.fit_scan; not worker end-to-end",
+      "initialization_scope": "Center-anchored bounds; fit_scan supplies current shift 0 and setup_fit_parameters clips theta0 into those bounds",
+      "source_case_id": "roi1_signed_low_residual",
+      "allow_negative_gas": true,
+      "fit_context": {
+        "poly": 4,
+        "step_limit": 0.5,
+        "detector_px_inclusive": [
+          599,
+          1270
+        ],
+        "fit_sign": 1.0,
+        "W": "identity",
+        "sample": {
+          "selection_method": "exact alpha data-row index",
+          "row_index": 0,
+          "exported_row_idx": 0,
+          "doy": 184.028329,
+          "datetime": "2026-07-03 00:40:47.644",
+          "state": "ambient_60s_average",
+          "state_source": "alpha export header ambient_avg_sec=60"
+        }
+      },
+      "policy": {
+        "shift_mode": "Center",
+        "shift_value": "-5.25, 3.75",
+        "seed_grid": {
+          "state": "N/A",
+          "reason": "Center bypasses grid seeding"
+        }
+      },
+      "observations": [
+        {
+          "declared_shift": {
+            "mode": "Center",
+            "value": "-5.25, 3.75"
+          },
+          "declared_squeeze": {
+            "mode": "Limit",
+            "value": "-0.005, 0.005"
+          },
+          "initialization": {
+            "active": [
+              "NO2_sh",
+              "NO2_sq"
+            ],
+            "theta0": [
+              -4.75001,
+              1.0
+            ],
+            "lower": [
+              -5.75,
+              0.995
+            ],
+            "upper": [
+              -4.75,
+              1.005
+            ]
+          },
+          "fitted_shift": -4.75001,
+          "fitted_squeeze": 1.0,
+          "metrics": {
+            "conc": 3.599730776995688,
+            "rms_sig": 0.03868480115512115,
+            "abs_ac1": 0.2725983912874257
+          }
+        }
+      ],
+      "t2": {
+        "state": "UNAVAILABLE",
+        "reason": "ROI1 measurement has no absolute physical anchor"
+      }
     }
   ],
   "failed": [],
@@ -364,7 +919,7 @@
   ],
   "assertion_scope": "qualitative behavioral ordering only; not cross-platform numeric equivalence, scientific tolerance, concentration truth, T3, or plateau evidence",
   "generation": {
-    "base_commit": "fd5f93d66a19f6555e6f6b94ecd7a7f12ba8641b",
+    "base_commit": "78f3d598fffc4bdbee01536f65fd7e95589fcfa2",
     "artifact_self_excluded": true,
     "artifact_name": "roi1_result_v1.json"
   }

@@ -24,8 +24,8 @@ from core.doas_fit import DoasFitter
 from tools.migrate_fitset_policy import sha256
 from tools.optimize_params import build_engine_from_config
 
-SCHEMA_VERSION = 2
-SUITE_VERSION = "1.1"
+SCHEMA_VERSION = 3
+SUITE_VERSION = "1.2"
 METRICS = ("conc", "rms_sig", "abs_ac1")
 ROLES = {"legacy_fitset", "alpha", "wavecal", "reference"}
 ASSERTION_SCOPE = ("qualitative behavioral ordering only; not cross-platform numeric equivalence, "
@@ -138,6 +138,54 @@ def validate_manifest(manifest, base, data_root=None):
             raise AssertionError("paired behavioral assertion must not define numeric thresholds")
         if not isinstance(assertion.get("source"), str) or not assertion["source"]:
             raise AssertionError("paired assertion requires a source")
+    measurements = manifest.get("measurements", [])
+    if not isinstance(measurements, list):
+        raise AssertionError("measurements must be a list")
+    measurement_ids = set()
+    for measurement in measurements:
+        measurement_id = measurement.get("id")
+        if (not isinstance(measurement_id, str) or not measurement_id or
+                measurement_id in measurement_ids):
+            raise AssertionError(f"duplicate or invalid measurement id: {measurement_id!r}")
+        measurement_ids.add(measurement_id)
+        kind = measurement.get("type")
+        if kind not in ("fixed_shift_grid", "shift_path"):
+            raise AssertionError(f"{measurement_id}: unsupported measurement type")
+        source_case_id = measurement.get("source_case_id")
+        if source_case_id not in case_ids:
+            raise AssertionError(f"{measurement_id}: source_case_id is unknown")
+        if kind == "fixed_shift_grid":
+            values = measurement.get("shift_values")
+            if (not isinstance(values, list) or not values or
+                    any(type(v) not in (int, float) or not math.isfinite(v) for v in values)):
+                raise AssertionError(f"{measurement_id}: finite shift_values are required")
+            if len(set(map(float, values))) != len(values) or any(a >= b for a, b in zip(values, values[1:])):
+                raise AssertionError(f"{measurement_id}: shift_values must be unique and strictly increasing")
+            fixed_squeeze = measurement.get("fixed_squeeze", 1.0)
+            if type(fixed_squeeze) not in (int, float) or not math.isfinite(fixed_squeeze):
+                raise AssertionError(f"{measurement_id}: fixed_squeeze must be finite")
+        else:
+            mode = measurement.get("shift_mode")
+            if mode not in ("Limit", "Center") or not isinstance(measurement.get("shift_value"), str):
+                raise AssertionError(f"{measurement_id}: Limit/Center shift policy is required")
+            try:
+                lo, hi = [float(part.strip()) for part in measurement["shift_value"].split(",")]
+            except (TypeError, ValueError):
+                raise AssertionError(f"{measurement_id}: shift_value must contain exactly two finite numbers") from None
+            if not (math.isfinite(lo) and math.isfinite(hi)):
+                raise AssertionError(f"{measurement_id}: shift_value must contain exactly two finite numbers")
+            if mode == "Limit" and lo >= hi:
+                raise AssertionError(f"{measurement_id}: Limit lower bound must be below upper bound")
+            if mode == "Center" and hi <= 0:
+                raise AssertionError(f"{measurement_id}: Center halfwidth must be positive")
+            if mode == "Limit":
+                for field in ("seed_range", "seed_step"):
+                    value = measurement.get(field)
+                    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                        raise AssertionError(f"{measurement_id}: {field} must be finite and positive")
+                seed_range = float(measurement["seed_range"])
+                if max(-seed_range, lo) >= min(seed_range, hi):
+                    raise AssertionError(f"{measurement_id}: Limit and seed_range must overlap")
     if used != set(dep_by_id):
         raise AssertionError(f"unused/extra dependencies: {sorted(set(dep_by_id) - used)}")
     return dep_by_id
@@ -243,6 +291,77 @@ def run_case(case, dependencies):
             "elapsed_s": time.perf_counter() - started}
 
 
+def run_measurement(spec, case_by_id, dependencies):
+    """Remeasure a single-row offline fit path; this is deliberately not worker E2E."""
+    case = copy.deepcopy(case_by_id[spec["source_case_id"]])
+    with open(dependencies[case["source_fitset_id"]]["resolved_path"], encoding="utf-8") as fh:
+        cfg = copy.deepcopy(json.load(fh)["channels"][str(case["channel_id"])])
+    policy = exact_bool(case["allow_negative_gas"], f"{spec['id']}.case policy")
+    cfg["wl_path"] = dependencies[case["wavecal_id"]]["resolved_path"]
+    cfg["refs"] = [{**cfg["refs"][i], "path": dependencies[r["dependency_id"]]["resolved_path"]}
+                   for i, r in enumerate(case["expected_references"])]
+    engine = build_engine_from_config(cfg)
+    wave, alpha, temp, pressure, px_start = DataIO.load_alpha_trace_row_mapped(
+        dependencies[case["alpha_id"]]["resolved_path"], int(case["row_index"]))
+    px_min, px_max = int(cfg["f_min"]) - px_start, int(cfg["f_max"]) - px_start
+    target = case.get("target", "NO2")
+
+    def observe(mode, value, fixed_squeeze=None):
+        props = copy.deepcopy(cfg["ref_props"])
+        props[target]["sh_mode"], props[target]["sh_val"] = mode, str(value)
+        if fixed_squeeze is not None:
+            props[target].update(sq_mode="Fix", sq_val=str(fixed_squeeze))
+        result = PO.fit_scan(
+            engine, DoasFitter(engine), props, wave, alpha, temp, pressure,
+            px_min, px_max, int(cfg["poly_deg"]), float(cfg.get("step_limit", .5)),
+            target=target, seed_range=float(spec.get("seed_range", 15.0)),
+            seed_step=float(spec.get("seed_step", .25)), allow_negative_gas=policy)
+        init = result["nonlinear_initialization"]
+        return {"declared_shift": {"mode": mode, "value": str(value)},
+                "declared_squeeze": {"mode": props[target]["sq_mode"],
+                                     "value": str(props[target]["sq_val"])},
+                "initialization": init, "fitted_shift": result["shifts"][target],
+                "fitted_squeeze": result["squeezes"][target],
+                "metrics": {"conc": float(result["conc"]),
+                            "rms_sig": float(result["rms_sig"]),
+                            "abs_ac1": abs(float(result["autocorr1"]))}}
+
+    if spec["type"] == "fixed_shift_grid":
+        observations = [observe("Fix", value, spec.get("fixed_squeeze", 1.0))
+                        for value in spec["shift_values"]]
+        policy_detail = {"shift_values": list(map(float, spec["shift_values"])),
+                         "fixed_squeeze": float(spec.get("fixed_squeeze", 1.0)),
+                         "seed_grid": {"state": "N/A", "reason": "shift and squeeze are fixed"}}
+    else:
+        observations = [observe(spec["shift_mode"], spec["shift_value"])]
+        declared_a, declared_b = map(float, spec["shift_value"].split(","))
+        seed_range = float(spec.get("seed_range", 15.0))
+        policy_detail = {"shift_mode": spec["shift_mode"], "shift_value": spec["shift_value"],
+                         "seed_grid": ({"range": seed_range,
+                                        "step": float(spec.get("seed_step", .25)),
+                                        "effective_interval": [max(-seed_range, declared_a),
+                                                               min(seed_range, declared_b)],
+                                        "selection": "minimum linear-fit RMS before final VarPro"}
+                                       if spec["shift_mode"] == "Limit" else
+                                       {"state": "N/A", "reason": "Center bypasses grid seeding"})}
+    return {"id": spec["id"], "type": spec["type"], "status": "OBSERVED",
+            "execution_scope": "offline single-row param_optimizer.fit_scan; not worker end-to-end",
+            "initialization_scope": ("Center-anchored bounds; fit_scan supplies current shift 0 and "
+                                     "setup_fit_parameters clips theta0 into those bounds"
+                                     if spec.get("shift_mode") == "Center" else
+                                     "param_optimizer fit_scan initialization"),
+            "source_case_id": spec["source_case_id"], "allow_negative_gas": policy,
+            "fit_context": {"poly": int(cfg["poly_deg"]),
+                            "step_limit": float(cfg.get("step_limit", .5)),
+                            "detector_px_inclusive": [int(cfg["f_min"]), int(cfg["f_max"])],
+                            "fit_sign": 1.0, "W": "identity",
+                            "sample": alpha_row_identity(
+                                dependencies[case["alpha_id"]]["resolved_path"],
+                                int(case["row_index"]))},
+            "policy": policy_detail, "observations": observations,
+            "t2": {"state": "UNAVAILABLE", "reason": "ROI1 measurement has no absolute physical anchor"}}
+
+
 def evaluate_assertions(specs, performed):
     rows, output = {row["id"]: row for row in performed}, []
     for spec in specs:
@@ -275,7 +394,7 @@ def main(argv=None):
               "manifest_sha256": None, "git": FE.git_provenance(ROOT, excluded),
               "runtime": {"python": platform.python_version(), "platform": platform.platform(),
                           "numpy": np.__version__, "scipy": scipy.__version__},
-              "performed": [], "failed": [], "skipped": []}
+              "performed": [], "measurements": [], "failed": [], "skipped": []}
     dependencies = {}
     candidate_inputs = [manifest_path]
     try:
@@ -291,6 +410,9 @@ def main(argv=None):
         verify_dependencies(dependencies)
         report["dependencies"] = [public_dependency(dep) for dep in dependencies.values()]
         report["performed"] = [run_case(case, dependencies) for case in manifest["cases"]]
+        case_by_id = {case["id"]: case for case in manifest["cases"]}
+        report["measurements"] = [run_measurement(spec, case_by_id, dependencies)
+                                  for spec in manifest.get("measurements", [])]
         report["assertions"] = evaluate_assertions(manifest["assertions"], report["performed"])
         report["assertion_scope"] = manifest["assertion_scope"]
         report["generation"] = {"base_commit": report["git"]["head"],
