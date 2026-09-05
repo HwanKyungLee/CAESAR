@@ -14,6 +14,66 @@ from core import param_optimizer as PO
 
 
 SCHEMA_VERSION = 1
+STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
+
+
+def representative_indices(pool_size, requested=4):
+    """Evenly spaced zero-based indices, including both endpoints."""
+    if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
+           for value in (pool_size, requested)):
+        raise ValueError("representative sample sizes must be exact non-bool integers")
+    pool_size, requested = int(pool_size), int(requested)
+    if requested < 2 or pool_size < requested:
+        raise ValueError(f"eligible alpha rows {pool_size} < requested {requested}")
+    indices = [i * (pool_size - 1) // (requested - 1) for i in range(requested)]
+    if len(set(indices)) != requested:
+        raise ValueError("representative row selection produced duplicate indices")
+    return indices
+
+
+def select_representative_rows(rows, requested=4):
+    """Sort row identities deterministically, then select even-spaced endpoints."""
+    keyed, physical = [], set()
+    for row in rows:
+        path, row_idx = row
+        if isinstance(row_idx, bool) or not isinstance(row_idx, (int, np.integer)) or row_idx < 0:
+            raise ValueError("alpha row identity is invalid")
+        canonical = os.path.normcase(os.path.realpath(path)).replace("\\", "/")
+        try:
+            stat = os.stat(path)
+        except OSError as exc:
+            raise ValueError("alpha row identity cannot be resolved") from exc
+        file_identity = (("stat", int(stat.st_dev), int(stat.st_ino))
+                         if stat.st_ino else ("realpath", canonical))
+        physical_key = (file_identity, int(row_idx))
+        if physical_key in physical:
+            raise ValueError("alpha row identities alias the same physical file")
+        physical.add(physical_key)
+        key = (canonical, int(row_idx))
+        keyed.append((key, (path, int(row_idx))))
+    keyed.sort(key=lambda item: item[0])
+    keys = [item[0] for item in keyed]
+    if len(keys) != len(set(keys)):
+        raise ValueError("alpha row identities are not unique")
+    indices = representative_indices(len(keyed), requested)
+    return [keyed[i][1] for i in indices], indices
+
+
+def stage1_budget(candidates, selected_scans, starts):
+    if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
+           for value in (selected_scans, starts)):
+        raise ValueError("Stage 1 sample budget requires exact non-bool integers")
+    if selected_scans != 4 or starts != 2:
+        raise ValueError("Stage 1 sample budget requires exactly 4 scans and 2 starts")
+    counts = {state: sum(c["stage0_preflight"]["state"] == state for c in candidates)
+              for state in ("PASS", "FAIL", "UNAVAILABLE")}
+    attempts = int(selected_scans) * int(starts)
+    return {"contract": STAGE1_SAMPLE_CONTRACT, "requested_scans": 4,
+            "selected_scans": int(selected_scans), "starts_per_candidate": int(starts),
+            "attempts_per_candidate": attempts, "stage0": counts,
+            "planned_fit_attempts": counts["PASS"] * attempts,
+            "executed_fit_attempts": sum(c["execution_gate"]["n_ok"] +
+                                         c["execution_gate"]["n_fail"] for c in candidates)}
 
 
 def neighboring_candidates(px_min, px_max, poly, pixel_step):

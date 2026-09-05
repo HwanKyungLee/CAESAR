@@ -194,6 +194,17 @@ Limit/Center 측정은 offline `param_optimizer.fit_scan()` 범위이며 worker 
 파일 순서/표본 교체, worker end-to-end, halving,
 plateau/closure/ranking은 아직 완료가 아니다.
 
+Stage 1의 **대표 행 선택 계약만** 먼저 고정했다. alpha 파일별 첫 행으로 제한하지 않고 모든
+`(path, row_index)`를 모집단으로 확장한 뒤 canonical identity로 정렬하고
+`floor(i*(N-1)/(k-1)), i=0..3`으로 양 끝을 포함한 중복 없는 4행을 고른다. 4행 미만이거나 identity가
+유일하지 않으면 fit 전에 `ABSTAIN_INCOMPLETE`로 중단한다. datetime은 alpha 헤더의 datetime 또는
+doy에서만 읽고, 상태는 명시적 `state=ambient_average` 메타데이터가 있을 때만 기록한다. 그 외 상태와
+상태 다양성은 `UNAVAILABLE`이며 추정하지 않는다. 보고서는 선택 계약·모집단·indices·날짜/상태
+완전성과 `4 scans × 2 starts = 8 attempts/candidate`, Stage 0별 후보 수, 계획/실행 시도 수를 기록한다.
+이는 **sampling/budget provenance checkpoint**일 뿐, 50~100 후보 확장·halving·pruning 완료가 아니다.
+여기서 Stage 0의 `fit-free`는 비선형 fit을 실행하지 않는다는 뜻이며, engine/reference 배열을 읽지
+않는다는 뜻은 아니다. 같은 물리 파일의 symlink·hardlink 별칭도 중복 identity로 보류한다.
+
 Cold/O4는 hash-pinned 균등 표본 15개에서 두 gas 부호 정책 모두 현재 코드로 T2 `FAIL`을 재현했다.
 nonnegative 정책은 O4 중앙 절대량비 230.998배로 절대량 게이트가 기각했다. signed 정책은 절대량비가
 2.207배라 그 게이트는 통과했지만, O4 계수 CV가 타깃 CV보다 큰 상수성 위반으로 기각됐다. 따라서
@@ -220,6 +231,7 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] synthetic CI 계약 테스트
 - [x] optional external-data suite: manifest 미지정만 SKIP, 명시 manifest의 missing/hash mismatch는 FAIL
 - [x] Stage 0 최소 사전검사: fit-free 정적 FAIL/UNAVAILABLE, 공선성 단일 기존 문턱, no-Apply
+- [x] Stage 1 대표 4행 선택·2-start 예산 provenance 계약 (halving/pruning은 미완료)
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가

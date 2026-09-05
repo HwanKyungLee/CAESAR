@@ -11,6 +11,7 @@ sys.path.insert(0, ROOT)
 
 from core import fit_explorer as FE
 from core.doas_fit import DoasFitter
+from tools import fit_explorer as CLI
 
 
 def test_candidates_and_starts():
@@ -28,6 +29,181 @@ def test_candidates_and_starts():
         {"NO2": {"sh_mode": "Center", "sh_val": "-5,2", "sq_mode": "Fix", "sq_val": "1"}},
         "NO2", .5)
     assert -5.5 < asymmetric[0]["shift"] < asymmetric[1]["shift"] < -4.5
+
+
+def test_stage1_representative_row_contract():
+    with tempfile.TemporaryDirectory() as td:
+        paths = []
+        for name in ("z", "a", "m", "b", "q", "c"):
+            path = os.path.join(td, name)
+            open(path, "wb").close()
+            paths.append(path)
+        rows = [(paths[0], 1), (paths[1], 2), (paths[2], 0),
+                (paths[3], 5), (paths[4], 3), (paths[5], 0)]
+        selected, indices = FE.select_representative_rows(rows)
+        assert indices == [0, 1, 3, 5]
+        assert selected == FE.select_representative_rows(list(reversed(rows)))[0]
+        try:
+            FE.select_representative_rows(rows[:3])
+        except ValueError as exc:
+            assert "eligible alpha rows 3 < requested 4" in str(exc)
+        else:
+            raise AssertionError("undersized Stage 1 sample pool was accepted")
+        alias = os.path.join(td, "alias")
+        os.link(paths[0], alias)
+        try:
+            FE.select_representative_rows([(paths[0], 0), (alias, 0), *rows[2:4]])
+        except ValueError as exc:
+            assert "alias the same physical file" in str(exc)
+        else:
+            raise AssertionError("physical-file alias was accepted")
+    for bad in (4.0, 4.9, "4", True, np.bool_(False)):
+        try:
+            FE.representative_indices(6, bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"non-exact requested size accepted: {bad!r}")
+
+
+def test_stage1_metadata_does_not_infer_state():
+    with tempfile.TemporaryDirectory() as td:
+        dated = os.path.join(td, "2026-06-01")
+        os.mkdir(dated)
+        path = os.path.join(dated, "alpha.dat")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("row_idx\tdatetime\tT_C\tP_mbar\tpx0\n")
+            fh.write("7\t2026-06-01 12:34:56\t25\t1013\t0.1\n")
+        row = CLI.alpha_row_metadata(path, 0)
+        first = row
+        assert row["id"].startswith("alpha.dat#sha256=") and row["id"].endswith("#row=0")
+        assert row["row_index"] == 0 and row["datetime"] == "2026-06-01 12:34:56"
+        assert row["date"] == "2026-06-01" and row["date_source"] == "alpha_header.datetime"
+        assert row["state"] == "unknown" and row["state_source"] == "unavailable"
+
+        fallback = os.path.join(dated, "legacy.dat")
+        with open(fallback, "w", encoding="utf-8") as fh:
+            fh.write("row_idx\tT_C\tP_mbar\tpx0\n0\t25\t1013\t0.1\n")
+        row = CLI.alpha_row_metadata(fallback, 0)
+        assert row["datetime"] is None and row["date"] == "2026-06-01"
+        assert row["date_source"] == "parent_directory_iso_date"
+
+        explicit = os.path.join(dated, "2026-06-01-alpha.dat")
+        with open(explicit, "w", encoding="utf-8") as fh:
+            fh.write("# state=ambient_average\nrow_idx\tdoy\tT_C\tP_mbar\tpx0\n")
+            fh.write("0\t152.5\t25\t1013\t0.1\n")
+        row = CLI.alpha_row_metadata(explicit, 0)
+        assert row["datetime_source"] == "alpha_header.doy+filename_year"
+        assert row["state"] == "ambient_average"
+        assert row["state_source"] == "alpha_comment.explicit_state"
+
+        copied_dir = os.path.join(td, "copied")
+        os.mkdir(copied_dir)
+        copied = os.path.join(copied_dir, "alpha.dat")
+        with open(copied, "wb") as dst, open(path, "rb") as src:
+            dst.write(src.read())
+        same = CLI.alpha_row_metadata(copied, 0)
+        assert first["file"] == same["file"] and first["sha256"] == same["sha256"]
+        assert CLI.sample_public_id(first, 0) != CLI.sample_public_id(same, 1)
+
+    all_ambient = [{"date": "2026-06-01", "state": "ambient_average"}] * 4
+    identities = [{"datetime": "2026-06-01 00:00:00"}] * 4
+    summary = CLI.sample_metadata_summary(all_ambient, identities)
+    assert summary["state_completeness"] == "COMPLETE"
+    assert summary["distinct_state_count"] == 1
+    assert summary["state_diversity"] == "NOT_DIVERSE"
+    summary = CLI.sample_metadata_summary(
+        [*all_ambient[:3], {"date": "2026-06-01", "state": "unknown"}], identities)
+    assert summary["state_completeness"] == "INCOMPLETE"
+    assert summary["state_diversity"] == "UNAVAILABLE"
+
+    candidates = [
+        {"stage0_preflight": {"state": "PASS"},
+         "execution_gate": {"n_ok": 7, "n_fail": 1}},
+        {"stage0_preflight": {"state": "FAIL"},
+         "execution_gate": {"n_ok": 0, "n_fail": 0}},
+        {"stage0_preflight": {"state": "UNAVAILABLE"},
+         "execution_gate": {"n_ok": 0, "n_fail": 0}},
+    ]
+    budget = FE.stage1_budget(candidates, 4, 2)
+    assert budget == {"contract": FE.STAGE1_SAMPLE_CONTRACT, "requested_scans": 4,
+                      "selected_scans": 4, "starts_per_candidate": 2,
+                      "attempts_per_candidate": 8,
+                      "stage0": {"PASS": 1, "FAIL": 1, "UNAVAILABLE": 1},
+                      "planned_fit_attempts": 8, "executed_fit_attempts": 8}
+    for scans, starts in ((3, 2), (4, 1)):
+        try:
+            FE.stage1_budget(candidates, scans, starts)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("non-contract Stage 1 budget was accepted")
+    for scans, starts in ((4.9, 2), ("4", 2), (True, 2), (4, 2.0), (4, "2"), (4, False)):
+        try:
+            FE.stage1_budget(candidates, scans, starts)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("non-exact Stage 1 budget type was accepted")
+
+
+def test_stage1_incomplete_input_abstains_before_fit():
+    class Engine:
+        _wave_axis = np.arange(200.)
+
+    old_map, old_pick, old_build, old_fit, old_eligible = (
+        CLI.OP.CHAN_ALPHA, CLI.OP.pick_channel, CLI.OP.build_engine_from_config,
+        FE.PO.fit_scan, CLI.eligible_scan_rows)
+    calls = []
+    cfg = {"allow_negative_gas": True, "wl_path": "wave.txt", "refs": [],
+           "f_min": 20, "f_max": 120, "poly_deg": 3, "step_limit": .5,
+           "ref_props": {"NO2": {"sh_mode": "Limit", "sh_val": "-1,1",
+                                    "sq_mode": "Fix", "sq_val": "1"}}}
+    try:
+        CLI.OP.pick_channel = lambda scenario, key: cfg
+        CLI.OP.build_engine_from_config = lambda config: Engine()
+        FE.PO.fit_scan = lambda *a, **k: calls.append(1)
+        with tempfile.TemporaryDirectory() as td:
+            fitset = os.path.join(td, "fitset.json")
+            with open(fitset, "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            secret = os.path.join(td, "private", "alpha.dat")
+            for error in (OSError(secret), ValueError(secret)):
+                CLI.eligible_scan_rows = lambda key, failure=error: (_ for _ in ()).throw(failure)
+                output = os.path.join(td, f"discovery-{type(error).__name__}.json")
+                try:
+                    CLI.main([fitset, "ans", "--output", output, "--allow-negative-gas"])
+                except SystemExit:
+                    pass
+                else:
+                    raise AssertionError("failed row discovery did not abstain")
+                report = json.load(open(output, encoding="utf-8"))
+                assert report["status"] == "ABSTAIN_INCOMPLETE"
+                assert report["reason"] == "eligible alpha rows could not be discovered"
+                assert td not in json.dumps(report) and not calls
+                assert not [name for name in os.listdir(td) if name.startswith(".fit-explorer-")]
+            CLI.eligible_scan_rows = old_eligible
+            for case, file_count in (("empty_pool", 0), ("unreadable_row", 4)):
+                case_dir = os.path.join(td, case)
+                os.mkdir(case_dir)
+                for i in range(file_count):
+                    open(os.path.join(case_dir, f"alpha{i}.dat"), "wb").close()
+                CLI.OP.CHAN_ALPHA = {"ans": (os.path.join(case_dir, "*.dat"), None)}
+                output = os.path.join(td, f"{case}.json")
+                try:
+                    CLI.main([fitset, "ans", "--output", output, "--allow-negative-gas"])
+                except SystemExit:
+                    pass
+                else:
+                    raise AssertionError("incomplete sample input did not abstain")
+                report = json.load(open(output, encoding="utf-8"))
+                assert report["status"] == "ABSTAIN_INCOMPLETE"
+                assert td not in report["reason"]
+                assert not calls
+    finally:
+        CLI.OP.CHAN_ALPHA, CLI.OP.pick_channel = old_map, old_pick
+        CLI.OP.build_engine_from_config, FE.PO.fit_scan = old_build, old_fit
+        CLI.eligible_scan_rows = old_eligible
 
 
 def test_t2_tri_state_never_turns_no_anchor_into_pass():
@@ -225,6 +401,9 @@ def test_json_schema_and_no_apply():
 
 def main():
     test_candidates_and_starts()
+    test_stage1_representative_row_contract()
+    test_stage1_metadata_does_not_infer_state()
+    test_stage1_incomplete_input_abstains_before_fit()
     test_t2_tri_state_never_turns_no_anchor_into_pass()
     test_evaluator_injects_two_distinct_final_starts()
     test_multistart_changes_target_theta_only_not_bounds()
