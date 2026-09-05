@@ -5,8 +5,10 @@ import hashlib
 import io
 import json
 import os
+import posixpath
 import tempfile
 from types import SimpleNamespace
+from unittest import mock
 
 import test_fit_explorer_external as ext
 
@@ -54,10 +56,35 @@ def main():
         validated = ext.validate_manifest(manifest, td)
         ext.verify_dependencies(validated)
         private = copy.deepcopy(validated["legacy"])
-        private["resolved_path"] = r"C:\Users\Private Person\secret\legacy.json"
-        encoded = json.dumps(ext.public_dependency(private))
-        assert "Private Person" not in encoded and "secret" not in encoded
-        assert "legacy.json" in encoded
+        private_paths = (r"C:\Users\Private Person\secret\legacy.json",
+                         "/home/private-person/secret/legacy.json",
+                         r"C:\Users/Private Person\secret/legacy.json",
+                         r"\\server\Private Person\secret\legacy.json")
+        with mock.patch.object(ext.os.path, "basename", side_effect=posixpath.basename):
+            for private_path in private_paths:
+                assert ext.portable_basename(private_path) == "legacy.json"
+                private["resolved_path"] = private_path
+                public = ext.public_dependency(private)
+                encoded = json.dumps(public)
+                assert public["name"] == "legacy.json"
+                assert "Private Person" not in encoded and "private-person" not in encoded
+                assert "secret" not in encoded and "server" not in encoded
+
+            missing = copy.deepcopy(validated)
+            missing["legacy"]["resolved_path"] = private_paths[0]
+            try:
+                ext.verify_dependencies(missing)
+            except AssertionError as exc:
+                assert str(exc) == "required file missing: legacy (legacy.json)"
+            else:
+                raise AssertionError("foreign-style missing dependency must fail")
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                assert ext.main(["--manifest", private_paths[0]]) == 1
+            error = stderr.getvalue()
+            assert "manifest not found: legacy.json" in error
+            assert "Private Person" not in error and "secret" not in error
 
         portable = copy.deepcopy(manifest)
         for dep in portable["dependencies"]:

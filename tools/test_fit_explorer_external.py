@@ -10,6 +10,7 @@ import os
 import platform
 import sys
 import time
+from ntpath import basename as _path_leaf
 
 import numpy as np
 import scipy
@@ -30,6 +31,11 @@ METRICS = ("conc", "rms_sig", "abs_ac1")
 ROLES = {"legacy_fitset", "alpha", "wavecal", "reference"}
 ASSERTION_SCOPE = ("qualitative behavioral ordering only; not cross-platform numeric equivalence, "
                    "scientific tolerance, concentration truth, T3, or plateau evidence")
+
+
+def portable_basename(path):
+    """Return only the leaf name for Windows or POSIX path text."""
+    return _path_leaf(path)
 
 
 def resolve(base, path, data_root=None):
@@ -195,7 +201,7 @@ def verify_dependencies(dep_by_id):
     for dep in dep_by_id.values():
         path = dep["resolved_path"]
         if not os.path.isfile(path):
-            raise AssertionError(f"required file missing: {dep['id']} ({os.path.basename(path)})")
+            raise AssertionError(f"required file missing: {dep['id']} ({portable_basename(path)})")
         actual = sha256(path)
         if actual.lower() != dep["sha256"].lower():
             raise AssertionError(f"hash mismatch: {dep['id']}: {actual}")
@@ -204,7 +210,7 @@ def verify_dependencies(dep_by_id):
 def public_dependency(dep):
     """Shareable identity without manifest or resolved directory paths."""
     return {"id": dep["id"], "role": dep["role"], "sha256": dep["sha256"].lower(),
-            "name": os.path.basename(dep["resolved_path"])}
+            "name": portable_basename(dep["resolved_path"])}
 
 
 def alpha_row_identity(path, row_index):
@@ -399,7 +405,7 @@ def main(argv=None):
     candidate_inputs = [manifest_path]
     try:
         if not os.path.isfile(manifest_path):
-            raise AssertionError(f"manifest not found: {os.path.basename(manifest_path)}")
+            raise AssertionError(f"manifest not found: {portable_basename(manifest_path)}")
         report["manifest_sha256"] = sha256(manifest_path)
         with open(manifest_path, encoding="utf-8") as fh:
             manifest = json.load(fh)
@@ -417,7 +423,7 @@ def main(argv=None):
         report["assertion_scope"] = manifest["assertion_scope"]
         report["generation"] = {"base_commit": report["git"]["head"],
                                 "artifact_self_excluded": bool(report["git"]["excluded_paths"]),
-                                "artifact_name": os.path.basename(args.result) if args.result else None}
+                                "artifact_name": portable_basename(args.result) if args.result else None}
     except (KeyError, OSError, TypeError, ValueError, AssertionError, json.JSONDecodeError) as exc:
         report["failed"].append({"id": "manifest_or_case", "reason": str(exc)})
         if args.result:
