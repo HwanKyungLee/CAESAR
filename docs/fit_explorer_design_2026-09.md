@@ -1,6 +1,6 @@
 # Fit Setting Explorer 설계 정본 (2026-09)
 
-> 상태: **설계 고정 / Phase A2·Explorer V1 synthetic·ROI1 및 cold·O4 portable 재현 증거 완료**
+> 상태: **설계 고정 / Phase A2·Explorer V1·Stage 0 synthetic·ROI1 및 cold·O4 portable 재현 증거 완료**
 > 선행 문서: `docs/fit_optimizer_handoff.md`, `docs/NO2_인젝션_실험_핸드오프_2026-08.md`,
 > `docs/ANs_분석_핸드오프_2026-07-23.md`  
 > 골든 사례와 재현 메타데이터: `docs/fit_explorer_golden_inventory_2026-09.md`
@@ -149,6 +149,14 @@ python tools/fit_explorer.py --help
 | Stage 3 | 3~5 후보 | 날짜별 시간 연속 블록; step_limit과 시간 연속성 |
 | Final | 1~3 후보 | 독립 홀드아웃 날짜, 가능하면 검증된 T3 |
 
+Stage 0의 최소 사전검사는 candidate 정수 inclusive bounds, engine wave의 유한·단조성, gas 순서와
+engine에 처리된 reference 배열의 shape/finite/index coverage, target 존재, poly 자유도, 그리고
+`core.fit_physics.COLLIN_HI_DEFAULT`를 **초과한** target differential multiple-R만 검사한다. 진단값이
+없거나 계산이 실패하면 PASS로 간주하지 않고 `UNAVAILABLE`로 중단한다. 이 경우에도 candidate의
+canonical evaluation state는 새 상태를 만들지 않고 `UNEVALUATED`로 유지하며 preflight 상태를 별도로 기록한다. engine reference는 이미
+보간·외삽된 배열이므로 원본 spectroscopy 파일의 실제 파장 coverage는 이 검사로 증명할 수 없으며
+별도 provenance가 생길 때까지 `UNAVAILABLE`로 기록한다. Stage 0 PASS도 실제 fit 전에는 UNEVALUATED다.
+
 100개 이상 규모에서는 halving이 선택 사항이 아니라 실행 예산의 필수 장치다. 단, Stage 1은 seed
 하나나 같은 상태의 2~3스캔만으로 공격적으로 제거하지 않는다. 애매한 후보는 승격하며, 조기 pruning은
 과학적 FAIL로 기록하지 않는다. 최종 후보군에는 §3의 one-step-neighbor closure를 수행한다.
@@ -211,6 +219,7 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] cold/O4 외부 실데이터의 현재 코드/hash·양쪽 부호 정책 기준 T2 재측정
 - [x] synthetic CI 계약 테스트
 - [x] optional external-data suite: manifest 미지정만 SKIP, 명시 manifest의 missing/hash mismatch는 FAIL
+- [x] Stage 0 최소 사전검사: fit-free 정적 FAIL/UNAVAILABLE, 공선성 단일 기존 문턱, no-Apply
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가

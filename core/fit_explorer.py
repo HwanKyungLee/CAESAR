@@ -94,6 +94,70 @@ def validate_coordinates(engine_wave, scans, candidates):
     return problems
 
 
+def stage0_preflight(eng, candidate, target="NO2"):
+    """Fit-free, conservative candidate preflight; PASS is not fit evidence."""
+    details = {
+        "collinearity_threshold": FP.COLLIN_HI_DEFAULT,
+        "tolerance_source": "core.fit_physics.COLLIN_HI_DEFAULT",
+        "original_reference_coverage": "UNAVAILABLE",
+        "coverage_limitation": "engine references are already interpolated/extrapolated",
+    }
+
+    def verdict(state, *reasons):
+        return {"state": state, "reason_codes": list(reasons), "details": details}
+
+    try:
+        wave = np.asarray(getattr(eng, "_wave_axis", None), dtype=float)
+    except (TypeError, ValueError):
+        return verdict("FAIL", "ENGINE_WAVE_INVALID")
+    if wave.ndim != 1 or len(wave) < 2 or not np.isfinite(wave).all() or not np.all(np.diff(wave) > 0):
+        return verdict("FAIL", "ENGINE_WAVE_INVALID")
+    try:
+        lo, hi, poly = (candidate[k] for k in ("px_min", "px_max", "poly"))
+    except (KeyError, TypeError):
+        return verdict("FAIL", "CANDIDATE_FIELDS_INVALID")
+    if any(isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, np.integer))
+           for v in (lo, hi, poly)):
+        return verdict("FAIL", "CANDIDATE_FIELDS_INVALID")
+    if lo < 0 or hi < 0 or poly < 0 or lo > hi:
+        return verdict("FAIL", "CANDIDATE_BOUNDS_INVALID")
+    if hi >= len(wave):
+        return verdict("FAIL", "CANDIDATE_OUTSIDE_ENGINE_DOMAIN")
+    gases = getattr(eng, "gas_list", None)
+    if (not isinstance(gases, (list, tuple)) or not gases
+            or any(not isinstance(g, str) or not g for g in gases)
+            or len(set(gases)) != len(gases)):
+        return verdict("FAIL", "GAS_ORDER_INVALID")
+    if target not in gases:
+        return verdict("FAIL", "TARGET_MISSING")
+    refs = getattr(eng, "raw_references", None)
+    if not isinstance(refs, dict):
+        return verdict("FAIL", "REFERENCE_SET_INVALID")
+    for gas in gases:
+        if gas not in refs:
+            return verdict("FAIL", "REFERENCE_MISSING")
+        try:
+            ref = np.asarray(refs[gas], dtype=float)
+        except (TypeError, ValueError):
+            return verdict("FAIL", "REFERENCE_ENGINE_COVERAGE_INVALID")
+        if ref.ndim != 1 or len(ref) != len(wave) or not np.isfinite(ref[lo:hi + 1]).all():
+            return verdict("FAIL", "REFERENCE_ENGINE_COVERAGE_INVALID")
+    if hi - lo + 1 <= poly + 1:
+        return verdict("FAIL", "POLY_UNDERDETERMINED")
+    try:
+        diag = FP.differential_collinearity(eng, list(gases), lo, hi, poly)
+        multiple_r = finite_or_none(diag["multiple_R"].get(target))
+    except Exception as exc:
+        details["diagnostic_error_class"] = type(exc).__name__
+        return verdict("UNAVAILABLE", "COLLINEARITY_DIAGNOSTIC_UNAVAILABLE")
+    details["target_multiple_R"] = multiple_r
+    if multiple_r is None:
+        return verdict("UNAVAILABLE", "COLLINEARITY_DIAGNOSTIC_UNAVAILABLE")
+    if multiple_r > FP.COLLIN_HI_DEFAULT:
+        return verdict("FAIL", "TARGET_DIFFERENTIAL_COLLINEARITY")
+    return verdict("PASS", "AVAILABLE_STATIC_CHECKS_PASSED")
+
+
 def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=None):
     """Conservative adapter: a negative exclusion decision is never a PASS."""
     try:
@@ -145,6 +209,16 @@ def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=N
 
 def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                        step_limit, allow_negative_gas, target="NO2"):
+    preflight = stage0_preflight(eng, candidate, target)
+    if preflight["state"] != "PASS":
+        return {**candidate,
+                "evaluation_state": "UNEVALUATED",
+                "stage0_preflight": preflight,
+                "execution_gate": {"state": "NOT_RUN", "n_ok": 0, "n_fail": 0},
+                "t2_gate": {"state": "UNAVAILABLE", "reason": "fit not run after Stage 0"},
+                "metrics": {key: summary([]) for key in
+                            ("conc", "rms_sig", "perr_rel", "autocorr1")},
+                "runs": [], "failures": [], "seconds": 0.0}
     rows, failures = [], []
     started = time.perf_counter()
     for scan in scans:
@@ -172,7 +246,7 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
     state = ("EVALUATED_FAIL" if gate == "FAIL" or t2["state"] == "FAIL" else
              "INCOMPLETE" if gate == "UNAVAILABLE" else
              "EVALUATED_PASS" if t2["state"] == "PASS" else "EVALUATED_WITH_T2_UNAVAILABLE")
-    out = {**candidate, "evaluation_state": state,
+    out = {**candidate, "evaluation_state": state, "stage0_preflight": preflight,
            "execution_gate": {"state": gate, "n_ok": len(rows), "n_fail": len(failures)},
            "t2_gate": t2, "metrics": metrics,
            "runs": rows, "failures": failures, "seconds": time.perf_counter() - started}
@@ -248,7 +322,11 @@ def json_ready(value):
 
 def overall_status(candidates):
     states = [c.get("evaluation_state") for c in candidates]
-    if states and all(s == "EVALUATED_FAIL" for s in states):
+    preflight_states = [c.get("stage0_preflight", {}).get("state") for c in candidates]
+    if "UNAVAILABLE" in preflight_states:
+        return "ABSTAIN_INCOMPLETE"
+    if states and all(s == "EVALUATED_FAIL" or (s == "UNEVALUATED" and p == "FAIL")
+                      for s, p in zip(states, preflight_states)):
         return "ABSTAIN"
     if any(s == "INCOMPLETE" for s in states):
         return "ABSTAIN_INCOMPLETE"

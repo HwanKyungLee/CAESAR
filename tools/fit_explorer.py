@@ -162,7 +162,9 @@ def main(argv=None):
                    "px_start": s["px_start"], "date": s["date"], "state": s["state"]} for s in scans],
         "candidates": evaluated,
         "seconds": time.perf_counter() - started,
-        "limitations": ["No candidate ranking", "No robustness plateau claim", "No Apply"],
+        "limitations": ["Stage 0 PASS remains unevaluated until fitting",
+                        "Original spectroscopy-file coverage is unavailable after engine interpolation",
+                        "No candidate ranking", "No robustness plateau claim", "No Apply"],
     }
     report["status"] = FE.overall_status(evaluated)
     FE.write_report(output, report)

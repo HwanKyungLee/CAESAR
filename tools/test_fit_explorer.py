@@ -40,20 +40,28 @@ def test_t2_tri_state_never_turns_no_anchor_into_pass():
 
 
 def test_evaluator_injects_two_distinct_final_starts():
+    class Engine:
+        _wave_axis = np.arange(101.)
+        gas_list = ["NO2", "H2O"]
+        raw_references = {"NO2": np.sin(np.linspace(0, 20, 101)),
+                          "H2O": np.cos(np.linspace(0, 20, 101))}
     seen = []
     original = FE.PO.fit_scan
     FE.PO.fit_scan = lambda *args, **kwargs: (seen.append(kwargs["controlled_start"]) or
         {"conc": 1., "rms_sig": .1, "perr_rel": .2, "autocorr1": 0., "coeffs": {}})
     FE.t2_tri_state, old_t2 = (lambda *args, **kwargs: {"state": "UNAVAILABLE"}), FE.t2_tri_state
+    FE.FP.differential_collinearity, old_diag = (lambda *args, **kwargs: {
+        "multiple_R": {"NO2": .2}}), FE.FP.differential_collinearity
     try:
         starts = [{"id": "a", "shift": -2., "squeeze": 1., "provenance": "test"},
                   {"id": "b", "shift": 2., "squeeze": 1., "provenance": "test"}]
         scans = [{"id": "s", "wave": np.arange(101), "alpha": np.zeros(101),
                   "T_C": 25., "P_mbar": 1013.}]
-        FE.evaluate_candidate(None, None, {}, scans, {"id": "c", "px_min": 0, "px_max": 100,
+        FE.evaluate_candidate(Engine(), None, {}, scans, {"id": "c", "px_min": 0, "px_max": 100,
                                                      "poly": 2}, starts, .5, True)
     finally:
         FE.PO.fit_scan, FE.t2_tri_state = original, old_t2
+        FE.FP.differential_collinearity = old_diag
     assert seen == [(-2., 1.), (2., 1.)]
 
 
@@ -115,6 +123,76 @@ def test_status_and_coordinate_contracts():
                                    [{"px_min": 10, "px_max": 111, "poly": 2}])
 
 
+def test_stage0_preflight_is_conservative_and_fit_free():
+    class Engine:
+        _wave_axis = np.arange(8.)
+        gas_list = ["NO2", "H2O"]
+        raw_references = {"NO2": np.arange(8.), "H2O": np.arange(8.)[::-1]}
+    eng = Engine()
+    candidate = {"id": "c", "px_min": 0, "px_max": 7, "poly": 2}
+    original_diag, original_fit = FE.FP.differential_collinearity, FE.PO.fit_scan
+    calls = []
+    try:
+        FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": .2}}
+        assert FE.stage0_preflight(eng, candidate)["state"] == "PASS"
+        for bad, code in [
+            ({**candidate, "px_min": 0.0}, "CANDIDATE_FIELDS_INVALID"),
+            ({**candidate, "px_min": -1}, "CANDIDATE_BOUNDS_INVALID"),
+            ({**candidate, "px_max": 8}, "CANDIDATE_OUTSIDE_ENGINE_DOMAIN"),
+            ({**candidate, "poly": 7}, "POLY_UNDERDETERMINED")]:
+            verdict = FE.stage0_preflight(eng, bad)
+            assert verdict["state"] == "FAIL" and code in verdict["reason_codes"]
+        saved = eng.raw_references.pop("H2O")
+        assert FE.stage0_preflight(eng, candidate)["state"] == "FAIL"
+        eng.raw_references["H2O"] = saved
+        eng.raw_references["H2O"] = np.arange(7.)
+        assert FE.stage0_preflight(eng, candidate)["state"] == "FAIL"
+        eng.raw_references["H2O"] = saved
+        outside_nan = saved.copy()
+        outside_nan[0] = np.nan
+        eng.raw_references["H2O"] = outside_nan
+        inner = {**candidate, "px_min": 1}
+        assert FE.stage0_preflight(eng, inner)["state"] == "PASS"
+        eng.raw_references["H2O"][1] = np.nan
+        assert FE.stage0_preflight(eng, inner)["state"] == "FAIL"
+        eng.raw_references["H2O"] = saved
+        assert FE.stage0_preflight(eng, candidate, "O4")["state"] == "FAIL"
+        FE.FP.differential_collinearity = lambda *a, **k: {
+            "multiple_R": {"NO2": FE.FP.COLLIN_HI_DEFAULT}}
+        assert FE.stage0_preflight(eng, candidate)["state"] == "PASS"
+        FE.FP.differential_collinearity = lambda *a, **k: {
+            "multiple_R": {"NO2": np.nextafter(FE.FP.COLLIN_HI_DEFAULT, np.inf)}}
+        assert FE.stage0_preflight(eng, candidate)["state"] == "FAIL"
+        FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": np.nan}}
+        assert FE.stage0_preflight(eng, candidate)["state"] == "UNAVAILABLE"
+        FE.PO.fit_scan = lambda *a, **k: calls.append(1)
+        rows = FE.evaluate_candidate(eng, None, {}, [], candidate, [], .5, True)
+        assert rows["evaluation_state"] == "UNEVALUATED" and not calls
+        failed = FE.evaluate_candidate(eng, None, {}, [], {**candidate, "px_max": 8}, [], .5, True)
+        assert failed["evaluation_state"] == "UNEVALUATED" and not calls
+        secret = r"C:\Users\secret\reference.txt"
+        FE.FP.differential_collinearity = lambda *a, **k: (_ for _ in ()).throw(RuntimeError(secret))
+        unavailable = FE.stage0_preflight(eng, candidate)
+        assert unavailable["state"] == "UNAVAILABLE"
+        assert secret not in json.dumps(unavailable)
+    finally:
+        FE.FP.differential_collinearity, FE.PO.fit_scan = original_diag, original_fit
+    assert candidate == {"id": "c", "px_min": 0, "px_max": 7, "poly": 2}
+    assert eng.gas_list == ["NO2", "H2O"]
+
+    class BadWave(Engine):
+        _wave_axis = np.array([0., 1., 1.])
+        raw_references = {"NO2": np.ones(3), "H2O": np.ones(3)}
+    assert FE.stage0_preflight(BadWave(), {**candidate, "px_max": 2})["state"] == "FAIL"
+    eng.gas_list = ["NO2", "NO2"]
+    assert FE.stage0_preflight(eng, candidate)["state"] == "FAIL"
+
+    assert FE.overall_status([{"evaluation_state": "UNEVALUATED",
+                               "stage0_preflight": {"state": "FAIL"}}]) == "ABSTAIN"
+    assert FE.overall_status([{"evaluation_state": "UNEVALUATED",
+                               "stage0_preflight": {"state": "UNAVAILABLE"}}]) == "ABSTAIN_INCOMPLETE"
+
+
 def test_early_policy_abstain_cannot_overwrite_alpha_input():
     with tempfile.TemporaryDirectory() as td:
         alpha = os.path.join(td, "alpha.dat")
@@ -153,6 +231,7 @@ def main():
     test_t2_nan_and_partial_are_unavailable()
     test_t2_nonnumeric_collinearity_is_unavailable()
     test_status_and_coordinate_contracts()
+    test_stage0_preflight_is_conservative_and_fit_free()
     test_early_policy_abstain_cannot_overwrite_alpha_input()
     test_json_schema_and_no_apply()
     print("test_fit_explorer: PASS")
