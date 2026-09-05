@@ -163,7 +163,7 @@ def test_policy_reaches_seed_and_final():
     class Fitter:
         engine = Eng()
         detect_etalon_frequency = lambda *a: 0.1
-        setup_fit_parameters = lambda *a: ([], {}, {}, np.array([]), np.array([]), np.array([]))
+        setup_fit_parameters = lambda *a, **k: ([], {}, {}, np.array([]), np.array([]), np.array([]))
 
         def execute_varpro_fit(self, *args, **kwargs):
             seen.append(("final", kwargs["allow_negative_gas"]))
@@ -172,9 +172,16 @@ def test_policy_reaches_seed_and_final():
     old = PO._seed_shift
     PO._seed_shift = lambda *a, **k: (seen.append(("seed", a[8])) or (0.0, 1.0))
     try:
-        PO.fit_scan(Eng(), Fitter(), {}, [0, 1], [0, 0], 25, 1013, 0, 1, 0, 0.5,
-                    allow_negative_gas=True)
+        result = PO.fit_scan(Eng(), Fitter(), {}, [0, 1], [0, 0], 25, 1013, 0, 1, 0, 0.5,
+                             allow_negative_gas=True)
         assert seen == [("seed", True), ("final", True)]
+        assert result["deterministic_seed"] == {
+            "shift": 0.0, "squeeze": 1.0, "source": "deterministic_grid"}
+        controlled = PO.fit_scan(Eng(), Fitter(), {}, [0, 1], [0, 0], 25, 1013,
+                                 0, 1, 0, 0.5, allow_negative_gas=False,
+                                 controlled_start=(0.2, 1.01))
+        assert controlled["deterministic_seed"] == {
+            "shift": 0.2, "squeeze": 1.01, "source": "controlled_start"}
     finally:
         PO._seed_shift = old
 

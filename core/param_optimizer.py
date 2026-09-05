@@ -183,6 +183,9 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                 rms_sig=float(rms / (sig + 1e-30)), autocorr1=autocorr1,
                 shifts=shifts, squeezes=squeezes, coeffs=coeffs, n_free=len(active),
                 etalon_frequency=float(ef),
+                deterministic_seed={"shift": float(seed), "squeeze": float(seed_sq),
+                                    "source": ("controlled_start" if controlled_start is not None
+                                               else "deterministic_grid")},
                 nonlinear_initialization={"active": list(active), "theta0": list(map(float, t0)),
                                           "lower": list(map(float, lb)),
                                           "upper": list(map(float, ub))})

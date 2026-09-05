@@ -1,6 +1,6 @@
 # Fit Explorer 골든 데이터 인벤토리 (2026-09)
 
-> 상태: **ROI1 portable 재현 증거 완료 / cold·O4 재측정 미완료**
+> 상태: **ROI1 및 cold·O4 portable 재현 증거 완료**
 > 설계 정본: `docs/fit_explorer_design_2026-09.md`
 
 ## 1. 증거 라벨
@@ -117,8 +117,11 @@ plateau, T2/T3 진실을 주장하지 않는다.
 ## 4. Cold/O4 후보
 
 과거 cold 사례는 O4가 T1에서 매우 좋아 보이지만 fitted amount가 물리 기대보다 수십~수백 배 커져
-T2가 기각하는 정책 사례다. 숫자(예: 89배 또는 229배)는 서로 다른 실행 문맥이 섞여 있으므로 현재
-입력 hash와 설정을 고정하기 전 단일 골든 숫자로 채택하지 않는다.
+T2가 기각하는 정책 사례로 기록됐다. 현재 hash-pinned 입력 15개로 양쪽 gas 부호 정책을 재측정했다.
+nonnegative 정책은 중앙 절대량비 **230.998배**로 절대량 게이트가 `FAIL`했고, signed 정책은 절대량비
+**2.207배**로 그 게이트는 통과했으나 O4 계수 CV **102%**가 NO2 계수 CV **95%**보다 커 상수성
+게이트에서 `FAIL`했다. 따라서 229배와 2.2배는 모순된 골든이 아니라 서로 다른 명시적 부호 정책의
+관측이다. 89배 수치는 실행 문맥이 고정되지 않았으므로 계속 `HISTORICAL`로 유지한다.
 
 골든 판정은 다음 property다.
 
@@ -129,6 +132,12 @@ T2가 기각하는 정책 사례다. 숫자(예: 89배 또는 229배)는 서로 
 
 재측정 manifest에는 §3의 공통 항목과 함께 O4 이론량 식, 산소 몰분율/압력/온도, ZA가 I0에 사용된
 여부와 그 provenance를 기록한다.
+
+Portable 재현 파일은 `diagnostics/fit_explorer/cold_o4_manifest_v1.json`과
+`cold_o4_result_v1.json`이다. 원자료는 커밋하지 않는다. 이 체크포인트는 현재 T2 분기만 고정하며,
+O4 제외 후보의 농도 진실, T3, plateau 또는 대표 설정 추천을 주장하지 않는다.
+표본은 명시된 날짜 범위의 cold alpha 상대경로 453개를 정렬한 뒤 0부터 30 간격의 인덱스 15개를
+선택했으며, manifest가 glob·필터·정렬 규약·인덱스와 각 파일 hash를 함께 고정한다.
 
 ## 5. Cold/PNs 및 기타 후보
 
@@ -163,5 +172,6 @@ CI의 **synthetic 계약 테스트**는 과학적 진실을 증명하지 않고 
 2. ~~필요한 alpha·wavecal·reference·FitSet 의존성을 portable manifest로 고정한다.~~
 3. raw data는 커밋하지 않고 외부 suite 전용으로 유지한다.
 4. ~~current code에서 fixed shift grid와 default/Center 경로를 둘 다 재측정한다.~~
-5. O4 사례를 동일 manifest로 재실행해 T2 tri-state와 magnitude 판정을 확인한다.
-6. cold/O4는 그 뒤에만 `HISTORICAL`에서 `REPRODUCED`로 승격한다.
+5. ~~O4 사례를 동일 manifest로 재실행해 T2 tri-state와 magnitude 판정을 확인한다.~~
+6. ~~cold/O4 양쪽 부호 정책의 현재 T2 분기를 `REPRODUCED`로 승격한다.~~ 89배 수치는 실행 문맥이
+   고정되지 않았으므로 별도 `HISTORICAL`로 유지한다.

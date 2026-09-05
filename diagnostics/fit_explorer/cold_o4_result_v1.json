@@ -1,0 +1,1790 @@
+{
+  "schema_version": 1,
+  "manifest_sha256": "febf5a9ef7ba78ef7e4eebc061525f04de78356ca10ee506b2f61c0a70b7e86c",
+  "claim_scope": "current-code cold/O4 T2 checkpoint only; not concentration truth, T3, plateau, or recommendation",
+  "dependencies": [
+    {
+      "id": "fitset",
+      "sha256": "66c5835e0e8ad94aca27b90ee41334177cb57dcb70deea2a8ed2219edda08505",
+      "name": "FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json"
+    },
+    {
+      "id": "wavecal",
+      "sha256": "21460f605d7bb4f4312450b8547ec3071e25bd2e8c1244c83b77b1ea7cbbb458",
+      "name": "Calib_20260523_Hg_4line_400-497nm_Poly2.txt"
+    },
+    {
+      "id": "ref_chocho",
+      "sha256": "95efe7f628328c2dd9fd6437ee7bbd250a6b5f3824122346298456db472b98b0",
+      "name": "Ref_CHOCHO_Dynamic-ILS-Applied.dat"
+    },
+    {
+      "id": "ref_h2o",
+      "sha256": "ef66a53d233398cd2471dcfc231b6c751a672915d88be4deeb9920413a384773",
+      "name": "Ref_H2O-HITRAN_Dynamic-ILS-Applied.dat"
+    },
+    {
+      "id": "ref_no2",
+      "sha256": "d13123a1cedad36b1041645610d3541d2533acb681c6ae9b2f54283a5fa5970c",
+      "name": "Ref_NO2_Dynamic-ILS-Applied.dat"
+    },
+    {
+      "id": "ref_o4",
+      "sha256": "2f616532147342010429f3909d3ac63e0b61a73e41486a7242b50bac91205d6e",
+      "name": "Ref_O4_Dynamic-ILS-Applied.dat"
+    },
+    {
+      "id": "alpha01",
+      "sha256": "0ec02ef0b071f55e21228bae70cef006f6f1af0b40670dafc0dddb5a847c7dbd",
+      "name": "2026-05-26-001_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha02",
+      "sha256": "3848f88cea374bd02d640a2d200b092a84d1234704b92348bf0f5e49b7932497",
+      "name": "2026-05-27-006_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha03",
+      "sha256": "b11111e934b8fb192e4f42be658ab9cead555dd3e7e88c7a854b028bcfb9f230",
+      "name": "2026-05-28-012_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha04",
+      "sha256": "5b013c73d32e5d613f956862119b7ec2acab06bd9b3ddc429746afc235b385b8",
+      "name": "2026-05-29-017_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha05",
+      "sha256": "8633075ab0dc90f95f9e03c35fff86a196ec4a2aa1bc042973fab7132632cdb3",
+      "name": "2026-05-30-022_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha06",
+      "sha256": "c636c168ba32b6df2e088c3deecfbd7d235deb815c27ae04a40700931ba84063",
+      "name": "2026-06-01-004_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha07",
+      "sha256": "4fd5048b4415ea4b090945c41998b151f74800f5b97975008da69c6f09be3842",
+      "name": "2026-06-02-011_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha08",
+      "sha256": "65eb2566ddb40867637ee8efeb7227e86967d3e0c5e3cb3381b308bb69df1f43",
+      "name": "2026-06-03-013_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha09",
+      "sha256": "c854f572304b01cf82dcbd34375ced0d4fa5ce250d789229aebcf5543d15ad8e",
+      "name": "2026-06-04-019_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha10",
+      "sha256": "b730c80f23c469991671bd53420fcc3cce326fcef58f7c9df062fe6a57250570",
+      "name": "2026-06-06-001_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha11",
+      "sha256": "5b0d2b30fa01750d99df7a67e937bed44e62ee845466f3589abb3420dd8097df",
+      "name": "2026-06-07-006_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha12",
+      "sha256": "41ec10a70670ab1b830774baeab967e7d1acfce4bb1499ead9aabec8f3159d97",
+      "name": "2026-06-08-012_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha13",
+      "sha256": "902fefbfe3b5f9729a29242d93d822dbaca790d109e394a0aacd9016ab94ba8a",
+      "name": "2026-06-09-019_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha14",
+      "sha256": "318ed4f8a29fed0734049eebe0c1a18509186254864914bf9dccd68eef2486b7",
+      "name": "2026-06-11-006_cold_alpha_trace.dat"
+    },
+    {
+      "id": "alpha15",
+      "sha256": "eb1bf7ffc0dd97ffc5c6a28591f5d93f52accdb40988fca44439e972a399e9f1",
+      "name": "2026-06-12-016_cold_alpha_trace.dat"
+    }
+  ],
+  "sampling": {
+    "method": "sorted relative path, zero-based indices 0:450:30",
+    "n": 15,
+    "source_population_n": 453,
+    "date_range": [
+      "2026-05-26",
+      "2026-06-13"
+    ],
+    "population_glob": "Output/alpha/60s/cold/2026-*/*_cold_alpha_trace.dat",
+    "population_filter": "parent directory date within date_range, inclusive",
+    "population_order": "ascending repository-relative POSIX path",
+    "selected_zero_based_indices": [
+      0,
+      30,
+      60,
+      90,
+      120,
+      150,
+      180,
+      210,
+      240,
+      270,
+      300,
+      330,
+      360,
+      390,
+      420
+    ],
+    "samples": [
+      {
+        "id": "alpha01",
+        "row_idx": "0",
+        "datetime": "2026-05-26 00:06:25.720",
+        "state": "ambient_60s_average",
+        "T_C": 25.0,
+        "P_mbar": 1013.25,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha02",
+        "row_idx": "0",
+        "datetime": "2026-05-27 05:40:14.119",
+        "state": "ambient_60s_average",
+        "T_C": 28.72,
+        "P_mbar": 996.98,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha03",
+        "row_idx": "0",
+        "datetime": "2026-05-28 10:26:19.092",
+        "state": "ambient_60s_average",
+        "T_C": 29.15,
+        "P_mbar": 998.36,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha04",
+        "row_idx": "0",
+        "datetime": "2026-05-29 16:14:39.907",
+        "state": "ambient_60s_average",
+        "T_C": 29.43,
+        "P_mbar": 1003.87,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha05",
+        "row_idx": "0",
+        "datetime": "2026-05-30 21:47:50.851",
+        "state": "ambient_60s_average",
+        "T_C": 29.32,
+        "P_mbar": 1007.32,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha06",
+        "row_idx": "0",
+        "datetime": "2026-06-01 03:38:31.159",
+        "state": "ambient_60s_average",
+        "T_C": 27.4,
+        "P_mbar": 1009.39,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha07",
+        "row_idx": "0",
+        "datetime": "2026-06-02 07:41:38.370",
+        "state": "ambient_60s_average",
+        "T_C": 25.0,
+        "P_mbar": 1013.25,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha08",
+        "row_idx": "0",
+        "datetime": "2026-06-03 12:51:41.448",
+        "state": "ambient_60s_average",
+        "T_C": 30.4,
+        "P_mbar": 999.74,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha09",
+        "row_idx": "0",
+        "datetime": "2026-06-04 18:51:54.642",
+        "state": "ambient_60s_average",
+        "T_C": 27.92,
+        "P_mbar": 997.67,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha10",
+        "row_idx": "0",
+        "datetime": "2026-06-06 00:52:03.791",
+        "state": "ambient_60s_average",
+        "T_C": 29.62,
+        "P_mbar": 1007.32,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha11",
+        "row_idx": "0",
+        "datetime": "2026-06-07 05:57:31.926",
+        "state": "ambient_60s_average",
+        "T_C": 28.49,
+        "P_mbar": 1000.43,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha12",
+        "row_idx": "0",
+        "datetime": "2026-06-08 12:01:22.776",
+        "state": "ambient_60s_average",
+        "T_C": 28.59,
+        "P_mbar": 1001.12,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha13",
+        "row_idx": "0",
+        "datetime": "2026-06-09 15:51:15.892",
+        "state": "ambient_60s_average",
+        "T_C": 27.79,
+        "P_mbar": 1002.49,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha14",
+        "row_idx": "0",
+        "datetime": "2026-06-11 05:05:29.120",
+        "state": "ambient_60s_average",
+        "T_C": 31.99,
+        "P_mbar": 1004.56,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      },
+      {
+        "id": "alpha15",
+        "row_idx": "0",
+        "datetime": "2026-06-12 15:50:43.424",
+        "state": "ambient_60s_average",
+        "T_C": 29.68,
+        "P_mbar": 1007.32,
+        "channel": "1",
+        "label": "cold",
+        "RL_factor": 1.0,
+        "d_cm": 51.8,
+        "I0_mode": "PCHIP",
+        "ZA_count": 749,
+        "ambient_avg_sec": 60
+      }
+    ]
+  },
+  "fit": {
+    "gas_order": [
+      "CHOCHO",
+      "H2O",
+      "NO2",
+      "O4"
+    ],
+    "multipliers": {
+      "CHOCHO": 1.0,
+      "H2O": 1e-12,
+      "NO2": 1.0,
+      "O4": 1.0
+    },
+    "scaling_factors": {
+      "CHOCHO": 4.94275445e-19,
+      "H2O": 7.90868152e-19,
+      "NO2": 6.99025673e-19,
+      "O4": 6.501913949999999e-46
+    },
+    "gas_policies_evaluated": [
+      false,
+      true
+    ],
+    "fit_sign": 1.0,
+    "W": "identity",
+    "poly": 4,
+    "window_nm_inclusive": [
+      438.0,
+      465.8
+    ],
+    "local_px_inclusive": [
+      765,
+      1341
+    ],
+    "step_limit": 0.5,
+    "coordinate_provenance": "nm endpoints mapped independently on first selected alpha wave axis by nearest pixel",
+    "target_shift": {
+      "mode": "Limit",
+      "value": "-1, 1",
+      "configured_seed_range": [
+        -15.0,
+        15.0
+      ],
+      "effective_seed_range": [
+        -1.0,
+        1.0
+      ],
+      "seed_step": 0.25
+    },
+    "target_squeeze": {
+      "mode": "Limit",
+      "value": "-0.005, 0.005",
+      "effective_seed_range": [
+        0.99,
+        1.01
+      ],
+      "seed_step": 0.001
+    },
+    "ref_props": {
+      "CHOCHO": {
+        "sh_mode": "Link",
+        "sh_val": "NO2",
+        "sq_mode": "Link",
+        "sq_val": "NO2",
+        "t_ref": 25.0,
+        "t_coeff": 0.0,
+        "active_bands_nm": ""
+      },
+      "H2O": {
+        "sh_mode": "Link",
+        "sh_val": "NO2",
+        "sq_mode": "Link",
+        "sq_val": "NO2",
+        "t_ref": 25.0,
+        "t_coeff": 0.0,
+        "active_bands_nm": ""
+      },
+      "NO2": {
+        "sh_mode": "Limit",
+        "sh_val": "-1, 1",
+        "sq_mode": "Limit",
+        "sq_val": "-0.005, 0.005",
+        "t_ref": 25.0,
+        "t_coeff": 0.0,
+        "active_bands_nm": ""
+      },
+      "O4": {
+        "sh_mode": "Link",
+        "sh_val": "NO2",
+        "sq_mode": "Link",
+        "sq_val": "NO2",
+        "t_ref": 25.0,
+        "t_coeff": 0.0
+      }
+    },
+    "linked_species": [
+      "CHOCHO",
+      "H2O",
+      "O4"
+    ],
+    "gas_temperature_override_C": 0.0,
+    "cavity_d_cm": 51.8,
+    "rl_factor": 1.0,
+    "tikhonov_lambda": 0.0,
+    "robust_fit": false,
+    "etalon": {
+      "enabled": true,
+      "frequency_search_cycles_per_px": [
+        0.02,
+        0.4
+      ],
+      "frequency_search_rad_per_px": [
+        0.12566370614359174,
+        2.5132741228718345
+      ],
+      "detected_frequency_rad_per_px_by_policy": {
+        "nonnegative": [
+          0.14156223395725237,
+          0.16334103918144505,
+          0.16334103918144505,
+          0.16334103918144505,
+          0.16334103918144505,
+          0.17423044179354139,
+          2.363000366824905,
+          0.16334103918144505,
+          0.1524516365693487,
+          1.9274242623410514,
+          0.16334103918144505,
+          0.17423044179354139,
+          0.1851198444056377,
+          0.16334103918144505,
+          0.16334103918144505
+        ],
+        "signed": [
+          0.14156223395725237,
+          0.16334103918144505,
+          0.16334103918144505,
+          0.16334103918144505,
+          0.16334103918144505,
+          0.17423044179354139,
+          2.363000366824905,
+          0.16334103918144505,
+          0.1524516365693487,
+          1.9274242623410514,
+          0.16334103918144505,
+          0.17423044179354139,
+          0.1851198444056377,
+          0.16334103918144505,
+          0.16334103918144505
+        ]
+      }
+    }
+  },
+  "physical_anchor": {
+    "species": "O4",
+    "formula": "(0.2095 * n_air)^2",
+    "oxygen_mole_fraction": 0.2095,
+    "air_number_density_formula": "2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))",
+    "source": "core.fit_physics.air_number_density/theoretical_amount",
+    "temperature_pressure_source": "each selected alpha export row",
+    "temperature_C": [
+      25.0,
+      28.72,
+      29.15,
+      29.43,
+      29.32,
+      27.4,
+      25.0,
+      30.4,
+      27.92,
+      29.62,
+      28.49,
+      28.59,
+      27.79,
+      31.99,
+      29.68
+    ],
+    "pressure_mbar": [
+      1013.25,
+      996.98,
+      998.36,
+      1003.87,
+      1007.32,
+      1009.39,
+      1013.25,
+      999.74,
+      997.67,
+      1007.32,
+      1000.43,
+      1001.12,
+      1002.49,
+      1004.56,
+      1007.32
+    ],
+    "za_provenance": "selected alpha headers declare I0_mode=PCHIP and ZA_count=749; this records provenance, not an independent T3"
+  },
+  "t2": {
+    "states": {
+      "nonnegative": {
+        "allow_negative_gas": false,
+        "per_scan_audit": [
+          {
+            "id": "alpha01",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.0070000000000001,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.580071246968424e-06,
+            "O4": {
+              "coefficient": 4.134194428534899e-06,
+              "retrieved_amount": 6.35842685757922e+39,
+              "theoretical_amount": 2.6592860206277793e+37,
+              "abs_ratio": 239.10278203463733
+            },
+            "etalon_frequency_rad_per_px": 0.14156223395725237
+          },
+          {
+            "id": "alpha02",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.479135054136751e-06,
+            "O4": {
+              "coefficient": 3.8060487222437723e-06,
+              "retrieved_amount": 5.853735917627413e+39,
+              "theoretical_amount": 2.5115072489397384e+37,
+              "abs_ratio": 233.0766084827601
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha03",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4627828950351477e-06,
+            "O4": {
+              "coefficient": 3.7677889677048776e-06,
+              "retrieved_amount": 5.794892083591598e+39,
+              "theoretical_amount": 2.5113052438135682e+37,
+              "abs_ratio": 230.75219939379832
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha04",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4677350437921654e-06,
+            "O4": {
+              "coefficient": 3.791743608433292e-06,
+              "retrieved_amount": 5.831734528620288e+39,
+              "theoretical_amount": 2.5344047137587644e+37,
+              "abs_ratio": 230.1027336700013
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha05",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.5226426454376615e-06,
+            "O4": {
+              "coefficient": 3.835488064646761e-06,
+              "retrieved_amount": 5.899013881361443e+39,
+              "theoretical_amount": 2.5537110404380537e+37,
+              "abs_ratio": 230.99770443681635
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha06",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4639967808766516e-06,
+            "O4": {
+              "coefficient": 3.5809370277312288e-06,
+              "retrieved_amount": 5.507512180672938e+39,
+              "theoretical_amount": 2.5970839257492923e+37,
+              "abs_ratio": 212.06523694007885
+            },
+            "etalon_frequency_rad_per_px": 0.17423044179354139
+          },
+          {
+            "id": "alpha07",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4611385012129437e-06,
+            "O4": {
+              "coefficient": 3.7683568329069176e-06,
+              "retrieved_amount": 5.795765465193396e+39,
+              "theoretical_amount": 2.6592860206277793e+37,
+              "abs_ratio": 217.9444189243392
+            },
+            "etalon_frequency_rad_per_px": 2.363000366824905
+          },
+          {
+            "id": "alpha08",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.5076984832408628e-06,
+            "O4": {
+              "coefficient": 3.76139057081156e-06,
+              "retrieved_amount": 5.785051293721844e+39,
+              "theoretical_amount": 2.497555318356948e+37,
+              "abs_ratio": 231.6285549794197
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha09",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.457669779037521e-06,
+            "O4": {
+              "coefficient": 3.7994701886581544e-06,
+              "retrieved_amount": 5.843618075963856e+39,
+              "theoretical_amount": 2.528368169885968e+37,
+              "abs_ratio": 231.12211843053728
+            },
+            "etalon_frequency_rad_per_px": 0.1524516365693487
+          },
+          {
+            "id": "alpha10",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 1.0,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              }
+            },
+            "NO2_coefficient": 2.4160979592335252e-08,
+            "O4": {
+              "coefficient": 1.0862726604784939e-08,
+              "retrieved_amount": 1.6706967653401412e+37,
+              "theoretical_amount": 2.54865285263869e+37,
+              "abs_ratio": 0.655521509573351
+            },
+            "etalon_frequency_rad_per_px": 1.9274242623410514
+          },
+          {
+            "id": "alpha11",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.5000783983861573e-06,
+            "O4": {
+              "coefficient": 3.817615772749501e-06,
+              "retrieved_amount": 5.871526141544063e+39,
+              "theoretical_amount": 2.5327772806114337e+37,
+              "abs_ratio": 231.82165232177962
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha12",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.475890093614332e-06,
+            "O4": {
+              "coefficient": 3.7223320996162563e-06,
+              "retrieved_amount": 5.724979026546878e+39,
+              "theoretical_amount": 2.5345913965640557e+37,
+              "abs_ratio": 225.87384437222417
+            },
+            "etalon_frequency_rad_per_px": 0.17423044179354139
+          },
+          {
+            "id": "alpha13",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4622975897353593e-06,
+            "O4": {
+              "coefficient": 3.840222848224372e-06,
+              "retrieved_amount": 5.906296019534944e+39,
+              "theoretical_amount": 2.5550636187794807e+37,
+              "abs_ratio": 231.1604288881191
+            },
+            "etalon_frequency_rad_per_px": 0.1851198444056377
+          },
+          {
+            "id": "alpha14",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4572437368761055e-06,
+            "O4": {
+              "coefficient": 3.790329037594491e-06,
+              "retrieved_amount": 5.82955890641169e+39,
+              "theoretical_amount": 2.4954848165548977e+37,
+              "abs_ratio": 233.60426269632032
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha15",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 1.0,
+              "squeeze": 1.01,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              },
+              "lower": {
+                "shift": 0.5,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.99999,
+                "squeeze": 1.0049999989999998
+              }
+            },
+            "NO2_coefficient": 1.4754216210663797e-06,
+            "O4": {
+              "coefficient": 3.802121531732038e-06,
+              "retrieved_amount": 5.847695864587747e+39,
+              "theoretical_amount": 2.5476430185922153e+37,
+              "abs_ratio": 229.53356580621272
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          }
+        ],
+        "state": "FAIL",
+        "observed": {
+          "candidate": "O4",
+          "exclude": true,
+          "pair_collinearity": 0.3446571740114693,
+          "multiple_R": 0.5012446534044394,
+          "candidate_cv": 0.26815243008470774,
+          "corr_with_target": 0.9972725658767537,
+          "abs_ratio": 230.99770443681635,
+          "impossible": true,
+          "target_cv": 0.2636073162405445,
+          "n": 15,
+          "verdict": "제외 권고(물리)",
+          "reasons": [
+            "★절대량 231배(이론 상한의 3배 초과) — 물리적으로 불가능한 양 흡수=과적합",
+            "O4 계수 CV 27%>타깃 26%(상수여야 하는데 출렁=과적합)"
+          ]
+        },
+        "gates": {
+          "magnitude": {
+            "state": "FAIL",
+            "input": 230.99770443681635,
+            "operator": ">",
+            "tolerance": 3.0,
+            "source": "core.fit_physics.judge_reference abs_max_ratio default"
+          },
+          "constant_species": {
+            "state": "FAIL",
+            "input": 0.26815243008470774,
+            "operator": ">",
+            "tolerance": 0.2636073162405445,
+            "tolerance_components": {
+              "target_cv": 0.2636073162405445,
+              "floor": 0.15
+            },
+            "source": "core.fit_physics.fitted_amount_health constant_flag rule"
+          },
+          "collinearity": {
+            "state": "PASS",
+            "input": 0.3446571740114693,
+            "operator": ">",
+            "tolerance": 0.7,
+            "source": "core.fit_physics.COLLIN_HI_DEFAULT"
+          },
+          "trade_off": {
+            "state": "PASS",
+            "input": 0.9972725658767537,
+            "operator": "<",
+            "tolerance": -0.5,
+            "source": "core.fit_physics.judge_reference trade_off rule"
+          }
+        }
+      },
+      "signed": {
+        "allow_negative_gas": true,
+        "per_scan_audit": [
+          {
+            "id": "alpha01",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 0.997,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 0.997
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 0.997
+              }
+            },
+            "NO2_coefficient": 2.3055156199510358e-07,
+            "O4": {
+              "coefficient": -1.01663933378387e-08,
+              "retrieved_amount": -1.5636001054487503e+37,
+              "theoretical_amount": 2.6592860206277793e+37,
+              "abs_ratio": 0.5879774094700917
+            },
+            "etalon_frequency_rad_per_px": 0.14156223395725237
+          },
+          {
+            "id": "alpha02",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 0.5,
+              "squeeze": 1.0,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.5,
+                "squeeze": 1.0
+              },
+              "lower": {
+                "shift": 0.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.5,
+                "squeeze": 1.0
+              }
+            },
+            "NO2_coefficient": 5.4625859310259566e-08,
+            "O4": {
+              "coefficient": -3.72173977518334e-08,
+              "retrieved_amount": -5.724068026436032e+37,
+              "theoretical_amount": 2.5115072489397384e+37,
+              "abs_ratio": 2.279136573805436
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha03",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 0.996,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 0.996
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 0.996
+              }
+            },
+            "NO2_coefficient": 2.7271202453944605e-08,
+            "O4": {
+              "coefficient": -4.1317431882649624e-08,
+              "retrieved_amount": -6.354656828801868e+37,
+              "theoretical_amount": 2.5113052438135682e+37,
+              "abs_ratio": 2.530419925835833
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha04",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -0.25,
+              "squeeze": 1.0030000000000001,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.25,
+                "squeeze": 1.0030000000000001
+              },
+              "lower": {
+                "shift": -0.75,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 0.25,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.25,
+                "squeeze": 1.0030000000000001
+              }
+            },
+            "NO2_coefficient": 3.455992654454828e-08,
+            "O4": {
+              "coefficient": -3.0720064223348685e-08,
+              "retrieved_amount": -4.724772499234428e+37,
+              "theoretical_amount": 2.5344047137587644e+37,
+              "abs_ratio": 1.864253358425592
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha05",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 1.0,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              }
+            },
+            "NO2_coefficient": 1.2566897524267412e-07,
+            "O4": {
+              "coefficient": -6.363690142534007e-08,
+              "retrieved_amount": -9.787410586284379e+37,
+              "theoretical_amount": 2.5537110404380537e+37,
+              "abs_ratio": 3.8326225760473998
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha06",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 0.75,
+              "squeeze": 1.001,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.75,
+                "squeeze": 1.001
+              },
+              "lower": {
+                "shift": 0.25,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.75,
+                "squeeze": 1.001
+              }
+            },
+            "NO2_coefficient": 2.4395358249420898e-08,
+            "O4": {
+              "coefficient": -1.569762307885155e-07,
+              "retrieved_amount": -2.414308032921837e+38,
+              "theoretical_amount": 2.5970839257492923e+37,
+              "abs_ratio": 9.296226467634378
+            },
+            "etalon_frequency_rad_per_px": 0.17423044179354139
+          },
+          {
+            "id": "alpha07",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -0.75,
+              "squeeze": 0.99,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.75,
+                "squeeze": 0.995000001
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.25,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.75,
+                "squeeze": 0.995000001
+              }
+            },
+            "NO2_coefficient": 1.953719333525966e-08,
+            "O4": {
+              "coefficient": -3.8165431550363906e-08,
+              "retrieved_amount": -5.869876446206106e+37,
+              "theoretical_amount": 2.6592860206277793e+37,
+              "abs_ratio": 2.2073129406442713
+            },
+            "etalon_frequency_rad_per_px": 2.363000366824905
+          },
+          {
+            "id": "alpha08",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -0.25,
+              "squeeze": 1.002,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.25,
+                "squeeze": 1.002
+              },
+              "lower": {
+                "shift": -0.75,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 0.25,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.25,
+                "squeeze": 1.002
+              }
+            },
+            "NO2_coefficient": 9.988047584620756e-08,
+            "O4": {
+              "coefficient": -1.1193497143636843e-07,
+              "retrieved_amount": -1.7215695608578216e+38,
+              "theoretical_amount": 2.497555318356948e+37,
+              "abs_ratio": 6.893018737980868
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha09",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -0.25,
+              "squeeze": 0.998,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.25,
+                "squeeze": 0.998
+              },
+              "lower": {
+                "shift": -0.75,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 0.25,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.25,
+                "squeeze": 0.998
+              }
+            },
+            "NO2_coefficient": 1.7556477141301224e-08,
+            "O4": {
+              "coefficient": -6.531292884302172e-09,
+              "retrieved_amount": -1.0045185055551486e+37,
+              "theoretical_amount": 2.528368169885968e+37,
+              "abs_ratio": 0.39729914239525227
+            },
+            "etalon_frequency_rad_per_px": 0.1524516365693487
+          },
+          {
+            "id": "alpha10",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 1.0,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              }
+            },
+            "NO2_coefficient": 2.4160979592335252e-08,
+            "O4": {
+              "coefficient": 1.0862726604784939e-08,
+              "retrieved_amount": 1.6706967653401412e+37,
+              "theoretical_amount": 2.54865285263869e+37,
+              "abs_ratio": 0.655521509573351
+            },
+            "etalon_frequency_rad_per_px": 1.9274242623410514
+          },
+          {
+            "id": "alpha11",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 1.001,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 1.001
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 1.001
+              }
+            },
+            "NO2_coefficient": 8.982915062367844e-08,
+            "O4": {
+              "coefficient": -5.129939815887588e-08,
+              "retrieved_amount": -7.88989189235208e+37,
+              "theoretical_amount": 2.5327772806114337e+37,
+              "abs_ratio": 3.1151147606817577
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha12",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 1.0,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 1.0
+              }
+            },
+            "NO2_coefficient": 4.410349787749171e-08,
+            "O4": {
+              "coefficient": -4.12460337803652e-08,
+              "retrieved_amount": -6.343675738797682e+37,
+              "theoretical_amount": 2.5345913965640557e+37,
+              "abs_ratio": 2.5028396085449116
+            },
+            "etalon_frequency_rad_per_px": 0.17423044179354139
+          },
+          {
+            "id": "alpha13",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": 0.75,
+              "squeeze": 0.996,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": 0.75,
+                "squeeze": 0.996
+              },
+              "lower": {
+                "shift": 0.25,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": 1.0,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": 0.75,
+                "squeeze": 0.996
+              }
+            },
+            "NO2_coefficient": 2.6080310806825298e-08,
+            "O4": {
+              "coefficient": -7.182565906615972e-09,
+              "retrieved_amount": -1.1046848607733379e+37,
+              "theoretical_amount": 2.5550636187794807e+37,
+              "abs_ratio": 0.43235121530986803
+            },
+            "etalon_frequency_rad_per_px": 0.1851198444056377
+          },
+          {
+            "id": "alpha14",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 0.997,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 0.997
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 0.997
+              }
+            },
+            "NO2_coefficient": 1.7509962604480868e-08,
+            "O4": {
+              "coefficient": -7.423953409723485e-09,
+              "retrieved_amount": -1.1418104679351357e+37,
+              "theoretical_amount": 2.4954848165548977e+37,
+              "abs_ratio": 0.4575505570542578
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          },
+          {
+            "id": "alpha15",
+            "fit_success": true,
+            "deterministic_seed": {
+              "shift": -1.0,
+              "squeeze": 1.0030000000000001,
+              "source": "deterministic_grid"
+            },
+            "effective_target": {
+              "theta0": {
+                "shift": -0.99999,
+                "squeeze": 1.0030000000000001
+              },
+              "lower": {
+                "shift": -1.0,
+                "squeeze": 0.995
+              },
+              "upper": {
+                "shift": -0.5,
+                "squeeze": 1.005
+              },
+              "final": {
+                "shift": -0.99999,
+                "squeeze": 1.0030000000000001
+              }
+            },
+            "NO2_coefficient": 4.8170472062612304e-08,
+            "O4": {
+              "coefficient": -2.5438599967060786e-08,
+              "retrieved_amount": -3.9124787197561713e+37,
+              "theoretical_amount": 2.5476430185922153e+37,
+              "abs_ratio": 1.535724860666759
+            },
+            "etalon_frequency_rad_per_px": 0.16334103918144505
+          }
+        ],
+        "state": "FAIL",
+        "observed": {
+          "candidate": "O4",
+          "exclude": true,
+          "pair_collinearity": 0.3446571740114693,
+          "multiple_R": 0.5012446534044394,
+          "candidate_cv": 1.020880590654299,
+          "corr_with_target": -0.048133823012788235,
+          "abs_ratio": 2.2073129406442713,
+          "impossible": false,
+          "target_cv": 0.9494212471536988,
+          "n": 15,
+          "verdict": "제외 권고(물리)",
+          "reasons": [
+            "O4 계수 CV 102%>타깃 95%(상수여야 하는데 출렁=과적합)"
+          ]
+        },
+        "gates": {
+          "magnitude": {
+            "state": "PASS",
+            "input": 2.2073129406442713,
+            "operator": ">",
+            "tolerance": 3.0,
+            "source": "core.fit_physics.judge_reference abs_max_ratio default"
+          },
+          "constant_species": {
+            "state": "FAIL",
+            "input": 1.020880590654299,
+            "operator": ">",
+            "tolerance": 0.9494212471536988,
+            "tolerance_components": {
+              "target_cv": 0.9494212471536988,
+              "floor": 0.15
+            },
+            "source": "core.fit_physics.fitted_amount_health constant_flag rule"
+          },
+          "collinearity": {
+            "state": "PASS",
+            "input": 0.3446571740114693,
+            "operator": ">",
+            "tolerance": 0.7,
+            "source": "core.fit_physics.COLLIN_HI_DEFAULT"
+          },
+          "trade_off": {
+            "state": "PASS",
+            "input": -0.048133823012788235,
+            "operator": "<",
+            "tolerance": -0.5,
+            "source": "core.fit_physics.judge_reference trade_off rule"
+          }
+        }
+      }
+    },
+    "threshold_sources": {
+      "collinearity": "core.fit_physics.COLLIN_HI_DEFAULT",
+      "absolute_ratio": "core.fit_physics.judge_reference default abs_max_ratio=3.0",
+      "constant_species": "core.fit_physics.fitted_amount_health CV rule"
+    }
+  },
+  "selection": {
+    "pruning": {
+      "state": "N/A",
+      "reason": "checkpoint evaluates every selected scan"
+    },
+    "closure": {
+      "state": "N/A",
+      "reason": "not a plateau/selection checkpoint"
+    }
+  },
+  "execution": {
+    "elapsed_seconds": 2.2946782000362873,
+    "timing_source": "time.perf_counter"
+  },
+  "git": {
+    "head": "3b4dfd0b9d0cd62a48dccae28221bb92e6176e47",
+    "tracked_diff_sha256": "1f9601a6e3d779e82d2ea90ce0c89b52d5f600b97556c7ce53b73484fef858f6",
+    "untracked": [
+      {
+        "path": "diagnostics/fit_explorer/cold_o4_manifest_v1.json",
+        "sha256": "febf5a9ef7ba78ef7e4eebc061525f04de78356ca10ee506b2f61c0a70b7e86c"
+      },
+      {
+        "path": "tools/test_fit_explorer_cold_o4_evidence.py",
+        "sha256": "9ce418e6a4f2aaed4e04a1d9b9ad6e44b3c67551d8e896f058007f715df81fa1"
+      },
+      {
+        "path": "tools/test_fit_explorer_cold_o4_external.py",
+        "sha256": "297d88ad1c9cdfdf7f402a339e7d96beb12564f1752b1dde2c1f40a12c0362d6"
+      },
+      {
+        "path": "tools/test_fit_explorer_cold_o4_rerun.py",
+        "sha256": "1e4cd13c86bc3f3631e24bbdfe20831adaad077bf0e80ff3ce45303ef96b5bb1"
+      },
+      {
+        "path": "tools/test_fit_explorer_cold_o4_t2_adapter.py",
+        "sha256": "60f890d769417e1ed14178cf5dec755b830bc7b4aff794d15f739caa778077f1"
+      }
+    ],
+    "dirty": true,
+    "excluded_paths": [
+      "Claude outputs",
+      "diagnostics/fit_explorer/cold_o4_result_v1.json",
+      "diagnostics/parallel_shift_bench/bench.py",
+      "diagnostics/parallel_shift_bench/validate_chunk.py",
+      "diagnostics/varpro_speed_2026-09"
+    ]
+  },
+  "runtime": {
+    "python": "3.13.14",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0"
+  }
+}

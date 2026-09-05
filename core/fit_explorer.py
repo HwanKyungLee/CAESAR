@@ -205,7 +205,11 @@ def git_provenance(root, excluded_paths=()):
     pathspec = ["."] + [f":(exclude){p}" for p in excluded]
     diff = run("diff", "--binary", "HEAD", "--", *pathspec).replace("\r\n", "\n").encode()
     untracked = sorted(run("ls-files", "--others", "--exclude-standard").splitlines())
-    untracked = [p for p in untracked if p.replace("\\", "/") not in excluded]
+    def is_excluded(path):
+        path = path.replace("\\", "/")
+        return any(path == item or path.startswith(item.rstrip("/") + "/")
+                   for item in excluded)
+    untracked = [p for p in untracked if not is_excluded(p)]
     return {"head": head, "tracked_diff_sha256": hashlib.sha256(diff).hexdigest(),
             "untracked": [{"path": p.replace("\\", "/"), "sha256": sha256_file(os.path.join(root, p))}
                           for p in untracked], "dirty": bool(diff or untracked),

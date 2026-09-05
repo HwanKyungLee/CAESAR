@@ -1,6 +1,6 @@
 # Fit Setting Explorer 설계 정본 (2026-09)
 
-> 상태: **설계 고정 / Phase A2·Explorer V1 synthetic·ROI1 portable 재현 증거 완료 / cold·O4 미완료**
+> 상태: **설계 고정 / Phase A2·Explorer V1 synthetic·ROI1 및 cold·O4 portable 재현 증거 완료**
 > 선행 문서: `docs/fit_optimizer_handoff.md`, `docs/NO2_인젝션_실험_핸드오프_2026-08.md`,
 > `docs/ANs_분석_핸드오프_2026-07-23.md`  
 > 골든 사례와 재현 메타데이터: `docs/fit_explorer_golden_inventory_2026-09.md`
@@ -183,8 +183,13 @@ ROI1의 정책별 behavioral branch와 단일행 fixed-shift grid/default Limit/
 portable manifest/result로 재현된다. 이는 full external golden이나 T2/plateau 증거가 아니며,
 검증하는 것은 두 분기의 정성적 순서이지 플랫폼 간 수치 동등성이나 과학적 tolerance가 아니다.
 Limit/Center 측정은 offline `param_optimizer.fit_scan()` 범위이며 worker end-to-end가 아니다.
-파일 순서/표본 교체, cold/O4, worker end-to-end, halving,
+파일 순서/표본 교체, worker end-to-end, halving,
 plateau/closure/ranking은 아직 완료가 아니다.
+
+Cold/O4는 hash-pinned 균등 표본 15개에서 두 gas 부호 정책 모두 현재 코드로 T2 `FAIL`을 재현했다.
+nonnegative 정책은 O4 중앙 절대량비 230.998배로 절대량 게이트가 기각했다. signed 정책은 절대량비가
+2.207배라 그 게이트는 통과했지만, O4 계수 CV가 타깃 CV보다 큰 상수성 위반으로 기각됐다. 따라서
+과거 수치와의 비교에는 부호 정책까지 포함해야 하며, 이 결과는 농도 진실·T3·plateau를 확정하지 않는다.
 
 ## 7. ML·LLM과 탐색 가속
 
@@ -203,7 +208,7 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] Explorer V1 synthetic 계약: 3×3 × 대표 4스캔 × controlled start 2개, 보수적 T2, 원자적 보고서
 - [x] ROI1 외부 실데이터의 hash-pinned portable behavioral evidence (정책 상호작용만, raw 미커밋)
 - [ ] full external golden/T2/plateau evidence
-- [ ] cold/O4 외부 실데이터의 현재 코드/hash 기준 골든 재측정
+- [x] cold/O4 외부 실데이터의 현재 코드/hash·양쪽 부호 정책 기준 T2 재측정
 - [x] synthetic CI 계약 테스트
 - [x] optional external-data suite: manifest 미지정만 SKIP, 명시 manifest의 missing/hash mismatch는 FAIL
 - [ ] 규모 확장 successive halving
