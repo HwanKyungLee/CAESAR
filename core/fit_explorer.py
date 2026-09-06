@@ -129,44 +129,162 @@ def neighboring_candidates(px_min, px_max, poly, pixel_step):
             for wi, (lo, hi) in enumerate(windows) for p in polys]
 
 
-def controlled_starts(ref_props, target, step_limit):
-    """Two starts from the common effective target bounds used by final VarPro."""
+def _strict_interval(lo, hi, label):
+    lo, hi = float(lo), float(hi)
+    if not np.isfinite([lo, hi]).all() or hi <= lo:
+        raise ValueError(f"invalid {label} bounds")
+    margin = 1e-5
+    if hi - lo <= 2 * margin or np.nextafter(lo + margin, np.inf) >= hi - margin:
+        raise ValueError(f"{label} interval is too narrow for fitter interior margin")
+    return lo, hi
+
+
+def _worker_shift_interval(lo, hi, label):
+    """Match setup_fit_parameters Limit behavior before validating usable width."""
+    lo, hi = float(lo), float(hi)
+    return _strict_interval(min(lo, hi), max(lo, hi), label)
+
+
+def _squeeze_interval(value, label):
+    lo, hi = map(float, str(value).split(","))
+    lo = 1 + lo if abs(lo) < .5 else lo
+    hi = 1 + hi if abs(hi) < .5 else hi
+    return _strict_interval(lo, hi, label)
+
+
+def target_global_bounds(ref_props, target):
+    """Return finite FitSet-declared target bounds; never infer an Explorer range."""
     props = ref_props.get(target, {})
     mode = props.get("sh_mode")
     if mode == "Center":
         center, half = map(float, str(props.get("sh_val", "")).split(","))
-        global_lo, global_hi, anchor = center - abs(half), center + abs(half), center
+        half = abs(half)
+        if not np.isfinite([center, half]).all() or half == 0:
+            raise ValueError("invalid target global shift bounds")
+        sh_lo, sh_hi = _strict_interval(center - half, center + half,
+                                         "target global shift")
     elif mode == "Limit":
-        global_lo, global_hi = map(float, str(props.get("sh_val", "")).split(","))
-        anchor = 0.0
+        sh_lo, sh_hi = map(float, str(props.get("sh_val", "")).split(","))
+        sh_lo, sh_hi = _worker_shift_interval(sh_lo, sh_hi, "target global shift")
     else:
-        raise ValueError(f"target shift mode {mode!r} cannot provide controlled starts")
-    if global_hi < global_lo:
-        global_lo, global_hi = global_hi, global_lo
-    step_limit = float(step_limit)
-    lo, hi = max(global_lo, anchor - step_limit), min(global_hi, anchor + step_limit)
-    if not np.isfinite([lo, hi, step_limit]).all() or hi <= lo:
-        raise ValueError("invalid target shift bounds")
-    sq = props.get("sq_val", "1.0")
-    if props.get("sq_mode") == "Limit":
-        slo, shi = map(float, str(sq).split(","))
-        if abs(slo) < .5 and abs(shi) < .5:
-            slo, shi = 1 + slo, 1 + shi
-        sqs = (slo + .25 * (shi - slo), slo + .75 * (shi - slo))
+        raise ValueError(f"target shift mode {mode!r} has no finite declared interval")
+    sq_mode = props.get("sq_mode")
+    if sq_mode == "Limit":
+        sq_lo, sq_hi = _squeeze_interval(props.get("sq_val", ""),
+                                          "target global squeeze")
+        squeeze = {"mode": "INTERVAL", "lower": sq_lo, "upper": sq_hi}
+    elif sq_mode == "Fix":
+        value = float(props.get("sq_val", "1"))
+        value = 1 + value if abs(value) < .5 else value
+        if not np.isfinite(value):
+            raise ValueError("invalid fixed target squeeze")
+        squeeze = {"mode": "FIXED", "value": value}
     else:
-        v = float(sq)
-        sqs = (1 + v if abs(v) < .5 else v,) * 2
+        raise ValueError(f"target squeeze mode {sq_mode!r} has no finite declared interval")
+    return {"shift": {"mode": "INTERVAL", "lower": sh_lo, "upper": sh_hi},
+            "squeeze": squeeze,
+            "source": "FitSet ref_props; Stage 1 independent-scan global bounds"}
+
+
+def independent_global_bounds(ref_props, gas_order):
+    """Bounds for every independently active nonlinear variable in Stage 1."""
+    bounds = {}
+    for gas in gas_order:
+        props = ref_props.get(gas, {})
+        sh_mode = props.get("sh_mode")
+        if sh_mode == "Limit":
+            lo, hi = map(float, str(props.get("sh_val", "")).split(","))
+            lo, hi = _worker_shift_interval(lo, hi, f"{gas} global shift")
+        elif sh_mode == "Center":
+            center, half = map(float, str(props.get("sh_val", "")).split(","))
+            half = abs(half)
+            if not np.isfinite([center, half]).all() or half == 0:
+                raise ValueError(f"invalid {gas} global shift bounds")
+            lo, hi = _strict_interval(center - half, center + half,
+                                      f"{gas} global shift")
+        elif sh_mode in ("Fix", "Link"):
+            lo = hi = None
+        else:
+            raise ValueError(f"{gas} shift mode {sh_mode!r} has no finite declared interval")
+        if lo is not None:
+            bounds[f"{gas}_sh"] = (float(lo), float(hi))
+
+        sq_mode = props.get("sq_mode")
+        if sq_mode == "Limit":
+            lo, hi = _squeeze_interval(props.get("sq_val", ""),
+                                       f"{gas} global squeeze")
+            bounds[f"{gas}_sq"] = (float(lo), float(hi))
+        elif sq_mode not in ("Fix", "Link"):
+            raise ValueError(f"{gas} squeeze mode {sq_mode!r} has no finite declared interval")
+    return bounds
+
+
+def independent_initial_values(bounds, target):
+    """Use one deterministic midpoint for every non-target active variable."""
+    prefix = f"{target}_"
+    return {name: float((lo + hi) / 2)
+            for name, (lo, hi) in bounds.items() if not name.startswith(prefix)}
+
+
+def controlled_starts(ref_props, target):
+    """Two starts inside the FitSet global interval, independent of step_limit."""
+    bounds = target_global_bounds(ref_props, target)
+    lo, hi = bounds["shift"]["lower"], bounds["shift"]["upper"]
     margin = max(1e-5, np.finfo(float).eps * max(abs(lo), abs(hi), 1.0) * 16)
     usable_lo, usable_hi = lo + margin, hi - margin
     if usable_hi <= usable_lo or np.nextafter(usable_lo, np.inf) >= usable_hi:
-        raise ValueError("effective target interval cannot support two distinct starts")
+        raise ValueError("global target interval cannot support two distinct starts")
     shifts = (usable_lo + .25 * (usable_hi - usable_lo),
               usable_lo + .75 * (usable_hi - usable_lo))
+    sq = bounds["squeeze"]
+    if sq["mode"] == "INTERVAL":
+        sqs = (sq["lower"] + .25 * (sq["upper"] - sq["lower"]),
+               sq["lower"] + .75 * (sq["upper"] - sq["lower"]))
+    else:
+        sqs = (sq["value"], sq["value"])
     starts = [dict(id=f"seed{i}", shift=float(shifts[i]), squeeze=float(sqs[i]),
-                   provenance="interior quartile of common effective target bounds") for i in range(2)]
+                   provenance="interior quartile of FitSet global target bounds") for i in range(2)]
     if starts[0]["shift"] == starts[1]["shift"] and starts[0]["squeeze"] == starts[1]["squeeze"]:
         raise ValueError("controlled starts are not distinct")
     return starts
+
+
+def boundary_hits(result, bounds, target="NO2"):
+    """Report proximity to declared interval edges; diagnostic only."""
+    hits = []
+    for parameter, result_key in (("shift", "shifts"), ("squeeze", "squeezes")):
+        spec = bounds[parameter]
+        if spec["mode"] != "INTERVAL":
+            continue
+        lo, hi = float(spec["lower"]), float(spec["upper"])
+        value = finite_or_none(result.get(result_key, {}).get(target))
+        if value is None:
+            continue
+        span = hi - lo
+        tolerance = max(span * 1e-6,
+                        np.finfo(float).eps * max(abs(lo), abs(hi), 1.0) * 64)
+        if value - lo <= tolerance:
+            hits.append({"parameter": parameter.upper(), "side": "LOWER", "value": value,
+                         "bound": lo, "tolerance": float(tolerance)})
+        if hi - value <= tolerance:
+            hits.append({"parameter": parameter.upper(), "side": "UPPER", "value": value,
+                         "bound": hi, "tolerance": float(tolerance)})
+    return hits
+
+
+def boundary_diagnostic(rows, bounds, target="NO2", expected=STAGE1_EXPECTED_ATTEMPTS):
+    applicable = [(parameter, result_key) for parameter, result_key in
+                  (("shift", "shifts"), ("squeeze", "squeezes"))
+                  if bounds[parameter]["mode"] == "INTERVAL"]
+    complete = len(rows) == expected and all(
+        finite_or_none(row.get("result", {}).get(result_key, {}).get(target)) is not None
+        for row in rows for _, result_key in applicable)
+    if not complete:
+        return {"state": "UNAVAILABLE", "reason": "BOUNDARY_INPUT_INCOMPLETE",
+                "hit_count": None, "bounds": bounds, "effect": "diagnostic_only"}
+    hit_count = sum(len(row["result"]["boundary_hits"]) for row in rows)
+    return {"state": "BOUNDARY_HIT" if hit_count else "NO_BOUNDARY_HIT",
+            "hit_count": hit_count, "bounds": bounds, "effect": "diagnostic_only"}
 
 
 def validate_coordinates(engine_wave, scans, candidates):
@@ -436,7 +554,8 @@ def attempt_identity_check(scans, starts, rows, failures):
 
 
 def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
-                       step_limit, allow_negative_gas, target="NO2"):
+                       step_limit, allow_negative_gas, target="NO2", target_bounds=None,
+                       nonlinear_bounds=None):
     preflight = stage0_preflight(eng, candidate, target)
     if preflight["state"] != "PASS":
         gate = stage1_gate(preflight["state"], 0, 0, [])
@@ -447,9 +566,16 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                 "t2_gate": {"state": "UNAVAILABLE", "reason": "fit not run after Stage 0"},
                 "stage1_gate": gate, "paired_starts": [],
                 "seed_stability": {**seed_stability([], target), "reason": "FIT_NOT_RUN"},
+                "boundary_diagnostic": {
+                    "state": "UNAVAILABLE", "reason": "FIT_NOT_RUN",
+                    "hit_count": None, "bounds": target_bounds,
+                    "effect": "diagnostic_only"},
                 "metrics": {key: summary([]) for key in
                             ("conc", "rms_sig", "perr_rel", "autocorr1")},
                 "runs": [], "failures": [], "seconds": 0.0}
+    target_bounds = target_bounds or target_global_bounds(ref_props, target)
+    nonlinear_bounds = nonlinear_bounds or independent_global_bounds(ref_props, eng.gas_list)
+    secondary_initials = independent_initial_values(nonlinear_bounds, target)
     rows, failures = [], []
     started = time.perf_counter()
     for scan in scans:
@@ -462,7 +588,10 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                     eng, fitter, ref_props, scan["wave"], scan["alpha"], scan["T_C"], scan["P_mbar"],
                     fit_lo, fit_hi, candidate["poly"], step_limit, target,
                     allow_negative_gas=allow_negative_gas,
-                    controlled_start=(seed["shift"], seed["squeeze"]))
+                    controlled_start=(seed["shift"], seed["squeeze"]),
+                    controlled_bounds=nonlinear_bounds,
+                    controlled_initial_values=secondary_initials)
+                result["boundary_hits"] = boundary_hits(result, target_bounds, target)
                 rows.append({"scan_id": scan["id"], "seed_id": seed["id"], "T_C": scan["T_C"],
                              "P_mbar": scan["P_mbar"], "seconds": time.perf_counter() - t0,
                              "result": result})
@@ -491,6 +620,10 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                 "metrics": metrics, "paired_starts": [],
                 "seed_stability": {**seed_stability([], target),
                                    "reason": "ATTEMPT_IDENTITY_INVALID"},
+                "boundary_diagnostic": {
+                    "state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID",
+                    "hit_count": None, "bounds": target_bounds,
+                    "effect": "diagnostic_only"},
                 "runs": rows,
                 "failures": failures, "seconds": time.perf_counter() - started}
     attempt_t2 = [t2_tri_state(eng, candidate, [row], target, expected_count=1)
@@ -507,6 +640,7 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
            "execution_gate": {"state": gate, "n_ok": len(rows), "n_fail": len(failures)},
            "t2_gate": t2, "stage1_gate": s1, "metrics": metrics,
            "paired_starts": pairs, "seed_stability": seed_stability(pairs, target),
+           "boundary_diagnostic": boundary_diagnostic(rows, target_bounds, target),
            "runs": rows, "failures": failures, "seconds": time.perf_counter() - started}
     return out
 

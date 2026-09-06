@@ -133,6 +133,14 @@ Apply, 새 최적화 프레임워크는 만들지 않는다. 후보별 per-scan 
 shift/squeeze 초깃값만 바꾼다. 다른 gas의 초깃값과 두 실행의 유효 bounds는 동일하다. V1은 후보별
 실행/T2 상태와 요약치를 기록하지만 **ranking, plateau/closure 판정, Apply는 하지 않는다**.
 
+Stage 1의 독립 스캔은 FitSet `ref_props`에 선언된 모든 독립 활성 reference의 유한한 global
+shift/squeeze 범위를 두 start에 동일하게 적용하고, start 값 자체만 target에서 바꾼다. `Link`는 연결된
+값을 따르고 `Fix`는 활성 변수가 아니다. `step_limit`은 이 범위를 자르지 않으며 Stage 3 시간연속성
+검사에만 예약한다. 독립 활성 모드에서 유한 구간을 얻을 수 없으면 범위를 발명하지 않고 `ABSTAIN`한다. 최종 target
+shift/squeeze가 선언 구간 끝에서 구간 폭의 `1e-6` 이내(또는 부동소수점 64 ulp 규모 중 큰 값)이면
+parameter와 LOWER/UPPER를 `BOUNDARY_HIT`으로 기록한다. 이는 진단일 뿐 T2, pruning, ranking,
+plateau 또는 Apply를 바꾸지 않는다.
+
 Stage 1의 paired-start 수렴 진단은 T2 물리 판정과 분리한다. 정확히 4개 스캔의 두 start가 모두
 완료되고 유한할 때, 각 스캔에서 NO2 농도 차이가 `max(0.1 ppb, 두 절대농도 최댓값의 5%)`, target
 shift 차이가 `0.01 px`, squeeze 차이가 `1e-5`, rms/signal 상대차이가 `1%` 이하여야

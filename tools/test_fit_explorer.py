@@ -21,14 +21,89 @@ def test_candidates_and_starts():
     assert {c["poly"] for c in candidates} == {2, 3, 4}
     starts = FE.controlled_starts(
         {"NO2": {"sh_mode": "Limit", "sh_val": "-8, 0", "sq_mode": "Fix", "sq_val": "1"}},
-        "NO2", .5)
+        "NO2")
     assert len(starts) == 2
     assert (starts[0]["shift"], starts[0]["squeeze"]) != (starts[1]["shift"], starts[1]["squeeze"])
-    assert -.5 < starts[0]["shift"] < starts[1]["shift"] < 0
+    assert -8 < starts[0]["shift"] < starts[1]["shift"] < 0
     asymmetric = FE.controlled_starts(
         {"NO2": {"sh_mode": "Center", "sh_val": "-5,2", "sq_mode": "Fix", "sq_val": "1"}},
-        "NO2", .5)
-    assert -5.5 < asymmetric[0]["shift"] < asymmetric[1]["shift"] < -4.5
+        "NO2")
+    assert -7 < asymmetric[0]["shift"] < asymmetric[1]["shift"] < -3
+
+
+def test_stage1_global_bounds_and_boundary_diagnostic():
+    props = {"NO2": {"sh_mode": "Limit", "sh_val": "-8,0",
+                     "sq_mode": "Limit", "sq_val": "-.005,.005"}}
+    bounds = FE.target_global_bounds(props, "NO2")
+    assert bounds["shift"] == {"mode": "INTERVAL", "lower": -8., "upper": 0.}
+    assert bounds["squeeze"] == {"mode": "INTERVAL", "lower": .995, "upper": 1.005}
+    hits = FE.boundary_hits({"shifts": {"NO2": -7.999999},
+                             "squeezes": {"NO2": 1.004999999}}, bounds)
+    assert [(h["parameter"], h["side"]) for h in hits] == [
+        ("SHIFT", "LOWER"), ("SQUEEZE", "UPPER")]
+    shift_tol = 8. * 1e-6
+    assert FE.boundary_hits({"shifts": {"NO2": -8.},
+                             "squeezes": {"NO2": 1.}}, bounds)[0]["side"] == "LOWER"
+    assert FE.boundary_hits({"shifts": {"NO2": -8. + shift_tol * .5},
+                             "squeezes": {"NO2": 1.}}, bounds)[0]["side"] == "LOWER"
+    assert FE.boundary_hits({"shifts": {"NO2": -8. + shift_tol * 1.5},
+                             "squeezes": {"NO2": 1.}}, bounds) == []
+    assert FE.boundary_hits({"shifts": {"NO2": -4.},
+                             "squeezes": {"NO2": 1.}}, bounds) == []
+    mixed = FE.target_global_bounds(
+        {"NO2": {"sh_mode": "Limit", "sh_val": "-1,1",
+                 "sq_mode": "Limit", "sq_val": "-.1,2"}}, "NO2")
+    assert mixed["squeeze"] == {"mode": "INTERVAL", "lower": .9, "upper": 2.}
+    reversed_shift = FE.target_global_bounds(
+        {"NO2": {"sh_mode": "Limit", "sh_val": "1,-1",
+                 "sq_mode": "Fix", "sq_val": "1"}}, "NO2")
+    assert reversed_shift["shift"] == {"mode": "INTERVAL", "lower": -1., "upper": 1.}
+    negative_half = FE.target_global_bounds(
+        {"NO2": {"sh_mode": "Center", "sh_val": "-5,-2",
+                 "sq_mode": "Fix", "sq_val": "1"}}, "NO2")
+    assert negative_half["shift"] == {"mode": "INTERVAL", "lower": -7., "upper": -3.}
+    for value in ("nan,1", "0,.00001", "bad"):
+        bad = {"NO2": {"sh_mode": "Limit", "sh_val": value,
+                       "sq_mode": "Fix", "sq_val": "1"}}
+        try:
+            FE.target_global_bounds(bad, "NO2")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid shift interval accepted: {value}")
+    for value in (".1,-.1", "nan,.1", "0,.00001", "bad"):
+        bad = {"NO2": {"sh_mode": "Limit", "sh_val": "-1,1",
+                       "sq_mode": "Limit", "sq_val": value}}
+        try:
+            FE.target_global_bounds(bad, "NO2")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid squeeze interval accepted: {value}")
+    for mode in ("Free", "Fix", "Link"):
+        bad = {"NO2": {"sh_mode": mode, "sh_val": "0",
+                       "sq_mode": "Fix", "sq_val": "1"}}
+        try:
+            FE.target_global_bounds(bad, "NO2")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"non-interval shift mode accepted: {mode}")
+    all_bounds = FE.independent_global_bounds({
+        "NO2": props["NO2"],
+        "H2O": {"sh_mode": "Center", "sh_val": "-5,2",
+                "sq_mode": "Limit", "sq_val": ".8,1.2"},
+        "CHOCHO": {"sh_mode": "Link", "sh_val": "NO2",
+                   "sq_mode": "Fix", "sq_val": "1"}}, ["NO2", "H2O", "CHOCHO"])
+    assert all_bounds == {"NO2_sh": (-8., 0.), "NO2_sq": (.995, 1.005),
+                          "H2O_sh": (-7., -3.), "H2O_sq": (.8, 1.2)}
+    complete_rows = [{"result": {"shifts": {"NO2": -4.},
+                                  "squeezes": {"NO2": 1.},
+                                  "boundary_hits": []}} for _ in range(8)]
+    assert FE.boundary_diagnostic(complete_rows, bounds)["state"] == "NO_BOUNDARY_HIT"
+    assert FE.boundary_diagnostic(complete_rows[:7], bounds)["state"] == "UNAVAILABLE"
+    complete_rows[0]["result"]["shifts"]["NO2"] = float("nan")
+    assert FE.boundary_diagnostic(complete_rows, bounds)["state"] == "UNAVAILABLE"
 
 
 def test_stage1_representative_row_contract():
@@ -150,6 +225,7 @@ def test_stage1_metadata_does_not_infer_state():
 def test_stage1_incomplete_input_abstains_before_fit():
     class Engine:
         _wave_axis = np.arange(200.)
+        gas_list = ["NO2"]
 
     old_map, old_pick, old_build, old_fit, old_eligible = (
         CLI.OP.CHAN_ALPHA, CLI.OP.pick_channel, CLI.OP.build_engine_from_config,
@@ -223,7 +299,9 @@ def test_evaluator_injects_two_distinct_final_starts():
                           "H2O": np.cos(np.linspace(0, 20, 101))}
     seen = []
     original = FE.PO.fit_scan
-    FE.PO.fit_scan = lambda *args, **kwargs: (seen.append(kwargs["controlled_start"]) or
+    FE.PO.fit_scan = lambda *args, **kwargs: (seen.append(
+        (kwargs["controlled_start"], kwargs["controlled_bounds"],
+         kwargs["controlled_initial_values"])) or
         {"conc": 1., "rms_sig": .1, "perr_rel": .2, "autocorr1": 0., "coeffs": {},
          "shifts": {"NO2": 0.}, "squeezes": {"NO2": 1.}})
     FE.t2_tri_state, old_t2 = (lambda *args, **kwargs: {"state": "UNAVAILABLE"}), FE.t2_tri_state
@@ -236,11 +314,17 @@ def test_evaluator_injects_two_distinct_final_starts():
                   "T_C": 25., "P_mbar": 1013.} for i in range(4)]
         evaluated = FE.evaluate_candidate(
             Engine(), None, {}, scans,
-            {"id": "c", "px_min": 0, "px_max": 100, "poly": 2}, starts, .5, True)
+            {"id": "c", "px_min": 0, "px_max": 100, "poly": 2}, starts, .5, True,
+            target_bounds={"shift": {"mode": "INTERVAL", "lower": -3., "upper": 3.},
+                           "squeeze": {"mode": "FIXED", "value": 1.}},
+            nonlinear_bounds={"NO2_sh": (-3., 3.), "H2O_sh": (-8., -2.)})
     finally:
         FE.PO.fit_scan, FE.t2_tri_state = original, old_t2
         FE.FP.differential_collinearity = old_diag
-    assert seen == [(-2., 1.), (2., 1.)] * 4
+    expected_bounds = {"NO2_sh": (-3., 3.), "H2O_sh": (-8., -2.)}
+    expected_secondary = {"H2O_sh": -5.}
+    assert seen == [((-2., 1.), expected_bounds, expected_secondary),
+                    ((2., 1.), expected_bounds, expected_secondary)] * 4
     assert evaluated["seed_stability"]["state"] == "SEED_STABLE"
 
 
@@ -385,7 +469,10 @@ def test_stage1_exceptions_are_unavailable_and_path_private():
             FE.PO.fit_scan = lambda *a, value=secret, **k: (_ for _ in ()).throw(
                 RuntimeError(value))
             result = FE.evaluate_candidate(
-                Engine(), None, {}, scans, candidate, starts, .5, True)
+                Engine(), None, {}, scans, candidate, starts, .5, True,
+                target_bounds={"shift": {"mode": "INTERVAL", "lower": -3., "upper": 3.},
+                               "squeeze": {"mode": "FIXED", "value": 1.}},
+                nonlinear_bounds={"NO2_sh": (-3., 3.)})
             encoded = json.dumps(result)
             assert result["evaluation_state"] == "UNEVALUATED"
             assert result["stage1_gate"]["state"] == "UNAVAILABLE"
@@ -404,11 +491,15 @@ def test_stage1_exceptions_are_unavailable_and_path_private():
             "conc": 1., "rms_sig": .1, "perr_rel": .2, "autocorr1": 0., "coeffs": {}}
         duplicate_scans = [*scans[:3], {**scans[3], "id": "s0"}]
         invalid = FE.evaluate_candidate(
-            Engine(), None, {}, duplicate_scans, candidate, starts, .5, True)
+            Engine(), None, {}, duplicate_scans, candidate, starts, .5, True,
+            target_bounds={"shift": {"mode": "INTERVAL", "lower": -3., "upper": 3.},
+                           "squeeze": {"mode": "FIXED", "value": 1.}},
+            nonlinear_bounds={"NO2_sh": (-3., 3.)})
         assert invalid["evaluation_state"] == "UNEVALUATED"
         assert invalid["stage1_gate"]["reason"] == "ATTEMPT_IDENTITY_INVALID"
         assert invalid["stage1_gate"]["advance"] is True
         assert invalid["paired_starts"] == []
+        assert invalid["boundary_diagnostic"]["state"] == "UNAVAILABLE"
     finally:
         FE.PO.fit_scan, FE.FP.differential_collinearity = old_fit, old_diag
 
@@ -527,6 +618,7 @@ def test_stage0_preflight_is_conservative_and_fit_free():
         FE.PO.fit_scan = lambda *a, **k: calls.append(1)
         rows = FE.evaluate_candidate(eng, None, {}, [], candidate, [], .5, True)
         assert rows["evaluation_state"] == "UNEVALUATED" and not calls
+        assert rows["boundary_diagnostic"]["state"] == "UNAVAILABLE"
         failed = FE.evaluate_candidate(eng, None, {}, [], {**candidate, "px_max": 8}, [], .5, True)
         assert failed["evaluation_state"] == "UNEVALUATED" and not calls
         secret = r"C:\Users\secret\reference.txt"
@@ -584,6 +676,7 @@ def test_json_schema_and_no_apply():
 
 def main():
     test_candidates_and_starts()
+    test_stage1_global_bounds_and_boundary_diagnostic()
     test_stage1_representative_row_contract()
     test_stage1_metadata_does_not_infer_state()
     test_stage1_incomplete_input_abstains_before_fit()

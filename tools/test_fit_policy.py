@@ -188,6 +188,40 @@ def test_policy_reaches_seed_and_final():
         PO._seed_shift = old
 
 
+def test_controlled_bounds_override_all_active_variables_and_secondary_theta0():
+    class Eng:
+        gas_list = ["NO2", "H2O"]
+        _wave_axis = np.array([0., 1.])
+        scaling_factors = {"NO2": 1., "H2O": 1.}
+        multipliers = {"NO2": 1., "H2O": 1.}
+
+        def get_model_components(self, *args, **kwargs):
+            z = np.zeros(2)
+            return z, z, z, z, None
+
+    seen = {}
+
+    class Fitter:
+        engine = Eng()
+        detect_etalon_frequency = lambda *a: .1
+
+        def setup_fit_parameters(self, *args, initial_values=None):
+            active = ["NO2_sh", "H2O_sh"]
+            values = initial_values or {}
+            return active, {}, {}, [values.get("NO2_sh", 0.), values.get("H2O_sh", 0.)], \
+                [-.5, -.5], [.5, .5]
+
+        def execute_varpro_fit(self, *args, **kwargs):
+            seen["theta0"], seen["lower"], seen["upper"] = args[6], args[7], args[8]
+            return np.array([0., -5.]), np.ones(2), np.ones(2), np.array([]), 0., 0., np.ones(2)
+
+    PO.fit_scan(Eng(), Fitter(), {}, [0., 1.], [1e-6, 1e-6], 25., 1013., 0, 1, 0, .5,
+                allow_negative_gas=True, controlled_start=(.2, 1.),
+                controlled_bounds={"NO2_sh": (-3., 3.), "H2O_sh": (-8., -2.)},
+                controlled_initial_values={"H2O_sh": -5.})
+    assert seen == {"theta0": [.2, -5.], "lower": [-3., -8.], "upper": [3., -2.]}
+
+
 def test_fit_scan_matches_worker_small_alpha_scaling_and_unscales_outputs():
     class Eng:
         gas_list = ["NO2"]
@@ -315,8 +349,9 @@ if __name__ == "__main__":
     test_abs_ratio_is_median_of_per_scan_magnitudes()
     test_mixed_ac1_aggregate()
     test_policy_reaches_seed_and_final()
+    test_controlled_bounds_override_all_active_variables_and_secondary_theta0()
     test_fit_scan_matches_worker_small_alpha_scaling_and_unscales_outputs()
     test_fit_scan_rejects_invalid_alpha_before_solver()
     test_small_alpha_active_shift_moves_and_multistarts_converge()
     test_impossible_reference_excluded()
-    print("10 PASS")
+    print("11 PASS")

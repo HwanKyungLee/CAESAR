@@ -95,7 +95,7 @@ def _seed_shift(fitter, pixel_idx, optical_depth, poly_deg, ref_props, target,
 def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              px_min, px_max, poly_deg, step_limit, target="NO2",
              seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
-             controlled_start=None):
+             controlled_start=None, controlled_bounds=None, controlled_initial_values=None):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
     이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
     allow_negative_gas = _require_bool(allow_negative_gas)
@@ -157,9 +157,22 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                 anchor = 0.0
         else:
             anchor = 0.0
-        initial_values = {f"{target}_sh": seed, f"{target}_sq": seed_sq}
+        initial_values = dict(controlled_initial_values or {})
+        initial_values.update({f"{target}_sh": seed, f"{target}_sq": seed_sq})
         active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
             ref_props, anchor, [anchor, 1.0], step_limit, initial_values=initial_values)
+        if controlled_bounds is not None:
+            for name, spec in controlled_bounds.items():
+                if name not in active:
+                    raise ValueError(f"controlled bound {name!r} is not independently active")
+                lo, hi = map(float, spec)
+                if not np.isfinite([lo, hi]).all() or hi <= lo:
+                    raise ValueError(f"invalid controlled bounds for {name}")
+                k = active.index(name)
+                lb[k], ub[k] = lo, hi
+                margin = max(1e-12, np.finfo(float).eps * max(abs(lo), abs(hi), 1.0) * 16)
+                start = initial_values.get(name, t0[k])
+                t0[k] = min(max(float(start), lo + margin), hi - margin)
     out = fitter.execute_varpro_fit(vp, a_scaled, np.eye(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
                                     ref_props, T_C, 0.0, False,

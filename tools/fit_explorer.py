@@ -178,8 +178,10 @@ def main(argv=None):
 
     ref_props = cfg.get("ref_props", {})
     try:
-        starts = FE.controlled_starts(ref_props, "NO2", float(cfg.get("step_limit", .5)))
-    except (ValueError, KeyError) as exc:
+        target_bounds = FE.target_global_bounds(ref_props, "NO2")
+        nonlinear_bounds = FE.independent_global_bounds(ref_props, eng.gas_list)
+        starts = FE.controlled_starts(ref_props, "NO2")
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         abstain(str(exc))
     try:
         selected_rows, pool, selected_indices = selected_scan_rows(args.key, rows=pool)
@@ -224,7 +226,9 @@ def main(argv=None):
     started = time.perf_counter()
     fitter = DoasFitter(eng)
     evaluated = [FE.evaluate_candidate(eng, fitter, ref_props, scans, c, starts,
-                                       float(cfg.get("step_limit", .5)), requested_policy)
+                                       float(cfg.get("step_limit", .5)), requested_policy,
+                                       target_bounds=target_bounds,
+                                       nonlinear_bounds=nonlinear_bounds)
                  for c in candidates]
     report = {
         "schema_version": FE.SCHEMA_VERSION,
@@ -260,6 +264,10 @@ def main(argv=None):
                      "window_step_nm": args.window_step_nm, "pixel_step": pixel_step,
                      "step_limit": float(cfg.get("step_limit", .5)),
                      "ref_props": ref_props, "refs": cfg.get("refs", [])},
+        "stage1_nonlinear_bounds": target_bounds,
+        "stage1_all_independent_bounds": nonlinear_bounds,
+        "stage3_reserved": {"step_limit": float(cfg.get("step_limit", .5)),
+                            "purpose": "temporal continuity; not applied to Stage 1 independent scans"},
         "controlled_starts": starts,
         "budget": FE.stage1_budget(evaluated, len(scans), len(starts)),
         "scans": [{"id": s["id"], "T_C": s["T_C"], "P_mbar": s["P_mbar"],
