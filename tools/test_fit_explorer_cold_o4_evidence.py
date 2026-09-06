@@ -11,7 +11,9 @@ def main():
     manifest = json.loads(manifest_bytes)
     result = json.load(open(os.path.join(EVIDENCE, "cold_o4_result_v1.json"), encoding="utf-8"))
     assert result["manifest_sha256"] == hashlib.sha256(manifest_bytes).hexdigest()
-    assert result["claim_scope"] == manifest["claim_scope"]
+    assert result["status"] == "HISTORICAL_INVALIDATED_FOR_NUMERIC_USE"
+    assert result["superseded_by"] == "diagnostics/fit_explorer/o4_ab_result_v1.json"
+    assert result["claim_scope"].startswith("historical pre-normalization ")
     states = result["t2"]["states"]
     assert {name: row["state"] for name, row in states.items()} == manifest["expected_t2_states"]
     nonnegative, signed = states["nonnegative"]["observed"], states["signed"]["observed"]
