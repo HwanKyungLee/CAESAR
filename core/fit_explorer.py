@@ -17,6 +17,8 @@ from core import param_optimizer as PO
 SCHEMA_VERSION = 1
 STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
 STAGE1_EXPECTED_ATTEMPTS = 8
+STAGE1_VERTICAL_SLICE_SCHEMA = "stage1-one-candidate-v1"
+STAGE1_SOLVER_STATUSES = {"CONVERGED", "MAX_NFEV", "FAILED", "TERMINATED"}
 ZERO_BASE_CANDIDATE_SCHEMA = "zero-base-candidates-v1"
 SEED_STABILITY_TOLERANCES = {
     "conc_abs_ppb": 0.1, "conc_rel": 0.05, "shift_abs_px": 0.01,
@@ -310,6 +312,137 @@ def translate_zero_base_policy(cfg, ref_props, candidate, target="NO2"):
         "fit_executed": False,
     }
     return {"ref_props": derived, "provenance": provenance}
+
+
+def stage1_policy_starts(candidate):
+    """Return the exact Stage 1 starts implied by one zero-base policy."""
+    policy = candidate.get("policy") if isinstance(candidate, dict) else None
+    if not isinstance(policy, dict) or set(policy) != {"shift", "squeeze"}:
+        raise ValueError("candidate policy must contain exactly shift and squeeze")
+
+    def axis_values(name):
+        spec = policy[name]
+        if not isinstance(spec, dict) or spec.get("mode") not in ("Fix", "Limit"):
+            raise ValueError(f"candidate {name} policy is invalid")
+        if spec["mode"] == "Fix":
+            if set(spec) != {"mode", "value"}:
+                raise ValueError(f"candidate {name} policy schema is invalid")
+            value = spec["value"]
+            if isinstance(value, (bool, np.bool_)) or not np.isfinite(value):
+                raise ValueError(f"candidate {name} fixed value is invalid")
+            return [float(value)]
+        if set(spec) != {"mode", "lower", "upper"}:
+            raise ValueError(f"candidate {name} policy schema is invalid")
+        lo, hi = _strict_interval(spec["lower"], spec["upper"], f"candidate {name}")
+        return [lo + .25 * (hi - lo), lo + .75 * (hi - lo)]
+
+    shifts, squeezes = axis_values("shift"), axis_values("squeeze")
+    active = len(shifts) == 2 or len(squeezes) == 2
+    count = 2 if active else 1
+    starts = []
+    for index in range(count):
+        starts.append({"id": f"start{index}",
+                       "shift": shifts[index if len(shifts) == 2 else 0],
+                       "squeeze": squeezes[index if len(squeezes) == 2 else 0]})
+    return {"starts": starts, "attempts_per_scan": count,
+            "seed_stability": ("PENDING" if active else "NOT_APPLICABLE"),
+            "reason": ("ACTIVE_LIMIT_DIMENSION" if active else "FIXED_POLICY")}
+
+
+def run_stage1_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
+                              allow_negative_gas, target="NO2"):
+    """Execute one candidate's budget through an injected worker-compatible adapter.
+
+    The callback receives immutable copies of the translated worker ``ref_props``
+    and policy bounds.  It must expose the exact diagnostics schema below; this
+    contract does not infer or preserve arbitrary callback content.
+    """
+    if allow_negative_gas is not True:
+        raise ValueError("Stage 1 vertical slice requires explicit allow_negative_gas=True")
+    if not isinstance(candidate, dict) or not isinstance(candidate.get("id"), str) \
+            or not candidate["id"]:
+        raise ValueError("Stage 1 candidate id is required")
+    if not callable(fit_callback) or not isinstance(scans, list) or len(scans) != 4:
+        raise ValueError("Stage 1 vertical slice requires a callback and exactly 4 scans")
+    scan_ids = [scan.get("id") for scan in scans if isinstance(scan, dict)]
+    if len(scan_ids) != 4 or any(not isinstance(x, str) or not x for x in scan_ids) \
+            or len(set(scan_ids)) != 4:
+        raise ValueError("Stage 1 scan identities must be four unique strings")
+    translated = translate_zero_base_policy(cfg, ref_props, candidate, target)
+    plan = stage1_policy_starts(candidate)
+    policy = candidate["policy"]
+    policy_bounds = {
+        axis: ({"mode": "FIXED", "value": float(spec["value"])}
+               if spec["mode"] == "Fix" else
+               {"mode": "INTERVAL", "lower": float(spec["lower"]),
+                "upper": float(spec["upper"])})
+        for axis, spec in policy.items()
+    }
+    required = {"initial_shift", "initial_squeeze", "final_shift", "final_squeeze",
+                "objective_initial", "objective_final", "solver_termination",
+                "boundary_hits"}
+    attempts = []
+    for scan in scans:
+        for start in plan["starts"]:
+            try:
+                raw = fit_callback(copy.deepcopy(candidate), copy.deepcopy(scan),
+                                   copy.deepcopy(start),
+                                   ref_props=copy.deepcopy(translated["ref_props"]),
+                                   policy_bounds=copy.deepcopy(policy_bounds),
+                                   allow_negative_gas=True)
+                if not isinstance(raw, dict) or set(raw) != required:
+                    raise ValueError("worker result must match the exact Stage 1 schema")
+                numeric = [raw[key] for key in required - {"solver_termination", "boundary_hits"}]
+                if any(isinstance(v, (bool, np.bool_)) or not np.isfinite(v) for v in numeric):
+                    raise ValueError("worker result contains non-finite diagnostics")
+                if (not np.isclose(raw["initial_shift"], start["shift"], rtol=0.0, atol=1e-12)
+                        or not np.isclose(raw["initial_squeeze"], start["squeeze"],
+                                          rtol=0.0, atol=1e-12)):
+                    raise ValueError("worker did not use the prescribed Stage 1 start")
+                termination = raw["solver_termination"]
+                if (not isinstance(termination, dict)
+                        or set(termination) != {"status", "success", "nfev"}
+                        or termination["status"] not in STAGE1_SOLVER_STATUSES
+                        or type(termination["success"]) is not bool
+                        or isinstance(termination["nfev"], (bool, np.bool_))
+                        or not isinstance(termination["nfev"], (int, np.integer))
+                        or termination["nfev"] < 0):
+                    raise ValueError("worker solver termination is unavailable")
+                hits = raw["boundary_hits"]
+                if not isinstance(hits, list) or any(
+                        not isinstance(hit, dict)
+                        or set(hit) != {"parameter", "side", "value", "bound"}
+                        or hit["parameter"] not in ("shift", "squeeze")
+                        or hit["side"] not in ("lower", "upper")
+                        or not np.isfinite([hit["value"], hit["bound"]]).all()
+                        for hit in hits):
+                    raise ValueError("worker boundary diagnostics are invalid")
+                for axis in ("shift", "squeeze"):
+                    spec = policy_bounds[axis]
+                    if spec["mode"] == "FIXED" and not np.isclose(
+                            raw[f"final_{axis}"], spec["value"], rtol=0.0, atol=1e-12):
+                        raise ValueError(f"worker changed fixed {axis}")
+                attempts.append({"candidate_id": candidate.get("id"),
+                                 "scan_id": scan["id"], "start_id": start["id"],
+                                 "status": "OK",
+                                 **{key: copy.deepcopy(raw[key]) for key in required},
+                                 "objective_change": (float(raw["objective_final"])
+                                                      - float(raw["objective_initial"]))})
+            except Exception as exc:
+                attempts.append({"candidate_id": candidate.get("id"),
+                                 "scan_id": scan["id"], "start_id": start["id"],
+                                 "status": "UNAVAILABLE", "reason": "FIT_ATTEMPT_EXCEPTION",
+                                 "exception_class": type(exc).__name__})
+    n_ok = sum(row["status"] == "OK" for row in attempts)
+    return {"schema": STAGE1_VERTICAL_SLICE_SCHEMA, "candidate_id": candidate.get("id"),
+            "status": "COMPLETE" if n_ok == len(attempts) else "ABSTAIN_INCOMPLETE",
+            "policy": {"allow_negative_gas": True}, "budget": plan,
+            "translation": translated["provenance"], "policy_bounds": policy_bounds,
+            "planned_attempts": 4 * plan["attempts_per_scan"],
+            "executed_attempts": len(attempts), "successful_attempts": n_ok,
+            "objective_change_convention": "final_minus_initial",
+            "attempts": attempts,
+            "limitations": ["No T2 verdict", "No ranking", "No plateau claim", "No Apply"]}
 
 
 def _strict_interval(lo, hi, label):

@@ -214,11 +214,16 @@ Stage 1의 **대표 행 선택 계약만** 먼저 고정했다. alpha 파일별 
 유일하지 않으면 fit 전에 `ABSTAIN_INCOMPLETE`로 중단한다. datetime은 alpha 헤더의 datetime 또는
 doy에서만 읽고, 상태는 명시적 `state=ambient_average` 메타데이터가 있을 때만 기록한다. 그 외 상태와
 상태 다양성은 `UNAVAILABLE`이며 추정하지 않는다. 보고서는 선택 계약·모집단·indices·날짜/상태
-완전성과 `4 scans × 2 starts = 8 attempts/candidate`, Stage 0별 후보 수, 계획/실행 시도 수를 기록한다.
+완전성과 계획/실행 시도 수를 기록한다. 하나 이상의 shift/squeeze 축이 `Limit`이면
+`4 scans × 2 starts = 8 attempts/candidate`이고, 둘 다 `Fix`이면 비선형 초기값 선택이 없으므로
+`4 scans × 1 deterministic attempt = 4 attempts/candidate`이다. 이때 seed stability는 중복 실행으로
+꾸미지 않고 명시적으로 `NOT_APPLICABLE`이다.
 이는 **sampling/budget provenance checkpoint**일 뿐, 50~100 후보 확장·halving·pruning 완료가 아니다.
 여기서 Stage 0의 `fit-free`는 비선형 fit을 실행하지 않는다는 뜻이며, engine/reference 배열을 읽지
 않는다는 뜻은 아니다. 같은 물리 파일의 symlink·hardlink 별칭도 중복 identity로 보류한다.
 
+아래 8회 판정 계약은 active `Limit`이 있는 후보에 적용한다. Fix/Fix의 4회 판정 adapter는 아직
+구현하지 않았으므로 이번 수직 조각은 실행 진단만 기록하고 T2/evaluation state를 만들지 않는다.
 Stage 1 판정은 8개 시도를 모두 개별 T2 tri-state로 검사한다. 8개가 모두 실행되고 모두 T2 `FAIL`일
 때만 후보를 `EVALUATED_FAIL`로 탈락시킨다. 8개 실행이 모두 예외인 경우는 과학적 실패가 아니므로
 `ALL_ATTEMPTS_UNAVAILABLE`로 재실행 대상에 남긴다. 8개가 모두 T2 `PASS`일
@@ -261,6 +266,10 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] Stage 1 보수적 판정 계약: 8개 개별 T2, 전부 T2 실패만 탈락, 실행예외/불완전/혼합은 보존
 - [x] zero-base Stage 0 shift/squeeze 정책의 worker-compatible `ref_props` 순수 변환 계약
   (원본 불변, 변환만으로 Stage 1 실행·판정된 것은 아님)
+- [x] zero-base 후보 하나의 Stage 1 실행예산 수직 조각: 대표 4행, active Limit은 행당 2 start,
+  Fix/Fix는 행당 1 deterministic attempt와 `seed_stability=NOT_APPLICABLE`, fail-closed 진단 보고
+  (candidate 정책을 worker `ref_props`로 순수 변환한 payload만 adapter에 전달하며, callback 출력은
+  exact diagnostic schema로 재구성; production 315-candidate 실행·T2·ranking은 미완료)
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가

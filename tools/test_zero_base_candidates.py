@@ -149,10 +149,122 @@ def test_policy_translation_malformed_fails_closed():
         raise AssertionError("missing target must fail closed")
 
 
+def test_stage1_one_candidate_budget_and_worker_contract():
+    cfg, props, candidates = _translation_fixture()
+    original_cfg, original_props = copy.deepcopy(cfg), copy.deepcopy(props)
+    scans = [{"id": f"scan{i}"} for i in range(4)]
+
+    def worker(candidate, scan, start, *, ref_props, policy_bounds,
+               allow_negative_gas):
+        assert allow_negative_gas is True
+        assert ref_props["H2O"] == props["H2O"]
+        assert ref_props["NO2"]["sh_mode"] == candidate["policy"]["shift"]["mode"]
+        assert set(policy_bounds) == {"shift", "squeeze"}
+        return {"initial_shift": start["shift"],
+                "initial_squeeze": start["squeeze"],
+                "final_shift": start["shift"],
+                "final_squeeze": start["squeeze"],
+                "objective_initial": 10.0, "objective_final": 8.0,
+                "solver_termination": {"status": "CONVERGED", "success": True,
+                                       "nfev": 3},
+                "boundary_hits": []}
+
+    fixed = next(c for c in candidates
+                 if c["policy"]["shift"]["mode"] == "Fix"
+                 and c["policy"]["squeeze"]["mode"] == "Fix")
+    fixed_report = FE.run_stage1_vertical_slice(
+        cfg, props, fixed, scans, worker, allow_negative_gas=True)
+    assert fixed_report["status"] == "COMPLETE"
+    assert fixed_report["planned_attempts"] == 4
+    assert fixed_report["budget"]["attempts_per_scan"] == 1
+    assert fixed_report["budget"]["seed_stability"] == "NOT_APPLICABLE"
+    assert all(row["objective_change"] == -2.0 for row in fixed_report["attempts"])
+
+    modes = (("Limit", "Fix"), ("Fix", "Limit"), ("Limit", "Limit"))
+    for sh_mode, sq_mode in modes:
+        active = next(c for c in candidates
+                      if c["policy"]["shift"]["mode"] == sh_mode
+                      and c["policy"]["squeeze"]["mode"] == sq_mode)
+        active_report = FE.run_stage1_vertical_slice(
+            cfg, props, active, scans, worker, allow_negative_gas=True)
+        assert active_report["status"] == "COMPLETE"
+        assert active_report["planned_attempts"] == 8
+        assert active_report["budget"]["attempts_per_scan"] == 2
+        assert active_report["budget"]["seed_stability"] == "PENDING"
+        starts = active_report["budget"]["starts"]
+        assert len({(s["shift"], s["squeeze"]) for s in starts}) == 2
+        assert len({(r["scan_id"], r["start_id"])
+                    for r in active_report["attempts"]}) == 8
+
+    active = next(c for c in candidates
+                  if c["policy"]["shift"]["mode"] == "Limit"
+                  and c["policy"]["squeeze"]["mode"] == "Limit")
+
+    incomplete = FE.run_stage1_vertical_slice(
+        cfg, props, active, scans, lambda *a, **k: {}, allow_negative_gas=True)
+    assert incomplete["status"] == "ABSTAIN_INCOMPLETE"
+    assert incomplete["successful_attempts"] == 0
+    assert all(row["exception_class"] == "ValueError" for row in incomplete["attempts"])
+    try:
+        FE.run_stage1_vertical_slice(cfg, props, active, scans, worker,
+                                     allow_negative_gas=False)
+    except ValueError as exc:
+        assert "explicit" in str(exc)
+    else:
+        raise AssertionError("implicit/nonnegative Stage 1 policy was accepted")
+    assert cfg == original_cfg and props == original_props
+
+
+def test_stage1_worker_output_cannot_override_or_leak():
+    cfg, props, candidates = _translation_fixture()
+    scans = [{"id": f"scan{i}"} for i in range(4)]
+    fixed = next(c for c in candidates
+                 if c["policy"]["shift"]["mode"] == "Fix"
+                 and c["policy"]["squeeze"]["mode"] == "Fix")
+
+    def bad_extra(candidate, scan, start, **kwargs):
+        return {"initial_shift": start["shift"], "initial_squeeze": start["squeeze"],
+                "final_shift": start["shift"], "final_squeeze": start["squeeze"],
+                "objective_initial": 2.0, "objective_final": 1.0,
+                "solver_termination": {"status": "OK", "success": True, "nfev": 1},
+                "boundary_hits": [], "status": "OK", "path": "C:\\secret\\raw.txt"}
+
+    report = FE.run_stage1_vertical_slice(
+        cfg, props, fixed, scans, bad_extra, allow_negative_gas=True)
+    assert report["status"] == "ABSTAIN_INCOMPLETE"
+    assert all("path" not in row and row["status"] == "UNAVAILABLE"
+               for row in report["attempts"])
+
+    def changed_fixed(candidate, scan, start, **kwargs):
+        row = bad_extra(candidate, scan, start, **kwargs)
+        row.pop("status"); row.pop("path")
+        row["final_shift"] += 1e-6
+        return row
+
+    report = FE.run_stage1_vertical_slice(
+        cfg, props, fixed, scans, changed_fixed, allow_negative_gas=True)
+    assert report["status"] == "ABSTAIN_INCOMPLETE"
+    assert all(row["exception_class"] == "ValueError" for row in report["attempts"])
+
+    def sensitive_termination(candidate, scan, start, **kwargs):
+        row = changed_fixed(candidate, scan, start, **kwargs)
+        row["final_shift"] = start["shift"]
+        row["solver_termination"] = {"status": "C:\\secret\\solver.log",
+                                     "success": True, "nfev": 1}
+        return row
+
+    report = FE.run_stage1_vertical_slice(
+        cfg, props, fixed, scans, sensitive_termination, allow_negative_gas=True)
+    assert report["status"] == "ABSTAIN_INCOMPLETE"
+    assert "secret" not in repr(report)
+
+
 if __name__ == "__main__":
     test_zero_base_grid_is_explicit_and_deterministic()
     test_zero_base_rejects_collapsed_nm_offsets()
     test_zero_base_stage0_is_fit_free_and_counts()
     test_policy_translation_all_35_round_trip_through_worker()
     test_policy_translation_malformed_fails_closed()
+    test_stage1_one_candidate_budget_and_worker_contract()
+    test_stage1_worker_output_cannot_override_or_leak()
     print("test_zero_base_candidates: PASS")
