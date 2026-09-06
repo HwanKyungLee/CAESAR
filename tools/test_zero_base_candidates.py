@@ -9,7 +9,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import fit_explorer as FE
-from core.doas_fit import DoasFitter
+from core.doas_fit import (DoasFitter, _aggregate_solver_termination,
+                           _endpoint_objectives)
 
 
 def test_zero_base_grid_is_explicit_and_deterministic():
@@ -178,6 +179,8 @@ def test_stage1_one_candidate_budget_and_worker_contract():
     assert fixed_report["planned_attempts"] == 4
     assert fixed_report["budget"]["attempts_per_scan"] == 1
     assert fixed_report["budget"]["seed_stability"] == "NOT_APPLICABLE"
+    assert fixed_report["translation"]["scope"] == "TRANSLATION_ONLY_NO_FIT_CLAIM"
+    assert fixed_report["translation"]["details"]["fit_executed"] is False
     assert all(row["objective_change"] == -2.0 for row in fixed_report["attempts"])
 
     modes = (("Limit", "Fix"), ("Fix", "Limit"), ("Limit", "Limit"))
@@ -259,6 +262,59 @@ def test_stage1_worker_output_cannot_override_or_leak():
     assert "secret" not in repr(report)
 
 
+def test_production_adapter_maps_real_engine_contract():
+    cfg, props, candidates = _translation_fixture()
+    candidate = next(c for c in candidates
+                     if c["policy"]["shift"]["mode"] == "Limit"
+                     and c["policy"]["squeeze"]["mode"] == "Limit")
+    scan = {"id": "s0", "wave": np.arange(300.), "alpha": np.ones(300),
+            "temperature_C": 25., "pressure_mbar": 1013., "px_start": 0}
+    class Fitter:
+        pass
+    engine = SimpleNamespace(gas_list=["H2O", "NO2"])
+    translated = FE.translate_zero_base_policy(cfg, props, candidate)["ref_props"]
+    with patch.object(FE.PO, "fit_scan") as mocked:
+        mocked.return_value = {
+            "shifts": {"NO2": candidate["policy"]["shift"]["lower"]},
+            "squeezes": {"NO2": 1.0},
+            "solver_diagnostics": {"objective_initial": 4.0,
+                                   "objective_final": 1.0,
+                                   "solver_termination": {
+                                       "status": "CONVERGED", "success": True,
+                                       "nfev": 7}}}
+        callback = FE.production_stage1_callback(engine, Fitter(), cfg)
+        start = FE.stage1_policy_starts(candidate)["starts"][0]
+        bounds = {"shift": {"mode": "INTERVAL", **{
+                      "lower": candidate["policy"]["shift"]["lower"],
+                      "upper": candidate["policy"]["shift"]["upper"]}},
+                  "squeeze": {"mode": "INTERVAL", **{
+                      "lower": candidate["policy"]["squeeze"]["lower"],
+                      "upper": candidate["policy"]["squeeze"]["upper"]}}}
+        out = callback(candidate, scan, start, ref_props=translated,
+                       policy_bounds=bounds, allow_negative_gas=True)
+    assert out["solver_termination"]["nfev"] == 7
+    assert out["boundary_hits"] == [{"parameter": "shift", "side": "lower",
+                                     "value": bounds["shift"]["lower"],
+                                     "bound": bounds["shift"]["lower"]}]
+    assert mocked.call_args.kwargs["return_solver_diagnostics"] is True
+    assert mocked.call_args.kwargs["allow_negative_gas"] is True
+
+
+def test_solver_diagnostics_are_comparable_and_max_nfev_reachable():
+    termination = _aggregate_solver_termination([
+        {"status": 1, "success": True, "nfev": 3},
+        {"status": 0, "success": False, "nfev": 9}])
+    assert termination == {"status": "MAX_NFEV", "success": False, "nfev": 12}
+    final_irls_weight = 3.0
+    calls = []
+    def final_objective(theta):
+        calls.append(float(theta[0]))
+        return np.array([final_irls_weight * (theta[0] - 2.0)])
+    initial, final = _endpoint_objectives(final_objective, [0.0], [1.0])
+    assert calls == [0.0, 1.0]
+    assert initial == 36.0 and final == 9.0
+
+
 if __name__ == "__main__":
     test_zero_base_grid_is_explicit_and_deterministic()
     test_zero_base_rejects_collapsed_nm_offsets()
@@ -267,4 +323,6 @@ if __name__ == "__main__":
     test_policy_translation_malformed_fails_closed()
     test_stage1_one_candidate_budget_and_worker_contract()
     test_stage1_worker_output_cannot_override_or_leak()
+    test_production_adapter_maps_real_engine_contract()
+    test_solver_diagnostics_are_comparable_and_max_nfev_reachable()
     print("test_zero_base_candidates: PASS")

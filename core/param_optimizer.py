@@ -95,7 +95,8 @@ def _seed_shift(fitter, pixel_idx, optical_depth, poly_deg, ref_props, target,
 def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              px_min, px_max, poly_deg, step_limit, target="NO2",
              seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
-             controlled_start=None, controlled_bounds=None, controlled_initial_values=None):
+             controlled_start=None, controlled_bounds=None, controlled_initial_values=None,
+             return_solver_diagnostics=False):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
     이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
     allow_negative_gas = _require_bool(allow_negative_gas)
@@ -176,7 +177,11 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     out = fitter.execute_varpro_fit(vp, a_scaled, np.eye(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
                                     ref_props, T_C, 0.0, False,
-                                    allow_negative_gas=allow_negative_gas)
+                                    allow_negative_gas=allow_negative_gas,
+                                    return_diagnostics=return_solver_diagnostics)
+    solver_diagnostics = None
+    if return_solver_diagnostics:
+        out, solver_diagnostics = out
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out
     gco = np.asarray(gco, float) / scale_factor
     poly_c = np.asarray(poly_c, float) / scale_factor
@@ -213,7 +218,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     shifts = {g: float(s) for g, s in zip(eng.gas_list, opt_sh)}
     squeezes = {g: float(s) for g, s in zip(eng.gas_list, opt_sq)}
     coeffs = {g: float(c) for g, c in zip(eng.gas_list, gco)}   # ref별 핏 계수(정규화공간)
-    return dict(conc=conc, conc_all=conc_all, perr_rel=perr_rel, rms=rms, sig=sig,
+    result = dict(conc=conc, conc_all=conc_all, perr_rel=perr_rel, rms=rms, sig=sig,
                 rms_sig=float(rms / (sig + 1e-30)), autocorr1=autocorr1,
                 shifts=shifts, squeezes=squeezes, coeffs=coeffs, n_free=len(active),
                 etalon_frequency=float(ef),
@@ -224,6 +229,9 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                                           "lower": list(map(float, lb)),
                                           "upper": list(map(float, ub))},
                 normalization_factor=float(scale_factor))
+    if return_solver_diagnostics:
+        result["solver_diagnostics"] = solver_diagnostics
+    return result
 
 
 def _med_mad(xs):

@@ -342,7 +342,7 @@ class DoasFitter:
                            absolute_center, fit_sign, ref_properties, temperature,
                            tikhonov_lambda, use_robust,
                            override_lam=None, override_robust=None, allow_negative_gas=False,
-                           custom_basis=None):
+                           custom_basis=None, return_diagnostics=False):
         """VarPro + NNLS + Tikhonov + Robust(IRLS) 엔진. AnalysisWorker에서 verbatim 이식.
         allow_negative_gas=True면 가스 계수 하한을 0→−∞로 풀어 음수 농도 허용(0근처 비편향).
         custom_basis: (n_pix, k) 외부 선형 베이스(Ring·fixed-pattern 고유벡터 등). None이면
@@ -384,6 +384,7 @@ class DoasFitter:
             pen[num_gases:num_gases + (poly_order + 1)] = 0.0
             return np.diag(pen)
 
+        solver_runs = []
         for iteration in range(max_iters):
             def objective_varpro(theta):
                 val_dict = {v: theta[i] for i, v in enumerate(active_vars)}
@@ -431,6 +432,9 @@ class DoasFitter:
             if len(theta0) > 0:
                 res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub), max_nfev=1500)
                 theta_opt = res_nonlin.x
+                solver_runs.append({"status": int(res_nonlin.status),
+                                    "success": bool(res_nonlin.success),
+                                    "nfev": int(res_nonlin.nfev)})
             else:
                 # 비선형 파라미터 없음(모든 shift/squeeze가 Fix; etalon은 이제 선형 sin·cos).
                 # least_squares는 빈 x0에서 에러나므로 선형해만 1회. (콜드 shift Fix 0 시나리오)
@@ -520,4 +524,39 @@ class DoasFitter:
         etalon_phase = float(np.arctan2(b_et, a_et))
         poly_coeffs = c_opt[num_gases:-2]
 
-        return opt_shifts, opt_squeezes, c_gas, poly_coeffs, etalon_amp, etalon_phase, c_perr
+        result = (opt_shifts, opt_squeezes, c_gas, poly_coeffs,
+                  etalon_amp, etalon_phase, c_perr)
+        if not return_diagnostics:
+            return result
+        # ``objective_varpro`` now closes over the final IRLS weight matrix.
+        # Evaluate each endpoint once here so robust and non-robust diagnostics
+        # are directly comparable.  An earlier scipy ``fun`` may use an older
+        # IRLS matrix and therefore is deliberately not reused.
+        objective_initial, objective_final = _endpoint_objectives(
+            objective_varpro, theta0, theta_opt)
+        termination = _aggregate_solver_termination(solver_runs)
+        diagnostics = {"objective_initial": float(objective_initial),
+                       "objective_final": float(objective_final),
+                       "objective_convention": "sum_squared_weighted_varpro_residual",
+                       "solver_termination": termination}
+        return result, diagnostics
+
+
+def _aggregate_solver_termination(solver_runs):
+    """Conservatively aggregate scipy statuses across IRLS solves."""
+    if not solver_runs:
+        return {"status": "TERMINATED", "success": True, "nfev": 0}
+    codes = [run["status"] for run in solver_runs]
+    status = ("FAILED" if any(code < 0 for code in codes)
+              else "MAX_NFEV" if any(code == 0 for code in codes)
+              else "CONVERGED")
+    return {"status": status,
+            "success": all(run["success"] for run in solver_runs),
+            "nfev": sum(run["nfev"] for run in solver_runs)}
+
+
+def _endpoint_objectives(objective, theta_initial, theta_final):
+    """Evaluate both endpoints once through the same current objective closure."""
+    initial = np.asarray(objective(np.asarray(theta_initial, dtype=float)), dtype=float)
+    final = np.asarray(objective(np.asarray(theta_final, dtype=float)), dtype=float)
+    return float(np.dot(initial, initial)), float(np.dot(final, final))

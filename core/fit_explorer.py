@@ -437,12 +437,57 @@ def run_stage1_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
     return {"schema": STAGE1_VERTICAL_SLICE_SCHEMA, "candidate_id": candidate.get("id"),
             "status": "COMPLETE" if n_ok == len(attempts) else "ABSTAIN_INCOMPLETE",
             "policy": {"allow_negative_gas": True}, "budget": plan,
-            "translation": translated["provenance"], "policy_bounds": policy_bounds,
+            "translation": {"scope": "TRANSLATION_ONLY_NO_FIT_CLAIM",
+                            "details": translated["provenance"]},
+            "policy_bounds": policy_bounds,
             "planned_attempts": 4 * plan["attempts_per_scan"],
             "executed_attempts": len(attempts), "successful_attempts": n_ok,
             "objective_change_convention": "final_minus_initial",
             "attempts": attempts,
             "limitations": ["No T2 verdict", "No ranking", "No plateau claim", "No Apply"]}
+
+
+def production_stage1_callback(eng, fitter, cfg, target="NO2"):
+    """Adapt ``param_optimizer.fit_scan`` to the exact Stage 1 result schema."""
+    gas_order = list(eng.gas_list)
+    step_limit = float(cfg.get("step_limit", .5))
+
+    def fit(candidate, scan, start, *, ref_props, policy_bounds,
+            allow_negative_gas):
+        if allow_negative_gas is not True:
+            raise ValueError("production Stage 1 requires signed gas coefficients")
+        required = {"wave", "alpha", "temperature_C", "pressure_mbar", "px_start"}
+        if not isinstance(scan, dict) or not required.issubset(scan):
+            raise ValueError("scan payload is incomplete")
+        all_bounds = independent_global_bounds(ref_props, gas_order)
+        initial_values = independent_initial_values(all_bounds, target)
+        result = PO.fit_scan(
+            eng, fitter, ref_props, scan["wave"], scan["alpha"],
+            float(scan["temperature_C"]), float(scan["pressure_mbar"]),
+            int(candidate["px_min"]) - int(scan["px_start"]),
+            int(candidate["px_max"]) - int(scan["px_start"]),
+            int(candidate["poly"]), step_limit, target,
+            allow_negative_gas=True,
+            controlled_start=(start["shift"], start["squeeze"]),
+            controlled_bounds=all_bounds,
+            controlled_initial_values=initial_values,
+            return_solver_diagnostics=True)
+        diagnostics = result.get("solver_diagnostics")
+        if not isinstance(diagnostics, dict):
+            raise ValueError("solver diagnostics are unavailable")
+        raw_hits = boundary_hits(result, policy_bounds, target)
+        hits = [{"parameter": hit["parameter"].lower(),
+                 "side": hit["side"].lower(), "value": hit["value"],
+                 "bound": hit["bound"]} for hit in raw_hits]
+        return {"initial_shift": float(start["shift"]),
+                "initial_squeeze": float(start["squeeze"]),
+                "final_shift": float(result["shifts"][target]),
+                "final_squeeze": float(result["squeezes"][target]),
+                "objective_initial": diagnostics["objective_initial"],
+                "objective_final": diagnostics["objective_final"],
+                "solver_termination": diagnostics["solver_termination"],
+                "boundary_hits": hits}
+    return fit
 
 
 def _strict_interval(lo, hi, label):

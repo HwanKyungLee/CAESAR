@@ -236,6 +236,17 @@ Stage 2 진행 자격일 뿐 추천·plateau 증거가 아니다. 하나라도 `
 전체 상태는 `ABSTAIN_INCOMPLETE`이며, `advance=true`는 보수적으로 후보를 보존한다는 뜻이지 평가가
 완료됐다는 뜻이 아니다.
 
+Stage 1 production adapter는 controlled start와 모든 독립 활성축의 선언 bounds를 현행
+`param_optimizer.fit_scan()`에 전달한다. 엔진은 동일 VARPRO 목적함수에서 시작점·종료점의 가중
+잔차 제곱합과 SciPy 종료 상태/nfev를 선택적으로 반환하며, 기존 호출의 7항 tuple 계약은 유지한다.
+adapter는 기존 대문자 경계 진단을 Stage 1의 소문자 exact schema로만 정규화한다. 이 계측과
+1후보 수직 조각은 실행 진단일 뿐 T2, ranking, plateau 또는 Apply가 아니다.
+IRLS 사용 여부와 무관하게 시작·종료 목적함수는 **최종 IRLS 가중행렬 하나**로 각각 한 번 계산한다.
+여러 IRLS 내부 solve의 종료상태는 음수 status가 하나라도 있으면 `FAILED`, 그렇지 않고 0이 하나라도
+있으면 `MAX_NFEV`, 모두 양수일 때만 `CONVERGED`로 집계한다. `success`는 모든 내부 solve의 논리곱이다.
+실행 보고서의 `translation.details.fit_executed=false`는 번역 함수 자체가 fit을 하지 않았다는 뜻이며,
+상위 `translation.scope=TRANSLATION_ONLY_NO_FIT_CLAIM` 아래에만 둔다.
+
 Cold/O4는 hash-pinned 균등 표본 15개에서 두 gas 부호 정책 모두 현재 코드로 T2 `FAIL`을 재현했다.
 nonnegative 정책은 O4 중앙 절대량비 230.998배로 절대량 게이트가 기각했다. signed 정책은 절대량비가
 2.207배라 그 게이트는 통과했지만, O4 계수 CV가 타깃 CV보다 큰 상수성 위반으로 기각됐다. 따라서
