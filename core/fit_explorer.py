@@ -16,6 +16,7 @@ from core import param_optimizer as PO
 SCHEMA_VERSION = 1
 STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
 STAGE1_EXPECTED_ATTEMPTS = 8
+ZERO_BASE_CANDIDATE_SCHEMA = "zero-base-candidates-v1"
 SEED_STABILITY_TOLERANCES = {
     "conc_abs_ppb": 0.1, "conc_rel": 0.05, "shift_abs_px": 0.01,
     "squeeze_abs": 1e-5, "rms_sig_rel": 0.01,
@@ -127,6 +128,83 @@ def neighboring_candidates(px_min, px_max, poly, pixel_step):
     windows = [(px_min + d, px_max + d) for d in (-pixel_step, 0, pixel_step)]
     return [dict(id=f"w{wi}_p{p}", px_min=lo, px_max=hi, poly=p)
             for wi, (lo, hi) in enumerate(windows) for p in polys]
+
+
+def zero_base_policy_candidates(cfg, wave_axis, target="NO2", window_offsets_nm=(-1.0, 0.0, 1.0)):
+    """Generate the deliberately small, explicit zero-base Stage 0 grid.
+
+    This describes policies; it does not run a fit and never changes ``refs``.
+    The FitSet's existing window/poly are the baseline geometry.  Window offsets
+    are converted to inclusive pixel offsets using the median wavelength spacing.
+    """
+    wave = np.asarray(wave_axis, dtype=float).reshape(-1)
+    if wave.size < 2 or not np.isfinite(wave).all() or not np.all(np.diff(wave) > 0):
+        raise ValueError("wave axis must be finite and strictly increasing")
+    try:
+        base_lo, base_hi = int(cfg["f_min"]), int(cfg["f_max"])
+        base_poly = int(cfg["poly_deg"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("FitSet baseline window/poly is invalid") from None
+    if any(isinstance(v, bool) for v in (base_lo, base_hi, base_poly)):
+        raise ValueError("FitSet baseline window/poly is invalid")
+    if base_lo < 0 or base_hi <= base_lo or base_hi >= wave.size or base_poly < 1:
+        raise ValueError("FitSet baseline window/poly is invalid")
+    spacing = float(np.median(np.diff(wave[base_lo:base_hi + 1])))
+    if not np.isfinite(spacing) or spacing <= 0:
+        raise ValueError("wavelength spacing unavailable")
+    offsets = tuple(float(x) for x in window_offsets_nm)
+    if len(offsets) != 3 or len(set(offsets)) != 3 or not all(np.isfinite(offsets)):
+        raise ValueError("window offsets must be three finite unique values")
+    deltas = tuple(int(round(x / spacing)) for x in offsets)
+    if len(set(deltas)) != len(deltas):
+        raise ValueError("window offsets collapse to duplicate pixel deltas")
+    shift_policies = (
+        {"mode": "Fix", "value": -5.0}, {"mode": "Fix", "value": -2.0},
+        {"mode": "Fix", "value": -0.5}, {"mode": "Fix", "value": 0.0},
+        {"mode": "Limit", "lower": -1.0, "upper": 1.0},
+        {"mode": "Limit", "lower": -5.0, "upper": 5.0},
+        {"mode": "Limit", "lower": -10.0, "upper": 0.5},
+    )
+    squeeze_policies = (
+        {"mode": "Fix", "value": 1.0},
+        {"mode": "Limit", "lower": 0.9999, "upper": 1.0001},
+        {"mode": "Limit", "lower": 0.9995, "upper": 1.0005},
+        {"mode": "Limit", "lower": 0.995, "upper": 1.005},
+        {"mode": "Limit", "lower": 0.98, "upper": 1.02},
+    )
+    for policy in shift_policies:
+        if policy["mode"] == "Fix" and not np.isfinite(policy["value"]):
+            raise ValueError("invalid fixed shift policy")
+        if policy["mode"] == "Limit":
+            _worker_shift_interval(policy["lower"], policy["upper"], "candidate shift")
+    for policy in squeeze_policies:
+        if policy["mode"] == "Fix" and (not np.isfinite(policy["value"])
+                                         or policy["value"] <= 0):
+            raise ValueError("invalid fixed squeeze policy")
+        if policy["mode"] == "Limit":
+            _strict_interval(policy["lower"], policy["upper"], "candidate squeeze")
+    rows = []
+    for offset_nm, delta in zip(offsets, deltas):
+        lo, hi = base_lo + delta, base_hi + delta
+        for poly in (base_poly - 1, base_poly, base_poly + 1):
+            if poly < 0 or hi < lo or hi >= wave.size or lo < 0:
+                continue
+            for shift in shift_policies:
+                for squeeze in squeeze_policies:
+                    policy = {"shift": shift, "squeeze": squeeze}
+                    digest = hashlib.sha256(json.dumps(
+                        {"window": [lo, hi], "poly": poly, "policy": policy,
+                         "target": target}, sort_keys=True, separators=(",", ":")
+                    ).encode()).hexdigest()[:16]
+                    rows.append({"id": f"zb_{digest}", "px_min": lo, "px_max": hi,
+                                 "poly": poly, "window_offset_nm": offset_nm,
+                                 "window_offset_px": delta, "target": target,
+                                 "policy": policy, "refs_source": "FitSet.cfg.refs",
+                                 "policy_stage": "STAGE0_METADATA_ONLY"})
+    rows.sort(key=lambda c: c["id"])
+    if len({c["id"] for c in rows}) != len(rows):
+        raise ValueError("zero-base candidate IDs are not unique")
+    return rows
 
 
 def _strict_interval(lo, hi, label):
@@ -374,6 +452,27 @@ def stage0_preflight(eng, candidate, target="NO2"):
     if multiple_r > FP.COLLIN_HI_DEFAULT:
         return verdict("FAIL", "TARGET_DIFFERENTIAL_COLLINEARITY")
     return verdict("PASS", "AVAILABLE_STATIC_CHECKS_PASSED")
+
+
+def stage0_candidate_grid(eng, candidates, target="NO2"):
+    """Run only fit-free preflight over an explicit candidate grid."""
+    if not isinstance(candidates, list):
+        raise ValueError("candidate grid must be a list")
+    out = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or not isinstance(candidate.get("id"), str):
+            out.append({"id": None, "stage0_preflight": {
+                "state": "FAIL", "reason_codes": ["CANDIDATE_FIELDS_INVALID"],
+                "details": {}}})
+            continue
+        result = dict(candidate)
+        result["stage0_preflight"] = stage0_preflight(eng, candidate, target)
+        out.append(result)
+    counts = {state: sum(x["stage0_preflight"]["state"] == state for x in out)
+              for state in ("PASS", "FAIL", "UNAVAILABLE")}
+    return {"schema": ZERO_BASE_CANDIDATE_SCHEMA, "target": target,
+            "fit_executed": False, "counts": counts, "candidates": out,
+            "limitations": ["Stage 0 is fit-free preflight only", "No ranking", "No Apply"]}
 
 
 def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=None):
