@@ -263,18 +263,19 @@ def main(argv=None):
         "seconds": time.perf_counter() - started,
         "limitations": ["Stage 0 PASS is preflight evidence only, even when fitting follows",
                         "Stage 0 pruning is an execution decision, not a scientific fit failure",
-                        "This checkpoint fixes sampling and budget provenance; halving is not implemented",
+                        "Stage 1 removes only all-attempt T2 failures; execution failures require rerun",
                         "Original spectroscopy-file coverage is unavailable after engine interpolation",
                         "No candidate ranking", "No robustness plateau claim", "No Apply"],
     }
     report["status"] = FE.overall_status(evaluated)
     FE.write_report(output, report)
-    print("candidate  window(px)     poly  exec         T2           conc median     rms/sig median")
+    print("candidate  window(px)     poly  exec         Stage1      pooled T2    conc median     rms/sig median")
     for row in evaluated:
         conc = row["metrics"]["conc"]["median"]
         rms = row["metrics"]["rms_sig"]["median"]
         print(f"{row['id']:9} {row['px_min']:4}-{row['px_max']:<4} {row['poly']:5}  "
-              f"{row['execution_gate']['state']:12} {row['t2_gate']['state']:12} "
+              f"{row['execution_gate']['state']:12} {row['stage1_gate']['state']:12} "
+              f"{row['t2_gate']['state']:12} "
               f"{conc if conc is not None else 'n/a':>12} {rms if rms is not None else 'n/a':>16}")
     print(f"\nJSON: {os.path.abspath(args.output)}")
     return report

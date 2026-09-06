@@ -205,6 +205,18 @@ doy에서만 읽고, 상태는 명시적 `state=ambient_average` 메타데이터
 여기서 Stage 0의 `fit-free`는 비선형 fit을 실행하지 않는다는 뜻이며, engine/reference 배열을 읽지
 않는다는 뜻은 아니다. 같은 물리 파일의 symlink·hardlink 별칭도 중복 identity로 보류한다.
 
+Stage 1 판정은 8개 시도를 모두 개별 T2 tri-state로 검사한다. 8개가 모두 실행되고 모두 T2 `FAIL`일
+때만 후보를 `EVALUATED_FAIL`로 탈락시킨다. 8개 실행이 모두 예외인 경우는 과학적 실패가 아니므로
+`ALL_ATTEMPTS_UNAVAILABLE`로 재실행 대상에 남긴다. 8개가 모두 T2 `PASS`일
+때만 `EVALUATED_PASS`이며, 실행 일부 실패·T2 혼합·T2 `UNAVAILABLE`은 `UNEVALUATED`로 남겨
+재평가 대상으로 보존한다. 각 스캔의 두 start 원출력과 단순 차이는 기록하지만 안정성 임계값이나
+판정에는 사용하지 않는다. 네 scan ID와 두 seed ID가 유일하고 4×2 Cartesian 조합마다 성공 또는
+실패 결과가 정확히 하나인지 검사하며, 중복·누락·겹침은 `ATTEMPT_IDENTITY_INVALID`로 재실행한다.
+예외 메시지는 저장하지 않고 안정된 reason code와 예외 클래스만 기록한다. 이 단계의 `PASS`는
+Stage 2 진행 자격일 뿐 추천·plateau 증거가 아니다. 하나라도 `rerun_required` 후보가 남으면 보고서
+전체 상태는 `ABSTAIN_INCOMPLETE`이며, `advance=true`는 보수적으로 후보를 보존한다는 뜻이지 평가가
+완료됐다는 뜻이 아니다.
+
 Cold/O4는 hash-pinned 균등 표본 15개에서 두 gas 부호 정책 모두 현재 코드로 T2 `FAIL`을 재현했다.
 nonnegative 정책은 O4 중앙 절대량비 230.998배로 절대량 게이트가 기각했다. signed 정책은 절대량비가
 2.207배라 그 게이트는 통과했지만, O4 계수 CV가 타깃 CV보다 큰 상수성 위반으로 기각됐다. 따라서
@@ -232,6 +244,7 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] optional external-data suite: manifest 미지정만 SKIP, 명시 manifest의 missing/hash mismatch는 FAIL
 - [x] Stage 0 최소 사전검사: fit-free 정적 FAIL/UNAVAILABLE, 공선성 단일 기존 문턱, no-Apply
 - [x] Stage 1 대표 4행 선택·2-start 예산 provenance 계약 (halving/pruning은 미완료)
+- [x] Stage 1 보수적 판정 계약: 8개 개별 T2, 전부 T2 실패만 탈락, 실행예외/불완전/혼합은 보존
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가

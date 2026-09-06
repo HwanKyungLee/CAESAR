@@ -15,6 +15,7 @@ from core import param_optimizer as PO
 
 SCHEMA_VERSION = 1
 STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
+STAGE1_EXPECTED_ATTEMPTS = 8
 
 
 def representative_indices(pool_size, requested=4):
@@ -225,7 +226,8 @@ def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=N
             eng, list(eng.gas_list), candidate["px_min"], candidate["px_max"], candidate["poly"])
         multiple_r = finite_or_none(diag["multiple_R"].get(target))
     except Exception as exc:  # diagnostic failure is unavailable, not pass
-        return {"state": "UNAVAILABLE", "reason": f"collinearity unavailable: {exc}"}
+        return {"state": "UNAVAILABLE", "reason": "COLLINEARITY_UNAVAILABLE",
+                "details": {"exception_class": type(exc).__name__}}
     details = {"target_multiple_R": multiple_r,
                "threshold": FP.COLLIN_HI_DEFAULT}
     if multiple_r is not None and multiple_r > FP.COLLIN_HI_DEFAULT:
@@ -267,15 +269,100 @@ def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=N
              "details": details})
 
 
+def stage1_gate(preflight_state, n_ok, n_fail, attempt_t2_states,
+                expected=STAGE1_EXPECTED_ATTEMPTS):
+    """Decide only whether conservative Stage 1 evidence may advance."""
+    if preflight_state != "PASS":
+        return {"state": "UNAVAILABLE", "reason": "STAGE0_NOT_PASSED",
+                "expected": expected, "n_ok": 0, "n_fail": 0,
+                "t2_counts": {s: 0 for s in ("PASS", "FAIL", "UNAVAILABLE")},
+                "advance": False, "rerun_required": False}
+    if n_ok + n_fail != expected or len(attempt_t2_states) != n_ok:
+        raise ValueError("Stage 1 gate attempt accounting is inconsistent")
+    counts = {state: attempt_t2_states.count(state)
+              for state in ("PASS", "FAIL", "UNAVAILABLE")}
+    if any(state not in counts for state in attempt_t2_states):
+        raise ValueError("Stage 1 gate received a non-canonical T2 state")
+    if n_ok == 0:
+        state, reason, advance = "UNAVAILABLE", "ALL_ATTEMPTS_UNAVAILABLE", True
+    elif n_ok < expected:
+        state, reason, advance = "UNAVAILABLE", "EXECUTION_INCOMPLETE", True
+    elif counts["FAIL"] == expected:
+        state, reason, advance = "FAIL", "ALL_ATTEMPTS_T2_FAIL", False
+    elif counts["PASS"] == expected:
+        state, reason, advance = "PASS", "ALL_ATTEMPTS_T2_PASS", True
+    elif counts["UNAVAILABLE"]:
+        state, reason, advance = "UNAVAILABLE", "T2_UNAVAILABLE", True
+    else:
+        state, reason, advance = "UNAVAILABLE", "MIXED_T2_OUTCOMES", True
+    return {"state": state, "reason": reason, "expected": expected,
+            "n_ok": n_ok, "n_fail": n_fail, "t2_counts": counts,
+            "advance": advance, "rerun_required": state == "UNAVAILABLE"}
+
+
+def stage1_evaluation_state(gate):
+    return ({"FAIL": "EVALUATED_FAIL", "PASS": "EVALUATED_PASS",
+             "UNAVAILABLE": "UNEVALUATED"}[gate["state"]])
+
+
+def paired_start_outputs(scans, starts, rows, failures):
+    """Expose paired raw start results and arithmetic deltas without judging them."""
+    ok = {(row["scan_id"], row["seed_id"]): row for row in rows}
+    failed = {(row["scan_id"], row["seed_id"]): row for row in failures}
+    numeric = ("conc", "rms_sig", "perr_rel", "autocorr1")
+    pairs = []
+    for scan in scans:
+        entries = []
+        for seed in starts:
+            key = (scan["id"], seed["id"])
+            if key in ok:
+                entries.append({"seed_id": seed["id"], "status": "OK",
+                                "result": ok[key]["result"]})
+            else:
+                entries.append({"seed_id": seed["id"], "status": "FAIL",
+                                "error": failed.get(key, {}).get("error", "missing attempt")})
+        deltas = {}
+        if len(entries) == 2 and all(entry["status"] == "OK" for entry in entries):
+            for key in numeric:
+                a = finite_or_none(entries[0]["result"].get(key))
+                b = finite_or_none(entries[1]["result"].get(key))
+                deltas[key] = None if a is None or b is None else b - a
+        pairs.append({"scan_id": scan["id"], "expected_starts": len(starts),
+                      "n_ok": sum(e["status"] == "OK" for e in entries),
+                      "n_fail": sum(e["status"] == "FAIL" for e in entries),
+                      "completeness": ("COMPLETE" if all(e["status"] == "OK" for e in entries)
+                                       else "INCOMPLETE"),
+                      "starts": entries, "deltas": deltas})
+    return pairs
+
+
+def attempt_identity_check(scans, starts, rows, failures):
+    """Require one outcome for every member of the exact 4x2 Cartesian budget."""
+    scan_ids = [scan.get("id") for scan in scans]
+    seed_ids = [seed.get("id") for seed in starts]
+    if (len(scan_ids) != 4 or len(set(scan_ids)) != 4
+            or len(seed_ids) != 2 or len(set(seed_ids)) != 2):
+        return {"state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID"}
+    expected = {(scan_id, seed_id) for scan_id in scan_ids for seed_id in seed_ids}
+    outcomes = [(row.get("scan_id"), row.get("seed_id")) for row in [*rows, *failures]]
+    if len(outcomes) != len(expected) or len(set(outcomes)) != len(outcomes):
+        return {"state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID"}
+    if set(outcomes) != expected:
+        return {"state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID"}
+    return {"state": "PASS", "reason": "ATTEMPT_IDENTITY_COMPLETE"}
+
+
 def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                        step_limit, allow_negative_gas, target="NO2"):
     preflight = stage0_preflight(eng, candidate, target)
     if preflight["state"] != "PASS":
+        gate = stage1_gate(preflight["state"], 0, 0, [])
         return {**candidate,
                 "evaluation_state": "UNEVALUATED",
                 "stage0_preflight": preflight,
                 "execution_gate": {"state": "NOT_RUN", "n_ok": 0, "n_fail": 0},
                 "t2_gate": {"state": "UNAVAILABLE", "reason": "fit not run after Stage 0"},
+                "stage1_gate": gate, "paired_starts": [],
                 "metrics": {key: summary([]) for key in
                             ("conc", "rms_sig", "perr_rel", "autocorr1")},
                 "runs": [], "failures": [], "seconds": 0.0}
@@ -298,17 +385,40 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
             except Exception as exc:
                 failures.append({"scan_id": scan["id"], "seed_id": seed["id"],
                                  "seconds": time.perf_counter() - t0,
-                                 "error": f"{type(exc).__name__}: {exc}"})
+                                 "error": "FIT_ATTEMPT_EXCEPTION",
+                                 "exception_class": type(exc).__name__})
     gate = ("PASS" if rows and not failures else "FAIL" if not rows else "UNAVAILABLE")
     vals = lambda key: [r["result"][key] for r in rows if np.isfinite(r["result"][key])]
     metrics = {key: summary(vals(key)) for key in ("conc", "rms_sig", "perr_rel", "autocorr1")}
-    t2 = t2_tri_state(eng, candidate, rows, target, len(scans) * len(starts))
-    state = ("EVALUATED_FAIL" if gate == "FAIL" or t2["state"] == "FAIL" else
-             "INCOMPLETE" if gate == "UNAVAILABLE" else
-             "EVALUATED_PASS" if t2["state"] == "PASS" else "EVALUATED_WITH_T2_UNAVAILABLE")
+    expected = STAGE1_EXPECTED_ATTEMPTS
+    if len(scans) != 4 or len(starts) != 2:
+        raise ValueError("Stage 1 evaluation requires exactly 4 scans and 2 starts")
+    identity = attempt_identity_check(scans, starts, rows, failures)
+    if identity["state"] != "PASS":
+        s1 = {"state": "UNAVAILABLE", "reason": identity["reason"],
+              "expected": expected, "n_ok": len(rows), "n_fail": len(failures),
+              "t2_counts": {s: 0 for s in ("PASS", "FAIL", "UNAVAILABLE")},
+              "advance": True, "rerun_required": True}
+        return {**candidate, "evaluation_state": "UNEVALUATED",
+                "stage0_preflight": preflight,
+                "execution_gate": {"state": gate, "n_ok": len(rows), "n_fail": len(failures)},
+                "attempt_identity": identity, "stage1_gate": s1,
+                "t2_gate": {"state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID"},
+                "metrics": metrics, "paired_starts": [], "runs": rows,
+                "failures": failures, "seconds": time.perf_counter() - started}
+    attempt_t2 = [t2_tri_state(eng, candidate, [row], target, expected_count=1)
+                  for row in rows]
+    for row, verdict in zip(rows, attempt_t2):
+        row["t2"] = verdict
+    t2 = t2_tri_state(eng, candidate, rows, target, expected)
+    s1 = stage1_gate(preflight["state"], len(rows), len(failures),
+                     [verdict["state"] for verdict in attempt_t2], expected)
+    state = stage1_evaluation_state(s1)
     out = {**candidate, "evaluation_state": state, "stage0_preflight": preflight,
+           "attempt_identity": identity,
            "execution_gate": {"state": gate, "n_ok": len(rows), "n_fail": len(failures)},
-           "t2_gate": t2, "metrics": metrics,
+           "t2_gate": t2, "stage1_gate": s1, "metrics": metrics,
+           "paired_starts": paired_start_outputs(scans, starts, rows, failures),
            "runs": rows, "failures": failures, "seconds": time.perf_counter() - started}
     return out
 
@@ -388,7 +498,15 @@ def overall_status(candidates):
     if states and all(s == "EVALUATED_FAIL" or (s == "UNEVALUATED" and p == "FAIL")
                       for s, p in zip(states, preflight_states)):
         return "ABSTAIN"
-    if any(s == "INCOMPLETE" for s in states):
+    if any(s not in ("UNEVALUATED", "EVALUATED_PASS", "EVALUATED_FAIL") for s in states):
+        return "ABSTAIN_INCOMPLETE"
+    rerun_required = any(c.get("stage1_gate", {}).get("rerun_required", False)
+                         for c in candidates)
+    unresolved_nonadvancing = any(
+        s == "UNEVALUATED" and not c.get("stage1_gate", {}).get("advance", False)
+        and c.get("stage0_preflight", {}).get("state") != "FAIL"
+        for s, c in zip(states, candidates))
+    if rerun_required or unresolved_nonadvancing:
         return "ABSTAIN_INCOMPLETE"
     return "EVALUATED_NO_PLATEAU_CLAIM"
 

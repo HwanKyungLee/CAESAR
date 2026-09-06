@@ -231,14 +231,144 @@ def test_evaluator_injects_two_distinct_final_starts():
     try:
         starts = [{"id": "a", "shift": -2., "squeeze": 1., "provenance": "test"},
                   {"id": "b", "shift": 2., "squeeze": 1., "provenance": "test"}]
-        scans = [{"id": "s", "wave": np.arange(101), "alpha": np.zeros(101),
-                  "T_C": 25., "P_mbar": 1013.}]
+        scans = [{"id": f"s{i}", "wave": np.arange(101), "alpha": np.zeros(101),
+                  "T_C": 25., "P_mbar": 1013.} for i in range(4)]
         FE.evaluate_candidate(Engine(), None, {}, scans, {"id": "c", "px_min": 0, "px_max": 100,
                                                      "poly": 2}, starts, .5, True)
     finally:
         FE.PO.fit_scan, FE.t2_tri_state = original, old_t2
         FE.FP.differential_collinearity = old_diag
-    assert seen == [(-2., 1.), (2., 1.)]
+    assert seen == [(-2., 1.), (2., 1.)] * 4
+
+
+def test_stage1_conservative_verdict_table():
+    cases = [
+        ("FAIL", 0, 0, [], "UNAVAILABLE", "STAGE0_NOT_PASSED", False),
+        ("UNAVAILABLE", 0, 0, [], "UNAVAILABLE", "STAGE0_NOT_PASSED", False),
+        ("PASS", 0, 8, [], "UNAVAILABLE", "ALL_ATTEMPTS_UNAVAILABLE", True),
+        ("PASS", 7, 1, ["PASS"] * 7, "UNAVAILABLE", "EXECUTION_INCOMPLETE", True),
+        ("PASS", 8, 0, ["FAIL"] * 8, "FAIL", "ALL_ATTEMPTS_T2_FAIL", False),
+        ("PASS", 8, 0, ["PASS"] * 8, "PASS", "ALL_ATTEMPTS_T2_PASS", True),
+        ("PASS", 8, 0, ["PASS"] * 7 + ["FAIL"], "UNAVAILABLE",
+         "MIXED_T2_OUTCOMES", True),
+        ("PASS", 8, 0, ["PASS"] * 7 + ["UNAVAILABLE"], "UNAVAILABLE",
+         "T2_UNAVAILABLE", True),
+    ]
+    for preflight, n_ok, n_fail, t2, state, reason, advance in cases:
+        gate = FE.stage1_gate(preflight, n_ok, n_fail, t2)
+        assert gate["state"] == state and gate["reason"] == reason
+        assert gate["advance"] is advance and gate["expected"] == 8
+        assert gate["rerun_required"] is (state == "UNAVAILABLE" and preflight == "PASS")
+        assert gate["n_ok"] == n_ok and gate["n_fail"] == n_fail
+        assert set(gate["t2_counts"]) == {"PASS", "FAIL", "UNAVAILABLE"}
+        assert FE.stage1_evaluation_state(gate) in {
+            "UNEVALUATED", "EVALUATED_PASS", "EVALUATED_FAIL"}
+
+    for args in (("PASS", 7, 0, ["PASS"] * 7),
+                 ("PASS", 8, 0, ["PASS"] * 7),
+                 ("PASS", 8, 0, ["PASS"] * 7 + ["BAD"])):
+        try:
+            FE.stage1_gate(*args)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("inconsistent Stage 1 accounting was accepted")
+
+    for n_ok, n_fail, t2 in (
+            (0, 8, []),
+            (7, 1, ["PASS"] * 7),
+            (8, 0, ["PASS"] * 7 + ["FAIL"]),
+            (8, 0, ["PASS"] * 7 + ["UNAVAILABLE"])):
+        gate = FE.stage1_gate("PASS", n_ok, n_fail, t2)
+        candidate = {"evaluation_state": FE.stage1_evaluation_state(gate),
+                     "stage0_preflight": {"state": "PASS"},
+                     "stage1_gate": gate}
+        assert FE.overall_status([candidate]) == "ABSTAIN_INCOMPLETE"
+
+
+def test_stage1_paired_outputs_are_diagnostic_only():
+    scans = [{"id": f"s{i}"} for i in range(4)]
+    starts = [{"id": "a"}, {"id": "b"}]
+    rows = [
+        {"scan_id": scan["id"], "seed_id": seed["id"],
+         "result": {"conc": i + j, "rms_sig": 1., "perr_rel": .2,
+                    "autocorr1": 0., "coeffs": {"NO2": i}}}
+        for i, scan in enumerate(scans) for j, seed in enumerate(starts)
+        if not (i == 3 and j == 1)]
+    failures = [{"scan_id": "s3", "seed_id": "b", "error": "RuntimeError"}]
+    pairs = FE.paired_start_outputs(scans, starts, rows, failures)
+    assert len(pairs) == 4
+    assert pairs[0]["completeness"] == "COMPLETE"
+    assert pairs[0]["deltas"]["conc"] == 1
+    assert pairs[3]["completeness"] == "INCOMPLETE"
+    assert pairs[3]["deltas"] == {}
+    assert "stable" not in json.dumps(pairs).lower()
+
+
+def test_stage1_attempt_identity_is_exact_cartesian_product():
+    scans = [{"id": f"s{i}"} for i in range(4)]
+    starts = [{"id": "a"}, {"id": "b"}]
+    outcomes = [{"scan_id": scan["id"], "seed_id": seed["id"]}
+                for scan in scans for seed in starts]
+    assert FE.attempt_identity_check(scans, starts, outcomes, [])["state"] == "PASS"
+    invalid = [
+        (scans, starts, outcomes[:-1], []),
+        (scans, starts, outcomes, [outcomes[0]]),
+        (scans, starts, outcomes[:-1] + [outcomes[0]], []),
+        ([*scans[:3], {"id": "s0"}], starts, outcomes, []),
+        (scans, [{"id": "a"}, {"id": "a"}], outcomes, []),
+    ]
+    for args in invalid:
+        verdict = FE.attempt_identity_check(*args)
+        assert verdict == {"state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID"}
+
+
+def test_stage1_exceptions_are_unavailable_and_path_private():
+    class Engine:
+        _wave_axis = np.arange(101.)
+        gas_list = ["NO2", "H2O"]
+        raw_references = {"NO2": np.sin(np.linspace(0, 20, 101)),
+                          "H2O": np.cos(np.linspace(0, 20, 101))}
+    candidate = {"id": "c", "px_min": 0, "px_max": 100, "poly": 2}
+    scans = [{"id": f"s{i}", "wave": np.arange(101), "alpha": np.zeros(101),
+              "T_C": 25., "P_mbar": 1013.} for i in range(4)]
+    starts = [{"id": "a", "shift": -1., "squeeze": 1.},
+              {"id": "b", "shift": 1., "squeeze": 1.}]
+    old_fit, old_diag = FE.PO.fit_scan, FE.FP.differential_collinearity
+    secrets = [r"C:\Users\secret\alpha.dat", "/home/secret/alpha.dat",
+               r"\\server\private\alpha.dat"]
+    try:
+        FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": .2}}
+        for secret in secrets:
+            FE.PO.fit_scan = lambda *a, value=secret, **k: (_ for _ in ()).throw(
+                RuntimeError(value))
+            result = FE.evaluate_candidate(
+                Engine(), None, {}, scans, candidate, starts, .5, True)
+            encoded = json.dumps(result)
+            assert result["evaluation_state"] == "UNEVALUATED"
+            assert result["stage1_gate"]["state"] == "UNAVAILABLE"
+            assert result["stage1_gate"]["reason"] == "ALL_ATTEMPTS_UNAVAILABLE"
+            assert result["stage1_gate"]["advance"] is True
+            assert secret not in encoded
+
+            FE.FP.differential_collinearity = lambda *a, value=secret, **k: (
+                _ for _ in ()).throw(RuntimeError(value))
+            t2 = FE.t2_tri_state(Engine(), candidate, [])
+            assert secret not in json.dumps(t2)
+            assert t2["details"]["exception_class"] == "RuntimeError"
+            FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": .2}}
+
+        FE.PO.fit_scan = lambda *a, **k: {
+            "conc": 1., "rms_sig": .1, "perr_rel": .2, "autocorr1": 0., "coeffs": {}}
+        duplicate_scans = [*scans[:3], {**scans[3], "id": "s0"}]
+        invalid = FE.evaluate_candidate(
+            Engine(), None, {}, duplicate_scans, candidate, starts, .5, True)
+        assert invalid["evaluation_state"] == "UNEVALUATED"
+        assert invalid["stage1_gate"]["reason"] == "ATTEMPT_IDENTITY_INVALID"
+        assert invalid["stage1_gate"]["advance"] is True
+        assert invalid["paired_starts"] == []
+    finally:
+        FE.PO.fit_scan, FE.FP.differential_collinearity = old_fit, old_diag
 
 
 def test_multistart_changes_target_theta_only_not_bounds():
@@ -292,6 +422,17 @@ def test_t2_nonnumeric_collinearity_is_unavailable():
 def test_status_and_coordinate_contracts():
     assert FE.overall_status([{"evaluation_state": "EVALUATED_FAIL"}]) == "ABSTAIN"
     assert FE.overall_status([{"evaluation_state": "INCOMPLETE"}]) == "ABSTAIN_INCOMPLETE"
+    assert FE.overall_status([{"evaluation_state": "UNEVALUATED",
+                               "stage0_preflight": {"state": "PASS"},
+                               "stage1_gate": {"advance": True,
+                                               "rerun_required": True}}]) == "ABSTAIN_INCOMPLETE"
+    assert FE.overall_status([{"evaluation_state": "UNEVALUATED",
+                               "stage0_preflight": {"state": "PASS"},
+                               "stage1_gate": {"advance": True,
+                                               "rerun_required": False}}]) == "EVALUATED_NO_PLATEAU_CLAIM"
+    assert FE.overall_status([{"evaluation_state": "UNEVALUATED",
+                               "stage0_preflight": {"state": "PASS"},
+                               "stage1_gate": {"advance": False}}]) == "ABSTAIN_INCOMPLETE"
     scan = {"id": "x", "wave": np.arange(101.), "alpha": np.zeros(101), "px_start": 10}
     assert FE.validate_coordinates(np.arange(200.), [scan],
                                    [{"px_min": 9, "px_max": 100, "poly": 2}])
@@ -406,6 +547,10 @@ def main():
     test_stage1_incomplete_input_abstains_before_fit()
     test_t2_tri_state_never_turns_no_anchor_into_pass()
     test_evaluator_injects_two_distinct_final_starts()
+    test_stage1_conservative_verdict_table()
+    test_stage1_paired_outputs_are_diagnostic_only()
+    test_stage1_attempt_identity_is_exact_cartesian_product()
+    test_stage1_exceptions_are_unavailable_and_path_private()
     test_multistart_changes_target_theta_only_not_bounds()
     test_t2_nan_and_partial_are_unavailable()
     test_t2_nonnumeric_collinearity_is_unavailable()
