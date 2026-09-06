@@ -259,6 +259,8 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [x] Stage 0 최소 사전검사: fit-free 정적 FAIL/UNAVAILABLE, 공선성 단일 기존 문턱, no-Apply
 - [x] Stage 1 대표 4행 선택·2-start 예산 provenance 계약 (halving/pruning은 미완료)
 - [x] Stage 1 보수적 판정 계약: 8개 개별 T2, 전부 T2 실패만 탈락, 실행예외/불완전/혼합은 보존
+- [x] zero-base Stage 0 shift/squeeze 정책의 worker-compatible `ref_props` 순수 변환 계약
+  (원본 불변, 변환만으로 Stage 1 실행·판정된 것은 아님)
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가

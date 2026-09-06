@@ -1,11 +1,15 @@
 import os
 import sys
+import copy
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import fit_explorer as FE
+from core.doas_fit import DoasFitter
 
 
 def test_zero_base_grid_is_explicit_and_deterministic():
@@ -32,21 +36,123 @@ def test_zero_base_rejects_collapsed_nm_offsets():
         raise AssertionError("collapsed offsets must fail closed")
 
 
-def test_zero_base_stage0_is_fit_free_and_counts(monkeypatch):
+def test_zero_base_stage0_is_fit_free_and_counts():
     class Engine:
         _wave_axis = np.arange(300.0)
         gas_list = ["NO2"]
         raw_references = {"NO2": np.ones(300)}
 
-    monkeypatch.setattr(FE.FP, "differential_collinearity",
-                        lambda *a, **k: {"multiple_R": {"NO2": 0.1}})
     candidates = [{"id": "pass", "px_min": 100, "px_max": 200, "poly": 2},
                   {"id": "bad", "px_min": 100, "px_max": 999, "poly": 2}]
-    report = FE.stage0_candidate_grid(Engine(), candidates)
+    with patch.object(FE.FP, "differential_collinearity",
+                      return_value={"multiple_R": {"NO2": 0.1}}):
+        report = FE.stage0_candidate_grid(Engine(), candidates)
     assert report["fit_executed"] is False
     assert report["counts"] == {"PASS": 1, "FAIL": 1, "UNAVAILABLE": 0}
     assert report["candidates"][1]["stage0_preflight"]["state"] == "FAIL"
 
 
+def _translation_fixture():
+    cfg = {"f_min": 100, "f_max": 200, "poly_deg": 4,
+           "refs": [{"name": "H2O"}, {"name": "NO2"}]}
+    props = {
+        "H2O": {"sh_mode": "Link", "sh_val": "NO2",
+                "sq_mode": "Link", "sq_val": "NO2", "mult": -12},
+        "NO2": {"sh_mode": "Center", "sh_val": "-2, 3",
+                "sq_mode": "Fix", "sq_val": "1.0", "mult": 0},
+    }
+    wave = np.linspace(430.0, 480.0, 401)
+    candidates = FE.zero_base_policy_candidates(cfg, wave)
+    unique = {}
+    for candidate in candidates:
+        key = repr(candidate["policy"])
+        unique.setdefault(key, candidate)
+    assert len(unique) == 35
+    return cfg, props, list(unique.values())
+
+
+def test_policy_translation_all_35_round_trip_through_worker():
+    cfg, props, candidates = _translation_fixture()
+    original_cfg, original_props = copy.deepcopy(cfg), copy.deepcopy(props)
+    fake = SimpleNamespace(engine=SimpleNamespace(gas_list=["H2O", "NO2"]))
+    for candidate in candidates:
+        original_candidate = copy.deepcopy(candidate)
+        translated = FE.translate_zero_base_policy(cfg, props, candidate)
+        derived = translated["ref_props"]
+        assert derived["H2O"] == props["H2O"]
+        active, fixed, linked, _, lower, upper = DoasFitter.setup_fit_parameters(
+            fake, derived, 0.0, [0.0, 1.0], 1e6)
+        policy = candidate["policy"]
+        shift = policy["shift"]
+        squeeze = policy["squeeze"]
+        if shift["mode"] == "Fix":
+            assert fixed["NO2_sh"] == shift["value"]
+        else:
+            index = active.index("NO2_sh")
+            assert (lower[index], upper[index]) == (shift["lower"], shift["upper"])
+        if squeeze["mode"] == "Fix":
+            assert fixed["NO2_sq"] == squeeze["value"]
+            assert derived["NO2"]["sq_val"] == "0.0"
+        else:
+            index = active.index("NO2_sq")
+            assert np.allclose((lower[index], upper[index]),
+                               (squeeze["lower"], squeeze["upper"]),
+                               rtol=0.0, atol=1e-15)
+        assert linked["H2O_sh"] == "NO2_sh"
+        assert linked["H2O_sq"] == "NO2_sq"
+        assert translated["provenance"]["fit_executed"] is False
+        assert candidate == original_candidate
+    assert cfg == original_cfg
+    assert props == original_props
+
+
+def test_policy_translation_malformed_fails_closed():
+    cfg, props, candidates = _translation_fixture()
+    base = candidates[0]
+    malformed = []
+    wrong_stage = copy.deepcopy(base)
+    wrong_stage["policy_stage"] = "STAGE1"
+    malformed.append(wrong_stage)
+    extra = copy.deepcopy(base)
+    extra["policy"]["shift"]["extra"] = 1
+    malformed.append(extra)
+    nan_value = copy.deepcopy(base)
+    nan_value["policy"]["shift"] = {"mode": "Fix", "value": float("nan")}
+    malformed.append(nan_value)
+    reversed_bounds = copy.deepcopy(base)
+    reversed_bounds["policy"]["squeeze"] = {"mode": "Limit", "lower": 1.1, "upper": 0.9}
+    malformed.append(reversed_bounds)
+    bad_fix = copy.deepcopy(base)
+    bad_fix["policy"]["squeeze"] = {"mode": "Fix", "value": 1.1}
+    malformed.append(bad_fix)
+    string_value = copy.deepcopy(base)
+    string_value["policy"]["shift"] = {"mode": "Fix", "value": "0.0"}
+    malformed.append(string_value)
+    missing_id = copy.deepcopy(base)
+    del missing_id["id"]
+    malformed.append(missing_id)
+    for candidate in malformed:
+        try:
+            FE.translate_zero_base_policy(cfg, props, candidate)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("malformed policy must fail closed")
+
+    missing_target = copy.deepcopy(cfg)
+    missing_target["refs"] = [{"name": "H2O"}]
+    try:
+        FE.translate_zero_base_policy(missing_target, props, base)
+    except ValueError as exc:
+        assert "target" in str(exc)
+    else:
+        raise AssertionError("missing target must fail closed")
+
+
 if __name__ == "__main__":
     test_zero_base_grid_is_explicit_and_deterministic()
+    test_zero_base_rejects_collapsed_nm_offsets()
+    test_zero_base_stage0_is_fit_free_and_counts()
+    test_policy_translation_all_35_round_trip_through_worker()
+    test_policy_translation_malformed_fails_closed()
+    print("test_zero_base_candidates: PASS")

@@ -1,6 +1,7 @@
 """Minimal Fit Setting Explorer contracts (no ranking, plateau, or Apply)."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -205,6 +206,110 @@ def zero_base_policy_candidates(cfg, wave_axis, target="NO2", window_offsets_nm=
     if len({c["id"] for c in rows}) != len(rows):
         raise ValueError("zero-base candidate IDs are not unique")
     return rows
+
+
+def translate_zero_base_policy(cfg, ref_props, candidate, target="NO2"):
+    """Translate one Stage 0 policy into worker-compatible Stage 1 ref props.
+
+    This is a pure translation contract: no fit is run and neither input is
+    mutated.  The candidate still carries ``STAGE0_METADATA_ONLY`` because
+    translation alone does not make it evaluated Stage 1 evidence.
+    """
+    if not isinstance(candidate, dict) or candidate.get("policy_stage") != "STAGE0_METADATA_ONLY":
+        raise ValueError("candidate must be STAGE0_METADATA_ONLY")
+    if not isinstance(candidate.get("id"), str) or not candidate["id"]:
+        raise ValueError("candidate id is required")
+    if not isinstance(cfg, dict) or not isinstance(ref_props, dict):
+        raise ValueError("FitSet cfg/ref_props must be objects")
+    refs = cfg.get("refs")
+    if not isinstance(refs, list) or any(not isinstance(ref, dict) for ref in refs):
+        raise ValueError("FitSet refs must be an ordered list of objects")
+    gas_order = [ref.get("name") for ref in refs]
+    if (any(not isinstance(name, str) or not name for name in gas_order)
+            or len(gas_order) != len(set(gas_order))):
+        raise ValueError("FitSet refs must contain unique species names")
+    if target not in gas_order or target not in ref_props or not isinstance(ref_props[target], dict):
+        raise ValueError("candidate target is absent from FitSet refs/ref_props")
+    if candidate.get("target") != target:
+        raise ValueError("candidate target does not match requested target")
+
+    policy = candidate.get("policy")
+    if not isinstance(policy, dict) or set(policy) != {"shift", "squeeze"}:
+        raise ValueError("candidate policy must contain exactly shift and squeeze")
+
+    def parse_axis(axis, *, positive=False):
+        spec = policy[axis]
+        if not isinstance(spec, dict) or spec.get("mode") not in ("Fix", "Limit"):
+            raise ValueError(f"candidate {axis} policy is invalid")
+        mode = spec["mode"]
+        expected = {"mode", "value"} if mode == "Fix" else {"mode", "lower", "upper"}
+        if set(spec) != expected:
+            raise ValueError(f"candidate {axis} policy schema is invalid")
+        keys = ("value",) if mode == "Fix" else ("lower", "upper")
+        values = []
+        for key in keys:
+            value = spec[key]
+            if (isinstance(value, (bool, np.bool_))
+                    or not isinstance(value, (int, float, np.integer, np.floating))):
+                raise ValueError(f"candidate {axis} values must be finite numbers")
+            value = float(value)
+            if not np.isfinite(value) or (positive and value <= 0):
+                raise ValueError(f"candidate {axis} values must be finite positive numbers")
+            values.append(value)
+        if mode == "Limit" and values[1] <= values[0]:
+            raise ValueError(f"candidate {axis} bounds must be strictly increasing")
+        return mode, values
+
+    sh_mode, sh_values = parse_axis("shift")
+    sq_mode, sq_values = parse_axis("squeeze", positive=True)
+    derived = copy.deepcopy(ref_props)
+    target_props = derived[target]
+    if sh_mode == "Fix":
+        target_props["sh_mode"] = "Fix"
+        target_props["sh_val"] = repr(sh_values[0])
+    else:
+        _strict_interval(*sh_values, "candidate shift")
+        target_props["sh_mode"] = "Limit"
+        target_props["sh_val"] = f"{repr(sh_values[0])}, {repr(sh_values[1])}"
+    if sq_mode == "Fix":
+        if sq_values[0] != 1.0:
+            raise ValueError("candidate fixed squeeze must be the absolute factor 1.0")
+        target_props["sq_mode"] = "Fix"
+        target_props["sq_val"] = "0.0"
+    else:
+        _strict_interval(*sq_values, "candidate squeeze")
+        target_props["sq_mode"] = "Limit"
+        target_props["sq_val"] = (f"{repr(sq_values[0] - 1.0)}, "
+                                  f"{repr(sq_values[1] - 1.0)}")
+
+    # Fail closed if our serialization does not round-trip through the same
+    # parser used to derive independent Stage 1 nonlinear bounds.
+    parsed = independent_global_bounds(derived, gas_order)
+    if sh_mode == "Limit" and not np.allclose(
+            parsed.get(f"{target}_sh", ()), sh_values, rtol=0.0, atol=1e-15):
+        raise ValueError("candidate shift policy failed worker round-trip")
+    if sh_mode == "Fix" and float(target_props["sh_val"]) != sh_values[0]:
+        raise ValueError("candidate fixed shift failed worker round-trip")
+    if sq_mode == "Limit" and not np.allclose(
+            parsed.get(f"{target}_sq", ()), sq_values, rtol=0.0, atol=1e-15):
+        raise ValueError("candidate squeeze policy failed worker round-trip")
+    if sq_mode == "Fix":
+        raw = float(target_props["sq_val"])
+        worker_value = 1.0 + raw if abs(raw) < 0.5 else raw
+        if worker_value != sq_values[0]:
+            raise ValueError("candidate fixed squeeze failed worker round-trip")
+
+    provenance = {
+        "schema": "zero-base-policy-translation-v1",
+        "candidate_id": candidate.get("id"),
+        "target": target,
+        "gas_order": gas_order,
+        "source_policy": copy.deepcopy(policy),
+        "derived_target_ref_props": copy.deepcopy(target_props),
+        "source_policy_stage": "STAGE0_METADATA_ONLY",
+        "fit_executed": False,
+    }
+    return {"ref_props": derived, "provenance": provenance}
 
 
 def _strict_interval(lo, hi, label):
