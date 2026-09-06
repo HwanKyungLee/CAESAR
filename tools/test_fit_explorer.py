@@ -224,7 +224,8 @@ def test_evaluator_injects_two_distinct_final_starts():
     seen = []
     original = FE.PO.fit_scan
     FE.PO.fit_scan = lambda *args, **kwargs: (seen.append(kwargs["controlled_start"]) or
-        {"conc": 1., "rms_sig": .1, "perr_rel": .2, "autocorr1": 0., "coeffs": {}})
+        {"conc": 1., "rms_sig": .1, "perr_rel": .2, "autocorr1": 0., "coeffs": {},
+         "shifts": {"NO2": 0.}, "squeezes": {"NO2": 1.}})
     FE.t2_tri_state, old_t2 = (lambda *args, **kwargs: {"state": "UNAVAILABLE"}), FE.t2_tri_state
     FE.FP.differential_collinearity, old_diag = (lambda *args, **kwargs: {
         "multiple_R": {"NO2": .2}}), FE.FP.differential_collinearity
@@ -233,12 +234,14 @@ def test_evaluator_injects_two_distinct_final_starts():
                   {"id": "b", "shift": 2., "squeeze": 1., "provenance": "test"}]
         scans = [{"id": f"s{i}", "wave": np.arange(101), "alpha": np.zeros(101),
                   "T_C": 25., "P_mbar": 1013.} for i in range(4)]
-        FE.evaluate_candidate(Engine(), None, {}, scans, {"id": "c", "px_min": 0, "px_max": 100,
-                                                     "poly": 2}, starts, .5, True)
+        evaluated = FE.evaluate_candidate(
+            Engine(), None, {}, scans,
+            {"id": "c", "px_min": 0, "px_max": 100, "poly": 2}, starts, .5, True)
     finally:
         FE.PO.fit_scan, FE.t2_tri_state = original, old_t2
         FE.FP.differential_collinearity = old_diag
     assert seen == [(-2., 1.), (2., 1.)] * 4
+    assert evaluated["seed_stability"]["state"] == "SEED_STABLE"
 
 
 def test_stage1_conservative_verdict_table():
@@ -303,6 +306,45 @@ def test_stage1_paired_outputs_are_diagnostic_only():
     assert pairs[3]["completeness"] == "INCOMPLETE"
     assert pairs[3]["deltas"] == {}
     assert "stable" not in json.dumps(pairs).lower()
+
+
+def test_stage1_seed_stability_is_separate_convergence_evidence():
+    def result(conc=10., shift=0., squeeze=1., rms_sig=.1):
+        return {"conc": conc, "rms_sig": rms_sig, "perr_rel": .2,
+                "autocorr1": 0., "shifts": {"NO2": shift},
+                "squeezes": {"NO2": squeeze}}
+
+    pairs = [{"scan_id": f"s{i}", "completeness": "COMPLETE",
+              "starts": [{"status": "OK", "result": result()},
+                         {"status": "OK", "result": result(
+                             conc=10.5, shift=.01, squeeze=1.00001, rms_sig=.101)}]}
+             for i in range(4)]
+    stable = FE.seed_stability(pairs)
+    assert stable["state"] == "SEED_STABLE"
+    json.dumps(stable)
+    assert stable["tolerances"] == {"conc_abs_ppb": .1, "conc_rel": .05,
+                                      "shift_abs_px": .01, "squeeze_abs": 1e-5,
+                                      "rms_sig_rel": .01}
+
+    pairs[2]["starts"][1]["result"]["shifts"]["NO2"] = .01001
+    assert FE.seed_stability(pairs)["state"] == "SEED_UNSTABLE"
+    pairs[2]["starts"][1]["result"]["shifts"]["NO2"] = 0.
+    pairs[2]["starts"][1]["result"]["squeezes"]["NO2"] = 1.000011
+    assert FE.seed_stability(pairs)["state"] == "SEED_UNSTABLE"
+    pairs[2]["starts"][1]["result"]["squeezes"]["NO2"] = 1.
+    pairs[2]["starts"][1]["result"]["rms_sig"] = .102
+    assert FE.seed_stability(pairs)["state"] == "SEED_UNSTABLE"
+    pairs[2]["starts"][1]["result"]["rms_sig"] = .1
+    pairs[2]["starts"][0]["result"]["conc"] = 1.
+    pairs[2]["starts"][1]["result"]["conc"] = 1.1
+    assert FE.seed_stability(pairs)["state"] == "SEED_STABLE"
+    pairs[2]["starts"][0]["result"]["conc"] = 9.499
+    pairs[2]["starts"][1]["result"]["conc"] = 10.
+    assert FE.seed_stability(pairs)["state"] == "SEED_UNSTABLE"
+    pairs[2]["starts"][1]["result"]["shifts"]["NO2"] = float("nan")
+    assert FE.seed_stability(pairs)["state"] == "UNAVAILABLE"
+    pairs[2]["completeness"] = "INCOMPLETE"
+    assert FE.seed_stability(pairs)["state"] == "UNAVAILABLE"
 
 
 def test_stage1_attempt_identity_is_exact_cartesian_product():
@@ -549,6 +591,7 @@ def main():
     test_evaluator_injects_two_distinct_final_starts()
     test_stage1_conservative_verdict_table()
     test_stage1_paired_outputs_are_diagnostic_only()
+    test_stage1_seed_stability_is_separate_convergence_evidence()
     test_stage1_attempt_identity_is_exact_cartesian_product()
     test_stage1_exceptions_are_unavailable_and_path_private()
     test_multistart_changes_target_theta_only_not_bounds()

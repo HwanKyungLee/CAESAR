@@ -16,6 +16,10 @@ from core import param_optimizer as PO
 SCHEMA_VERSION = 1
 STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
 STAGE1_EXPECTED_ATTEMPTS = 8
+SEED_STABILITY_TOLERANCES = {
+    "conc_abs_ppb": 0.1, "conc_rel": 0.05, "shift_abs_px": 0.01,
+    "squeeze_abs": 1e-5, "rms_sig_rel": 0.01,
+}
 
 
 def validate_reference_policy(cfg):
@@ -371,6 +375,50 @@ def paired_start_outputs(scans, starts, rows, failures):
     return pairs
 
 
+def seed_stability(pairs, target="NO2"):
+    """Classify paired-start convergence only; this is not a T2 physics gate."""
+    tolerances = dict(SEED_STABILITY_TOLERANCES)
+    checks = []
+    unavailable = lambda reason: {"state": "UNAVAILABLE", "reason": reason,
+                                  "target": target, "tolerances": tolerances,
+                                  "checks": checks}
+    if len(pairs) != 4:
+        return unavailable("PAIRED_STARTS_INCOMPLETE")
+    for pair in pairs:
+        starts = pair.get("starts", [])
+        if (pair.get("completeness") != "COMPLETE" or len(starts) != 2
+                or any(start.get("status") != "OK" for start in starts)):
+            return unavailable("PAIRED_STARTS_INCOMPLETE")
+        a, b = (start.get("result", {}) for start in starts)
+        values = [finite_or_none(a.get("conc")), finite_or_none(b.get("conc")),
+                  finite_or_none(a.get("shifts", {}).get(target)),
+                  finite_or_none(b.get("shifts", {}).get(target)),
+                  finite_or_none(a.get("squeezes", {}).get(target)),
+                  finite_or_none(b.get("squeezes", {}).get(target)),
+                  finite_or_none(a.get("rms_sig")), finite_or_none(b.get("rms_sig"))]
+        if any(value is None for value in values):
+            return unavailable("PAIRED_START_VALUE_UNAVAILABLE")
+        ca, cb, sha, shb, sqa, sqb, ra, rb = values
+        conc_limit = max(tolerances["conc_abs_ppb"],
+                         tolerances["conc_rel"] * max(abs(ca), abs(cb)))
+        rms_scale = max(abs(ra), abs(rb))
+        deltas = {"conc_abs_ppb": abs(cb - ca), "conc_limit_ppb": conc_limit,
+                  "shift_abs_px": abs(shb - sha), "squeeze_abs": abs(sqb - sqa),
+                  "rms_sig_rel": 0.0 if rms_scale == 0 else abs(rb - ra) / rms_scale}
+        within = lambda value, limit: bool(value <= limit or
+                                           np.isclose(value, limit, rtol=1e-12, atol=1e-15))
+        passed = (within(deltas["conc_abs_ppb"], conc_limit)
+                  and within(deltas["shift_abs_px"], tolerances["shift_abs_px"])
+                  and within(deltas["squeeze_abs"], tolerances["squeeze_abs"])
+                  and within(deltas["rms_sig_rel"], tolerances["rms_sig_rel"]))
+        checks.append({"scan_id": pair.get("scan_id"), "passed": passed,
+                       "deltas": deltas})
+    stable = all(check["passed"] for check in checks)
+    return {"state": "SEED_STABLE" if stable else "SEED_UNSTABLE",
+            "reason": "ALL_PAIRS_WITHIN_TOLERANCE" if stable else "PAIR_THRESHOLD_EXCEEDED",
+            "target": target, "tolerances": tolerances, "checks": checks}
+
+
 def attempt_identity_check(scans, starts, rows, failures):
     """Require one outcome for every member of the exact 4x2 Cartesian budget."""
     scan_ids = [scan.get("id") for scan in scans]
@@ -398,6 +446,7 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                 "execution_gate": {"state": "NOT_RUN", "n_ok": 0, "n_fail": 0},
                 "t2_gate": {"state": "UNAVAILABLE", "reason": "fit not run after Stage 0"},
                 "stage1_gate": gate, "paired_starts": [],
+                "seed_stability": {**seed_stability([], target), "reason": "FIT_NOT_RUN"},
                 "metrics": {key: summary([]) for key in
                             ("conc", "rms_sig", "perr_rel", "autocorr1")},
                 "runs": [], "failures": [], "seconds": 0.0}
@@ -439,7 +488,10 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                 "execution_gate": {"state": gate, "n_ok": len(rows), "n_fail": len(failures)},
                 "attempt_identity": identity, "stage1_gate": s1,
                 "t2_gate": {"state": "UNAVAILABLE", "reason": "ATTEMPT_IDENTITY_INVALID"},
-                "metrics": metrics, "paired_starts": [], "runs": rows,
+                "metrics": metrics, "paired_starts": [],
+                "seed_stability": {**seed_stability([], target),
+                                   "reason": "ATTEMPT_IDENTITY_INVALID"},
+                "runs": rows,
                 "failures": failures, "seconds": time.perf_counter() - started}
     attempt_t2 = [t2_tri_state(eng, candidate, [row], target, expected_count=1)
                   for row in rows]
@@ -449,11 +501,12 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
     s1 = stage1_gate(preflight["state"], len(rows), len(failures),
                      [verdict["state"] for verdict in attempt_t2], expected)
     state = stage1_evaluation_state(s1)
+    pairs = paired_start_outputs(scans, starts, rows, failures)
     out = {**candidate, "evaluation_state": state, "stage0_preflight": preflight,
            "attempt_identity": identity,
            "execution_gate": {"state": gate, "n_ok": len(rows), "n_fail": len(failures)},
            "t2_gate": t2, "stage1_gate": s1, "metrics": metrics,
-           "paired_starts": paired_start_outputs(scans, starts, rows, failures),
+           "paired_starts": pairs, "seed_stability": seed_stability(pairs, target),
            "runs": rows, "failures": failures, "seconds": time.perf_counter() - started}
     return out
 

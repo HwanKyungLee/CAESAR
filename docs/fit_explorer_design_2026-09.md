@@ -133,6 +133,12 @@ Apply, 새 최적화 프레임워크는 만들지 않는다. 후보별 per-scan 
 shift/squeeze 초깃값만 바꾼다. 다른 gas의 초깃값과 두 실행의 유효 bounds는 동일하다. V1은 후보별
 실행/T2 상태와 요약치를 기록하지만 **ranking, plateau/closure 판정, Apply는 하지 않는다**.
 
+Stage 1의 paired-start 수렴 진단은 T2 물리 판정과 분리한다. 정확히 4개 스캔의 두 start가 모두
+완료되고 유한할 때, 각 스캔에서 NO2 농도 차이가 `max(0.1 ppb, 두 절대농도 최댓값의 5%)`, target
+shift 차이가 `0.01 px`, squeeze 차이가 `1e-5`, rms/signal 상대차이가 `1%` 이하여야
+`SEED_STABLE`이다. 하나라도 초과하면 `SEED_UNSTABLE`, 누락·비유한·불완전 pair는 `UNAVAILABLE`이다.
+이는 solver 수렴 재현성 증거일 뿐 T2 상태, Stage 1 pruning, ranking, plateau 또는 Apply를 바꾸지 않는다.
+
 실행 인자와 현재 CLI 계약은 추측해 복사하지 말고 다음 도움말을 정본으로 확인한다.
 
 ```text
