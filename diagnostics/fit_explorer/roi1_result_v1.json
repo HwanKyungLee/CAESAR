@@ -1,5 +1,8 @@
 {
   "schema_version": 3,
+  "status": "HISTORICAL_INVALIDATED_FOR_NUMERIC_USE",
+  "claim_scope": "historical pre-normalization ROI1 behavioral record; superseded for numeric interpretation by normalization remeasurement and o4_ab_result_v1",
+  "superseded_by": "diagnostics/fit_explorer/o4_ab_result_v1.json",
   "suite_version": "1.2",
   "manifest_sha256": "88924778ede8014c5ff56dd70e067f458a7e955726aea3fa386949826c6dbf1e",
   "git": {

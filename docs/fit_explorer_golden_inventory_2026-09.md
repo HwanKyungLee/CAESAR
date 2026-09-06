@@ -136,6 +136,17 @@ nonnegative 정책은 중앙 절대량비 **230.998배**로 절대량 게이트�
 Portable 재현 파일은 `diagnostics/fit_explorer/cold_o4_manifest_v1.json`과
 `cold_o4_result_v1.json`이다. 원자료는 커밋하지 않는다. 이 체크포인트는 현재 T2 분기만 고정하며,
 O4 제외 후보의 농도 진실, T3, plateau 또는 대표 설정 추천을 주장하지 않는다.
+
+2026-09-06 정규화 이후 A/B 관측은 `diagnostics/fit_explorer/o4_ab_result_v1.json`에 요약했다.
+O4 포함/제외 × nonnegative/signed를 같은 15개 행(총 60 fit)에서 비교했으며, O4 계수와
+retrieved amount가 정책에 따라 경계·불안정하게 변했다. 따라서 이 창에서는 O4를 기본 제외한다.
+이는 관측적 운영 결론이며 임의의 near-zero/CV 문턱, T2 PASS/FAIL, T3 진실값 또는 plateau를
+주장하지 않는다. O4 물리 게이트는 이 창에서 `NOT_APPLICABLE_OR_UNAVAILABLE`이다. O4 reference
+파일과 기존 cold/O4·ROI1 JSON은 삭제하지 않고, 정규화 이전 수치 사용은 재측정 전
+`HISTORICAL_OR_INVALIDATED_FOR_NUMERIC_USE_UNTIL_NORMALIZATION_REMEASUREMENT`로 취급한다.
+체크리스트 관점에서 기존 `roi1_result_v1.json`과 `cold_o4_result_v1.json`은 보존된
+`HISTORICAL_INVALIDATED_FOR_NUMERIC_USE` 기록이며, 현재 숫자 근거로 재사용하지 않는다.
+현재 이 창에 대한 최신 수치 요약은 A/B descriptive artifact이고, O4 anchor는 `UNAVAILABLE`이다.
 표본은 명시된 날짜 범위의 cold alpha 상대경로 453개를 정렬한 뒤 0부터 30 간격의 인덱스 15개를
 선택했으며, manifest가 glob·필터·정렬 규약·인덱스와 각 파일 hash를 함께 고정한다.
 

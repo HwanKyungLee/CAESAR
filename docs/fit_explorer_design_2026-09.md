@@ -248,3 +248,12 @@ ANs 퇴화 분류기는 별도 트랙이며 결과 삭제/농도 대체가 아�
 - [ ] 규모 확장 successive halving
 - [ ] plateau graph, closure, hop-distance, abstention
 - [ ] 독립 날짜 및 검증된 T3 최종 평가
+
+> 2026-09-06 수치 정합성 메모: 초기 Stage 1 실데이터 실행과 기존 cold/O4 증거는 오프라인
+> `fit_scan`이 프로덕션 워커의 small-alpha decade normalization을 빠뜨린 상태에서 생성됐다.
+> 작은 잔차 규모 때문에 비선형 solver가 초기점에서 조기 종료할 수 있으므로, 해당 수치와 판정은
+> 현재 코드로 재측정하기 전까지 탐색 근거로 사용하지 않는다. 이 제한은 기존 JSON을 조용히
+> 덮어쓰지 않고 provenance와 함께 별도 재측정으로 해소한다.
+> 정규화 크기는 프로덕션과 동일하게 alpha의 평균으로 정한다. 부호가 상쇄되어 평균이 0에
+> 가까워지는 신호에는 이 방식이 정규화를 적용하지 못할 수 있다. 워커와 다른 통계량이나 새
+> 문턱을 Explorer에만 도입하지 않고, 이 한계는 provenance의 `normalization_factor`로 남긴다.

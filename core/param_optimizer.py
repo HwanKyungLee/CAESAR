@@ -102,12 +102,29 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     sl = slice(px_min, px_max + 1)
     wl = np.asarray(wave, float)[sl]
     a = np.asarray(alpha, float)[sl]
+    if not np.all(np.isfinite(a)):
+        raise ValueError("alpha must contain only finite values")
+    if not np.any(a != 0):
+        raise ValueError("alpha must not be all zero")
+    # Production workers lift very small linear alpha onto an O(1) numerical
+    # scale before VARPRO, then unscale every linear result.  Keep the offline
+    # explorer on that exact path so least_squares does not terminate at theta0
+    # merely because the unscaled residual is already below its absolute tests.
+    avg_raw = float(np.mean(a))
+    with np.errstate(over="ignore"):
+        scale_factor = (float(np.power(10.0, -np.floor(np.log10(abs(avg_raw)))))
+                        if abs(avg_raw) < 1e-4 and avg_raw != 0 else 1.0)
+    if not np.isfinite(scale_factor) or scale_factor <= 0:
+        raise ValueError("alpha normalization factor must be finite and positive")
+    a_scaled = a * scale_factor
+    if not np.all(np.isfinite(a_scaled)):
+        raise ValueError("alpha normalization overflow")
     wax = np.asarray(eng._wave_axis, float).flatten()
     vp = np.asarray(interp1d(wax, np.arange(len(wax)), bounds_error=False,
                              fill_value="extrapolate")(wl), float)
     center = vp[len(vp) // 2]
 
-    ef = fitter.detect_etalon_frequency(vp, a, poly_deg, 0.02, 0.40)
+    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40)
 
     # ★초기 shift 시딩(필수): DOAS의 shift 지형은 레퍼런스가 진동해 **비볼록**이라
     # x0=0에서 least_squares만 돌리면 멀리 있는 진짜 최소(예: 핫 -4.95px)를 못 찾고
@@ -115,7 +132,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     # 표본 스캔은 시간연속이 아니므로 **스캔마다 넓은 격자탐색**으로 시드를 잡는다.
     # (DoasFitter.pre_calibrate는 ±0.5 국소 격자라 여기선 부족 → 전역 격자를 직접 돈다.)
     if controlled_start is None:
-        seed, seed_sq = _seed_shift(fitter, vp, a, poly_deg, ref_props, target, seed_range,
+        seed, seed_sq = _seed_shift(fitter, vp, a_scaled, poly_deg, ref_props, target, seed_range,
                                     seed_step, allow_negative_gas)
     else:
         if len(controlled_start) != 2 or not np.all(np.isfinite(controlled_start)):
@@ -143,11 +160,15 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
         initial_values = {f"{target}_sh": seed, f"{target}_sq": seed_sq}
         active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
             ref_props, anchor, [anchor, 1.0], step_limit, initial_values=initial_values)
-    out = fitter.execute_varpro_fit(vp, a, np.eye(len(a)), active, fixed, linked,
+    out = fitter.execute_varpro_fit(vp, a_scaled, np.eye(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
                                     ref_props, T_C, 0.0, False,
                                     allow_negative_gas=allow_negative_gas)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out
+    gco = np.asarray(gco, float) / scale_factor
+    poly_c = np.asarray(poly_c, float) / scale_factor
+    eamp = float(eamp) / scale_factor
+    perr = np.asarray(perr, float) / scale_factor
 
     full, tot, base, etal, _ = eng.get_model_components(
         vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp, etalon_freq=ef,
@@ -188,7 +209,8 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                                                else "deterministic_grid")},
                 nonlinear_initialization={"active": list(active), "theta0": list(map(float, t0)),
                                           "lower": list(map(float, lb)),
-                                          "upper": list(map(float, ub))})
+                                          "upper": list(map(float, ub))},
+                normalization_factor=float(scale_factor))
 
 
 def _med_mad(xs):

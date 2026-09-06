@@ -1,7 +1,9 @@
 {
   "schema_version": 1,
+  "status": "HISTORICAL_INVALIDATED_FOR_NUMERIC_USE",
+  "claim_scope": "historical pre-normalization cold/O4 T2 record; superseded for numeric interpretation by normalization remeasurement and o4_ab_result_v1",
+  "superseded_by": "diagnostics/fit_explorer/o4_ab_result_v1.json",
   "manifest_sha256": "febf5a9ef7ba78ef7e4eebc061525f04de78356ca10ee506b2f61c0a70b7e86c",
-  "claim_scope": "current-code cold/O4 T2 checkpoint only; not concentration truth, T3, plateau, or recommendation",
   "dependencies": [
     {
       "id": "fitset",
