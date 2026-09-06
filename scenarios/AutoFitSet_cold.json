@@ -18,6 +18,13 @@
     }
   ],
   "data_label": "cold",
+  "reference_policy": {
+    "mode": "EXPLICIT_FITSET_ORDER",
+    "excluded_species": ["O4"],
+    "reason": "O4_ANCHOR_NOT_ESTABLISHED_IN_WINDOW",
+    "evidence": "diagnostics/fit_explorer/o4_ab_result_v1.json",
+    "t2_o4_state": "UNAVAILABLE"
+  },
   "time_shift_h": 0.0,
   "gas_temp": 0.0,
   "f_min": "971",

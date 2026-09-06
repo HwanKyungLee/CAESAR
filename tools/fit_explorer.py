@@ -141,6 +141,10 @@ def main(argv=None):
         scenario = json.load(fh)
     cfg = OP.pick_channel(scenario, args.key)
     try:
+        reference_policy = FE.validate_reference_policy(cfg)
+    except ValueError as exc:
+        abstain(str(exc), "ABSTAIN_CONFIG")
+    try:
         pool = eligible_scan_rows(args.key)
     except (OSError, RuntimeError, TypeError, ValueError):
         abstain("eligible alpha rows could not be discovered", "ABSTAIN_INCOMPLETE")
@@ -230,6 +234,7 @@ def main(argv=None):
             "files": [{"path": os.path.abspath(p), "sha256": FE.sha256_file(p)} for p in file_paths],
             "channel_key": args.key, "wavecal_identity": cfg.get("wl_path"),
             "reference_order": [r["name"] for r in cfg.get("refs", [])],
+            "reference_policy": reference_policy,
             "sample_selection": {
                 "contract": FE.STAGE1_SAMPLE_CONTRACT,
                 "method": "sort canonical (realpath,row_index); floor(i*(N-1)/(k-1)), endpoints included",

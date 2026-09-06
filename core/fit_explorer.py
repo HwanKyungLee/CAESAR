@@ -18,6 +18,41 @@ STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
 STAGE1_EXPECTED_ATTEMPTS = 8
 
 
+def validate_reference_policy(cfg):
+    """Validate optional window-specific reference policy without changing refs.
+
+    The ordered ``cfg['refs']`` list remains authoritative.  A policy may
+    document an intentional exclusion, but it must not silently add/remove a
+    reference or contradict the actual FitSet.
+    """
+    policy = cfg.get("reference_policy")
+    if policy is None:
+        return None
+    if not isinstance(policy, dict):
+        raise ValueError("reference_policy must be an object")
+    mode = policy.get("mode")
+    excluded = policy.get("excluded_species", [])
+    if mode != "EXPLICIT_FITSET_ORDER" or not isinstance(excluded, list):
+        raise ValueError("reference_policy has unsupported mode or exclusions")
+    if any(not isinstance(name, str) or not name for name in excluded):
+        raise ValueError("reference_policy excluded_species must contain names")
+    refs = cfg.get("refs", [])
+    if not isinstance(refs, list) or any(not isinstance(ref, dict) for ref in refs):
+        raise ValueError("FitSet refs must be a list of objects")
+    names = [ref.get("name") for ref in refs]
+    if len(names) != len(set(names)) or any(not isinstance(name, str) or not name for name in names):
+        raise ValueError("FitSet refs must be an ordered list of unique names")
+    contradiction = sorted(set(excluded).intersection(names))
+    if contradiction:
+        raise ValueError("reference_policy contradicts FitSet refs: " + ", ".join(contradiction))
+    if not policy.get("reason"):
+        raise ValueError("reference_policy reason is required")
+    return {"mode": mode, "excluded_species": list(excluded),
+            "reason": str(policy["reason"]),
+            "evidence": policy.get("evidence"),
+            "t2_o4_state": policy.get("t2_o4_state")}
+
+
 def representative_indices(pool_size, requested=4):
     """Evenly spaced zero-based indices, including both endpoints."""
     if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
