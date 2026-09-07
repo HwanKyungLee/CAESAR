@@ -177,6 +177,42 @@ canonical evaluation state는 새 상태를 만들지 않고 `UNEVALUATED`로 �
 
 ## 6. 재현성과 보고서 계약
 
+### 6.1 다채널 배치 실행/checkpoint 계약
+
+`tools/run_fit_explorer_batch.py`는 Stage 1 또는 Stage 2의 검증된 단일후보 수직 조각을 여러 채널·후보에
+순차 적용한다. JSON 설정은 opaque mission label, 명시적인 canonical 채널(`ANs`, `PNs`, `cold`),
+FitSet, alpha glob, 날짜 범위, stage, `allow_negative_gas=true`, 출력 루트와 zero-base generator가 만든
+정확한 candidate ID+policy를 받는다. Stage 2는 채널별 `sample_manifest`가 필수다. 특정 미션의 경로,
+shift/squeeze 최종값 또는 cold 사전 분류는 코드 기본값으로 두지 않는다.
+진단 실행은 canonical 채널의 부분집합도 허용하지만, 범용 production 비교 설정은 ANs·PNs·cold 세
+채널을 모두 선언한다. 부분집합 실행은 범용성이나 채널 간 비교를 주장할 수 없다.
+
+범용 설정의 채널 골격은 다음처럼 세 채널을 모두 포함한다(경로와 candidate는 미션별 생성값으로 교체).
+
+```json
+{"schema":"fit-explorer-batch-v1","mission":"mission-id","stage":1,
+ "allow_negative_gas":true,"output_root":"evidence","date_range":["2026-01-01","2026-01-31"],
+ "channels":[
+  {"label":"ANs","fitset":"fitset.json","alpha_glob":"ANs/*.dat","candidates":[{"id":"generated-id","policy":{"shift":{"mode":"Limit","lower":-1,"upper":1},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}}]},
+  {"label":"PNs","fitset":"fitset.json","alpha_glob":"PNs/*.dat","candidates":[{"id":"generated-id","policy":{"shift":{"mode":"Limit","lower":-1,"upper":1},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}}]},
+  {"label":"cold","fitset":"fitset.json","alpha_glob":"cold/*.dat","candidates":[{"id":"generated-id","policy":{"shift":{"mode":"Limit","lower":-1,"upper":1},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}}]}
+ ]}
+```
+
+첫 fit 전에 모든 채널의 FitSet·reference 순서·wavecal·alpha 표본·manifest hash와 candidate ID/policy를
+전부 검증한다. 하나라도 불완전하면 전체 실행을 보류한다. 실행 중 한 후보만 실패하면 그 후보를
+`INCOMPLETE`로 기록하고 나머지는 계속한다. 후보 evidence는 config/input/code hash로 만든 별도 디렉터리에
+원자적으로 기록하며, 동일 fingerprint의 완전한 보고서만 resume에서 건너뛴다. 입력 또는 코드 hash가
+달라지면 새 evidence를 만들고 과거 보고서는 덮어쓰거나 삭제하지 않는다. 공개 보고서에는 입력 절대경로와
+예외 메시지를 넣지 않는다. `--dry-run`은 같은 전체 입력 검증 후 실행 목록만 출력하며 파일을 쓰지 않는다.
+후보 보고서는 전체 envelope 무결성 hash를 포함한다. 정상 보고서와 누락·RUNNING checkpoint가 함께
+발견되면 checkpoint만 COMPLETE로 원자 복구한다. 손상되거나 부분적인 기존 보고서는 보존하고 해당
+fingerprint 실행을 fail-closed로 중단한다. 요약도 내용 hash 이름의 불변 파일로 누적한다.
+
+이 배치 계층은 실행/checkpoint 기능만 제공한다. 요약 count는 과학적 점수가 아니며 T2, pruning,
+ranking, plateau/closure, 추천, Apply를 수행하지 않는다. 세 채널은 동일 계약으로 실행되고 불안정성은
+후속 강건성 계층의 관측 결과이지 사전 라벨이 아니다.
+
 모든 실행은 다음을 기록해야 한다.
 
 - source data/fixture manifest와 각 파일 hash, git `HEAD`, 정규화한 tracked diff의 hash, untracked
