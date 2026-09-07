@@ -1,6 +1,8 @@
 import os
 import sys
 import copy
+import tempfile
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,9 +11,13 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import fit_explorer as FE
+from core.data_io import DataIO
 from core.doas_fit import (DoasFitter, _aggregate_solver_termination,
                            _endpoint_objectives)
-from tools.run_zero_base_stage1 import select_candidate
+from tools.run_zero_base_stage1 import (alpha_header_channel, alpha_stage2_metadata,
+                                        alpha_time_source, load_selected_scans,
+                                        report_sampling, select_candidate,
+                                        stage1_paths_in_date_range)
 
 
 def test_zero_base_grid_is_explicit_and_deterministic():
@@ -244,6 +250,240 @@ def test_stage1_one_candidate_budget_and_worker_contract():
     assert cfg == original_cfg and props == original_props
 
 
+def test_stage2_date_distributed_sampling_and_budget_contract():
+    cfg, props, candidates = _translation_fixture()
+    active = next(c for c in candidates
+                  if c["policy"]["shift"]["mode"] == "Limit"
+                  and c["policy"]["squeeze"]["mode"] == "Limit")
+    with tempfile.TemporaryDirectory() as root:
+        records = []
+        for index in range(24):
+            day = f"2026-06-{1 + index // 4:02d}"
+            path = os.path.join(root, f"{day}-{index:02d}.dat")
+            open(path, "wb").close()
+            timestamp = f"{day} 12:{index:02d}:00"
+            records.append({"path": path, "row_index": 0, "date": day,
+                            "timestamp": timestamp, "observation_key": timestamp,
+                            "time_source": "alpha_header_datetime",
+                            "channel": "ANs",
+                            "channel_source": "alpha_header_label"})
+        selected_a, provenance_a = FE.select_stage2_rows(
+            records, "2026-06-01", "2026-06-06", "ANs")
+        selected_b, provenance_b = FE.select_stage2_rows(
+            list(reversed(records)), "2026-06-01", "2026-06-06", "ANs")
+        assert selected_a == selected_b and provenance_a == provenance_b
+        assert len(selected_a) == 12
+        assert provenance_a["date_range"] == ["2026-06-01", "2026-06-06"]
+        assert len({sample["date"] for sample in provenance_a["samples"]}) == 6
+        assert provenance_a["state_stratification"] == "NOT_AVAILABLE_NOT_STRATIFIED"
+        assert not any(os.path.isabs(sample.get("file", ""))
+                       or "path" in sample for sample in provenance_a["samples"])
+        assert set(provenance_a["eligible_per_date"]) == {
+            f"2026-06-{day:02d}" for day in range(1, 7)}
+        assert sum(provenance_a["selected_per_date"].values()) == 12
+        assert max(provenance_a["selected_per_date"].values()) <= 3
+        shared_file_records = []
+        for day_number in range(1, 5):
+            shared_path = os.path.join(root, f"shared-{day_number}.dat")
+            open(shared_path, "wb").close()
+            for row_index in range(3):
+                day = f"2026-08-{day_number:02d}"
+                timestamp = f"{day} 12:{row_index:02d}:00"
+                shared_file_records.append({"path": shared_path,
+                    "row_index": row_index, "date": day,
+                    "timestamp": timestamp, "observation_key": timestamp,
+                    "time_source": "alpha_header_datetime", "channel": "ANs",
+                    "channel_source": "alpha_header_label"})
+        with patch.object(FE, "sha256_file", wraps=FE.sha256_file) as hashes:
+            FE.select_stage2_rows(
+                shared_file_records, "2026-08-01", "2026-08-04", "ANs")
+        assert hashes.call_count == 4
+        pns_records = []
+        for index, record in enumerate(records):
+            path = os.path.join(root, f"pns-{index:02d}.dat")
+            open(path, "wb").close()
+            pns_records.append({**record, "path":path, "channel":"PNs"})
+        _, pns_provenance = FE.select_stage2_rows(
+            pns_records, "2026-06-01", "2026-06-06", "PNs")
+        assert ([sample["observation_key"] for sample in pns_provenance["samples"]]
+                == [sample["observation_key"] for sample in provenance_a["samples"]])
+        cli_scans = [{"id": sample["id"]} for sample in provenance_a["samples"]]
+        cli_sampling = report_sampling(provenance_a, cli_scans, "2")
+        assert cli_sampling["expected_channel"] == "ANs"
+        assert cli_sampling["samples"] == provenance_a["samples"]
+        try:
+            report_sampling(provenance_a, list(reversed(cli_scans)), "2")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("CLI accepted mismatched Stage 2 provenance")
+
+        many_dates = []
+        for index in range(15):
+            day = f"2026-07-{index + 1:02d}"
+            path = os.path.join(root, f"many-{index:02d}.dat")
+            open(path, "wb").close()
+            timestamp = f"{day} 00:00:00"
+            many_dates.append({"path":path,"row_index":0,"date":day,
+                "timestamp":timestamp,"observation_key":timestamp,"channel":"ANs",
+                "time_source":"alpha_header_datetime",
+                "channel_source":"alpha_header_label"})
+        _, many_provenance = FE.select_stage2_rows(
+            many_dates, "2026-07-01", "2026-07-15", "ANs")
+        assert len([n for n in many_provenance["selected_per_date"].values() if n]) == 12
+        assert sum(n == 0 for n in many_provenance["selected_per_date"].values()) == 3
+        scans = [{"id": f"scan{i}"} for i in range(12)]
+
+        def worker(candidate, scan, start, **kwargs):
+            assert kwargs["allow_negative_gas"] is True
+            return {"initial_shift": start["shift"],
+                    "initial_squeeze": start["squeeze"],
+                    "final_shift": start["shift"],
+                    "final_squeeze": start["squeeze"],
+                    "objective_initial": 2.0, "objective_final": 1.0,
+                    "solver_termination": {"status": "CONVERGED", "success": True,
+                                           "nfev": 1}, "boundary_hits": []}
+        report = FE.run_stage2_vertical_slice(
+            cfg, props, active, scans, worker, allow_negative_gas=True)
+        assert report["schema"] == FE.STAGE2_VERTICAL_SLICE_SCHEMA
+        assert report["planned_attempts"] == report["executed_attempts"] == 24
+        assert FE.run_stage1_vertical_slice(
+            cfg, props, active, scans[:4], worker,
+            allow_negative_gas=True)["planned_attempts"] == 8
+        for bad_scans in (scans[:11], scans + [{"id": "scan12"}]):
+            try:
+                FE.run_stage2_vertical_slice(
+                    cfg, props, active, bad_scans, worker,
+                    allow_negative_gas=True)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("non-12 Stage 2 budget was accepted")
+
+        bad_cases = (records[:11],
+                     [{**record, "date": ""} for record in records],
+                     [{**record, "channel": "PNs"} for record in records],
+                     [{**record, "channel_source": "cli"} for record in records],
+                     [{**record, "observation_key": "made-up"} for record in records],
+                     [{**record, "timestamp": "not-a-time",
+                       "observation_key": "not-a-time"} for record in records],
+                     [record for record in records if record["date"] < "2026-06-04"])
+        for bad in bad_cases:
+            try:
+                FE.select_stage2_rows(bad, "2026-06-01", "2026-06-06", "ANs")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid Stage 2 population was accepted")
+        alias = os.path.join(root, "alias.dat")
+        os.link(records[0]["path"], alias)
+        try:
+            FE.select_stage2_rows(
+                records + [{**records[0], "path": alias}],
+                "2026-06-01", "2026-06-06", "ANs")
+        except ValueError as exc:
+            assert "alias" in str(exc)
+        else:
+            raise AssertionError("physical alias was accepted")
+
+        header_path = os.path.join(root, "header.dat")
+        with open(header_path, "w", encoding="utf-8") as fh:
+            fh.write("# channel=2  label=PNs\nrow_idx\tdatetime\n")
+        assert alpha_header_channel(header_path) == {
+            "index": 2, "label": "PNs", "source": "alpha_header_label"}
+        assert alpha_time_source(header_path) == "alpha_header_datetime"
+
+        lopsided = records[:4] + [
+            {**records[4], "path": os.path.join(root, f"lopsided-{index}.dat"),
+             "row_index": index, "timestamp": f"2026-06-02 15:{index:02d}:00",
+             "observation_key": f"2026-06-02 15:{index:02d}:00"}
+            for index in range(20)] + records[8:12] + records[12:16]
+        for record in lopsided[4:24]:
+            open(record["path"], "wb").close()
+        _, lopsided_provenance = FE.select_stage2_rows(
+            lopsided, "2026-06-01", "2026-06-04", "ANs")
+        assert set(lopsided_provenance["selected_per_date"].values()) == {3}
+        capped_short = records[:3] + lopsided[4:24] + records[8:11] + records[12:14]
+        try:
+            FE.select_stage2_rows(capped_short, "2026-06-01", "2026-06-04", "ANs")
+        except ValueError as exc:
+            assert "cap" in str(exc)
+        else:
+            raise AssertionError("population below capped budget was accepted")
+
+        duplicate = list(records)
+        duplicate[1] = {**duplicate[1],
+                        "timestamp": duplicate[0]["timestamp"],
+                        "observation_key": duplicate[0]["observation_key"]}
+        try:
+            FE.select_stage2_rows(duplicate, "2026-06-01", "2026-06-06", "ANs")
+        except ValueError as exc:
+            assert "duplicated" in str(exc)
+        else:
+            raise AssertionError("duplicate timestamp was accepted")
+
+        fallback_path = os.path.join(root, "alpha_2026-06-01_fallback.dat")
+        with open(fallback_path, "w", encoding="utf-8") as fh:
+            fh.write("# channel=1 label=ANs\n")
+            fh.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\tpx0\n")
+            fh.write("0\t152.5\tnot-a-time\t25\t1000\t1\n")
+        real_open = open
+        with patch("builtins.open", side_effect=real_open) as mocked_open:
+            fallback_channel, fallback_rows = alpha_stage2_metadata(fallback_path)
+        assert sum(call.args and call.args[0] == fallback_path
+                   for call in mocked_open.call_args_list) == 1
+        assert fallback_channel["label"] == "ANs"
+        assert fallback_rows[0][2] == "alpha_header_doy_with_filename_year"
+        assert fallback_rows[0][1] == datetime(2026, 6, 1, 12)
+
+        duplicate_header = os.path.join(root, "duplicate-header.dat")
+        with open(duplicate_header, "w", encoding="utf-8") as fh:
+            fh.write("# channel=1 label=ANs\n# channel=1 label=ANs\n")
+            fh.write("row_idx\tdatetime\n0\t2026-06-01 12:00:00\n")
+        try:
+            alpha_stage2_metadata(duplicate_header)
+        except ValueError as exc:
+            assert "duplicated" in str(exc)
+        else:
+            raise AssertionError("duplicate channel headers were accepted")
+
+        conflicting_header = os.path.join(root, "conflicting-header.dat")
+        with open(conflicting_header, "w", encoding="utf-8") as fh:
+            fh.write("# channel=1 label=ANs\n# channel=2 label=PNs\n")
+            fh.write("row_idx\tdatetime\n0\t2026-06-01 12:00:00\n")
+        try:
+            alpha_stage2_metadata(conflicting_header)
+        except ValueError as exc:
+            assert "duplicated" in str(exc)
+        else:
+            raise AssertionError("conflicting channel headers were accepted")
+
+        dated_paths = []
+        for day in ("2026-05-31", "2026-06-01", "2026-06-02", "2026-06-03"):
+            folder = os.path.join(root, day)
+            os.makedirs(folder)
+            path = os.path.join(folder, "alpha.dat")
+            open(path, "wb").close()
+            dated_paths.append(path)
+        in_range = stage1_paths_in_date_range(
+            dated_paths, datetime(2026, 6, 1).date(), datetime(2026, 6, 2).date())
+        assert in_range == dated_paths[1:3]
+        stage1_rows = [(path, row) for path in in_range for row in range(2)]
+        selected_stage1, _ = FE.select_representative_rows(stage1_rows, 4)
+        assert all(os.path.basename(os.path.dirname(path)) in {"2026-06-01", "2026-06-02"}
+                   for path, _ in selected_stage1)
+
+        with patch.object(FE, "sha256_file", wraps=FE.sha256_file) as hashes:
+            selected_stage2, sampling_stage2 = FE.select_stage2_rows(
+                shared_file_records, "2026-08-01", "2026-08-04", "ANs")
+            with patch.object(DataIO, "load_alpha_trace_row_mapped",
+                              return_value=([1.0], [2.0], 25.0, 1000.0, 0)):
+                cli_scans = load_selected_scans(selected_stage2, sampling_stage2)
+        assert hashes.call_count == 4
+        assert [scan["id"] for scan in cli_scans] == [
+            sample["id"] for sample in sampling_stage2["samples"]]
+
+
 def test_stage1_worker_output_cannot_override_or_leak():
     cfg, props, candidates = _translation_fixture()
     scans = [{"id": f"scan{i}"} for i in range(4)]
@@ -349,6 +589,7 @@ if __name__ == "__main__":
     test_policy_translation_all_35_round_trip_through_worker()
     test_policy_translation_malformed_fails_closed()
     test_stage1_one_candidate_budget_and_worker_contract()
+    test_stage2_date_distributed_sampling_and_budget_contract()
     test_stage1_worker_output_cannot_override_or_leak()
     test_production_adapter_maps_real_engine_contract()
     test_solver_diagnostics_are_comparable_and_max_nfev_reachable()

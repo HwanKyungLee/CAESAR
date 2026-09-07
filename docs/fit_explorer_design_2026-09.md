@@ -208,6 +208,17 @@ Limit/Center 측정은 offline `param_optimizer.fit_scan()` 범위이며 worker 
 파일 순서/표본 교체, worker end-to-end, halving,
 plateau/closure/ranking은 아직 완료가 아니다.
 
+Stage 2의 첫 실행 계약은 Stage 1의 정확히 4행 계약과 분리한다. alpha 행의 `datetime`/`doy`에서
+읽은 시각과 alpha 헤더의 `label`로 날짜·채널이 증명된 canonical 모집단에서 결정적으로 12행을
+선택하고 날짜·관측 identity와 선택 인덱스를 보고한다. 12행 예산에서 날짜 복제를 확보하기 위한
+보수적 최소치는 서로 다른 4일(최대 3행/일)이다. 12행 미만, 날짜 누락/모호성, 물리 파일 alias,
+헤더 채널 불일치는 fit 전에
+보류한다. active Limit 후보는 같은 controlled start 2개를 재사용해 정확히 24회 실행한다. 이
+체크포인트도 objective·최종 파라미터·종료·경계 진단만 기록하며 T2, ranking, plateau, Apply는 하지
+않는다. 공개 provenance에는 절대경로를 넣지 않고 basename/hash/row/date/timestamp를 쓴다. 채널 간
+같은 관측 비교는 timestamp observation key가 실제로 일치할 때만 주장하며, 같은 파일·날짜의 여러
+행은 독립 날짜 복제가 아니다. 상태 메타데이터가 없으므로 `NOT_AVAILABLE_NOT_STRATIFIED`로 기록한다.
+
 Stage 1의 **대표 행 선택 계약만** 먼저 고정했다. alpha 파일별 첫 행으로 제한하지 않고 모든
 `(path, row_index)`를 모집단으로 확장한 뒤 canonical identity로 정렬하고
 `floor(i*(N-1)/(k-1)), i=0..3`으로 양 끝을 포함한 중복 없는 4행을 고른다. 4행 미만이거나 identity가

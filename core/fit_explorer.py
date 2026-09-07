@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import date, datetime, timedelta
 
 import numpy as np
 
@@ -19,6 +20,8 @@ STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
 STAGE1_EXPECTED_ATTEMPTS = 8
 STAGE1_VERTICAL_SLICE_SCHEMA = "stage1-one-candidate-v1"
 STAGE1_SOLVER_STATUSES = {"CONVERGED", "MAX_NFEV", "FAILED", "TERMINATED"}
+STAGE2_SAMPLE_CONTRACT = "stage2-date-distributed-rows-v1"
+STAGE2_VERTICAL_SLICE_SCHEMA = "stage2-one-candidate-v1"
 ZERO_BASE_CANDIDATE_SCHEMA = "zero-base-candidates-v1"
 SEED_STABILITY_TOLERANCES = {
     "conc_abs_ppb": 0.1, "conc_rel": 0.05, "shift_abs_px": 0.01,
@@ -101,6 +104,132 @@ def select_representative_rows(rows, requested=4):
         raise ValueError("alpha row identities are not unique")
     indices = representative_indices(len(keyed), requested)
     return [keyed[i][1] for i in indices], indices
+
+
+def select_stage2_rows(records, date_from, date_to, expected_channel, requested=12):
+    """Select an exact date-ordered Stage 2 sample with explicit provenance."""
+    if requested != 12 or not isinstance(expected_channel, str) or not expected_channel:
+        raise ValueError("Stage 2 requires exactly 12 scans and an explicit channel")
+    try:
+        first, last = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Stage 2 requires an explicit ISO date range") from exc
+    if last < first:
+        raise ValueError("Stage 2 date range is reversed")
+    all_dates = [(first + timedelta(days=offset)).isoformat()
+                 for offset in range((last - first).days + 1)]
+    keyed, physical = [], set()
+    observation_keys, timestamps = set(), set()
+    for record in records:
+        required = {"path", "row_index", "date", "timestamp", "observation_key",
+                    "time_source", "channel", "channel_source"}
+        if not isinstance(record, dict) or set(record) != required:
+            raise ValueError("Stage 2 row metadata is incomplete or ambiguous")
+        if (record["channel"] != expected_channel
+                or record["channel_source"] != "alpha_header_label"):
+            raise ValueError("Stage 2 row channel does not match the requested channel")
+        try:
+            day = date.fromisoformat(record["date"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Stage 2 row date is missing or ambiguous") from exc
+        if day < first or day > last:
+            raise ValueError("Stage 2 row lies outside the explicit date range")
+        if not isinstance(record["timestamp"], str) or not record["timestamp"] \
+                or record["observation_key"] != record["timestamp"]:
+            raise ValueError("Stage 2 observation identity is missing or ambiguous")
+        try:
+            timestamp = datetime.fromisoformat(record["timestamp"])
+        except ValueError as exc:
+            raise ValueError("Stage 2 timestamp is invalid") from exc
+        if timestamp.date() != day:
+            raise ValueError("Stage 2 timestamp and date disagree")
+        if record["time_source"] not in {
+                "alpha_header_datetime", "alpha_header_doy_with_filename_year"}:
+            raise ValueError("Stage 2 timestamp source is unavailable")
+        row_index = record["row_index"]
+        if isinstance(row_index, bool) or not isinstance(row_index, (int, np.integer)) \
+                or row_index < 0:
+            raise ValueError("Stage 2 row identity is invalid")
+        canonical = os.path.normcase(os.path.realpath(record["path"])).replace("\\", "/")
+        try:
+            stat = os.stat(record["path"])
+        except OSError as exc:
+            raise ValueError("Stage 2 row identity cannot be resolved") from exc
+        file_identity = (("stat", int(stat.st_dev), int(stat.st_ino))
+                         if stat.st_ino else ("realpath", canonical))
+        physical_key = (file_identity, int(row_index))
+        if physical_key in physical:
+            raise ValueError("Stage 2 rows alias the same physical file")
+        physical.add(physical_key)
+        if record["observation_key"] in observation_keys \
+                or record["timestamp"] in timestamps:
+            raise ValueError("Stage 2 observation identity is duplicated")
+        observation_keys.add(record["observation_key"])
+        timestamps.add(record["timestamp"])
+        keyed.append(((day, record["timestamp"], canonical, int(row_index)),
+                      (record["path"], int(row_index)), record))
+    keyed.sort(key=lambda item: item[0])
+    if len(keyed) < requested:
+        raise ValueError(f"eligible alpha rows {len(keyed)} < requested {requested}")
+    buckets = {}
+    for item in keyed:
+        buckets.setdefault(item[2]["date"], []).append(item)
+    if len(buckets) < 4:
+        raise ValueError("Stage 2 requires at least four distinct dates")
+    if sum(min(3, len(bucket)) for bucket in buckets.values()) < requested:
+        raise ValueError("Stage 2 date cap leaves fewer than 12 eligible rows")
+    allocated = {day: 0 for day in buckets}
+    while sum(allocated.values()) < requested:
+        available = [day for day in sorted(buckets)
+                     if allocated[day] < min(3, len(buckets[day]))]
+        remaining = requested - sum(allocated.values())
+        chosen = (available if len(available) <= remaining else
+                  [available[(len(available) - 1) // 2]] if remaining == 1 else
+                  [available[index] for index in representative_indices(
+                      len(available), remaining)])
+        for day in chosen:
+            allocated[day] += 1
+    picked = []
+    for day, count in allocated.items():
+        if not count:
+            continue
+        bucket = buckets[day]
+        local_indices = ([(len(bucket) - 1) // 2] if count == 1 else
+                         representative_indices(len(bucket), count))
+        picked.extend(bucket[index] for index in local_indices)
+    picked.sort(key=lambda item: item[0])
+    keyed_positions = {item[0]: index for index, item in enumerate(keyed)}
+    indices = [keyed_positions[item[0]] for item in picked]
+    selected = [item[1] for item in picked]
+    hash_cache = {}
+    for item in picked:
+        if item[1][0] not in hash_cache:
+            hash_cache[item[1][0]] = sha256_file(item[1][0])
+    samples = [{"id": (os.path.basename(item[1][0]) + "#sha256="
+                       + hash_cache[item[1][0]][:12] + f"#row={item[1][1]}"),
+                "file": os.path.basename(item[1][0]),
+                "sha256": hash_cache[item[1][0]], "row_index": item[1][1],
+                "date": item[2]["date"], "timestamp": item[2]["timestamp"],
+                "time_source": item[2]["time_source"],
+                "observation_key": item[2]["observation_key"],
+                "channel": expected_channel,
+                "channel_source": item[2]["channel_source"]} for item in picked]
+    per_date = {day: sum(sample["date"] == day for sample in samples)
+                for day in all_dates}
+    eligible_per_date = {day: len(buckets.get(day, [])) for day in all_dates}
+    return selected, {"contract": STAGE2_SAMPLE_CONTRACT,
+                      "requested_scans": 12, "eligible_rows": len(keyed),
+                      "selected_zero_based_indices": indices,
+                      "date_range": [date_from, date_to],
+                      "expected_channel": expected_channel,
+                      "channel_source": "alpha_header_label",
+                      "minimum_distinct_dates": 4,
+                      "eligible_per_date": eligible_per_date,
+                      "selected_per_date": per_date,
+                      "state_stratification": "NOT_AVAILABLE_NOT_STRATIFIED",
+                      "independence_note": ("Rows within one file/date are repeated observations, "
+                                            "not independent date replicates"),
+                      "samples": samples}
 
 
 def stage1_budget(candidates, selected_scans, starts):
@@ -349,8 +478,9 @@ def stage1_policy_starts(candidate):
             "reason": ("ACTIVE_LIMIT_DIMENSION" if active else "FIXED_POLICY")}
 
 
-def run_stage1_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
-                              allow_negative_gas, target="NO2"):
+def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
+                                   allow_negative_gas, target, expected_scans,
+                                   schema, stage):
     """Execute one candidate's budget through an injected worker-compatible adapter.
 
     The callback receives immutable copies of the translated worker ``ref_props``
@@ -358,16 +488,16 @@ def run_stage1_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
     contract does not infer or preserve arbitrary callback content.
     """
     if allow_negative_gas is not True:
-        raise ValueError("Stage 1 vertical slice requires explicit allow_negative_gas=True")
+        raise ValueError(f"{stage} vertical slice requires explicit allow_negative_gas=True")
     if not isinstance(candidate, dict) or not isinstance(candidate.get("id"), str) \
             or not candidate["id"]:
-        raise ValueError("Stage 1 candidate id is required")
-    if not callable(fit_callback) or not isinstance(scans, list) or len(scans) != 4:
-        raise ValueError("Stage 1 vertical slice requires a callback and exactly 4 scans")
+        raise ValueError(f"{stage} candidate id is required")
+    if not callable(fit_callback) or not isinstance(scans, list) or len(scans) != expected_scans:
+        raise ValueError(f"{stage} vertical slice requires a callback and exactly {expected_scans} scans")
     scan_ids = [scan.get("id") for scan in scans if isinstance(scan, dict)]
-    if len(scan_ids) != 4 or any(not isinstance(x, str) or not x for x in scan_ids) \
-            or len(set(scan_ids)) != 4:
-        raise ValueError("Stage 1 scan identities must be four unique strings")
+    if len(scan_ids) != expected_scans or any(not isinstance(x, str) or not x for x in scan_ids) \
+            or len(set(scan_ids)) != expected_scans:
+        raise ValueError(f"{stage} scan identities must be {expected_scans} unique strings")
     translated = translate_zero_base_policy(cfg, ref_props, candidate, target)
     plan = stage1_policy_starts(candidate)
     policy = candidate["policy"]
@@ -434,17 +564,35 @@ def run_stage1_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
                                  "status": "UNAVAILABLE", "reason": "FIT_ATTEMPT_EXCEPTION",
                                  "exception_class": type(exc).__name__})
     n_ok = sum(row["status"] == "OK" for row in attempts)
-    return {"schema": STAGE1_VERTICAL_SLICE_SCHEMA, "candidate_id": candidate.get("id"),
+    return {"schema": schema, "candidate_id": candidate.get("id"),
             "status": "COMPLETE" if n_ok == len(attempts) else "ABSTAIN_INCOMPLETE",
             "policy": {"allow_negative_gas": True}, "budget": plan,
             "translation": {"scope": "TRANSLATION_ONLY_NO_FIT_CLAIM",
                             "details": translated["provenance"]},
             "policy_bounds": policy_bounds,
-            "planned_attempts": 4 * plan["attempts_per_scan"],
+            "planned_attempts": expected_scans * plan["attempts_per_scan"],
             "executed_attempts": len(attempts), "successful_attempts": n_ok,
             "objective_change_convention": "final_minus_initial",
             "attempts": attempts,
             "limitations": ["No T2 verdict", "No ranking", "No plateau claim", "No Apply"]}
+
+
+def run_stage1_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
+                              allow_negative_gas, target="NO2"):
+    """Execute the unchanged exact-four-scan Stage 1 diagnostic contract."""
+    return _run_diagnostic_vertical_slice(
+        cfg, ref_props, candidate, scans, fit_callback,
+        allow_negative_gas=allow_negative_gas, target=target, expected_scans=4,
+        schema=STAGE1_VERTICAL_SLICE_SCHEMA, stage="Stage 1")
+
+
+def run_stage2_vertical_slice(cfg, ref_props, candidate, scans, fit_callback, *,
+                              allow_negative_gas, target="NO2"):
+    """Execute one Stage 2 candidate on exactly 12 scans; diagnostics only."""
+    return _run_diagnostic_vertical_slice(
+        cfg, ref_props, candidate, scans, fit_callback,
+        allow_negative_gas=allow_negative_gas, target=target, expected_scans=12,
+        schema=STAGE2_VERTICAL_SLICE_SCHEMA, stage="Stage 2")
 
 
 def production_stage1_callback(eng, fitter, cfg, target="NO2"):
