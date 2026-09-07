@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import fit_explorer as FE
 from core.doas_fit import (DoasFitter, _aggregate_solver_termination,
                            _endpoint_objectives)
+from tools.run_zero_base_stage1 import select_candidate
 
 
 def test_zero_base_grid_is_explicit_and_deterministic():
@@ -24,6 +25,31 @@ def test_zero_base_grid_is_explicit_and_deterministic():
     assert all(x["policy_stage"] == "STAGE0_METADATA_ONLY" for x in a)
     assert {x["window_offset_nm"] for x in a} == {-1.0, 0.0, 1.0}
     assert {x["policy"]["shift"]["mode"] for x in a} == {"Fix", "Limit"}
+
+
+def test_stage1_cli_candidate_selector_uses_explicit_policy():
+    cfg = {"f_min": 100, "f_max": 200, "poly_deg": 4,
+           "refs": [{"name": "NO2"}]}
+    candidates = FE.zero_base_policy_candidates(
+        cfg, np.linspace(430.0, 480.0, 401))
+    selected = select_candidate(
+        candidates, cfg, shift_limit=(-10.0, .5),
+        squeeze_limit=(.995, 1.005))
+    assert selected["policy"] == {
+        "shift": {"mode": "Limit", "lower": -10.0, "upper": .5},
+        "squeeze": {"mode": "Limit", "lower": .995, "upper": 1.005}}
+    fixed = select_candidate(
+        candidates, cfg, shift_fix=-.5, squeeze_fix=1.0)
+    assert fixed["policy"] == {
+        "shift": {"mode": "Fix", "value": -.5},
+        "squeeze": {"mode": "Fix", "value": 1.0}}
+    try:
+        select_candidate(candidates, cfg, shift_limit=(-3.0, 3.0),
+                         squeeze_fix=1.0)
+    except StopIteration:
+        pass
+    else:
+        raise AssertionError("policy outside the zero-base grid was accepted")
 
 
 def test_zero_base_rejects_collapsed_nm_offsets():
@@ -317,6 +343,7 @@ def test_solver_diagnostics_are_comparable_and_max_nfev_reachable():
 
 if __name__ == "__main__":
     test_zero_base_grid_is_explicit_and_deterministic()
+    test_stage1_cli_candidate_selector_uses_explicit_policy()
     test_zero_base_rejects_collapsed_nm_offsets()
     test_zero_base_stage0_is_fit_free_and_counts()
     test_policy_translation_all_35_round_trip_through_worker()

@@ -9,12 +9,33 @@ from core.doas_fit import DoasFitter
 from core import fit_explorer as FE
 from tools import optimize_params as OP
 
+def select_candidate(candidates, cfg, *, shift_fix=None, shift_limit=None,
+                     squeeze_fix=None, squeeze_limit=None):
+    shift = ({"mode": "Fix", "value": float(shift_fix)} if shift_fix is not None
+             else {"mode": "Limit", "lower": float(shift_limit[0]),
+                   "upper": float(shift_limit[1])})
+    squeeze = ({"mode": "Fix", "value": float(squeeze_fix)} if squeeze_fix is not None
+               else {"mode": "Limit", "lower": float(squeeze_limit[0]),
+                     "upper": float(squeeze_limit[1])})
+    return next(c for c in candidates if c["window_offset_nm"] == 0.0
+                and c["poly"] == int(cfg["poly_deg"])
+                and c["policy"] == {"shift": shift, "squeeze": squeeze})
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--fitset", required=True); p.add_argument("--key", default="cold")
     p.add_argument("--alpha-glob", required=True); p.add_argument("--output", required=True)
     p.add_argument("--date-from", required=True); p.add_argument("--date-to", required=True)
+    shift = p.add_mutually_exclusive_group()
+    shift.add_argument("--shift-fix", type=float)
+    shift.add_argument("--shift-limit", type=float, nargs=2, metavar=("LOWER", "UPPER"))
+    squeeze = p.add_mutually_exclusive_group()
+    squeeze.add_argument("--squeeze-fix", type=float)
+    squeeze.add_argument("--squeeze-limit", type=float, nargs=2,
+                         metavar=("LOWER", "UPPER"))
     a = p.parse_args(argv)
+    if a.shift_fix is None and a.shift_limit is None: a.shift_limit = (-1.0, 1.0)
+    if a.squeeze_fix is None and a.squeeze_limit is None: a.squeeze_limit = (.9999, 1.0001)
     if os.path.exists(a.output): raise SystemExit("ABSTAIN: output exists")
     with open(a.fitset, encoding="utf-8") as fh: scenario = json.load(fh)
     cfg = OP.pick_channel(scenario, a.key)
@@ -37,10 +58,9 @@ def main(argv=None):
         if list(eng.gas_list) != [ref["name"] for ref in cfg["refs"]]:
             raise ValueError("engine reference order does not match FitSet")
         candidates = FE.zero_base_policy_candidates(cfg, eng._wave_axis)
-        candidate = next(c for c in candidates if c["window_offset_nm"] == 0.0
-                         and c["poly"] == int(cfg["poly_deg"])
-                         and c["policy"]["shift"] == {"mode":"Limit","lower":-1.0,"upper":1.0}
-                         and c["policy"]["squeeze"] == {"mode":"Limit","lower":.9999,"upper":1.0001})
+        candidate = select_candidate(
+            candidates, cfg, shift_fix=a.shift_fix, shift_limit=a.shift_limit,
+            squeeze_fix=a.squeeze_fix, squeeze_limit=a.squeeze_limit)
         scans = []
         for path, row_index in selected:
             wave, alpha, temp, pressure, px_start = DataIO.load_alpha_trace_row_mapped(path, row_index)

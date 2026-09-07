@@ -246,6 +246,9 @@ IRLS 사용 여부와 무관하게 시작·종료 목적함수는 **최종 IRLS 
 있으면 `MAX_NFEV`, 모두 양수일 때만 `CONVERGED`로 집계한다. `success`는 모든 내부 solve의 논리곱이다.
 실행 보고서의 `translation.details.fit_executed=false`는 번역 함수 자체가 fit을 하지 않았다는 뜻이며,
 상위 `translation.scope=TRANSLATION_ONLY_NO_FIT_CLAIM` 아래에만 둔다.
+`tools/run_zero_base_stage1.py`는 zero-base grid에 실제로 선언된 shift/squeeze Fix 또는 Limit 정책을
+CLI에서 명시해 같은 clean checkout으로 재실행할 수 있다. 인자를 생략하면 최초 수직 조각의
+shift `[-1, 1]`, squeeze `[0.9999, 1.0001]`을 유지하며, grid 밖 범위는 발명하지 않고 `ABSTAIN`한다.
 
 Cold/O4는 hash-pinned 균등 표본 15개에서 두 gas 부호 정책 모두 현재 코드로 T2 `FAIL`을 재현했다.
 nonnegative 정책은 O4 중앙 절대량비 230.998배로 절대량 게이트가 기각했다. signed 정책은 절대량비가
