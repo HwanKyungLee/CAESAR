@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -15,6 +16,22 @@ EVIDENCE = os.path.join(ROOT, "diagnostics", "fit_explorer")
 
 
 def main():
+    with tempfile.TemporaryDirectory() as td:
+        subprocess.run(["git", "init", "-q"], cwd=td, check=True)
+        tracked = os.path.join(td, "tracked.txt")
+        with open(tracked, "w", encoding="utf-8") as fh:
+            fh.write("tracked")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=td, check=True)
+        subprocess.run(["git", "-c", "user.name=test", "-c",
+                        "user.email=test@example.invalid", "commit", "-qm", "initial"],
+                       cwd=td, check=True)
+        name = "한글 파일.txt"
+        path = os.path.join(td, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("portable")
+        provenance = FE.git_provenance(td)
+        assert provenance["untracked"] == [{"path": name, "sha256": FE.sha256_file(path)}]
+
     manifest_path = os.path.join(EVIDENCE, "roi1_manifest_v1.json")
     result_path = os.path.join(EVIDENCE, "roi1_result_v1.json")
     manifest_bytes = open(manifest_path, "rb").read()

@@ -1217,7 +1217,11 @@ def git_provenance(root, excluded_paths=()):
                        if os.path.commonpath((root_real, os.path.realpath(p))) == root_real})
     pathspec = ["."] + [f":(exclude){p}" for p in excluded]
     diff = run("diff", "--binary", "HEAD", "--", *pathspec).replace("\r\n", "\n").encode()
-    untracked = sorted(run("ls-files", "--others", "--exclude-standard").splitlines())
+    raw_untracked = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "ls-files", "--others",
+         "--exclude-standard", "-z"],
+        cwd=root, check=True, capture_output=True).stdout
+    untracked = sorted(os.fsdecode(path) for path in raw_untracked.split(b"\0") if path)
     def is_excluded(path):
         path = path.replace("\\", "/")
         return any(path == item or path.startswith(item.rstrip("/") + "/")

@@ -1,8 +1,9 @@
 import os
 import sys
 import copy
+import json
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,7 +17,8 @@ from core.doas_fit import (DoasFitter, _aggregate_solver_termination,
                            _endpoint_objectives)
 from tools.run_zero_base_stage1 import (alpha_header_channel, alpha_stage2_metadata,
                                         alpha_time_source, load_selected_scans,
-                                        report_sampling, select_candidate,
+                                        main as run_stage_main, report_sampling,
+                                        reuse_stage2_samples, select_candidate,
                                         stage1_paths_in_date_range)
 
 
@@ -514,6 +516,105 @@ def test_stage2_date_distributed_sampling_and_budget_contract():
             sample["id"] for sample in sampling_stage2["samples"]]
 
 
+def test_stage2_manifest_reuse_revalidates_selected_rows_only():
+    with tempfile.TemporaryDirectory() as root:
+        paths, samples = [], []
+        for index in range(12):
+            day = f"2026-06-{1 + index // 3:02d}"
+            timestamp = f"{day} 12:{index:02d}:00.123000"
+            path = os.path.join(root, f"sample-{index:02d}.dat")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("# channel=1 label=ANs\nrow_idx\tdatetime\n")
+                fh.write(f"0\t{timestamp}\n")
+            digest = FE.sha256_file(path)
+            name = os.path.basename(path)
+            samples.append({"id":f"{name}#sha256={digest[:12]}#row=0",
+                "file":name,"sha256":digest,"row_index":0,"date":day,
+                "timestamp":timestamp,"observation_key":timestamp,
+                "time_source":"alpha_header_datetime","channel":"ANs",
+                "channel_source":"alpha_header_label"})
+            paths.append(path)
+        sampling = {"contract":FE.STAGE2_SAMPLE_CONTRACT,"requested_scans":12,
+            "date_range":["2026-06-01","2026-06-04"],"expected_channel":"ANs",
+            "selected_per_date":{f"2026-06-{n:02d}":3 for n in range(1,5)},
+            "samples":samples}
+        manifest = os.path.join(root, "prior-stage2.json")
+        with open(manifest, "w", encoding="utf-8") as fh:
+            json.dump({"sampling":sampling}, fh)
+        unrelated = os.path.join(root, "unrelated.dat")
+        os.link(paths[0], unrelated)
+        selected, reused = reuse_stage2_samples(
+            manifest, list(reversed(paths)) + [unrelated],
+            date(2026,6,1), date(2026,6,4), "aNs")
+        assert selected == [(path, 0) for path in paths]
+        assert reused["samples"] == samples
+        assert reused["manifest_reuse"] == {"status":"REVALIDATED",
+            "sample_order":"PRESERVED","file":"prior-stage2.json",
+            "sha256":FE.sha256_file(manifest)}
+        assert not any(os.path.isabs(value) for value in reused["manifest_reuse"].values()
+                       if isinstance(value, str))
+
+        for field, value in (("sha256", "0" * 64), ("row_index", 1),
+                             ("timestamp", "2026-06-01 00:00:00"),
+                             ("observation_key", "2026-06-01 00:00:00"),
+                             ("channel", "PNs"), ("date", "2026-06-02")):
+            bad = copy.deepcopy(sampling)
+            bad["samples"][0][field] = value
+            bad_manifest = os.path.join(root, f"bad-{field}.json")
+            with open(bad_manifest, "w", encoding="utf-8") as fh:
+                json.dump({"sampling":bad}, fh)
+            try:
+                reuse_stage2_samples(bad_manifest, paths, date(2026,6,1),
+                                     date(2026,6,4), "ANs")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"tampered manifest {field} was accepted")
+
+        duplicate = copy.deepcopy(sampling)
+        duplicate["samples"][1] = copy.deepcopy(duplicate["samples"][0])
+        duplicate_manifest = os.path.join(root, "duplicate.json")
+        with open(duplicate_manifest, "w", encoding="utf-8") as fh:
+            json.dump({"sampling":duplicate}, fh)
+        aliased = copy.deepcopy(sampling)
+        aliased["samples"][1] = {**copy.deepcopy(aliased["samples"][0]),
+            "file":"unrelated.dat",
+            "id":f"unrelated.dat#sha256={samples[0]['sha256'][:12]}#row=0"}
+        alias_manifest = os.path.join(root, "alias.json")
+        with open(alias_manifest, "w", encoding="utf-8") as fh:
+            json.dump({"sampling":aliased}, fh)
+        try:
+            reuse_stage2_samples(alias_manifest, paths + [unrelated],
+                                 date(2026,6,1), date(2026,6,4), "ANs")
+        except ValueError as exc:
+            assert "alias" in str(exc)
+        else:
+            raise AssertionError("physical alias was accepted")
+        ambiguous_paths = paths + [os.path.join(root, "copy", samples[0]["file"])]
+        for target_manifest, current_paths in ((duplicate_manifest, paths),
+                                                (manifest, paths[1:]),
+                                                (manifest, ambiguous_paths)):
+            if current_paths is ambiguous_paths:
+                os.makedirs(os.path.dirname(current_paths[-1]))
+                with open(paths[0], "rb") as source, open(current_paths[-1], "wb") as dest:
+                    dest.write(source.read())
+            try:
+                reuse_stage2_samples(target_manifest, current_paths,
+                                     date(2026,6,1), date(2026,6,4), "ANs")
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("missing, duplicated, or ambiguous sample was accepted")
+        try:
+            run_stage_main(["--fitset","x","--alpha-glob","x","--output","x",
+                            "--date-from","2026-06-01","--date-to","2026-06-04",
+                            "--stage","1","--sample-manifest",manifest])
+        except SystemExit as exc:
+            assert "requires --stage 2" in str(exc)
+        else:
+            raise AssertionError("Stage 1 accepted a Stage 2 sample manifest")
+
+
 def test_stage1_worker_output_cannot_override_or_leak():
     cfg, props, candidates = _translation_fixture()
     scans = [{"id": f"scan{i}"} for i in range(4)]
@@ -620,6 +721,7 @@ if __name__ == "__main__":
     test_policy_translation_malformed_fails_closed()
     test_stage1_one_candidate_budget_and_worker_contract()
     test_stage2_date_distributed_sampling_and_budget_contract()
+    test_stage2_manifest_reuse_revalidates_selected_rows_only()
     test_stage1_worker_output_cannot_override_or_leak()
     test_production_adapter_maps_real_engine_contract()
     test_solver_diagnostics_are_comparable_and_max_nfev_reachable()

@@ -1,6 +1,6 @@
 """Run one explicit zero-base candidate using a Stage 1 or Stage 2 budget."""
 from __future__ import annotations
-import argparse, glob, json, os, re, sys
+import argparse, glob, json, ntpath, os, re, sys
 from datetime import date, datetime, timedelta
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -145,12 +145,103 @@ def report_sampling(sampling, scans, stage):
         raise ValueError("Stage 2 public sample provenance does not match selected scans")
     return out
 
+def reuse_stage2_samples(manifest_path, paths, date_from, date_to, expected_channel):
+    """Resolve and revalidate an exact prior Stage 2 sample, fail closed."""
+    with open(manifest_path, encoding="utf-8") as fh:
+        document = json.load(fh)
+    if not isinstance(document, dict):
+        raise ValueError("Stage 2 sample manifest must be an object")
+    sampling = document.get("sampling", document)
+    samples = sampling.get("samples") if isinstance(sampling, dict) else None
+    channel = FE.canonical_channel_label(expected_channel)
+    if (not isinstance(samples, list) or len(samples) != 12
+            or sampling.get("contract") != FE.STAGE2_SAMPLE_CONTRACT
+            or sampling.get("requested_scans") != 12
+            or FE.canonical_channel_label(sampling.get("expected_channel")) != channel
+            or sampling.get("date_range") != [date_from.isoformat(), date_to.isoformat()]):
+        raise ValueError("Stage 2 sample manifest contract does not match this run")
+    wanted = []
+    for sample in samples:
+        required = {"id", "file", "sha256", "row_index", "date", "timestamp",
+                    "time_source", "observation_key", "channel", "channel_source"}
+        if not isinstance(sample, dict) or set(sample) != required:
+            raise ValueError("Stage 2 sample manifest identity is incomplete")
+        name = sample["file"]
+        if (not isinstance(name, str) or not name or os.path.basename(name) != name
+                or "/" in name or "\\" in name):
+            raise ValueError("Stage 2 sample manifest file must be a basename")
+        wanted.append(name)
+    by_name = {name: [] for name in wanted}
+    for path in paths:
+        name = os.path.basename(path)
+        if name in by_name:
+            by_name[name].append(path)
+    selected, resolved_samples, physical = [], [], set()
+    observations, timestamps = set(), set()
+    for sample in samples:
+        matches = by_name[sample["file"]]
+        if len(matches) != 1:
+            raise ValueError("Stage 2 sample manifest file is missing or ambiguous")
+        path = matches[0]
+        row_index = sample["row_index"]
+        if isinstance(row_index, bool) or not isinstance(row_index, int) or row_index < 0:
+            raise ValueError("Stage 2 sample manifest row is invalid")
+        stat = os.stat(path)
+        file_identity = ((int(stat.st_dev), int(stat.st_ino)) if stat.st_ino else
+                         os.path.normcase(os.path.realpath(path)))
+        identity = (file_identity, row_index)
+        if identity in physical:
+            raise ValueError("Stage 2 sample manifest rows alias physically")
+        physical.add(identity)
+        if FE.sha256_file(path) != sample["sha256"]:
+            raise ValueError("Stage 2 sample manifest hash does not match")
+        header, rows = alpha_stage2_metadata(path)
+        if header["label"] != channel or FE.canonical_channel_label(sample["channel"]) != channel \
+                or sample["channel_source"] != header["source"]:
+            raise ValueError("Stage 2 sample manifest channel does not match")
+        if row_index >= len(rows):
+            raise ValueError("Stage 2 sample manifest row is invalid")
+        timestamp, time_source = rows[row_index][1], rows[row_index][2]
+        timestamp_text = timestamp.isoformat(sep=" ")
+        day = timestamp.date().isoformat()
+        expected_id = (f"{sample['file']}#sha256={sample['sha256'][:12]}"
+                       f"#row={row_index}")
+        if (sample["timestamp"] != timestamp_text or sample["observation_key"] != timestamp_text
+                or sample["date"] != day or sample["time_source"] != time_source
+                or sample["id"] != expected_id or not date_from <= timestamp.date() <= date_to):
+            raise ValueError("Stage 2 sample manifest row metadata does not match")
+        if sample["observation_key"] in observations or timestamp_text in timestamps:
+            raise ValueError("Stage 2 sample manifest observation is duplicated")
+        observations.add(sample["observation_key"]); timestamps.add(timestamp_text)
+        selected.append((path, row_index)); resolved_samples.append(dict(sample))
+    per_date = {day: sum(sample["date"] == day for sample in resolved_samples)
+                for day in {sample["date"] for sample in resolved_samples}}
+    if len(per_date) < 4 or max(per_date.values()) > 3:
+        raise ValueError("Stage 2 sample manifest violates date distribution")
+    all_dates = [(date_from + timedelta(days=offset)).isoformat()
+                 for offset in range((date_to - date_from).days + 1)]
+    reused = {"contract": FE.STAGE2_SAMPLE_CONTRACT, "requested_scans": 12,
+        "date_range": [date_from.isoformat(), date_to.isoformat()],
+        "expected_channel": channel, "channel_source": "alpha_header_label",
+        "minimum_distinct_dates": 4,
+        "selected_per_date": {day: per_date.get(day, 0) for day in all_dates},
+        "state_stratification": "NOT_AVAILABLE_NOT_STRATIFIED",
+        "independence_note": ("Rows within one file/date are repeated observations, "
+                              "not independent date replicates"),
+        "samples": resolved_samples}
+    reused["manifest_reuse"] = {"status": "REVALIDATED",
+        "sample_order": "PRESERVED", "file": ntpath.basename(manifest_path),
+        "sha256": FE.sha256_file(manifest_path)}
+    return selected, reused
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--fitset", required=True); p.add_argument("--key", default="cold")
     p.add_argument("--alpha-glob", required=True); p.add_argument("--output", required=True)
     p.add_argument("--date-from", required=True); p.add_argument("--date-to", required=True)
     p.add_argument("--stage", choices=("1", "2"), default="1")
+    p.add_argument("--sample-manifest",
+                   help="Reuse the exact sampling block from a prior Stage 2 report")
     shift = p.add_mutually_exclusive_group()
     shift.add_argument("--shift-fix", type=float)
     shift.add_argument("--shift-limit", type=float, nargs=2, metavar=("LOWER", "UPPER"))
@@ -159,6 +250,8 @@ def main(argv=None):
     squeeze.add_argument("--squeeze-limit", type=float, nargs=2,
                          metavar=("LOWER", "UPPER"))
     a = p.parse_args(argv)
+    if a.sample_manifest and a.stage != "2":
+        raise SystemExit("ABSTAIN: --sample-manifest requires --stage 2")
     a.key = OP.canonical_channel_key(a.key)
     if a.shift_fix is None and a.shift_limit is None: a.shift_limit = (-1.0, 1.0)
     if a.squeeze_fix is None and a.squeeze_limit is None: a.squeeze_limit = (.9999, 1.0001)
@@ -176,7 +269,11 @@ def main(argv=None):
     if a.stage == "1":
         paths = stage1_paths_in_date_range(paths, date_from, date_to)
     try:
-        if a.stage == "2":
+        if a.stage == "2" and a.sample_manifest:
+            selected, sampling = reuse_stage2_samples(
+                a.sample_manifest, paths, date_from, date_to, a.key)
+            rows = None
+        elif a.stage == "2":
             headers, rows = {}, []
             for path in paths:
                 headers[path], timed_rows = alpha_stage2_metadata(path)
@@ -193,7 +290,7 @@ def main(argv=None):
             selected, indices = FE.select_representative_rows(rows, 4)
             sampling = {"contract":FE.STAGE1_SAMPLE_CONTRACT,"eligible_rows":len(rows),
                 "selected_zero_based_indices":indices,"date_range":[a.date_from,a.date_to]}
-        else:
+        elif not a.sample_manifest:
             records = []
             for path,row_index,timestamp,time_source in rows:
                 header = headers[path]

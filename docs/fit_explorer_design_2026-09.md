@@ -218,6 +218,11 @@ Stage 2의 첫 실행 계약은 Stage 1의 정확히 4행 계약과 분리한다
 않는다. 공개 provenance에는 절대경로를 넣지 않고 basename/hash/row/date/timestamp를 쓴다. 채널 간
 같은 관측 비교는 timestamp observation key가 실제로 일치할 때만 주장하며, 같은 파일·날짜의 여러
 행은 독립 날짜 복제가 아니다. 상태 메타데이터가 없으므로 `NOT_AVAILABLE_NOT_STRATIFIED`로 기록한다.
+같은 12행으로 범위만 비교할 때는 `--sample-manifest`로 이전 Stage 2 보고서를 지정한다. 선택된
+basename/hash/row/channel/date/timestamp를 현재 alpha 파일에서 다시 확인하고, 정확히 12행·최소
+4일·최대 3행/일 계약을 다시 통과한 경우에만 실행한다. 선택 밖 glob 파일은 중복 검사를 유발하지
+않지만 선택 파일이 없거나 같은 basename이 둘 이상이면 보류한다. 출력에는 manifest basename과
+전체 hash만 남긴다.
 
 Stage 1의 **대표 행 선택 계약만** 먼저 고정했다. alpha 파일별 첫 행으로 제한하지 않고 모든
 `(path, row_index)`를 모집단으로 확장한 뒤 canonical identity로 정렬하고
