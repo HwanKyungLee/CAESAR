@@ -54,6 +54,8 @@ EXCLUDE = {
     "calibration/ils_sigma_sweep.py": "교정 스윕 스크립트 — 최상위에서 데이터 로드",
     "tools/weekly_reports/plot_tof_weekly.py": "주간 리포트 스크립트 — 최상위에서 데이터 로드",
     "tools/weekly_reports/plot_caesar_weekly.py": "주간 리포트 스크립트 — 최상위에서 데이터 로드",
+    "tools/explain_ans_correction.py": "일회성 설명용 그림 스크립트 — 최상위에서 데이터 로드",
+    "tools/plot_ans_clean.py": "발표/제출용 그림 스크립트 — 최상위에서 데이터 로드",
 }
 
 # 폴더째 제외 — 일회성 검증 아카이브(결론은 FINDINGS.md에 박제, 코드는 보존용)
