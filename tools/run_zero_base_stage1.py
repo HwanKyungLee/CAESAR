@@ -26,7 +26,8 @@ def alpha_header_channel(path):
         for line in fh:
             match = re.fullmatch(r"#\s*channel=(\d+)\s+label=(\S+)\s*", line)
             if match:
-                return {"index": int(match.group(1)), "label": match.group(2),
+                return {"index": int(match.group(1)),
+                        "label": FE.canonical_channel_label(match.group(2)),
                         "source": "alpha_header_label"}
             if not line.startswith("#"):
                 break
@@ -56,7 +57,8 @@ def alpha_stage2_metadata(path):
             if line.startswith("#"):
                 match = re.fullmatch(r"#\s*channel=(\d+)\s+label=(\S+)\s*", line)
                 if match:
-                    parsed = {"index": int(match.group(1)), "label": match.group(2),
+                    parsed = {"index": int(match.group(1)),
+                              "label": FE.canonical_channel_label(match.group(2)),
                               "source": "alpha_header_label"}
                     if channel is not None:
                         raise ValueError("alpha header channel metadata is duplicated")
@@ -157,6 +159,7 @@ def main(argv=None):
     squeeze.add_argument("--squeeze-limit", type=float, nargs=2,
                          metavar=("LOWER", "UPPER"))
     a = p.parse_args(argv)
+    a.key = OP.canonical_channel_key(a.key)
     if a.shift_fix is None and a.shift_limit is None: a.shift_limit = (-1.0, 1.0)
     if a.squeeze_fix is None and a.squeeze_limit is None: a.squeeze_limit = (.9999, 1.0001)
     if os.path.exists(a.output): raise SystemExit("ABSTAIN: output exists")

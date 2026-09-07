@@ -21,6 +21,22 @@ STAGE1_EXPECTED_ATTEMPTS = 8
 STAGE1_VERTICAL_SLICE_SCHEMA = "stage1-one-candidate-v1"
 STAGE1_SOLVER_STATUSES = {"CONVERGED", "MAX_NFEV", "FAILED", "TERMINATED"}
 STAGE2_SAMPLE_CONTRACT = "stage2-date-distributed-rows-v1"
+
+
+def canonical_channel_label(value):
+    """Normalize one of the three supported alpha channel labels.
+
+    Unknown labels are rejected instead of being returned unchanged.  This
+    keeps Stage 2 fail-closed even when an unknown value is supplied for both
+    the expected and record channel (which would otherwise compare equal).
+    """
+    if not isinstance(value, str):
+        raise ValueError("channel label must be a string")
+    normalized = {"cold": "cold", "ans": "ANs", "pns": "PNs"}.get(
+        value.strip().casefold())
+    if normalized is None:
+        raise ValueError("unsupported channel label")
+    return normalized
 STAGE2_VERTICAL_SLICE_SCHEMA = "stage2-one-candidate-v1"
 ZERO_BASE_CANDIDATE_SCHEMA = "zero-base-candidates-v1"
 SEED_STABILITY_TOLERANCES = {
@@ -125,7 +141,8 @@ def select_stage2_rows(records, date_from, date_to, expected_channel, requested=
                     "time_source", "channel", "channel_source"}
         if not isinstance(record, dict) or set(record) != required:
             raise ValueError("Stage 2 row metadata is incomplete or ambiguous")
-        if (record["channel"] != expected_channel
+        if (canonical_channel_label(record["channel"])
+                != canonical_channel_label(expected_channel)
                 or record["channel_source"] != "alpha_header_label"):
             raise ValueError("Stage 2 row channel does not match the requested channel")
         try:
@@ -212,7 +229,7 @@ def select_stage2_rows(records, date_from, date_to, expected_channel, requested=
                 "date": item[2]["date"], "timestamp": item[2]["timestamp"],
                 "time_source": item[2]["time_source"],
                 "observation_key": item[2]["observation_key"],
-                "channel": expected_channel,
+                "channel": canonical_channel_label(expected_channel),
                 "channel_source": item[2]["channel_source"]} for item in picked]
     per_date = {day: sum(sample["date"] == day for sample in samples)
                 for day in all_dates}
@@ -221,7 +238,7 @@ def select_stage2_rows(records, date_from, date_to, expected_channel, requested=
                       "requested_scans": 12, "eligible_rows": len(keyed),
                       "selected_zero_based_indices": indices,
                       "date_range": [date_from, date_to],
-                      "expected_channel": expected_channel,
+                      "expected_channel": canonical_channel_label(expected_channel),
                       "channel_source": "alpha_header_label",
                       "minimum_distinct_dates": 4,
                       "eligible_per_date": eligible_per_date,

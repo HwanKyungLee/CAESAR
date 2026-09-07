@@ -388,10 +388,40 @@ def test_stage2_date_distributed_sampling_and_budget_contract():
 
         header_path = os.path.join(root, "header.dat")
         with open(header_path, "w", encoding="utf-8") as fh:
-            fh.write("# channel=2  label=PNs\nrow_idx\tdatetime\n")
+            fh.write("# channel=2  label=pNs\nrow_idx\tdatetime\n")
         assert alpha_header_channel(header_path) == {
             "index": 2, "label": "PNs", "source": "alpha_header_label"}
         assert alpha_time_source(header_path) == "alpha_header_datetime"
+
+        mixed_case = [{**record, "channel": "aNs"} for record in records]
+        _, mixed_provenance = FE.select_stage2_rows(
+            mixed_case, "2026-06-01", "2026-06-06", "ANs")
+        assert mixed_provenance["expected_channel"] == "ANs"
+        try:
+            FE.select_stage2_rows(
+                mixed_case, "2026-06-01", "2026-06-06", "PNs")
+        except ValueError as exc:
+            assert "does not match" in str(exc)
+        else:
+            raise AssertionError("mismatched canonical channel was accepted")
+
+        for unknown_expected in ("mystery", "ANs-extra", ""):
+            try:
+                FE.select_stage2_rows(
+                    records, "2026-06-01", "2026-06-06", unknown_expected)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unknown expected channel was accepted")
+        unknown_records = [{**record, "channel": "mystery"}
+                           for record in records]
+        try:
+            FE.select_stage2_rows(
+                unknown_records, "2026-06-01", "2026-06-06", "mystery")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unknown record channel was accepted")
 
         lopsided = records[:4] + [
             {**records[4], "path": os.path.join(root, f"lopsided-{index}.dat"),

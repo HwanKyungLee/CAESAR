@@ -68,6 +68,17 @@ N_SCANS = 12
 POLYS = [2, 3, 4, 5, 6, 8]
 
 
+def canonical_channel_key(value):
+    """Accept case variants of configured keys/labels, returning the map key."""
+    if not isinstance(value, str):
+        return value
+    folded = value.strip().casefold()
+    for key, label in KEY2LABEL.items():
+        if folded in {key.casefold(), str(label).casefold()}:
+            return key
+    return value
+
+
 def require_key(key):
     """알 수 없는 채널 키에 바로 KeyError 대신 사용 가능한 키 목록 + 어디를 고칠지 알려준다."""
     if key not in CHAN_ALPHA:
@@ -121,6 +132,7 @@ def build_engine_from_config(cfg):
 def pick_channel(scen, key):
     """wl_path(roi1/roi2/cold)로 채널 매칭. data_label은 쓰지 않는다 — FitSet json에서
     라벨이 실제 채널과 뒤바뀌어 저장된 사례가 있다(§14-D, roi1이 'PNs'로 잘못 저장됨)."""
+    key = canonical_channel_key(key)
     require_key(key)
     wldir = KEY2WLDIR[key]
     for ch in scen["channels"].values():
