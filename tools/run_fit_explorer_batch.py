@@ -125,6 +125,8 @@ def execute_candidate(_label, candidate, context):
                     allow_negative_gas=True)
     report["sampling"] = context["sampling"]
     report["source"] = context["source"]
+    report["t2_gate"] = FE.t2_from_attempts(
+        context["engine"], candidate, report.get("attempts", []))
     return report
 
 

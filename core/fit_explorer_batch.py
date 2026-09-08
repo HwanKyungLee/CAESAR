@@ -24,7 +24,7 @@ _RESERVED = {"CON", "PRN", "AUX", "NUL",
 _RESULT_FIELDS = {"schema", "candidate_id", "status", "policy", "budget",
     "translation", "policy_bounds", "planned_attempts", "executed_attempts",
     "successful_attempts", "objective_change_convention", "attempts",
-    "limitations", "sampling", "source"}
+    "limitations", "sampling", "source", "t2_gate"}
 _PUBLIC_KEYS = _RESULT_FIELDS | {
     "active_bands_nm", "allow_negative_gas", "attempts_per_scan", "bound",
     "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date", "quality_state", "quality_gate",
@@ -40,7 +40,7 @@ _PUBLIC_KEYS = _RESULT_FIELDS | {
     "side", "solver_termination", "source_policy", "source_policy_stage",
     "sq_mode", "sq_val", "squeeze", "start_id", "starts", "state_stratification",
     "success", "successful_attempts", "t_coeff", "t_ref", "target", "exception_class",
-    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig", "T_C", "P_mbar"}
+    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig", "T_C", "P_mbar", "t2_gate"}
 _FORBIDDEN_PUBLIC_KEYS = {"path", "message", "traceback", "exception_message"}
 
 
