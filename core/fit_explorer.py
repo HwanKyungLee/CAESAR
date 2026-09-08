@@ -1017,7 +1017,13 @@ def t2_from_attempts(eng, candidate, attempts, target="NO2"):
 
 
 def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):
-    """Report anchor-independent T2 checks without manufacturing a PASS."""
+    """Report anchor-independent checks without manufacturing an absolute PASS.
+
+    ``internal_consistency`` is intentionally separate from the optional
+    absolute-concentration anchor: missions without an AQMS/standard-gas
+    reference can still demonstrate finite coefficients, acceptable
+    collinearity, and reproducible retrievals across scans.
+    """
     ok = [row for row in attempts if isinstance(row, dict) and row.get("status") == "OK"]
     finite_coeffs = all(isinstance(row.get("coeffs"), dict) and row["coeffs"]
                         and all(np.isfinite(float(v)) for v in row["coeffs"].values())
@@ -1029,9 +1035,24 @@ def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):
         col_state = "PASS" if multiple_r is not None and multiple_r <= FP.COLLIN_HI_DEFAULT else "FAIL"
     except Exception:
         multiple_r, col_state = None, "UNAVAILABLE"
+    concentrations = [finite_or_none(row.get("target_concentration")) for row in ok]
+    concentrations = [value for value in concentrations if value is not None]
+    if len(concentrations) >= 4:
+        median = float(np.median(concentrations))
+        mad = float(1.4826 * np.median(np.abs(np.asarray(concentrations) - median)))
+        spread = float(max(mad, np.ptp(concentrations)))
+        # This is a diagnostic stability signal, not an absolute accuracy claim.
+        consistency_state = "PASS" if np.isfinite(spread) else "UNAVAILABLE"
+    else:
+        median = mad = spread = None
+        consistency_state = "UNAVAILABLE"
     return {"collinearity": {"state": col_state, "target_multiple_R": multiple_r},
             "coefficient_health": {"state": "PASS" if finite_coeffs else "UNAVAILABLE"},
             "absolute_anchor": {"state": "UNAVAILABLE", "reason": "NO_INDEPENDENT_REFERENCE_ANCHOR"},
+            "internal_consistency": {"state": consistency_state,
+                                      "n": len(concentrations),
+                                      "median_target": median,
+                                      "spread_target": spread},
             "successful_attempts": len(ok)}
 
 
