@@ -27,7 +27,7 @@ _RESULT_FIELDS = {"schema", "candidate_id", "status", "policy", "budget",
     "limitations", "sampling", "source"}
 _PUBLIC_KEYS = _RESULT_FIELDS | {
     "active_bands_nm", "allow_negative_gas", "attempts_per_scan", "bound",
-    "boundary_hits", "channel", "channel_source", "contract", "date",
+    "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date",
     "date_range", "derived_target_ref_props", "details", "eligible_per_date",
     "eligible_rows", "executed_attempts", "expected_channel", "file",
     "final_shift", "final_squeeze", "fit_executed", "fitset", "gas_order",
@@ -40,7 +40,7 @@ _PUBLIC_KEYS = _RESULT_FIELDS | {
     "side", "solver_termination", "source_policy", "source_policy_stage",
     "sq_mode", "sq_val", "squeeze", "start_id", "starts", "state_stratification",
     "success", "successful_attempts", "t_coeff", "t_ref", "target", "exception_class",
-    "time_source", "timestamp", "upper", "value", "wavecal"}
+    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig"}
 _FORBIDDEN_PUBLIC_KEYS = {"path", "message", "traceback", "exception_message"}
 
 

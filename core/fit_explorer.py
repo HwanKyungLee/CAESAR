@@ -651,6 +651,10 @@ def production_stage1_callback(eng, fitter, cfg, target="NO2"):
                 "final_squeeze": float(result["squeezes"][target]),
                 "objective_initial": diagnostics["objective_initial"],
                 "objective_final": diagnostics["objective_final"],
+                "target_concentration": float(result.get("conc", float("nan"))),
+                "rms": float(result.get("rms", float("nan"))),
+                "rms_sig": float(result.get("rms_sig", float("nan"))),
+                "coeffs": {str(k): float(v) for k, v in result.get("coeffs", {}).items()},
                 "solver_termination": diagnostics["solver_termination"],
                 "boundary_hits": hits}
     return fit
