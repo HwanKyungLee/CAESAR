@@ -53,6 +53,32 @@ def _result(candidate_id, stage=1):
         "limitations": ["No T2 verdict"], "sampling": {}, "source": {}}
 
 
+def test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys():
+    good = _result("candidate-a", stage=2)
+    good["sampling"] = {"selected_per_date": {"2026-05-26": 1},
+                        "eligible_per_date": {"2026-05-26": 3}}
+    assert FB.validate_public_result(good, stage=2,
+                                     candidate_id="candidate-a")["sampling"] == good["sampling"]
+    for bad_key in ("2026/05/26", r"C:\\secret\\alpha.dat", "not-a-date"):
+        bad = _result("candidate-a", stage=2)
+        bad["sampling"] = {"selected_per_date": {bad_key: 1}}
+        try:
+            FB.validate_public_result(bad, stage=2, candidate_id="candidate-a")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("malformed per-date sampling key was accepted")
+    for bad_count in (-1, True, 1.5):
+        bad = _result("candidate-a", stage=2)
+        bad["sampling"] = {"selected_per_date": {"2026-05-26": bad_count}}
+        try:
+            FB.validate_public_result(bad, stage=2, candidate_id="candidate-a")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("malformed per-date sampling count was accepted")
+
+
 def test_validation_is_fail_closed():
     with tempfile.TemporaryDirectory() as root:
         good = _config(root)

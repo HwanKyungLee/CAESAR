@@ -86,6 +86,19 @@ def _validate_public_value(value, key=""):
     if key.casefold() in _FORBIDDEN_PUBLIC_KEYS:
         raise ValueError("public result contains a forbidden field")
     if isinstance(value, dict):
+        if key in {"selected_per_date", "eligible_per_date"}:
+            from datetime import date
+            for date_key, count in value.items():
+                if not isinstance(date_key, str):
+                    raise ValueError("per-date sampling keys must be ISO dates")
+                try:
+                    date.fromisoformat(date_key)
+                except ValueError as exc:
+                    raise ValueError("per-date sampling keys must be ISO dates") from exc
+                if (isinstance(count, bool) or not isinstance(count, int)
+                        or count < 0):
+                    raise ValueError("per-date sampling counts must be nonnegative integers")
+            return
         for child_key, child in value.items():
             if not isinstance(child_key, str) or child_key not in _PUBLIC_KEYS:
                 raise ValueError("public result contains a non-allowlisted field")
