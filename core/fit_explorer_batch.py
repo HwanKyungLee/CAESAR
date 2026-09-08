@@ -107,7 +107,9 @@ def _validate_public_value(value, key=""):
         for child in value:
             _validate_public_value(child, key)
     elif isinstance(value, str):
-        if re.search(r"(?:^[A-Za-z]:[\\/]|^\\\\|^/|[\\/])", value):
+        # Reject absolute/local paths, but allow ordinary prose containing
+        # words such as "file/date" in scientific limitations.
+        if re.search(r"(?:^[A-Za-z]:[\\/]|^\\\\|^/)", value):
             raise ValueError("public result contains a path-like string")
 
 

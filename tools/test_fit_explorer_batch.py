@@ -79,6 +79,20 @@ def test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys():
             raise AssertionError("malformed per-date sampling count was accepted")
 
 
+def test_public_result_allows_slashes_in_prose_but_rejects_absolute_paths():
+    good = _result("candidate-a", stage=2)
+    good["sampling"] = {"independence_note": "Rows within one file/date are repeated"}
+    FB.validate_public_result(good, stage=2, candidate_id="candidate-a")
+    bad = _result("candidate-a", stage=2)
+    bad["sampling"] = {"independence_note": "C:/private/input.dat"}
+    try:
+        FB.validate_public_result(bad, stage=2, candidate_id="candidate-a")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("absolute path-like prose was accepted")
+
+
 def test_validation_is_fail_closed():
     with tempfile.TemporaryDirectory() as root:
         good = _config(root)
