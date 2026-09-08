@@ -24,7 +24,7 @@ _RESERVED = {"CON", "PRN", "AUX", "NUL",
 _RESULT_FIELDS = {"schema", "candidate_id", "status", "policy", "budget",
     "translation", "policy_bounds", "planned_attempts", "executed_attempts",
     "successful_attempts", "objective_change_convention", "attempts",
-    "limitations", "sampling", "source", "t2_gate"}
+    "limitations", "sampling", "source", "quality_gate", "t2_gate"}
 _PUBLIC_KEYS = _RESULT_FIELDS | {
     "active_bands_nm", "allow_negative_gas", "attempts_per_scan", "bound",
     "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date", "quality_state", "quality_gate",

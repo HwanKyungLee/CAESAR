@@ -51,6 +51,8 @@ def _result(candidate_id, stage=1):
         "planned_attempts": 0, "executed_attempts": 0, "successful_attempts": 0,
         "objective_change_convention": "final_minus_initial", "attempts": [],
         "limitations": ["No T2 verdict"], "sampling": {}, "source": {},
+        "quality_gate": {"state": "QUALITY_GATE_UNAVAILABLE", "threshold": None,
+                         "median": None, "mad_scaled": None, "n": 0},
         "t2_gate": {"state": "UNAVAILABLE", "reason": "fixture"}}
 
 
