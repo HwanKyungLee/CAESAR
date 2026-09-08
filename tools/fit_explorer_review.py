@@ -1,0 +1,41 @@
+"""Render a human-review summary from completed Fit Explorer evidence.
+
+This tool never ranks candidates or changes a FitSet.  The verdict is supplied
+by the scientific review that produced the evidence, then rendered with the
+same boundary and seed diagnostics a user needs before manual approval.
+"""
+from __future__ import annotations
+import argparse, json, os
+from collections import defaultdict
+import numpy as np
+
+VERDICTS = ("RECOMMENDABLE_INTERNAL", "MISSION_LOCAL_ONLY",
+            "NON_IDENTIFIABLE_OR_ABSTAIN")
+
+def summarize(path):
+    with open(path, encoding="utf-8") as fh: data = json.load(fh)
+    attempts = data.get("attempts", [])
+    if not attempts or any("target_concentration" not in row for row in attempts):
+        raise ValueError("report has no completed concentration attempts")
+    groups = defaultdict(list)
+    for row in attempts: groups[row["scan_id"]].append(row["target_concentration"])
+    return {"file": os.path.basename(path), "candidate_id": data.get("candidate_id"),
+            "attempts": len(attempts),
+            "boundary_attempts": sum(bool(row.get("boundary_hits")) for row in attempts),
+            "median_ppb": float(np.median([row["target_concentration"] for row in attempts])),
+            "seed_max_delta_ppb": float(max(abs(max(v)-min(v)) for v in groups.values()))}
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--stage2", required=True); p.add_argument("--holdout")
+    p.add_argument("--verdict", choices=VERDICTS, required=True)
+    p.add_argument("--reason", required=True)
+    a = p.parse_args(argv)
+    result = {"schema": "fit-explorer-human-review-v1", "verdict": a.verdict,
+              "reason": a.reason, "stage2": summarize(a.stage2),
+              "holdout": summarize(a.holdout) if a.holdout else None,
+              "apply": "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION"}
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+if __name__ == "__main__": raise SystemExit(main())
