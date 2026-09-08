@@ -538,7 +538,7 @@ def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callbac
                                    ref_props=copy.deepcopy(translated["ref_props"]),
                                    policy_bounds=copy.deepcopy(policy_bounds),
                                    allow_negative_gas=True)
-                optional = {"target_concentration", "rms", "rms_sig", "coeffs"}
+                optional = {"target_concentration", "rms", "rms_sig", "coeffs", "date", "T_C", "P_mbar"}
                 if not isinstance(raw, dict) or not required.issubset(raw):
                     raise ValueError("worker result must match the exact Stage 1 schema")
                 numeric = [raw[key] for key in required - {"solver_termination", "boundary_hits"}]
@@ -665,7 +665,10 @@ def production_stage1_callback(eng, fitter, cfg, target="NO2"):
                   if np.isfinite(float(v))}
         if coeffs:
             summary["coeffs"] = coeffs
-        return {"initial_shift": float(start["shift"]),
+        return {"date": str(scan.get("date", "")),
+                "T_C": float(scan["temperature_C"]),
+                "P_mbar": float(scan["pressure_mbar"]),
+                "initial_shift": float(start["shift"]),
                 "initial_squeeze": float(start["squeeze"]),
                 "final_shift": float(result["shifts"][target]),
                 "final_squeeze": float(result["squeezes"][target]),
