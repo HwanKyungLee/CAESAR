@@ -645,16 +645,23 @@ def production_stage1_callback(eng, fitter, cfg, target="NO2"):
         hits = [{"parameter": hit["parameter"].lower(),
                  "side": hit["side"].lower(), "value": hit["value"],
                  "bound": hit["bound"]} for hit in raw_hits]
+        summary = {}
+        for name in ("conc", "rms", "rms_sig"):
+            value = float(result.get(name, float("nan")))
+            if np.isfinite(value):
+                summary[{"conc": "target_concentration", "rms": "rms",
+                         "rms_sig": "rms_sig"}[name]] = value
+        coeffs = {str(k): float(v) for k, v in result.get("coeffs", {}).items()
+                  if np.isfinite(float(v))}
+        if coeffs:
+            summary["coeffs"] = coeffs
         return {"initial_shift": float(start["shift"]),
                 "initial_squeeze": float(start["squeeze"]),
                 "final_shift": float(result["shifts"][target]),
                 "final_squeeze": float(result["squeezes"][target]),
                 "objective_initial": diagnostics["objective_initial"],
                 "objective_final": diagnostics["objective_final"],
-                "target_concentration": float(result.get("conc", float("nan"))),
-                "rms": float(result.get("rms", float("nan"))),
-                "rms_sig": float(result.get("rms_sig", float("nan"))),
-                "coeffs": {str(k): float(v) for k, v in result.get("coeffs", {}).items()},
+                **summary,
                 "solver_termination": diagnostics["solver_termination"],
                 "boundary_hits": hits}
     return fit
