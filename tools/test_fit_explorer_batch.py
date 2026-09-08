@@ -127,6 +127,15 @@ def test_validation_is_fail_closed():
                 raise AssertionError("invalid batch config was accepted")
 
 
+def test_mission_agnostic_channel_and_target_metadata():
+    config = _config("fixture-root", stage=1)
+    config["channels"] = [{"label": "sensor_A", "fitset_channel_key": "roi_custom",
+                            "channel_header_key": "detector_7", "target_species": "SO2",
+                            "fitset": "fixture.json", "alpha_glob": "sensor/*.dat",
+                            "candidates": [{"id": "candidate-a", "policy": _policy()}]}]
+    FB.validate_config(config)
+
+
 def test_three_channels_resume_stale_and_failure_isolation():
     with tempfile.TemporaryDirectory() as root:
         config = _config(root)
