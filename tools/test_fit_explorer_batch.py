@@ -50,7 +50,8 @@ def _result(candidate_id, stage=1):
         "budget": {}, "translation": {}, "policy_bounds": {},
         "planned_attempts": 0, "executed_attempts": 0, "successful_attempts": 0,
         "objective_change_convention": "final_minus_initial", "attempts": [],
-        "limitations": ["No T2 verdict"], "sampling": {}, "source": {}}
+        "limitations": ["No T2 verdict"], "sampling": {}, "source": {},
+        "t2_gate": {"state": "UNAVAILABLE", "reason": "fixture"}}
 
 
 def test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys():
