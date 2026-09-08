@@ -75,6 +75,7 @@ def prepare_channel(channel, document):
     with open(channel["fitset"], encoding="utf-8") as fh:
         scenario = json.load(fh)
     cfg = OP.pick_channel(scenario, channel["label"])
+    target = channel.get("target_species", "NO2")
     if cfg.get("allow_negative_gas") is not True:
         raise ValueError("FitSet must explicitly allow negative gas")
     paths = sorted(glob.glob(channel["alpha_glob"]))
@@ -101,7 +102,7 @@ def prepare_channel(channel, document):
     engine = OP.build_engine_from_config(cfg)
     if list(engine.gas_list) != [ref["name"] for ref in cfg["refs"]]:
         raise ValueError("engine reference order does not match FitSet")
-    generated = FE.zero_base_policy_candidates(cfg, engine._wave_axis)
+    generated = FE.zero_base_policy_candidates(cfg, engine._wave_axis, target=target)
     by_id = {candidate["id"]: candidate for candidate in generated}
     chosen = {}
     for declaration in channel["candidates"]:
@@ -112,23 +113,25 @@ def prepare_channel(channel, document):
     input_hash, source = _source_hash(cfg, channel["fitset"], sampling, selected)
     return {"input_hash": input_hash, "candidates": chosen,
         "context": {"cfg": cfg, "scans": scans, "sampling": sampling,
+                     "target": target,
                     "source": source, "engine": engine,
                     "fitter": DoasFitter(engine), "stage": document["stage"]}}
 
 
 def execute_candidate(_label, candidate, context):
     cfg = context["cfg"]
-    callback = FE.production_stage1_callback(context["engine"], context["fitter"], cfg)
+    target = context.get("target", "NO2")
+    callback = FE.production_stage1_callback(context["engine"], context["fitter"], cfg, target=target)
     runner = FE.run_stage1_vertical_slice if context["stage"] == 1 \
         else FE.run_stage2_vertical_slice
     report = runner(cfg, cfg["ref_props"], candidate, context["scans"], callback,
-                    allow_negative_gas=True)
+                    allow_negative_gas=True, target=target)
     report["sampling"] = context["sampling"]
     report["source"] = context["source"]
     report["t2_gate"] = FE.t2_from_attempts(
-        context["engine"], candidate, report.get("attempts", []))
+        context["engine"], candidate, report.get("attempts", []), target=target)
     report["t2_diagnostics"] = FE.t2_diagnostic_checks(
-        context["engine"], candidate, report.get("attempts", []))
+        context["engine"], candidate, report.get("attempts", []), target=target)
     return report
 
 

@@ -185,7 +185,7 @@ def validate_config(document):
         raise ValueError("channels must be a non-empty list")
     labels, alpha_globs = set(), set()
     for channel in channels:
-        allowed = {"label", "fitset", "alpha_glob", "candidates", "sample_manifest"}
+        allowed = {"label", "fitset", "alpha_glob", "candidates", "sample_manifest", "target_species"}
         if not isinstance(channel, dict) or not set(channel).issubset(allowed) \
                 or not {"label", "fitset", "alpha_glob", "candidates"}.issubset(channel):
             raise ValueError("channel config is incomplete")
