@@ -192,6 +192,15 @@ def validate_config(document):
         if not isinstance(label, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", label) or label in labels:
             raise ValueError("channel labels must be unique opaque IDs")
         labels.add(label)
+        if "target_species" in channel:
+            target = channel["target_species"]
+            if (not isinstance(target, str) or
+                    not re.fullmatch(r"[A-Za-z0-9_.+-]{1,64}", target)):
+                raise ValueError("target_species must be a safe opaque species ID")
+        if "fitset_channel_key" in channel and not isinstance(channel["fitset_channel_key"], str):
+            raise ValueError("fitset_channel_key must be a string")
+        if "channel_header_key" in channel and not isinstance(channel["channel_header_key"], str):
+            raise ValueError("channel_header_key must be a string")
         for field in ("fitset", "alpha_glob"):
             if not isinstance(channel[field], str) or not channel[field]:
                 raise ValueError(f"channel {field} is required")
