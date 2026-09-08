@@ -312,6 +312,7 @@ def zero_base_policy_candidates(cfg, wave_axis, target="NO2", window_offsets_nm=
         {"mode": "Fix", "value": -0.5}, {"mode": "Fix", "value": 0.0},
         {"mode": "Limit", "lower": -1.0, "upper": 1.0},
         {"mode": "Limit", "lower": -5.0, "upper": 5.0},
+        {"mode": "Limit", "lower": -3.5, "upper": 1.5},
         {"mode": "Limit", "lower": -10.0, "upper": 0.5},
     )
     squeeze_policies = (

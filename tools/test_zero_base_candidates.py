@@ -27,7 +27,7 @@ def test_zero_base_grid_is_explicit_and_deterministic():
     wave = np.linspace(430.0, 480.0, 401)
     a = FE.zero_base_policy_candidates(cfg, wave)
     b = FE.zero_base_policy_candidates(cfg, wave)
-    assert len(a) == 315
+    assert len(a) == 360
     assert [x["id"] for x in a] == [x["id"] for x in b]
     assert all(x["refs_source"] == "FitSet.cfg.refs" for x in a)
     assert all(x["policy_stage"] == "STAGE0_METADATA_ONLY" for x in a)
@@ -102,7 +102,7 @@ def _translation_fixture():
     for candidate in candidates:
         key = repr(candidate["policy"])
         unique.setdefault(key, candidate)
-    assert len(unique) == 35
+    assert len(unique) == 40
     return cfg, props, list(unique.values())
 
 
