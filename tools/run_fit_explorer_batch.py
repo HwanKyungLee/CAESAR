@@ -74,7 +74,7 @@ def prepare_channel(channel, document):
     """Open and fully validate one channel, but execute no nonlinear fit."""
     with open(channel["fitset"], encoding="utf-8") as fh:
         scenario = json.load(fh)
-    cfg = OP.pick_channel(scenario, channel["label"])
+    cfg = OP.pick_channel(scenario, channel.get("fitset_channel_key", channel["label"]))
     target = channel.get("target_species", "NO2")
     if cfg.get("allow_negative_gas") is not True:
         raise ValueError("FitSet must explicitly allow negative gas")

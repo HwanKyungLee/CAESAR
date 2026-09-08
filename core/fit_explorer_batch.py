@@ -12,7 +12,6 @@ import os
 import re
 import secrets
 
-from core.fit_explorer import canonical_channel_label
 
 
 SCHEMA = "fit-explorer-batch-v1"
@@ -185,13 +184,13 @@ def validate_config(document):
         raise ValueError("channels must be a non-empty list")
     labels, alpha_globs = set(), set()
     for channel in channels:
-        allowed = {"label", "fitset", "alpha_glob", "candidates", "sample_manifest", "target_species"}
+        allowed = {"label", "fitset", "alpha_glob", "candidates", "sample_manifest", "target_species", "fitset_channel_key"}
         if not isinstance(channel, dict) or not set(channel).issubset(allowed) \
                 or not {"label", "fitset", "alpha_glob", "candidates"}.issubset(channel):
             raise ValueError("channel config is incomplete")
-        label = canonical_channel_label(channel["label"])
-        if channel["label"] != label or label in labels:
-            raise ValueError("channel labels must be unique canonical labels")
+        label = channel["label"]
+        if not isinstance(label, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", label) or label in labels:
+            raise ValueError("channel labels must be unique opaque IDs")
         labels.add(label)
         for field in ("fitset", "alpha_glob"):
             if not isinstance(channel[field], str) or not channel[field]:
