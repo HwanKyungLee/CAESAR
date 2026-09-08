@@ -99,6 +99,11 @@ def _validate_public_value(value, key=""):
                         or count < 0):
                     raise ValueError("per-date sampling counts must be nonnegative integers")
             return
+        if key == "coeffs":
+            if any(not isinstance(name, str) or not isinstance(value, (int, float))
+                   or isinstance(value, bool) for name, value in value.items()):
+                raise ValueError("coefficient summary is invalid")
+            return
         for child_key, child in value.items():
             if not isinstance(child_key, str) or child_key not in _PUBLIC_KEYS:
                 raise ValueError("public result contains a non-allowlisted field")
