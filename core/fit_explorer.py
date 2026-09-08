@@ -538,7 +538,8 @@ def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callbac
                                    ref_props=copy.deepcopy(translated["ref_props"]),
                                    policy_bounds=copy.deepcopy(policy_bounds),
                                    allow_negative_gas=True)
-                if not isinstance(raw, dict) or set(raw) != required:
+                optional = {"target_concentration", "rms", "rms_sig", "coeffs"}
+                if not isinstance(raw, dict) or not required.issubset(raw):
                     raise ValueError("worker result must match the exact Stage 1 schema")
                 numeric = [raw[key] for key in required - {"solver_termination", "boundary_hits"}]
                 if any(isinstance(v, (bool, np.bool_)) or not np.isfinite(v) for v in numeric):
@@ -570,10 +571,11 @@ def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callbac
                     if spec["mode"] == "FIXED" and not np.isclose(
                             raw[f"final_{axis}"], spec["value"], rtol=0.0, atol=1e-12):
                         raise ValueError(f"worker changed fixed {axis}")
+                extra = {key: copy.deepcopy(raw[key]) for key in optional if key in raw}
                 attempts.append({"candidate_id": candidate.get("id"),
                                  "scan_id": scan["id"], "start_id": start["id"],
                                  "status": "OK",
-                                 **{key: copy.deepcopy(raw[key]) for key in required},
+                                 **{key: copy.deepcopy(raw[key]) for key in required}, **extra,
                                  "objective_change": (float(raw["objective_final"])
                                                       - float(raw["objective_initial"]))})
             except Exception as exc:
