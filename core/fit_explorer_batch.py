@@ -86,6 +86,14 @@ def _validate_public_value(value, key=""):
     if key.casefold() in _FORBIDDEN_PUBLIC_KEYS:
         raise ValueError("public result contains a forbidden field")
     if isinstance(value, dict):
+        if key == "t2_gate":
+            # T2 details contain dynamic gas names; retain safety checks while
+            # allowing domain-specific nested diagnostic keys.
+            for child_key, child in value.items():
+                if not isinstance(child_key, str) or child_key.casefold() in _FORBIDDEN_PUBLIC_KEYS:
+                    raise ValueError("T2 diagnostic contains a forbidden field")
+                _validate_public_value(child, "")
+            return
         if key in {"selected_per_date", "eligible_per_date"}:
             from datetime import date
             for date_key, count in value.items():
