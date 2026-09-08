@@ -1490,6 +1490,7 @@ def _pass2_write_file(fp, rows, ctx):
         f.write(f"# channel={ctx['channel']}  label={ctx['channel_label'] or 'single'}\n")
         f.write(f"# RL_factor={ctx['rl_factor']}  d={ctx['cavity_len']} cm\n")
         f.write(f"# I0_mode={ctx['i0_mode']}  ZA_count={ctx['n_za']}\n")
+        f.write("# T_P_PROVENANCE: measured_raw_housekeeping\n")
         f.write(f"# ambient_avg_sec={ctx['avg_sec']:.0f}  (alpha after {ctx['avg_sec']:.0f}s time-average of ambient)\n")
         dark = ctx['dark']
         dark_note = f"mean={dark.mean():.1f}×{ctx['dark_scale_factor']:g}" if dark is not None else "None"

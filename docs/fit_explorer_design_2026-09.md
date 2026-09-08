@@ -40,6 +40,12 @@ T2 결과는 반드시 세 상태로 기록한다.
 - `FAIL`: 수행된 T2 검사에서 물리 위반이 확인됨
 - `UNAVAILABLE`: 대상 종에 적용할 물리 앵커가 없거나 필요한 입력이 없어 판단할 수 없음
 
+T/P를 쓰는 절대량 gate는 alpha 행마다 `temperature_pressure_source`가
+`measured_raw_housekeeping` 또는 `matched_nearest_raw_mat_row`일 때만 실행한다.
+25°C/1013.25 mbar 같은 loader fallback 또는 누락 provenance는 수치가 유한해도
+`T2_TP_PROVENANCE_UNAVAILABLE`이며, 절대량 PASS/FAIL에 사용하지 않는다. 잔차·농도
+spread처럼 tolerance가 정해지지 않은 값은 `PASS`가 아니라 `COMPUTED`로 보고한다.
+
 Explorer의 T2 adapter는 각 gate마다 먼저 **적용 가능성**과 **필수 입력 완전성**을 판정한 뒤,
 적용 가능한 gate의 결과만 합성한다. 적용 가능한 gate에서 위반이 하나라도 나오면 `FAIL`, 적용 가능한
 필수 gate가 모두 실행되고 위반이 없을 때만 `PASS`, 적용 대상 gate가 없거나 필요한 입력이 하나라도

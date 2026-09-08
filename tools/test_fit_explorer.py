@@ -674,6 +674,27 @@ def test_json_schema_and_no_apply():
     assert "No Apply" in loaded["limitations"]
 
 
+def test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass():
+    class Engine:
+        gas_list = ["NO2"]
+        raw_references = {"NO2": np.arange(12.)}
+    candidate = {"px_min": 0, "px_max": 11, "poly": 2}
+    fallback = [{"status": "OK", "T_C": 25., "P_mbar": 1013.25,
+                 "temperature_pressure_source": "fallback_placeholder",
+                 "coeffs": {"NO2": 1.}}]
+    assert FE.t2_from_attempts(Engine(), candidate, fallback)["reason"] == "T2_TP_PROVENANCE_UNAVAILABLE"
+    original = FE.FP.differential_collinearity
+    try:
+        FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": .1}}
+        wild = [{"status": "OK", "coeffs": {"NO2": 1.}, "target_concentration": x}
+                for x in (1., 1000., -500., 2000.)]
+        result = FE.t2_diagnostic_checks(Engine(), candidate, wild)
+        assert result["internal_consistency"]["state"] == "COMPUTED"
+        assert result["internal_consistency"]["spread_target"] == 2500.
+    finally:
+        FE.FP.differential_collinearity = original
+
+
 def main():
     test_candidates_and_starts()
     test_stage1_global_bounds_and_boundary_diagnostic()
@@ -694,6 +715,7 @@ def main():
     test_stage0_preflight_is_conservative_and_fit_free()
     test_early_policy_abstain_cannot_overwrite_alpha_input()
     test_json_schema_and_no_apply()
+    test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass()
     print("test_fit_explorer: PASS")
 
 

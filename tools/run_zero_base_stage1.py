@@ -134,6 +134,17 @@ def load_selected_scans(selected, sampling=None, fallback_wave=None):
     hashes = {}
     scans = []
     for index, (path, row_index) in enumerate(selected):
+        tp_source = "UNAVAILABLE"
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("# T_P_PROVENANCE:"):
+                        tp_source = line.split(":", 1)[1].strip().split()[0]
+                        break
+                    if not line.startswith("#"):
+                        break
+        except OSError:
+            pass
         try:
             wave, alpha, temp, pressure, px_start = DataIO.load_alpha_trace_row_mapped(
                 path, row_index)
@@ -149,6 +160,7 @@ def load_selected_scans(selected, sampling=None, fallback_wave=None):
                 raise
             wave = np.asarray(fallback_wave, dtype=float)
             temp, pressure, px_start = 25.0, 1013.25, 0
+            tp_source = "fallback_placeholder"
         if samples:
             sample = samples[index]
             digest, scan_id = sample["sha256"], sample["id"]
@@ -160,6 +172,7 @@ def load_selected_scans(selected, sampling=None, fallback_wave=None):
                        f"#row={row_index}")
         scans.append({"id":scan_id, "wave":wave, "alpha":alpha,
                       "temperature_C":float(temp), "pressure_mbar":float(pressure),
+                      "temperature_pressure_source":tp_source,
                       "px_start":int(px_start)})
     return scans
 

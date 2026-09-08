@@ -20,6 +20,7 @@ STAGE1_SAMPLE_CONTRACT = "stage1-representative-rows-v1"
 STAGE1_EXPECTED_ATTEMPTS = 8
 STAGE1_VERTICAL_SLICE_SCHEMA = "stage1-one-candidate-v1"
 STAGE1_SOLVER_STATUSES = {"CONVERGED", "MAX_NFEV", "FAILED", "TERMINATED"}
+MEASURED_TP_SOURCES = {"measured_raw_housekeeping", "matched_nearest_raw_mat_row"}
 STAGE2_SAMPLE_CONTRACT = "stage2-date-distributed-rows-v1"
 
 
@@ -539,7 +540,8 @@ def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callbac
                                    ref_props=copy.deepcopy(translated["ref_props"]),
                                    policy_bounds=copy.deepcopy(policy_bounds),
                                    allow_negative_gas=True)
-                optional = {"target_concentration", "rms", "rms_sig", "coeffs", "date", "T_C", "P_mbar"}
+                optional = {"target_concentration", "rms", "rms_sig", "coeffs", "date", "T_C", "P_mbar",
+                            "temperature_pressure_source"}
                 if not isinstance(raw, dict) or not required.issubset(raw):
                     raise ValueError("worker result must match the exact Stage 1 schema")
                 numeric = [raw[key] for key in required - {"solver_termination", "boundary_hits"}]
@@ -669,6 +671,7 @@ def production_stage1_callback(eng, fitter, cfg, target="NO2"):
         return {"date": str(scan.get("date", "")),
                 "T_C": float(scan["temperature_C"]),
                 "P_mbar": float(scan["pressure_mbar"]),
+                "temperature_pressure_source": str(scan.get("temperature_pressure_source", "UNAVAILABLE")),
                 "initial_shift": float(start["shift"]),
                 "initial_squeeze": float(start["squeeze"]),
                 "final_shift": float(result["shifts"][target]),
@@ -951,6 +954,11 @@ def stage0_candidate_grid(eng, candidates, target="NO2"):
 
 def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=None):
     """Conservative adapter: a negative exclusion decision is never a PASS."""
+    sources = {str(row.get("temperature_pressure_source", "UNAVAILABLE"))
+               for row in successful_runs if isinstance(row, dict)}
+    if successful_runs and not sources.issubset(MEASURED_TP_SOURCES):
+        return {"state": "UNAVAILABLE", "reason": "T2_TP_PROVENANCE_UNAVAILABLE",
+                "details": {"temperature_pressure_sources": sorted(sources)}}
     try:
         diag = FP.differential_collinearity(
             eng, list(eng.gas_list), candidate["px_min"], candidate["px_max"], candidate["poly"])
@@ -1005,10 +1013,11 @@ def t2_from_attempts(eng, candidate, attempts, target="NO2"):
     for attempt in attempts:
         if not isinstance(attempt, dict) or attempt.get("status") != "OK":
             continue
-        required = ("T_C", "P_mbar", "coeffs")
+        required = ("T_C", "P_mbar", "coeffs", "temperature_pressure_source")
         if any(key not in attempt for key in required):
             return {"state": "UNAVAILABLE", "reason": "T2_ATTEMPT_PROVENANCE_INCOMPLETE"}
         successful.append({"T_C": attempt["T_C"], "P_mbar": attempt["P_mbar"],
+                           "temperature_pressure_source": attempt["temperature_pressure_source"],
                            "result": {"coeffs": attempt["coeffs"]}})
     if not successful:
         return {"state": "UNAVAILABLE", "reason": "T2_NO_SUCCESSFUL_ATTEMPTS"}
@@ -1042,7 +1051,7 @@ def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):
         mad = float(1.4826 * np.median(np.abs(np.asarray(concentrations) - median)))
         spread = float(max(mad, np.ptp(concentrations)))
         # This is a diagnostic stability signal, not an absolute accuracy claim.
-        consistency_state = "PASS" if np.isfinite(spread) else "UNAVAILABLE"
+        consistency_state = "COMPUTED" if np.isfinite(spread) else "UNAVAILABLE"
     else:
         median = mad = spread = None
         consistency_state = "UNAVAILABLE"
@@ -1050,6 +1059,7 @@ def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):
             "coefficient_health": {"state": "PASS" if finite_coeffs else "UNAVAILABLE"},
             "absolute_anchor": {"state": "UNAVAILABLE", "reason": "NO_INDEPENDENT_REFERENCE_ANCHOR"},
             "internal_consistency": {"state": consistency_state,
+                                      "scope": "COMPUTED_NOT_THRESHOLD_VERDICT",
                                       "n": len(concentrations),
                                       "median_target": median,
                                       "spread_target": spread},
@@ -1238,7 +1248,9 @@ def evaluate_candidate(eng, fitter, ref_props, scans, candidate, starts,
                     controlled_initial_values=secondary_initials)
                 result["boundary_hits"] = boundary_hits(result, target_bounds, target)
                 rows.append({"scan_id": scan["id"], "seed_id": seed["id"], "T_C": scan["T_C"],
-                             "P_mbar": scan["P_mbar"], "seconds": time.perf_counter() - t0,
+                             "P_mbar": scan["P_mbar"],
+                             "temperature_pressure_source": scan.get("temperature_pressure_source", "UNAVAILABLE"),
+                             "seconds": time.perf_counter() - t0,
                              "result": result})
             except Exception as exc:
                 failures.append({"scan_id": scan["id"], "seed_id": seed["id"],

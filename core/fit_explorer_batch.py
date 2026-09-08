@@ -39,7 +39,7 @@ _PUBLIC_KEYS = _RESULT_FIELDS | {
     "side", "solver_termination", "source_policy", "source_policy_stage",
     "sq_mode", "sq_val", "squeeze", "start_id", "starts", "state_stratification",
     "success", "successful_attempts", "t_coeff", "t_ref", "target", "exception_class",
-    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig", "T_C", "P_mbar", "t2_gate", "t2_diagnostics", "state", "reason", "details", "anchors", "abs_ratio", "limit", "target_multiple_R", "threshold", "incomplete", "n", "outlier_count", "median", "mad_scaled", "successful_attempts", "coefficient_health", "collinearity", "absolute_anchor"}
+    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig", "T_C", "P_mbar", "temperature_pressure_source", "t2_gate", "t2_diagnostics", "state", "reason", "details", "anchors", "abs_ratio", "limit", "target_multiple_R", "threshold", "incomplete", "n", "outlier_count", "median", "mad_scaled", "successful_attempts", "coefficient_health", "collinearity", "absolute_anchor"}
 _FORBIDDEN_PUBLIC_KEYS = {"path", "message", "traceback", "exception_message"}
 
 

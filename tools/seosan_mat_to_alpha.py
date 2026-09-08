@@ -65,7 +65,7 @@ def convert(mat_path: Path, output: Path, channel: int, rows: list[int],
         # Existing explorer metadata parser requires this exact portable form.
         fh.write(f"# channel={channel} label=CH{channel}\n")
         if raw_doy is None:
-            fh.write("# T_P_PROVENANCE: UNAVAILABLE (MAT alpha has no row-level T/P)\n")
+            fh.write("# T_P_PROVENANCE: fallback_placeholder (MAT alpha has no row-level T/P)\n")
         else:
             fh.write("# T_P_PROVENANCE: matched_nearest_raw_mat_row\n")
         fh.write("# wavelength_nm: " + "\t".join(f"{x:.9f}" for x in wave) + "\n")
