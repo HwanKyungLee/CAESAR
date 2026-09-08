@@ -53,7 +53,8 @@ def _result(candidate_id, stage=1):
         "limitations": ["No T2 verdict"], "sampling": {}, "source": {},
         "quality_gate": {"state": "QUALITY_GATE_UNAVAILABLE", "threshold": None,
                          "median": None, "mad_scaled": None, "n": 0},
-        "t2_gate": {"state": "UNAVAILABLE", "reason": "fixture"}}
+        "t2_gate": {"state": "UNAVAILABLE", "reason": "fixture"},
+        "t2_diagnostics": {"state": "fixture"}}
 
 
 def test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys():

@@ -127,6 +127,8 @@ def execute_candidate(_label, candidate, context):
     report["source"] = context["source"]
     report["t2_gate"] = FE.t2_from_attempts(
         context["engine"], candidate, report.get("attempts", []))
+    report["t2_diagnostics"] = FE.t2_diagnostic_checks(
+        context["engine"], candidate, report.get("attempts", []))
     return report
 
 

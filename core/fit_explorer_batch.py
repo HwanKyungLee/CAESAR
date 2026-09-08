@@ -24,7 +24,7 @@ _RESERVED = {"CON", "PRN", "AUX", "NUL",
 _RESULT_FIELDS = {"schema", "candidate_id", "status", "policy", "budget",
     "translation", "policy_bounds", "planned_attempts", "executed_attempts",
     "successful_attempts", "objective_change_convention", "attempts",
-    "limitations", "sampling", "source", "quality_gate", "t2_gate"}
+    "limitations", "sampling", "source", "quality_gate", "t2_gate", "t2_diagnostics"}
 _PUBLIC_KEYS = _RESULT_FIELDS | {
     "active_bands_nm", "allow_negative_gas", "attempts_per_scan", "bound",
     "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date", "quality_state", "quality_gate",
@@ -40,7 +40,7 @@ _PUBLIC_KEYS = _RESULT_FIELDS | {
     "side", "solver_termination", "source_policy", "source_policy_stage",
     "sq_mode", "sq_val", "squeeze", "start_id", "starts", "state_stratification",
     "success", "successful_attempts", "t_coeff", "t_ref", "target", "exception_class",
-    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig", "T_C", "P_mbar", "t2_gate", "state", "reason", "details", "anchors", "abs_ratio", "limit", "target_multiple_R", "threshold", "incomplete", "n", "outlier_count", "median", "mad_scaled"}
+    "time_source", "timestamp", "target_concentration", "upper", "value", "wavecal", "rms", "rms_sig", "T_C", "P_mbar", "t2_gate", "t2_diagnostics", "state", "reason", "details", "anchors", "abs_ratio", "limit", "target_multiple_R", "threshold", "incomplete", "n", "outlier_count", "median", "mad_scaled", "successful_attempts", "coefficient_health", "collinearity", "absolute_anchor"}
 _FORBIDDEN_PUBLIC_KEYS = {"path", "message", "traceback", "exception_message"}
 
 
@@ -86,7 +86,7 @@ def _validate_public_value(value, key=""):
     if key.casefold() in _FORBIDDEN_PUBLIC_KEYS:
         raise ValueError("public result contains a forbidden field")
     if isinstance(value, dict):
-        if key == "t2_gate":
+        if key in {"t2_gate", "t2_diagnostics"}:
             # T2 details contain dynamic gas names; retain safety checks while
             # allowing domain-specific nested diagnostic keys.
             def walk_t2(child):

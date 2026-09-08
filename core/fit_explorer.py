@@ -1015,6 +1015,25 @@ def t2_from_attempts(eng, candidate, attempts, target="NO2"):
                         expected_count=len(successful))
 
 
+def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):
+    """Report anchor-independent T2 checks without manufacturing a PASS."""
+    ok = [row for row in attempts if isinstance(row, dict) and row.get("status") == "OK"]
+    finite_coeffs = all(isinstance(row.get("coeffs"), dict) and row["coeffs"]
+                        and all(np.isfinite(float(v)) for v in row["coeffs"].values())
+                        for row in ok) if ok else False
+    try:
+        col = FP.differential_collinearity(
+            eng, list(eng.gas_list), candidate["px_min"], candidate["px_max"], candidate["poly"])
+        multiple_r = finite_or_none(col["multiple_R"].get(target))
+        col_state = "PASS" if multiple_r is not None and multiple_r <= FP.COLLIN_HI_DEFAULT else "FAIL"
+    except Exception:
+        multiple_r, col_state = None, "UNAVAILABLE"
+    return {"collinearity": {"state": col_state, "target_multiple_R": multiple_r},
+            "coefficient_health": {"state": "PASS" if finite_coeffs else "UNAVAILABLE"},
+            "absolute_anchor": {"state": "UNAVAILABLE", "reason": "NO_INDEPENDENT_REFERENCE_ANCHOR"},
+            "successful_attempts": len(ok)}
+
+
 def stage1_gate(preflight_state, n_ok, n_fail, attempt_t2_states,
                 expected=STAGE1_EXPECTED_ATTEMPTS):
     """Decide only whether conservative Stage 1 evidence may advance."""
