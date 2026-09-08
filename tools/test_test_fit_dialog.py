@@ -183,10 +183,13 @@ def test_explorer_review_is_read_only_contract():
         "holdout": {"candidate_id": "pns-mid", "attempts": 24,
                     "boundary_attempts": 0, "median_ppb": 1.64,
                     "seed_max_delta_ppb": 2e-7},
+        "session_relative_validation": [{"file": "injection.json", "candidate_count": 2,
+                                           "scope": "SESSION_RELATIVE_ONLY_NO_ABSOLUTE_CORRECTION"}],
         "apply": "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION",
     }
     html = _format_explorer_review(review)
-    check("조건부 verdict와 Apply 금지 표시", "MISSION_LOCAL_ONLY" in html and "자동 변경하지 않습니다" in html)
+    check("조건부 verdict와 Apply 금지 표시", "MISSION_LOCAL_ONLY" in html and "자동 변경하지 않습니다" in html
+          and "절대농도 보정에는 사용하지 않음" in html)
     review["apply"] = "ALLOWED"
     try:
         _format_explorer_review(review)

@@ -25,16 +25,34 @@ def summarize(path):
             "median_ppb": float(np.median([row["target_concentration"] for row in attempts])),
             "seed_max_delta_ppb": float(max(abs(max(v)-min(v)) for v in groups.values()))}
 
+
+def summarize_session_relative(path):
+    """Accept injection evidence only as session-relative, non-calibration context."""
+    with open(path, encoding="utf-8") as fh: data = json.load(fh)
+    if data.get("schema") != "CAESAR.InjectionPlateauEvidence.v1":
+        raise ValueError("not an InjectionPlateauEvidence.v1 report")
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("injection evidence has no stable plateau candidates")
+    return {"file": os.path.basename(path), "candidate_count": len(candidates),
+            "scope": "SESSION_RELATIVE_ONLY_NO_ABSOLUTE_CORRECTION",
+            "criterion": data.get("criterion"),
+            "limitations": data.get("limitations", [])}
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--stage2", required=True); p.add_argument("--holdout")
     p.add_argument("--verdict", choices=VERDICTS, required=True)
     p.add_argument("--reason", required=True)
+    p.add_argument("--session-relative-evidence", action="append", default=[],
+                   help="optional InjectionPlateauEvidence.v1; display-only, never calibration")
     p.add_argument("--output", help="optional JSON file for the Test Fit Explorer Review tab")
     a = p.parse_args(argv)
     result = {"schema": "fit-explorer-human-review-v1", "verdict": a.verdict,
               "reason": a.reason, "stage2": summarize(a.stage2),
               "holdout": summarize(a.holdout) if a.holdout else None,
+              "session_relative_validation": [summarize_session_relative(path)
+                                              for path in a.session_relative_evidence],
               "apply": "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION"}
     text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
     if a.output:

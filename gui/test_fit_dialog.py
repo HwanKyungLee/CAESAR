@@ -349,10 +349,20 @@ def _format_explorer_review(review: dict) -> str:
                 f"{float(value['seed_max_delta_ppb']):.3g} ppb")
 
     reason = str(review.get("reason", "")).replace("&", "&amp;").replace("<", "&lt;")
+    session_relative = review.get("session_relative_validation", [])
+    if not isinstance(session_relative, list):
+        raise ValueError("session-relative validation must be a list")
+    for item in session_relative:
+        if not isinstance(item, dict) or item.get("scope") != "SESSION_RELATIVE_ONLY_NO_ABSOLUTE_CORRECTION":
+            raise ValueError("invalid session-relative validation scope")
+    relative_html = ("<p><b>Session-relative validation:</b> " +
+                     ", ".join(f"{item.get('file', '?')} ({item.get('candidate_count', '?')} plateau)"
+                               for item in session_relative) +
+                     " — 절대농도 보정에는 사용하지 않음.</p>") if session_relative else ""
     return (f"<h3>Explorer verdict: {verdict}</h3>"
             f"<p><b>Reason:</b> {reason}</p>"
             f"<p>{_summary('Stage 2', review.get('stage2'))}<br>"
-            f"{_summary('Holdout', review.get('holdout'))}</p>"
+            f"{_summary('Holdout', review.get('holdout'))}</p>{relative_html}"
             "<p style='color:#C62828; font-weight:bold;'>"
             "이 카드는 증거를 표시할 뿐이며 현재 FitSet·채널 설정을 자동 변경하지 않습니다. "
             "현재 데이터가 이 보고서의 mission/data와 일치하는지는 사용자가 확인해야 합니다.</p>")
