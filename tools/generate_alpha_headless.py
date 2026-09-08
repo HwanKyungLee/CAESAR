@@ -28,6 +28,8 @@ def main() -> None:
     p.add_argument("--avg-sec", type=float, default=60.0)
     p.add_argument("--rl-factor", type=float, default=1.0)
     p.add_argument("--cavity-cm", type=float, default=51.8)
+    p.add_argument("--rt-path", type=Path,
+                   help="optional production R(t) npz when this raw file has no He scan")
     args = p.parse_args()
     wave = np.loadtxt(args.wavecal, dtype=float).reshape(-1)
     if len(wave) != 2048 or not np.isfinite(wave).all() or not np.all(np.diff(wave) > 0):
@@ -41,6 +43,7 @@ def main() -> None:
         rl_factor=args.rl_factor, cavity_len=args.cavity_cm,
         output_dir=str(args.output), channel=args.channel,
         avg_sec=args.avg_sec, channel_label=args.label,
+        rt_path=str(args.rt_path) if args.rt_path else None,
     )
     messages: list[str] = []
     worker.status_msg.connect(lambda message: messages.append(str(message)))
