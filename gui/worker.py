@@ -1965,16 +1965,10 @@ class AlphaExportWorker(QThread):
                     rc.add_za_spectrum(s, t, p)
                 for s, t, p in zip(he_spectra, he_t_list, he_p_list):
                     rc.add_he_spectrum(s, t, p)
-                # ROI는 이 채널의 실제 fit 범위(pixel_min:pixel_max)로 좁혀야 한다.
-                # wave_nm 전체(400~499nm대)로 잡으면 스펙트럼 앞쪽 다크/노이즈 구간이
-                # 섞여 들어와 He/ZA contrast의 median이 음수로 끌려간다(2026-08-10 NO2
-                # 인젝션 재현 중 발견 — fit window 안에서는 contrast +6~+22%로 정상인데
-                # 전체 범위로 재면 -15%가 나와 R-cal이 거짓으로 실패했음).
-                _pmin = max(0, int(self.pixel_min))
-                _pmax = min(len(wave_nm) - 1, int(self.pixel_max) - 1) if self.pixel_max else len(wave_nm) - 1
-                roi_lo, roi_hi = float(wave_nm[_pmin]), float(wave_nm[_pmax])
-                if roi_lo > roi_hi:
-                    roi_lo, roi_hi = roi_hi, roi_lo
+                # ``wave_nm`` and every collected spectrum are already sliced to
+                # pixel_min:pixel_max by the caller.  Reapplying absolute detector
+                # pixels here mis-indexes CH2 and narrows CH1 to its edge.
+                roi_lo, roi_hi = float(wave_nm[0]), float(wave_nm[-1])
                 _w, _rraw, r_fit, omr_d_fit = rc.calculate(
                     wave_nm, min_valid_fraction=0.30, roi_min=roi_lo, roi_max=roi_hi)
                 omr_d_fit = np.maximum(np.asarray(omr_d_fit, dtype=float), 1e-12)
