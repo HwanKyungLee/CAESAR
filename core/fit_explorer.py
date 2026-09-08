@@ -998,6 +998,23 @@ def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=N
              "details": details})
 
 
+def t2_from_attempts(eng, candidate, attempts, target="NO2"):
+    """Adapt public Stage 2 attempts to the conservative T2 tri-state gate."""
+    successful = []
+    for attempt in attempts:
+        if not isinstance(attempt, dict) or attempt.get("status") != "OK":
+            continue
+        required = ("T_C", "P_mbar", "coeffs")
+        if any(key not in attempt for key in required):
+            return {"state": "UNAVAILABLE", "reason": "T2_ATTEMPT_PROVENANCE_INCOMPLETE"}
+        successful.append({"T_C": attempt["T_C"], "P_mbar": attempt["P_mbar"],
+                           "result": {"coeffs": attempt["coeffs"]}})
+    if not successful:
+        return {"state": "UNAVAILABLE", "reason": "T2_NO_SUCCESSFUL_ATTEMPTS"}
+    return t2_tri_state(eng, candidate, successful, target=target,
+                        expected_count=len(successful))
+
+
 def stage1_gate(preflight_state, n_ok, n_fail, attempt_t2_states,
                 expected=STAGE1_EXPECTED_ATTEMPTS):
     """Decide only whether conservative Stage 1 evidence may advance."""
