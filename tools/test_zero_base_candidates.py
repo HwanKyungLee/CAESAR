@@ -16,7 +16,7 @@ from core.data_io import DataIO
 from core.doas_fit import (DoasFitter, _aggregate_solver_termination,
                            _endpoint_objectives)
 from tools.run_zero_base_stage1 import (alpha_header_channel, alpha_stage2_metadata,
-                                        alpha_time_source, load_selected_scans,
+                                        alpha_time_source, alpha_temperature_pressure_source, load_selected_scans,
                                         main as run_stage_main, report_sampling,
                                         reuse_stage2_samples, select_candidate,
                                         stage1_paths_in_date_range)
@@ -394,6 +394,10 @@ def test_stage2_date_distributed_sampling_and_budget_contract():
         assert alpha_header_channel(header_path) == {
             "index": 2, "label": "PNs", "source": "alpha_header_label"}
         assert alpha_time_source(header_path) == "alpha_header_datetime"
+        assert alpha_temperature_pressure_source(header_path) == "UNAVAILABLE"
+        with open(header_path, "w", encoding="utf-8") as fh:
+            fh.write("# T_P_PROVENANCE: measured_raw_housekeeping\n# channel=2  label=pNs\nrow_idx\tdatetime\n")
+        assert alpha_temperature_pressure_source(header_path) == "measured_raw_housekeeping"
 
         mixed_case = [{**record, "channel": "aNs"} for record in records]
         _, mixed_provenance = FE.select_stage2_rows(

@@ -311,7 +311,8 @@ def test_evaluator_injects_two_distinct_final_starts():
         starts = [{"id": "a", "shift": -2., "squeeze": 1., "provenance": "test"},
                   {"id": "b", "shift": 2., "squeeze": 1., "provenance": "test"}]
         scans = [{"id": f"s{i}", "wave": np.arange(101), "alpha": np.zeros(101),
-                  "T_C": 25., "P_mbar": 1013.} for i in range(4)]
+                  "T_C": 25., "P_mbar": 1013.,
+                  "temperature_pressure_source": "measured_raw_housekeeping"} for i in range(4)]
         evaluated = FE.evaluate_candidate(
             Engine(), None, {}, scans,
             {"id": "c", "px_min": 0, "px_max": 100, "poly": 2}, starts, .5, True,

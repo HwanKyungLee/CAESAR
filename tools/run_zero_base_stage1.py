@@ -48,6 +48,18 @@ def alpha_time_source(path):
                 break
     raise ValueError("alpha header time metadata is unavailable")
 
+
+def alpha_temperature_pressure_source(path):
+    """Read explicit alpha T/P provenance; absent legacy headers are unavailable."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith("# T_P_PROVENANCE:"):
+                value = line.split(":", 1)[1].strip().split()
+                return value[0] if value else "UNAVAILABLE"
+            if not line.startswith("#"):
+                break
+    return "UNAVAILABLE"
+
 def alpha_stage2_metadata(path):
     """Read one alpha file once and return channel plus row time provenance."""
     channel = None
@@ -134,17 +146,7 @@ def load_selected_scans(selected, sampling=None, fallback_wave=None):
     hashes = {}
     scans = []
     for index, (path, row_index) in enumerate(selected):
-        tp_source = "UNAVAILABLE"
-        try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    if line.startswith("# T_P_PROVENANCE:"):
-                        tp_source = line.split(":", 1)[1].strip().split()[0]
-                        break
-                    if not line.startswith("#"):
-                        break
-        except OSError:
-            pass
+        tp_source = alpha_temperature_pressure_source(path)
         try:
             wave, alpha, temp, pressure, px_start = DataIO.load_alpha_trace_row_mapped(
                 path, row_index)

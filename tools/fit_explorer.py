@@ -21,6 +21,7 @@ from core.doas_fit import DoasFitter
 from core.data_io import DataIO
 from core import fit_explorer as FE
 from tools import optimize_params as OP
+from tools.run_zero_base_stage1 import alpha_temperature_pressure_source
 
 
 def eligible_scan_rows(key):
@@ -206,6 +207,7 @@ def main(argv=None):
             scans.append({"id": identity["id"], "path": path,
                           "wave": w, "alpha": alpha, "T_C": float(temp),
                           "P_mbar": float(pressure), "px_start": px_start,
+                          "temperature_pressure_source": alpha_temperature_pressure_source(path),
                           "date": identity["date"], "state": identity["state"]})
             sample_rows.append(identity)
     except (OSError, RuntimeError, TypeError, ValueError, IndexError):
@@ -271,6 +273,7 @@ def main(argv=None):
         "controlled_starts": starts,
         "budget": FE.stage1_budget(evaluated, len(scans), len(starts)),
         "scans": [{"id": s["id"], "T_C": s["T_C"], "P_mbar": s["P_mbar"],
+                   "temperature_pressure_source": s["temperature_pressure_source"],
                    "px_start": s["px_start"], "date": s["date"], "state": s["state"]} for s in scans],
         "candidates": evaluated,
         "seconds": time.perf_counter() - started,
