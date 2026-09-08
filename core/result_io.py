@@ -118,24 +118,40 @@ def read_result(fp: str):
 
 
 def merge_results(files: list[str], dedup: bool = True):
-    """여러 결과 파일을 시간순 병합. 컬럼 불일치면 ValueError.
+    """여러 결과 파일을 시간순 병합. 새 컬럼은 구형 행에 빈 값으로 채운다.
 
     dedup=True(기본): 같은 (timestamp, Channel) 행이 여러 파일에 있으면
     **뒤에 온 파일(인자 순서상 나중)** 행만 남긴다 — 시간대가 겹쳐도 안전.
     반환: (comments, colhdr, rows 시간순, n_dup 제거수).
     """
     comments, colhdr, rows = read_result(files[0])
+    columns = colhdr.split('\t')
     for fp in files[1:]:
         _, ch2, r2 = read_result(fp)
-        if ch2 != colhdr:
-            raise ValueError(
-                f"Column mismatch — cannot merge:\n  {os.path.basename(files[0])}\n  {os.path.basename(fp)}\n"
-                "(merge only same-channel / same-format results)")
-        rows += r2
+        other = ch2.split('\t')
+        for c in other:
+            if c not in columns:
+                columns.append(c)
+        def align(line, src):
+            vals = line.split('\t')
+            by_name = dict(zip(src, vals))
+            return '\t'.join(by_name.get(c, '') for c in columns)
+        rows = [(t, align(line, columns[:len(colhdr.split('\t'))])) for t, line in rows]
+        rows += [(t, align(line, other)) for t, line in r2]
+        colhdr = '\t'.join(columns)
+
+    # First-file rows may need padding even when no later file introduced columns.
+    if colhdr != '\t'.join(columns):
+        colhdr = '\t'.join(columns)
+    if rows:
+        # rows already aligned above; pad initial rows for a single-file/new schema case.
+        rows = [(t, line if len(line.split('\t')) == len(columns)
+                 else '\t'.join(line.split('\t') + [''] * (len(columns) - len(line.split('\t')))))
+                for t, line in rows]
 
     n_dup = 0
     if dedup:
-        cols = colhdr.split('\t')
+        cols = columns
         ci = cols.index('Channel') if 'Channel' in cols else None
         seen = {}   # (epoch, channel) → 마지막 등장 인덱스(나중 파일 우선)
         for i, (t, line) in enumerate(rows):

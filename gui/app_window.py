@@ -4707,9 +4707,9 @@ class CAESARAnalyzer(QMainWindow):
             self._autosave_path = os.path.join(
                 folder, f'autosave_{_t.strftime("%Y%m%d_%H%M%S")}.tsv')
             cols = ['File', 'Channel', 'Time', 'RMS', 'Chi2', 'SNR', 'Status',
-                    'Shift', 'Squeeze']
+                    'Shift', 'Squeeze', 'T_used_C', 'P_used_mbar']
             for g in self.engine.gas_list:
-                cols += [g, f'{g}_Error', f'{g}_Smooth']
+                cols += [g, f'{g}_RealConc', f'{g}_Error', f'{g}_Smooth']
             self._autosave_cols = cols
             self._autosave_fh = open(self._autosave_path, 'w', encoding='utf-8')
             self._autosave_fh.write('\t'.join(cols) + '\n')

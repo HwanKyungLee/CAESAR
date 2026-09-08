@@ -549,7 +549,9 @@ class ResultViewerWidget(QWidget):
         # 개수 컬럼(n_used, *_n)은 스캔 수(신뢰도 메타)지 농도가 아니라 스케일이 달라
         # 같은 축에 그리면 방해만 됨 → 농도 플롯에서 제외(CSV엔 그대로 보존).
         ycols = [c for c in ycols
-                 if not (str(c) == "n_used" or str(c).endswith("_n"))]
+                 if not (str(c) == "n_used" or str(c).endswith("_n")
+                         or str(c) in ("T_used_C", "P_used_mbar")
+                         or str(c).endswith("_RealConc"))]
         n = 0
         for i, c in enumerate(ycols):
             y = pd.to_numeric(df[c], errors="coerce").to_numpy()

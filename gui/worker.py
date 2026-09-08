@@ -38,7 +38,7 @@ class AnalysisWorker(QThread):
     r_curve_update = pyqtSignal(object, object)
     scan_count_ready = pyqtSignal(int)   # emitted once after all files are expanded
 
-    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=None, flag_he=None, flag_amb=None, dark_array=None, dark_scale_factor=1.0, offset_array=None, offset_scale_factor=1.0, stray_light_fraction=0.0, use_temporal_i0=False, save_alpha=False, alpha_save_dir='', rl_factor=1.0, channel=1):
+    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=None, flag_he=None, flag_amb=None, dark_array=None, dark_scale_factor=1.0, offset_array=None, offset_scale_factor=1.0, stray_light_fraction=0.0, use_temporal_i0=False, save_alpha=False, alpha_save_dir='', rl_factor=1.0, channel=1, residual_dump_path=None):
         super().__init__()
         self.engine = engine
         self.file_list = file_list
@@ -82,6 +82,11 @@ class AnalysisWorker(QThread):
         self.save_alpha = save_alpha
         self.alpha_save_dir = alpha_save_dir
         self.rl_factor = rl_factor
+        # Optional, run-scoped residual export.  Fast-mode children never receive
+        # this path; the parent writes their returned payloads in scan order.
+        self.residual_dump_path = residual_dump_path
+        self._residual_dump_fp = None
+        self._residual_dump_wave_nm = None
 
         # ZA scan T&P — updated each time a ZA scan is seen; used in Rayleigh correction
         self.t_za_last = temperature
@@ -102,6 +107,50 @@ class AnalysisWorker(QThread):
         self.kalman_r = 0.050
         self.etalon_freq_min = 0.02
         self.etalon_freq_max = 0.40
+
+    def _write_residual_dump(self, wave_nm, result, residual):
+        """Append one fitted residual row, opening and validating the file once."""
+        path = self.residual_dump_path
+        if not path:
+            return
+        wave_nm = np.asarray(wave_nm, dtype=float).reshape(-1)
+        residual = np.asarray(residual, dtype=float).reshape(-1)
+        if len(wave_nm) != len(residual):
+            raise ValueError("residual dump wavelength/residual length mismatch")
+
+        if self._residual_dump_fp is None:
+            exists = os.path.exists(path) and os.path.getsize(path) > 0
+            if exists:
+                with open(path, 'r', encoding='utf-8') as f:
+                    axis_line = f.readline().rstrip('\r\n')
+                    columns = f.readline().rstrip('\r\n').split('\t')
+                if not axis_line.startswith('# wavelength_nm:'):
+                    raise ValueError(f"residual dump has no wavelength header: {path}")
+                saved_axis = np.fromstring(axis_line.split(':', 1)[1], sep='\t')
+                if (len(saved_axis) != len(wave_nm) or
+                        not np.allclose(saved_axis, wave_nm, rtol=0, atol=1e-8) or
+                        len(columns) != len(wave_nm) + 2 or columns[:2] != ['Time', 'rms']):
+                    raise ValueError(f"residual dump axis/header does not match current fit: {path}")
+            self._residual_dump_fp = open(path, 'a', encoding='utf-8')
+            self._residual_dump_wave_nm = wave_nm.copy()
+            if not exists:
+                self._residual_dump_fp.write('# wavelength_nm:\t' + '\t'.join(f'{w:.10g}' for w in wave_nm) + '\n')
+                self._residual_dump_fp.write('Time\trms\t' + '\t'.join(
+                    f'residual_{j}' for j in range(len(wave_nm))) + '\n')
+        elif (len(self._residual_dump_wave_nm) != len(wave_nm) or
+              not np.allclose(self._residual_dump_wave_nm, wave_nm, rtol=0, atol=1e-8)):
+            raise ValueError("residual dump axis changed during a run")
+
+        fp = self._residual_dump_fp
+        fp.write(f"{result.get('Time', '')}\t{float(result['RMS']):.6e}\t" +
+                 '\t'.join(f'{v:.6e}' for v in residual) + '\n')
+        fp.flush()
+
+    def _close_residual_dump(self):
+        if self._residual_dump_fp is not None:
+            self._residual_dump_fp.close()
+            self._residual_dump_fp = None
+            self._residual_dump_wave_nm = None
 
     # ==========================================
     # 알파 입력 처리 — 채널별(파일별) 파장축 사용
@@ -285,7 +334,7 @@ class AnalysisWorker(QThread):
         else:
             return after[0][1]
 
-    def run(self):
+    def _run(self):
         # Fast mode: dispatch alpha scans to a process pool (see _run_parallel).
         # Falls back to nothing on failure (no double-processing) — user re-runs.
         if getattr(self, 'parallel', False):
@@ -635,6 +684,12 @@ class AnalysisWorker(QThread):
                                 real_err  = gas_errs[gi]           / scale_div * mult_i
                             raw_concentrations.append(real_conc); real_errors.append(real_err)
 
+                        # Export the exact state used for the ppb conversion.
+                        result['T_used_C'] = float(self.temperature)
+                        result['P_used_mbar'] = float(self.pressure)
+                        for gi, nm in enumerate(self.engine.gas_list):
+                            result[f"{nm}_RealConc"] = float(raw_concentrations[gi])
+
                         smooth_concentrations = kalman_filter.process(raw_concentrations)
                         
                         # ── Real-time PPB conversion ─────────────────────────────────────
@@ -723,6 +778,9 @@ class AnalysisWorker(QThread):
                         if attempt == max_retries - 1: raise e
                         self.needs_pre_calibration = True
 
+                # Keep this outside the retry loop: one final fitted residual per scan.
+                self._write_residual_dump(wave_nm, result, residual)
+
                 # 6.5 ── 자동 품질필터(QC): 불량 핏 행의 가스 농도를 NaN으로 제외 ──
                 # 구름/저광량 등으로 핏이 실패하면(RMS가 신호의 임계% 초과 → Status=Unstable),
                 # NNLS/음수허용 하에서 NO2가 −로 폭주하고 CHOCHO·H2O가 상쇄상승하는 가짜값이
@@ -775,7 +833,15 @@ class AnalysisWorker(QThread):
             time.sleep(self.delay_ms / 1000.0 if self.delay_ms > 0 else 0.001)
 
         self.scan_count_ready.emit(i + 1)   # final actual count (in case estimate differed)
+        self._close_residual_dump()
         self.finished.emit()
+
+    def run(self):
+        """QThread entry point; always release an optional residual dump handle."""
+        try:
+            self._run()
+        finally:
+            self._close_residual_dump()
 
     # ──────────────────────────────────────────────────────────────────────────
     # 청크+워밍업 병렬화용 알파 핏 (터보 모드). run()의 ambient/linear 경로를
@@ -897,6 +963,11 @@ class AnalysisWorker(QThread):
                             real_err = (gas_errs[gj] / scale_factor) / scale_div * mult_i
                             raw_concentrations.append(real_conc); real_errors.append(real_err)
 
+                        result['T_used_C'] = float(self.temperature)
+                        result['P_used_mbar'] = float(self.pressure)
+                        for gj, nm in enumerate(self.engine.gas_list):
+                            result[f"{nm}_RealConc"] = float(raw_concentrations[gj])
+
                         n_air = 2.68678e19 * (self.pressure / 1013.25) * (273.15 / (self.temperature + 273.15))
                         dn_air_dT = -n_air / (self.temperature + 273.15)
                         dn_air_dP = n_air / self.pressure
@@ -961,6 +1032,11 @@ class AnalysisWorker(QThread):
                             result[_nm] = float('nan')
                         result['Status'] = f"QC-Excluded ({_qc_reason})"
 
+                # Only body scans are returned to the parent.  It is the sole
+                # writer, so child processes never contend for the dump file.
+                if is_body and getattr(self, 'residual_dump_enabled', False):
+                    result['_residual_dump'] = (wave_nm, float(rms), residual)
+
             except Exception as e:
                 result['Status'] = f"Skip: {str(e)}"
                 result['RMS'] = 0
@@ -1001,6 +1077,8 @@ class AnalysisWorker(QThread):
             'tz_offset_sec': getattr(self, 'tz_offset_sec', 0),
             'etalon_freq_min': getattr(self, 'etalon_freq_min', 0.02),
             'etalon_freq_max': getattr(self, 'etalon_freq_max', 0.40),
+            # Children receive only this flag, never the parent output path.
+            'residual_dump_enabled': bool(self.residual_dump_path),
         }
 
     def _run_parallel(self):
@@ -1112,6 +1190,14 @@ class AnalysisWorker(QThread):
                     _since_yield = 0
                     while nxt in done:
                         r = done.pop(nxt)
+                        payload = r.pop('_residual_dump', None)
+                        if payload is not None:
+                            wave_nm, rms, residual = payload
+                            # RMS is passed explicitly in the private payload so
+                            # the persisted row and result agree even if callers
+                            # later change result formatting.
+                            r['RMS'] = rms
+                            self._write_residual_dump(wave_nm, r, residual)
                         self.result_ready.emit(r, nxt)
                         self.progress.emit(nxt + 1)
                         nxt += 1
@@ -1120,6 +1206,7 @@ class AnalysisWorker(QThread):
                             _since_yield = 0
                             self.msleep(3)   # yield so the GUI can process queued updates
         finally:
+            self._close_residual_dump()
             self.scan_count_ready.emit(max(nxt, 1))
             self.finished.emit()
 
@@ -1232,7 +1319,8 @@ def _chunk_init(engine, cfg):
     for k in ('ref_properties', 'step_limit', 'tikhonov_lambda', 'use_robust_fitting',
               'allow_negative_gas', 'fit_unit', 'fit_lo_nm', 'fit_hi_nm',
               'qc_enabled', 'qc_rms_abs', 'qc_snr_min', 'ok_rms_threshold',
-              'gas_temp_override', 'tz_offset_sec', 'etalon_freq_min', 'etalon_freq_max'):
+              'gas_temp_override', 'tz_offset_sec', 'etalon_freq_min', 'etalon_freq_max',
+              'residual_dump_enabled'):
         if k in cfg:
             setattr(w, k, cfg[k])
     if not isinstance(w.allow_negative_gas, bool):
