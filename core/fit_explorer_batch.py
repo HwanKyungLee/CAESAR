@@ -35,7 +35,7 @@ _PUBLIC_KEYS = _RESULT_FIELDS | {
     "manifest_reuse", "minimum_distinct_dates", "mode", "name", "nfev", "objective_change",
     "objective_final", "objective_initial", "observation_key", "parameter",
     "planned_attempts", "reason", "references", "requested_scans", "row_index",
-    "sample_order", "samples", "scan_id", "scope", "seed_stability", "selected_per_date",
+    "sample_order", "samples", "scan_id", "scope", "seed_stability", "selected_alpha", "selected_per_date",
     "selected_zero_based_indices", "sh_mode", "sh_val", "sha256", "shift",
     "side", "solver_termination", "source_policy", "source_policy_stage",
     "sq_mode", "sq_val", "squeeze", "start_id", "starts", "state_stratification",

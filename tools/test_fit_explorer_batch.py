@@ -93,6 +93,12 @@ def test_public_result_allows_slashes_in_prose_but_rejects_absolute_paths():
         raise AssertionError("absolute path-like prose was accepted")
 
 
+def test_public_result_allows_sanitized_selected_alpha_provenance():
+    good = _result("candidate-a", stage=2)
+    good["source"] = {"selected_alpha": [{"file": "sample.dat", "row_index": 0}]}
+    FB.validate_public_result(good, stage=2, candidate_id="candidate-a")
+
+
 def test_validation_is_fail_closed():
     with tempfile.TemporaryDirectory() as root:
         good = _config(root)
