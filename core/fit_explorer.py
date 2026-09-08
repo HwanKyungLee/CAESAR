@@ -32,7 +32,8 @@ def canonical_channel_label(value):
     """
     if not isinstance(value, str):
         raise ValueError("channel label must be a string")
-    normalized = {"cold": "cold", "ans": "ANs", "pns": "PNs"}.get(
+    normalized = {"cold": "cold", "ans": "ANs", "pns": "PNs",
+                  "ch1": "CH1", "ch2": "CH2", "ch3": "CH3"}.get(
         value.strip().casefold())
     if normalized is None:
         raise ValueError("unsupported channel label")
