@@ -584,6 +584,13 @@ def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callbac
                                  "status": "UNAVAILABLE", "reason": "FIT_ATTEMPT_EXCEPTION",
                                  "exception_class": type(exc).__name__})
     n_ok = sum(row["status"] == "OK" for row in attempts)
+    quality = rms_quality_gate([{"rms": row["rms"]} for row in attempts
+                                if row["status"] == "OK" and "rms" in row])
+    if quality["state"] == "READY":
+        for row in attempts:
+            if row["status"] == "OK" and "rms" in row:
+                row["quality_state"] = ("DATA_QUALITY_OUTLIER"
+                                         if row["rms"] > quality["threshold"] else "INLIER")
     return {"schema": schema, "candidate_id": candidate.get("id"),
             "status": "COMPLETE" if n_ok == len(attempts) else "ABSTAIN_INCOMPLETE",
             "policy": {"allow_negative_gas": True}, "budget": plan,
@@ -594,6 +601,7 @@ def _run_diagnostic_vertical_slice(cfg, ref_props, candidate, scans, fit_callbac
             "executed_attempts": len(attempts), "successful_attempts": n_ok,
             "objective_change_convention": "final_minus_initial",
             "attempts": attempts,
+            "quality_gate": quality,
             "limitations": ["No T2 verdict", "No ranking", "No plateau claim", "No Apply"]}
 
 

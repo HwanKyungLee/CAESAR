@@ -27,7 +27,7 @@ _RESULT_FIELDS = {"schema", "candidate_id", "status", "policy", "budget",
     "limitations", "sampling", "source"}
 _PUBLIC_KEYS = _RESULT_FIELDS | {
     "active_bands_nm", "allow_negative_gas", "attempts_per_scan", "bound",
-    "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date",
+    "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date", "quality_state", "quality_gate",
     "date_range", "derived_target_ref_props", "details", "eligible_per_date",
     "eligible_rows", "executed_attempts", "expected_channel", "file",
     "final_shift", "final_squeeze", "fit_executed", "fitset", "gas_order",
