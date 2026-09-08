@@ -1,4 +1,4 @@
-"""gui/test_fit_dialog.py — Test Fit 다이얼로그: 탭1 자동 파라미터 최적화 + 탭2 1스캔 미리보기.
+"""gui/test_fit_dialog.py — Test Fit 다이얼로그: 최적화·미리보기·Fit Explorer.
 
 기존 app_window.py의 _test_fit(1스캔 즉석검산)을 대체하지 않고 탭2로 보존한 채,
 core/param_optimizer.py·core/fit_physics.py(둘 다 순수·Qt무관, tools/optimize_params.py로
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import traceback
 
@@ -168,6 +169,44 @@ def _rp_with_recommended_shift(ref_props: dict, target: str, sh: dict) -> dict:
         out[target] = dict(old, sh_mode="Fix", sh_val=str(sh.get("value", 0.0)))
     # policy == "Link"(측정불가)면 원래 설정 유지
     return out
+
+
+def _explorer_batch_command(config_path: str, dry_run: bool) -> list[str]:
+    """GUI에서도 검증된 Explorer batch CLI 하나만 실행한다.
+
+    GUI 상태를 암묵적으로 FitSet/입력으로 바꾸지 않는다. 사용자가 선택한 JSON config가
+    alpha·FitSet·후보·출력 경로를 모두 명시하며, --dry-run은 그 계약만 검사한다.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    command = [sys.executable, os.path.join(root, "tools", "run_fit_explorer_batch.py"),
+               "--config", os.path.abspath(config_path)]
+    if dry_run:
+        command.append("--dry-run")
+    return command
+
+
+class _ExplorerBatchWorker(QThread):
+    """Explorer CLI를 별도 스레드에서 실행해 Test Fit 창을 멈추지 않게 한다."""
+
+    completed = pyqtSignal(object)
+
+    def __init__(self, config_path: str, dry_run: bool):
+        super().__init__()
+        self.config_path = config_path
+        self.dry_run = dry_run
+
+    def run(self):
+        try:
+            command = _explorer_batch_command(self.config_path, self.dry_run)
+            result = subprocess.run(
+                command, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                capture_output=True, text=True, errors="replace", check=False)
+            self.completed.emit({"ok": result.returncode == 0, "returncode": result.returncode,
+                                 "stdout": result.stdout, "stderr": result.stderr,
+                                 "dry_run": self.dry_run})
+        except Exception as exc:
+            self.completed.emit({"ok": False, "returncode": None, "stdout": "",
+                                 "stderr": type(exc).__name__, "dry_run": self.dry_run})
 
 
 class _TestFitOptimizerWorker(QThread):
@@ -376,6 +415,8 @@ class TestFitDialog(QDialog):
         super().__init__(parent)
         self._app = parent
         self._worker: _TestFitOptimizerWorker | None = None
+        self._explorer_worker: _ExplorerBatchWorker | None = None
+        self._explorer_config_path = ""
         self.setWindowTitle("🧪 Test Fit")
         _s = getattr(parent, "_s", 1.0)
         self.resize(int(920 * _s), int(760 * _s))
@@ -635,18 +676,48 @@ class TestFitDialog(QDialog):
         self._btn_apply.setEnabled(False)
 
     # ══════════════════════════════════════════════════════════════
-    # 탭3 — Fit Explorer의 사람 검토 카드 (읽기 전용, Apply 없음)
+    # 탭3 — Fit Explorer 실행 + 사람 검토 카드 (Apply 없음)
     # ══════════════════════════════════════════════════════════════
     def _build_explorer_review_tab(self):
         page = QWidget()
         lay = QVBoxLayout(page)
         note = QLabel(
-            "Fit Explorer가 실제 피팅으로 만든 Stage 2/holdout 증거를 읽기 전용으로 표시합니다. "
-            "이 탭은 추천 파라미터를 자동 적용하지 않으며, 보고서의 mission·채널·입력이 현재 설정과 "
-            "같은지는 사람이 확인해야 합니다.")
+            "선택한 Explorer batch config로 실제 반복 피팅을 실행합니다. 사전검사 후에만 실행하고, "
+            "이 탭은 어떤 FitSet·채널 설정도 자동 적용하지 않습니다. config의 mission·채널·입력이 "
+            "현재 분석 의도와 맞는지는 사람이 확인해야 합니다.")
         note.setWordWrap(True)
         lay.addWidget(note)
+
+        config_bar = QHBoxLayout()
+        btn_config = QPushButton("Select Explorer Batch Config…")
+        btn_config.clicked.connect(self._choose_explorer_config)
+        config_bar.addWidget(btn_config)
+        self._explorer_config_label = QLabel("No batch config selected.")
+        self._explorer_config_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        config_bar.addWidget(self._explorer_config_label, 1)
+        lay.addLayout(config_bar)
+
+        run_bar = QHBoxLayout()
+        self._btn_explorer_dry_run = QPushButton("Validate Config (no fitting)")
+        self._btn_explorer_dry_run.clicked.connect(lambda: self._run_explorer_batch(dry_run=True))
+        run_bar.addWidget(self._btn_explorer_dry_run)
+        self._btn_explorer_run = QPushButton("▶ Run Explorer Batch")
+        self._btn_explorer_run.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
+        self._btn_explorer_run.clicked.connect(lambda: self._run_explorer_batch(dry_run=False))
+        run_bar.addWidget(self._btn_explorer_run)
+        run_bar.addStretch(1)
+        lay.addLayout(run_bar)
+        self._explorer_run_status = QLabel("Choose a batch config, validate it, then run it.")
+        self._explorer_run_status.setStyleSheet("color:#1565C0;")
+        lay.addWidget(self._explorer_run_status)
+        self._explorer_run_edit = QTextEdit()
+        self._explorer_run_edit.setReadOnly(True)
+        self._explorer_run_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._explorer_run_edit.setPlaceholderText("Batch validation and execution output appears here.")
+        lay.addWidget(self._explorer_run_edit, 1)
+
         bar = QHBoxLayout()
+        bar.addWidget(QLabel("After a completed batch:"))
         btn = QPushButton("Load Explorer Review JSON…")
         btn.clicked.connect(self._load_explorer_review)
         bar.addWidget(btn)
@@ -659,7 +730,45 @@ class TestFitDialog(QDialog):
             "<i>Review JSON을 불러오면 여기 표시됩니다. "
             "tools/fit_explorer_review.py --output REPORT.json 으로 만들 수 있습니다.</i>")
         lay.addWidget(self._explorer_review_edit, 1)
-        self._tabs.addTab(page, "🧭 Explorer Review")
+        self._tabs.addTab(page, "🧭 Explorer")
+
+    def _choose_explorer_config(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Fit Explorer batch config", "", "JSON Files (*.json)")
+        if not path:
+            return
+        self._explorer_config_path = path
+        self._explorer_config_label.setText(os.path.basename(path))
+        self._explorer_config_label.setToolTip(path)
+        self._explorer_run_status.setText("Config selected. Run validation before the batch.")
+
+    def _run_explorer_batch(self, dry_run: bool):
+        if not self._explorer_config_path:
+            QMessageBox.warning(self, "Fit Explorer", "Select an Explorer batch config first.")
+            return
+        if self._explorer_worker is not None and self._explorer_worker.isRunning():
+            return
+        self._btn_explorer_dry_run.setEnabled(False)
+        self._btn_explorer_run.setEnabled(False)
+        action = "Validating config" if dry_run else "Running Explorer batch"
+        self._explorer_run_status.setText(action + "…")
+        self._explorer_run_edit.clear()
+        self._explorer_worker = _ExplorerBatchWorker(self._explorer_config_path, dry_run)
+        self._explorer_worker.completed.connect(self._on_explorer_batch_completed)
+        self._explorer_worker.start()
+
+    def _on_explorer_batch_completed(self, result: dict):
+        self._btn_explorer_dry_run.setEnabled(True)
+        self._btn_explorer_run.setEnabled(True)
+        output = (result.get("stdout") or "") + ("\n" if result.get("stderr") else "") + (result.get("stderr") or "")
+        self._explorer_run_edit.setPlainText(output[-20000:] or "(no command output)")
+        if result.get("ok"):
+            if result.get("dry_run"):
+                self._explorer_run_status.setText("✅ Config validated — run the batch when ready.")
+            else:
+                self._explorer_run_status.setText("✅ Batch completed — load its Review JSON to inspect evidence.")
+        else:
+            self._explorer_run_status.setText("❌ Explorer stopped; inspect the output. No FitSet was changed.")
 
     def _load_explorer_review(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -749,4 +858,7 @@ class TestFitDialog(QDialog):
             if not self._worker.wait(3000):
                 self._worker.terminate()
                 self._worker.wait()
+        if self._explorer_worker is not None and self._explorer_worker.isRunning():
+            self._explorer_worker.terminate()
+            self._explorer_worker.wait()
         super().closeEvent(event)
