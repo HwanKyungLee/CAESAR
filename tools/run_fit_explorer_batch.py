@@ -63,7 +63,9 @@ def reject_cross_channel_alpha_aliases(config):
             owners[identity] = channel["label"]
 
 
-def validate_stage1_selected_channels(selected, expected_channel):
+def validate_stage1_selected_channels(selected, expected_channel=None):
+    if expected_channel is None:
+        return
     expected_channel = FE.canonical_channel_label(expected_channel)
     for path in {path for path, _ in selected}:
         if alpha_header_channel(path)["label"] != expected_channel:
@@ -96,7 +98,7 @@ def prepare_channel(channel, document):
         sampling = {"contract": FE.STAGE1_SAMPLE_CONTRACT, "eligible_rows": len(rows),
                     "selected_zero_based_indices": indices,
                     "date_range": [date_from, date_to]}
-        validate_stage1_selected_channels(selected, channel["label"])
+        validate_stage1_selected_channels(selected, channel.get("channel_header_key"))
     scans = load_selected_scans(selected, sampling if document["stage"] == 2 else None)
     sampling = report_sampling(sampling, scans, str(document["stage"]))
     engine = OP.build_engine_from_config(cfg)
