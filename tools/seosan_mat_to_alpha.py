@@ -62,7 +62,8 @@ def convert(mat_path: Path, output: Path, channel: int, rows: list[int],
     with output.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write("# format: CAESAR alpha_trace v1\n")
         fh.write(f"# source_mat: {mat_path.name}\n")
-        fh.write(f"# channel: CH{channel}\n")
+        # Existing explorer metadata parser requires this exact portable form.
+        fh.write(f"# channel={channel} label=CH{channel}\n")
         if raw_doy is None:
             fh.write("# T_P_PROVENANCE: UNAVAILABLE (MAT alpha has no row-level T/P)\n")
         else:

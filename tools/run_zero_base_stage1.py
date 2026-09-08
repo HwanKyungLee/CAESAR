@@ -279,12 +279,21 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.sample_manifest and a.stage != "2":
         raise SystemExit("ABSTAIN: --sample-manifest requires --stage 2")
-    a.key = OP.canonical_channel_key(a.key)
     if a.shift_fix is None and a.shift_limit is None: a.shift_limit = (-1.0, 1.0)
     if a.squeeze_fix is None and a.squeeze_limit is None: a.squeeze_limit = (.9999, 1.0001)
     if os.path.exists(a.output): raise SystemExit("ABSTAIN: output exists")
     with open(a.fitset, encoding="utf-8") as fh: scenario = json.load(fh)
-    cfg = OP.pick_channel(scenario, a.key)
+    # New/old missions may use opaque FitSet keys ("1", "blue_A", …).
+    # Prefer an exact declared key; legacy aliases retain the existing resolver.
+    channels = scenario.get("channels", {})
+    if a.key in channels:
+        cfg = channels[a.key]
+    else:
+        cfg = OP.pick_channel(scenario, OP.canonical_channel_key(a.key))
+    try:
+        expected_channel = FE.canonical_channel_label(cfg["data_label"])
+    except (KeyError, ValueError) as exc:
+        raise SystemExit("ABSTAIN: FitSet data_label is unavailable") from exc
     if cfg.get("allow_negative_gas") is not True:
         raise SystemExit("ABSTAIN: FitSet must explicitly allow negative gas")
     try:
@@ -298,13 +307,13 @@ def main(argv=None):
     try:
         if a.stage == "2" and a.sample_manifest:
             selected, sampling = reuse_stage2_samples(
-                a.sample_manifest, paths, date_from, date_to, a.key)
+                a.sample_manifest, paths, date_from, date_to, expected_channel)
             rows = None
         elif a.stage == "2":
             headers, rows = {}, []
             for path in paths:
                 headers[path], timed_rows = alpha_stage2_metadata(path)
-                if headers[path]["label"] != a.key:
+                if headers[path]["label"] != expected_channel:
                     raise ValueError("matched alpha file channel does not match --key")
                 rows.extend((path, row_index, timestamp, time_source)
                             for row_index, timestamp, time_source in timed_rows)
@@ -330,7 +339,7 @@ def main(argv=None):
                     "time_source":time_source,
                     "channel":header["label"],"channel_source":header["source"]})
             selected, sampling = FE.select_stage2_rows(
-                records, a.date_from, a.date_to, a.key)
+                records, a.date_from, a.date_to, expected_channel)
         eng = OP.build_engine_from_config(cfg)
         if list(eng.gas_list) != [ref["name"] for ref in cfg["refs"]]:
             raise ValueError("engine reference order does not match FitSet")
