@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 from scipy.io import loadmat
-import h5py
 
 
 def _date_from_doy(year: int, doy: float) -> str:
@@ -37,6 +36,10 @@ def convert(mat_path: Path, output: Path, channel: int, rows: list[int],
     wave = pixel_intercept + pixel_slope * np.arange(2048, dtype=float)
     raw_doy = raw_p = raw_t = None
     if raw_mat_paths:
+        try:
+            import h5py
+        except ImportError as exc:
+            raise RuntimeError("raw MATLAB v7.3 T/P matching requires h5py") from exc
         parts = []
         for raw_path in raw_mat_paths:
             with h5py.File(raw_path, "r") as raw:
