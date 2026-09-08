@@ -19,6 +19,18 @@ def _date_from_doy(year: int, doy: float) -> str:
     return (datetime(year, 1, 1) + timedelta(days=float(doy) - 1)).isoformat(sep=" ")
 
 
+def _read_raw_tp(raw_path: Path, channel: int):
+    """Read one old (v5) or new (v7.3/HDF5) Seosan raw file."""
+    fields = ("doy", f"presscell{channel}", f"tempcell{channel}")
+    try:
+        import h5py
+        with h5py.File(raw_path, "r") as raw:
+            return tuple(np.asarray(raw[field]).reshape(-1) for field in fields)
+    except (ImportError, OSError):
+        raw = loadmat(raw_path, squeeze_me=True, variable_names=list(fields))
+        return tuple(np.asarray(raw[field]).reshape(-1) for field in fields)
+
+
 def convert(mat_path: Path, output: Path, channel: int, rows: list[int],
             year: int = 2020, pixel_slope: float = 0.048844,
             pixel_intercept: float = 404.0361, raw_mat_paths: list[Path] | None = None) -> Path:
@@ -36,16 +48,9 @@ def convert(mat_path: Path, output: Path, channel: int, rows: list[int],
     wave = pixel_intercept + pixel_slope * np.arange(2048, dtype=float)
     raw_doy = raw_p = raw_t = None
     if raw_mat_paths:
-        try:
-            import h5py
-        except ImportError as exc:
-            raise RuntimeError("raw MATLAB v7.3 T/P matching requires h5py") from exc
         parts = []
         for raw_path in raw_mat_paths:
-            with h5py.File(raw_path, "r") as raw:
-                parts.append((np.asarray(raw["doy"]).reshape(-1),
-                              np.asarray(raw[f"presscell{channel}"]).reshape(-1),
-                              np.asarray(raw[f"tempcell{channel}"]).reshape(-1)))
+            parts.append(_read_raw_tp(raw_path, channel))
         raw_doy = np.concatenate([x[0] for x in parts])
         raw_p = np.concatenate([x[1] for x in parts])
         raw_t = np.concatenate([x[2] for x in parts])
