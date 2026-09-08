@@ -30,12 +30,18 @@ def main(argv=None):
     p.add_argument("--stage2", required=True); p.add_argument("--holdout")
     p.add_argument("--verdict", choices=VERDICTS, required=True)
     p.add_argument("--reason", required=True)
+    p.add_argument("--output", help="optional JSON file for the Test Fit Explorer Review tab")
     a = p.parse_args(argv)
     result = {"schema": "fit-explorer-human-review-v1", "verdict": a.verdict,
               "reason": a.reason, "stage2": summarize(a.stage2),
               "holdout": summarize(a.holdout) if a.holdout else None,
               "apply": "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION"}
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
+    if a.output:
+        # The report is evidence for human review, never a FitSet mutation.
+        with open(a.output, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text + "\n")
+    print(text)
     return 0
 
 if __name__ == "__main__": raise SystemExit(main())

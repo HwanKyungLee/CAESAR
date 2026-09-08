@@ -23,7 +23,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from gui.test_fit_dialog import (_TestFitOptimizerWorker, _resolve_px_bounds,
-                                 _assemble_ref_props)
+                                 _assemble_ref_props, _format_explorer_review)
 from gui.app_window import CAESARAnalyzer, _scenario_gas_policy, _channel_worker_gas_policy
 
 _n_pass = 0
@@ -171,12 +171,37 @@ def test_allow_negative_gas_roundtrip_policy():
         check("Test Fit non-bool 정책 거부", True)
 
 
+def test_explorer_review_is_read_only_contract():
+    print("[7] Explorer Review 읽기 전용 계약")
+    review = {
+        "schema": "fit-explorer-human-review-v1",
+        "verdict": "MISSION_LOCAL_ONLY",
+        "reason": "mission-specific evidence",
+        "stage2": {"candidate_id": "pns-mid", "attempts": 24,
+                   "boundary_attempts": 2, "median_ppb": 1.65,
+                   "seed_max_delta_ppb": 1e-7},
+        "holdout": {"candidate_id": "pns-mid", "attempts": 24,
+                    "boundary_attempts": 0, "median_ppb": 1.64,
+                    "seed_max_delta_ppb": 2e-7},
+        "apply": "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION",
+    }
+    html = _format_explorer_review(review)
+    check("조건부 verdict와 Apply 금지 표시", "MISSION_LOCAL_ONLY" in html and "자동 변경하지 않습니다" in html)
+    review["apply"] = "ALLOWED"
+    try:
+        _format_explorer_review(review)
+        check("자동 Apply 허용 보고서 거부", False)
+    except ValueError:
+        check("자동 Apply 허용 보고서 거부", True)
+
+
 if __name__ == "__main__":
     for t in (test_resolve_px_bounds, test_assemble_ref_props_target_limit_to_center,
               test_assemble_ref_props_target_fix,
               test_assemble_ref_props_secondary_independent_vs_link,
               test_assemble_ref_props_preserves_user_fields,
-              test_allow_negative_gas_roundtrip_policy):
+              test_allow_negative_gas_roundtrip_policy,
+              test_explorer_review_is_read_only_contract):
         t()
     print(f"\n{_n_pass} PASS · {_n_fail} FAIL")
     sys.exit(1 if _n_fail else 0)

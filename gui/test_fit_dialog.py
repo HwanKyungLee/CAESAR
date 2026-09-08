@@ -13,6 +13,7 @@ step_limit·Link)를 추천하는 탭1을 추가한다. 추천은 표시만 — 
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import traceback
@@ -22,7 +23,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
-    QPushButton, QProgressBar, QComboBox, QMessageBox, QTextEdit,
+    QPushButton, QProgressBar, QComboBox, QMessageBox, QTextEdit, QFileDialog,
 )
 
 from core.doas_fit import DoasFitter
@@ -325,6 +326,38 @@ class _TestFitOptimizerWorker(QThread):
         })
 
 
+def _format_explorer_review(review: dict) -> str:
+    """Render the small, public human-review contract without changing a FitSet."""
+    if not isinstance(review, dict) or review.get("schema") != "fit-explorer-human-review-v1":
+        raise ValueError("not a fit-explorer-human-review-v1 report")
+    verdict = review.get("verdict")
+    if verdict not in {"RECOMMENDABLE_INTERNAL", "MISSION_LOCAL_ONLY",
+                       "NON_IDENTIFIABLE_OR_ABSTAIN"}:
+        raise ValueError("unknown Explorer verdict")
+    if review.get("apply") != "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION":
+        raise ValueError("Explorer report must explicitly forbid automatic Apply")
+
+    def _summary(label: str, value: dict | None) -> str:
+        if value is None:
+            return f"<b>{label}:</b> 없음"
+        needed = ("candidate_id", "attempts", "boundary_attempts", "median_ppb", "seed_max_delta_ppb")
+        if not isinstance(value, dict) or any(key not in value for key in needed):
+            raise ValueError(f"{label} summary is incomplete")
+        return (f"<b>{label}:</b> 후보 {value['candidate_id']} · {value['attempts']} attempts · "
+                f"median {float(value['median_ppb']):.4g} ppb · boundary "
+                f"{value['boundary_attempts']} · seed Δmax "
+                f"{float(value['seed_max_delta_ppb']):.3g} ppb")
+
+    reason = str(review.get("reason", "")).replace("&", "&amp;").replace("<", "&lt;")
+    return (f"<h3>Explorer verdict: {verdict}</h3>"
+            f"<p><b>Reason:</b> {reason}</p>"
+            f"<p>{_summary('Stage 2', review.get('stage2'))}<br>"
+            f"{_summary('Holdout', review.get('holdout'))}</p>"
+            "<p style='color:#C62828; font-weight:bold;'>"
+            "이 카드는 증거를 표시할 뿐이며 현재 FitSet·채널 설정을 자동 변경하지 않습니다. "
+            "현재 데이터가 이 보고서의 mission/data와 일치하는지는 사용자가 확인해야 합니다.</p>")
+
+
 class TestFitDialog(QDialog):
     """탭1(⚙️ Optimize, 새로 추가) + 탭2(🧪 Preview, 기존 _show_test_fit_popup 이식).
     비모달(기존 Test Fit 팝업과 동일 — show(), exec() 아님)."""
@@ -343,6 +376,7 @@ class TestFitDialog(QDialog):
 
         self._build_optimize_tab()
         self._build_preview_tab()
+        self._build_explorer_review_tab()
 
     # ══════════════════════════════════════════════════════════════
     # 탭1 — 최적화
@@ -589,6 +623,45 @@ class TestFitDialog(QDialog):
         self._app._apply_test_fit_recommendations(self._last_result)
         self._btn_apply.setText("Applied ✓")
         self._btn_apply.setEnabled(False)
+
+    # ══════════════════════════════════════════════════════════════
+    # 탭3 — Fit Explorer의 사람 검토 카드 (읽기 전용, Apply 없음)
+    # ══════════════════════════════════════════════════════════════
+    def _build_explorer_review_tab(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        note = QLabel(
+            "Fit Explorer가 실제 피팅으로 만든 Stage 2/holdout 증거를 읽기 전용으로 표시합니다. "
+            "이 탭은 추천 파라미터를 자동 적용하지 않으며, 보고서의 mission·채널·입력이 현재 설정과 "
+            "같은지는 사람이 확인해야 합니다.")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        bar = QHBoxLayout()
+        btn = QPushButton("Load Explorer Review JSON…")
+        btn.clicked.connect(self._load_explorer_review)
+        bar.addWidget(btn)
+        bar.addStretch(1)
+        lay.addLayout(bar)
+        self._explorer_review_edit = QTextEdit()
+        self._explorer_review_edit.setReadOnly(True)
+        self._explorer_review_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._explorer_review_edit.setHtml(
+            "<i>Review JSON을 불러오면 여기 표시됩니다. "
+            "tools/fit_explorer_review.py --output REPORT.json 으로 만들 수 있습니다.</i>")
+        lay.addWidget(self._explorer_review_edit, 1)
+        self._tabs.addTab(page, "🧭 Explorer Review")
+
+    def _load_explorer_review(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Fit Explorer review", "", "JSON Files (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                review = json.load(fh)
+            self._explorer_review_edit.setHtml(_format_explorer_review(review))
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            QMessageBox.warning(self, "Explorer Review", f"Cannot load review: {exc}")
 
     # ══════════════════════════════════════════════════════════════
     # 탭2 — 1스캔 미리보기 (기존 _show_test_fit_popup 이식, 로직 불변)
