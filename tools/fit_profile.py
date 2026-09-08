@@ -21,7 +21,10 @@ def main(argv=None):
     a=p.parse_args(argv)
     if os.path.exists(a.output): raise SystemExit("ABSTAIN: output exists")
     with open(a.fitset,encoding="utf-8") as f: scenario=json.load(f)
-    cfg=OP.pick_channel(scenario,a.key)
+    cfg = (scenario.get("channels", {}).get(a.key)
+           if isinstance(scenario.get("channels"), dict) else None)
+    if cfg is None:
+        cfg = OP.pick_channel(scenario, a.key)
     policy=bool(a.allow_negative_gas)
     if type(cfg.get("allow_negative_gas")) is not bool or cfg["allow_negative_gas"] != policy: raise SystemExit("ABSTAIN: gas policy mismatch")
     if not os.path.isfile(a.alpha): raise SystemExit("ABSTAIN: alpha unavailable")
