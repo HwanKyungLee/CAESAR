@@ -1,6 +1,7 @@
 """Run one explicit zero-base candidate using a Stage 1 or Stage 2 budget."""
 from __future__ import annotations
 import argparse, glob, json, ntpath, os, re, sys
+import numpy as np
 from datetime import date, datetime, timedelta
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -101,18 +102,31 @@ def alpha_stage2_metadata(path):
     return channel, rows
 
 def stage1_paths_in_date_range(paths, date_from, date_to):
-    """Preserve the Stage 1 contract: the parent directory is its date."""
+    """Select paths by an ISO or compact YYYYMMDD date in the path.
+
+    The original CAESAR export uses ``.../2026-06-10/...`` directories, but
+    other missions commonly encode the date in a channel directory or file
+    name (for example ``ch1_20250610_000001.dat``).  Both are unambiguous and
+    remain fail-closed when no date can be extracted.
+    """
+    import re
     selected = []
     for path in paths:
+        text = os.path.normpath(path)
+        candidates = re.findall(r"(?<!\d)(\d{4}-\d{2}-\d{2}|\d{8})(?!\d)", text)
+        if not candidates:
+            continue
+        raw = candidates[-1]
         try:
-            day = date.fromisoformat(os.path.basename(os.path.dirname(path)))
+            day = date.fromisoformat(raw) if "-" in raw else date.fromisoformat(
+                f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}")
         except ValueError:
             continue
         if date_from <= day <= date_to:
             selected.append(path)
     return selected
 
-def load_selected_scans(selected, sampling=None):
+def load_selected_scans(selected, sampling=None, fallback_wave=None):
     """Load selected rows, reusing Stage 2 sample identities when supplied."""
     samples = sampling.get("samples", []) if sampling is not None else []
     if samples and len(samples) != len(selected):
@@ -120,8 +134,21 @@ def load_selected_scans(selected, sampling=None):
     hashes = {}
     scans = []
     for index, (path, row_index) in enumerate(selected):
-        wave, alpha, temp, pressure, px_start = DataIO.load_alpha_trace_row_mapped(
-            path, row_index)
+        try:
+            wave, alpha, temp, pressure, px_start = DataIO.load_alpha_trace_row_mapped(
+                path, row_index)
+        except (OSError, RuntimeError, ValueError, IndexError):
+            # Some missions export a plain one-spectrum-per-file alpha trace
+            # without the CAESAR header.  Preserve the solver path by using
+            # the FitSet wavelength axis and explicit unavailable HK defaults;
+            # T2 remains UNAVAILABLE until row-level T/P metadata exists.
+            if row_index != 0:
+                raise
+            alpha = np.loadtxt(path, dtype=float)
+            if fallback_wave is None or len(fallback_wave) != len(alpha):
+                raise
+            wave = np.asarray(fallback_wave, dtype=float)
+            temp, pressure, px_start = 25.0, 1013.25, 0
         if samples:
             sample = samples[index]
             digest, scan_id = sample["sha256"], sample["id"]

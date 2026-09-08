@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import sys
+import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -76,13 +77,24 @@ def prepare_channel(channel, document):
     """Open and fully validate one channel, but execute no nonlinear fit."""
     with open(channel["fitset"], encoding="utf-8") as fh:
         scenario = json.load(fh)
-    cfg = OP.pick_channel(scenario, channel.get("fitset_channel_key", channel["label"]))
+    fitset_key = channel.get("fitset_channel_key", channel["label"])
+    # Mission-specific FitSets may use opaque keys (e.g. "1", "blue").
+    # Prefer an exact key match; retain the legacy ANs/PNs/cold resolver when
+    # no explicit key was supplied.
+    if fitset_key in scenario.get("channels", {}):
+        cfg = scenario["channels"][fitset_key]
+    else:
+        cfg = OP.pick_channel(scenario, fitset_key)
     target = channel.get("target_species", "NO2")
     if cfg.get("allow_negative_gas") is not True:
         raise ValueError("FitSet must explicitly allow negative gas")
     paths = sorted(glob.glob(channel["alpha_glob"]))
     if not paths:
         raise ValueError("alpha glob matched no files")
+    excluded = set(channel.get("exclude_alpha_basenames", []))
+    paths = [path for path in paths if os.path.basename(path) not in excluded]
+    if not paths:
+        raise ValueError("all alpha files were excluded")
     date_from, date_to = document["date_range"]
     if document["stage"] == 2:
         selected, sampling = reuse_stage2_samples(
@@ -93,13 +105,34 @@ def prepare_channel(channel, document):
         selected_paths = stage1_paths_in_date_range(
             paths, __import__("datetime").date.fromisoformat(date_from),
             __import__("datetime").date.fromisoformat(date_to))
+        # Do not let an obviously empty plain-trace file consume one of the
+        # four representative slots. Headered alpha files are left untouched;
+        # this filter only applies to the legacy one-spectrum-per-file format.
+        nonempty = []
+        for path in selected_paths:
+            try:
+                if DataIO._is_alpha_trace_format(path) or DataIO.is_araon_mega_matrix(path):
+                    nonempty.append(path)
+                else:
+                    values = np.loadtxt(path, dtype=float)
+                    if values.size and np.any(np.isfinite(values) & (values != 0.0)):
+                        nonempty.append(path)
+            except (OSError, ValueError, TypeError):
+                continue
+        selected_paths = nonempty
         rows = [row for path in selected_paths for row in DataIO.expand_to_scan_list(path)]
         selected, indices = FE.select_representative_rows(rows, 4)
         sampling = {"contract": FE.STAGE1_SAMPLE_CONTRACT, "eligible_rows": len(rows),
                     "selected_zero_based_indices": indices,
                     "date_range": [date_from, date_to]}
         validate_stage1_selected_channels(selected, channel.get("channel_header_key"))
-    scans = load_selected_scans(selected, sampling if document["stage"] == 2 else None)
+    fallback_wave = None
+    try:
+        fallback_wave = __import__("numpy").loadtxt(cfg["wl_path"], dtype=float)
+    except Exception:
+        pass
+    scans = load_selected_scans(selected, sampling if document["stage"] == 2 else None,
+                                fallback_wave=fallback_wave)
     sampling = report_sampling(sampling, scans, str(document["stage"]))
     engine = OP.build_engine_from_config(cfg)
     if list(engine.gas_list) != [ref["name"] for ref in cfg["refs"]]:

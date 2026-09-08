@@ -184,7 +184,7 @@ def validate_config(document):
         raise ValueError("channels must be a non-empty list")
     labels, alpha_globs = set(), set()
     for channel in channels:
-        allowed = {"label", "fitset", "alpha_glob", "candidates", "sample_manifest", "target_species", "fitset_channel_key", "channel_header_key"}
+        allowed = {"label", "fitset", "alpha_glob", "candidates", "sample_manifest", "target_species", "fitset_channel_key", "channel_header_key", "exclude_alpha_basenames"}
         if not isinstance(channel, dict) or not set(channel).issubset(allowed) \
                 or not {"label", "fitset", "alpha_glob", "candidates"}.issubset(channel):
             raise ValueError("channel config is incomplete")
@@ -201,6 +201,13 @@ def validate_config(document):
             raise ValueError("fitset_channel_key must be a string")
         if "channel_header_key" in channel and not isinstance(channel["channel_header_key"], str):
             raise ValueError("channel_header_key must be a string")
+        if "exclude_alpha_basenames" in channel:
+            excluded = channel["exclude_alpha_basenames"]
+            if (not isinstance(excluded, list) or
+                    any(not isinstance(name, str) or not name or
+                        os.path.basename(name) != name for name in excluded) or
+                    len(set(excluded)) != len(excluded)):
+                raise ValueError("exclude_alpha_basenames must be unique basenames")
         for field in ("fitset", "alpha_glob"):
             if not isinstance(channel[field], str) or not channel[field]:
                 raise ValueError(f"channel {field} is required")
