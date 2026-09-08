@@ -1098,6 +1098,21 @@ def seed_stability(pairs, target="NO2"):
             "target": target, "tolerances": tolerances, "checks": checks}
 
 
+def rms_quality_gate(rows, *, sigma=3.0):
+    """Classify RMS values without removing observations."""
+    values = [float(row["rms"]) for row in rows
+              if isinstance(row, dict) and np.isfinite(row.get("rms", np.nan))]
+    if len(values) < 3 or not np.isfinite(sigma) or sigma <= 0:
+        return {"state": "QUALITY_GATE_UNAVAILABLE", "threshold": None,
+                "median": None, "mad_scaled": None, "n": len(values)}
+    median = float(np.median(values))
+    mad_scaled = float(1.4826 * np.median(np.abs(np.asarray(values) - median)))
+    threshold = median + float(sigma) * mad_scaled
+    return {"state": "READY", "threshold": threshold, "median": median,
+            "mad_scaled": mad_scaled, "n": len(values),
+            "outlier_count": sum(value > threshold for value in values)}
+
+
 def attempt_identity_check(scans, starts, rows, failures):
     """Require one outcome for every member of the exact 4x2 Cartesian budget."""
     scan_ids = [scan.get("id") for scan in scans]

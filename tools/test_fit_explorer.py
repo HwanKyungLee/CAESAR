@@ -699,3 +699,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+def test_rms_quality_gate_uses_mad_without_dropping_rows():
+    rows = [{"rms": 1.0}, {"rms": 1.1}, {"rms": 1.0}, {"rms": 9.0}]
+    gate = FE.rms_quality_gate(rows)
+    assert gate["state"] == "READY"
+    assert gate["outlier_count"] == 1
+    assert FE.rms_quality_gate(rows[:2])["state"] == "QUALITY_GATE_UNAVAILABLE"
