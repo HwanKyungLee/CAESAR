@@ -89,10 +89,18 @@ def _validate_public_value(value, key=""):
         if key == "t2_gate":
             # T2 details contain dynamic gas names; retain safety checks while
             # allowing domain-specific nested diagnostic keys.
-            for child_key, child in value.items():
-                if not isinstance(child_key, str) or child_key.casefold() in _FORBIDDEN_PUBLIC_KEYS:
-                    raise ValueError("T2 diagnostic contains a forbidden field")
-                _validate_public_value(child, "")
+            def walk_t2(child):
+                if isinstance(child, dict):
+                    for name, item in child.items():
+                        if not isinstance(name, str) or name.casefold() in _FORBIDDEN_PUBLIC_KEYS:
+                            raise ValueError("T2 diagnostic contains a forbidden field")
+                        walk_t2(item)
+                elif isinstance(child, list):
+                    for item in child:
+                        walk_t2(item)
+                elif isinstance(child, str) and re.search(r"(?:^[A-Za-z]:[\\/]|^\\\\|^/)", child):
+                    raise ValueError("T2 diagnostic contains a path-like string")
+            walk_t2(value)
             return
         if key in {"selected_per_date", "eligible_per_date"}:
             from datetime import date
