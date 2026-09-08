@@ -109,7 +109,7 @@ def test_validation_is_fail_closed():
         FB.validate_config(good)
         variants = []
         bad = json.loads(json.dumps(good)); bad["allow_negative_gas"] = False; variants.append(bad)
-        bad = json.loads(json.dumps(good)); bad["channels"][0]["label"] = "mystery"; variants.append(bad)
+        bad = json.loads(json.dumps(good)); bad["channels"][0]["label"] = "not a valid id"; variants.append(bad)
         bad = json.loads(json.dumps(good)); bad["channels"][1]["alpha_glob"] = bad["channels"][0]["alpha_glob"]; variants.append(bad)
         bad = json.loads(json.dumps(good)); bad["channels"][0]["candidates"] *= 2; variants.append(bad)
         bad = json.loads(json.dumps(good)); bad["channels"][0]["candidates"] = [
