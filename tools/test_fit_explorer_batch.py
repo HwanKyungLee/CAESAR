@@ -57,7 +57,8 @@ def _result(candidate_id, stage=1):
         "t2_diagnostics": {"state": "fixture"},
         "reference_roles": {
             "NO2": {"fit_role": "MODELED_REFERENCE", "registration_role": "PREFERRED",
-                    "anchor_role": "UNSPECIFIED", "reason": None}}}
+                    "anchor_role": "UNSPECIFIED", "reason": None}},
+        "reference_observability": {"state": "AVAILABLE", "references": {}}}
 
 
 def test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys():

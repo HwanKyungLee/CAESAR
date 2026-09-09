@@ -61,3 +61,26 @@ diagnostics remain available but cannot manufacture an absolute PASS.
 This is a semantic correction based on the ACES/BBCEAS retrieval model: fit
 reference inclusion, wavelength registration, interference control, and
 independent validation are separate jobs.
+
+## Static observability checkpoint
+
+`reference_observability()` is the first common check for NO2, H2O, CHOCHO,
+O4, or any later species. Within each candidate pixel window it removes the
+configured Chebyshev polynomial from every reference, records the retained
+differential norm, and computes how well the remaining structure is explained
+by the other references.
+
+Its states are intentionally limited:
+
+- `STRUCTURE_AVAILABLE`: differential reference structure remains and is below
+  the configured multi-reference collinearity threshold.
+- `CONFOUNDED_BY_REFERENCES`: structure remains but is substantially reproduced
+  by the other reference columns.
+- `POLYNOMIAL_DEGENERATE` or `REFERENCE_ZERO_IN_WINDOW`: no usable differential
+  structure remains in this window.
+
+It is static geometry only. It does not claim measured signal-to-noise, a
+unique shift/squeeze minimum, a concentration, a preferred FitSet mutation, or
+an absolute T2 result. `registration_role=PREFERRED` becomes a declared driver
+candidate only when this static check says it is eligible; scan-level profile
+evidence is the next phase.

@@ -176,6 +176,8 @@ def execute_candidate(_label, candidate, context):
                                          "registration_role": "NONE",
                                          "anchor_role": "UNSPECIFIED", "reason": None}
                                   for name in context["engine"].gas_list})
+    report["reference_observability"] = FE.reference_observability(
+        context["engine"], candidate, reference_roles)
     return report
 
 

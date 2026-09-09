@@ -141,6 +141,90 @@ def absolute_anchor_species(eng, reference_roles):
                  if reference_roles.get(gas, {}).get("anchor_role") == "ELIGIBLE")
 
 
+def reference_observability(eng, candidate, reference_roles=None):
+    """Describe static reference geometry in one candidate window.
+
+    This is deliberately fit-free: it establishes only whether a convolved
+    reference retains differential structure after the configured polynomial,
+    and whether other reference columns can reproduce it.  It does *not*
+    claim scan-level SNR, a unique shift minimum, or a concentration verdict.
+    """
+    try:
+        lo, hi, poly = (int(candidate["px_min"]), int(candidate["px_max"]),
+                        int(candidate["poly"]))
+        gases = list(eng.gas_list)
+        refs = eng.raw_references
+        if not gases or lo < 0 or hi < lo or poly < 0:
+            raise ValueError
+        vectors = {gas: np.asarray(refs[gas], float)[lo:hi + 1] for gas in gases}
+        if any(vector.size != hi - lo + 1 or not np.isfinite(vector).all()
+               for vector in vectors.values()):
+            raise ValueError
+        if hi - lo + 1 <= poly + 1:
+            raise ValueError
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {"state": "UNAVAILABLE", "reason": "REFERENCE_GEOMETRY_UNAVAILABLE",
+                "scope": "STATIC_REFERENCE_GEOMETRY_ONLY"}
+
+    x = np.linspace(-1.0, 1.0, hi - lo + 1)
+    polynomial = np.polynomial.chebyshev.chebvander(x, poly)
+    differential = {}
+    for gas, vector in vectors.items():
+        coefficient, *_ = np.linalg.lstsq(polynomial, vector, rcond=None)
+        differential[gas] = vector - polynomial @ coefficient
+
+    out = {}
+    for gas in gases:
+        vector, residual = vectors[gas], differential[gas]
+        raw_norm, differential_norm = float(np.linalg.norm(vector)), float(np.linalg.norm(residual))
+        tolerance = max(np.finfo(float).tiny,
+                        np.finfo(float).eps * max(raw_norm, np.finfo(float).tiny) * vector.size * 32.0)
+        if raw_norm <= tolerance:
+            state, multiple_r = "REFERENCE_ZERO_IN_WINDOW", None
+        elif differential_norm <= tolerance:
+            state, multiple_r = "POLYNOMIAL_DEGENERATE", None
+        else:
+            others = [differential[name] for name in gases if name != gas
+                      and np.linalg.norm(differential[name]) > tolerance]
+            if not others:
+                multiple_r = 0.0
+            else:
+                design = np.column_stack(others)
+                coefficient, *_ = np.linalg.lstsq(design, residual, rcond=None)
+                unexplained = residual - design @ coefficient
+                r2 = min(max(1.0 - float(unexplained @ unexplained) /
+                             float(residual @ residual), 0.0), 1.0)
+                multiple_r = float(np.sqrt(r2))
+            state = ("CONFOUNDED_BY_REFERENCES"
+                     if multiple_r > FP.COLLIN_HI_DEFAULT else "STRUCTURE_AVAILABLE")
+        role = (reference_roles or {}).get(gas, {})
+        out[gas] = {"state": state, "raw_norm": raw_norm,
+                    "differential_norm": differential_norm,
+                    "differential_fraction": (differential_norm / raw_norm
+                                                if raw_norm > tolerance else None),
+                    "multiple_R": multiple_r,
+                    "fit_role": role.get("fit_role", "MODELED_REFERENCE"),
+                    "registration_role": role.get("registration_role", "NONE"),
+                    "anchor_role": role.get("anchor_role", "UNSPECIFIED")}
+
+    preferred = [gas for gas in gases
+                 if out[gas]["registration_role"] == "PREFERRED"]
+    eligible = [gas for gas in preferred if out[gas]["state"] == "STRUCTURE_AVAILABLE"]
+    registration = ({"state": "NO_DECLARED_REGISTRATION_DRIVER", "selected": None}
+                    if not preferred else
+                    {"state": "DECLARED_DRIVER_STATICALLY_ELIGIBLE", "selected": eligible[0]}
+                    if len(eligible) == 1 else
+                    {"state": "DECLARED_DRIVER_UNAVAILABLE", "selected": None}
+                    if not eligible else
+                    {"state": "MULTIPLE_DECLARED_DRIVERS", "selected": None})
+    return {"state": "AVAILABLE", "scope": "STATIC_REFERENCE_GEOMETRY_ONLY_NO_DATA_SNR_OR_SHIFT_PROFILE",
+            "polynomial_order": poly, "collinearity_threshold": FP.COLLIN_HI_DEFAULT,
+            "references": out,
+            "registration_driver": {**registration, "declared_preferred": preferred,
+                                    "eligible": eligible,
+                                    "no_automatic_policy_mutation": True}}
+
+
 def representative_indices(pool_size, requested=4):
     """Evenly spaced zero-based indices, including both endpoints."""
     if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
@@ -926,7 +1010,7 @@ def validate_coordinates(engine_wave, scans, candidates):
     return problems
 
 
-def stage0_preflight(eng, candidate, target="NO2"):
+def stage0_preflight(eng, candidate, target="NO2", reference_roles=None):
     """Fit-free, conservative candidate preflight; PASS is not fit evidence."""
     details = {
         "collinearity_threshold": FP.COLLIN_HI_DEFAULT,
@@ -936,6 +1020,8 @@ def stage0_preflight(eng, candidate, target="NO2"):
     }
 
     def verdict(state, *reasons):
+        details["reference_observability"] = reference_observability(
+            eng, candidate, reference_roles)
         return {"state": state, "reason_codes": list(reasons), "details": details}
 
     try:
@@ -990,7 +1076,7 @@ def stage0_preflight(eng, candidate, target="NO2"):
     return verdict("PASS", "AVAILABLE_STATIC_CHECKS_PASSED")
 
 
-def stage0_candidate_grid(eng, candidates, target="NO2"):
+def stage0_candidate_grid(eng, candidates, target="NO2", reference_roles=None):
     """Run only fit-free preflight over an explicit candidate grid."""
     if not isinstance(candidates, list):
         raise ValueError("candidate grid must be a list")
@@ -1002,7 +1088,8 @@ def stage0_candidate_grid(eng, candidates, target="NO2"):
                 "details": {}}})
             continue
         result = dict(candidate)
-        result["stage0_preflight"] = stage0_preflight(eng, candidate, target)
+        result["stage0_preflight"] = stage0_preflight(
+            eng, candidate, target, reference_roles=reference_roles)
         out.append(result)
     counts = {state: sum(x["stage0_preflight"]["state"] == state for x in out)
               for state in ("PASS", "FAIL", "UNAVAILABLE")}

@@ -725,6 +725,35 @@ def test_t2_never_infers_o4_anchor_from_name():
          FE.FP.retrieved_amount) = original_col, original_theo, original_retrieved
 
 
+def test_reference_observability_is_species_generic_and_static_only():
+    class Engine:
+        gas_list = ["NO2", "H2O", "CHOCHO", "O4"]
+        raw_references = {
+            "NO2": np.sin(np.linspace(0., 60., 101)),
+            "H2O": np.cos(np.linspace(0., 21., 101)),
+            "CHOCHO": np.cos(np.linspace(0., 21., 101)),
+            "O4": np.ones(101),
+        }
+    candidate = {"px_min": 0, "px_max": 100, "poly": 3}
+    roles = {
+        "NO2": {"fit_role": "MODELED_REFERENCE", "registration_role": "PREFERRED",
+                "anchor_role": "UNSPECIFIED"},
+        "H2O": {"fit_role": "MODELED_REFERENCE", "registration_role": "LINKED",
+                "anchor_role": "UNSPECIFIED"},
+        "CHOCHO": {"fit_role": "MODELED_REFERENCE", "registration_role": "NONE",
+                   "anchor_role": "UNSPECIFIED"},
+        "O4": {"fit_role": "OPTIONAL_REFERENCE", "registration_role": "LINKED",
+               "anchor_role": "INELIGIBLE"},
+    }
+    result = FE.reference_observability(Engine(), candidate, roles)
+    assert result["scope"] == "STATIC_REFERENCE_GEOMETRY_ONLY_NO_DATA_SNR_OR_SHIFT_PROFILE"
+    assert result["references"]["O4"]["state"] == "POLYNOMIAL_DEGENERATE"
+    assert result["references"]["CHOCHO"]["state"] == "CONFOUNDED_BY_REFERENCES"
+    assert result["registration_driver"]["state"] == "DECLARED_DRIVER_STATICALLY_ELIGIBLE"
+    assert result["registration_driver"]["selected"] == "NO2"
+    assert result["registration_driver"]["no_automatic_policy_mutation"] is True
+
+
 def main():
     test_candidates_and_starts()
     test_stage1_global_bounds_and_boundary_diagnostic()
@@ -747,6 +776,7 @@ def main():
     test_json_schema_and_no_apply()
     test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass()
     test_t2_never_infers_o4_anchor_from_name()
+    test_reference_observability_is_species_generic_and_static_only()
     print("test_fit_explorer: PASS")
 
 
