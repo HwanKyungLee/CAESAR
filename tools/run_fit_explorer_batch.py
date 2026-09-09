@@ -171,6 +171,9 @@ def execute_candidate(_label, candidate, context):
         absolute_anchors=absolute_anchors)
     report["t2_diagnostics"] = FE.t2_diagnostic_checks(
         context["engine"], candidate, report.get("attempts", []), target=target)
+    report["retrieval_integrity"] = FE.v2_retrieval_integrity(
+        context["engine"], candidate, report.get("attempts", []), target=target,
+        expected_count=report["planned_attempts"])
     report["reference_roles"] = (reference_roles if reference_roles is not None else
                                  {name: {"fit_role": "MODELED_REFERENCE",
                                          "registration_role": "NONE",

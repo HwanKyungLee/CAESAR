@@ -10,6 +10,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from core import fit_explorer_batch as FB
+from tools import run_fit_explorer_batch as CLI
 from tools.run_fit_explorer_batch import (code_hash, reject_cross_channel_alpha_aliases,
                                           validate_stage1_selected_channels)
 
@@ -55,6 +56,8 @@ def _result(candidate_id, stage=1):
                          "median": None, "mad_scaled": None, "n": 0},
         "t2_gate": {"state": "UNAVAILABLE", "reason": "fixture"},
         "t2_diagnostics": {"state": "fixture"},
+        "retrieval_integrity": {"schema": "explorer-v2-retrieval-integrity-v1",
+                                "state": "UNAVAILABLE", "checks": {}, "limitations": []},
         "reference_roles": {
             "NO2": {"fit_role": "MODELED_REFERENCE", "registration_role": "PREFERRED",
                     "anchor_role": "UNSPECIFIED", "reason": None}},
@@ -105,6 +108,54 @@ def test_public_result_allows_sanitized_selected_alpha_provenance():
     good = _result("candidate-a", stage=2)
     good["source"] = {"selected_alpha": [{"file": "sample.dat", "row_index": 0}]}
     FB.validate_public_result(good, stage=2, candidate_id="candidate-a")
+
+
+def test_public_result_accepts_v2_retrieval_integrity_payload():
+    good = _result("candidate-a", stage=2)
+    good["retrieval_integrity"] = {
+        "schema": "explorer-v2-retrieval-integrity-v1", "state": "PASS",
+        "checks": {
+            "attempt_completeness": {"state": "PASS", "expected_attempts": 24,
+                                       "executed_attempts": 24, "successful_attempts": 24,
+                                       "reason": "ALL_PLANNED_ATTEMPTS_SUCCESSFUL"},
+            "target_collinearity": {"state": "PASS", "target_multiple_R": 0.2,
+                                      "threshold": 0.95},
+            "coefficient_health": {"state": "PASS", "reason": "FINITE_COEFFICIENTS"},
+            "temperature_pressure": {"applicability": "NOT_REQUIRED", "state": "UNAVAILABLE",
+                                       "reason": "NO_ABSOLUTE_AMOUNT_CHECK_REQUESTED"},
+        }, "limitations": ["No Apply"]}
+    assert FB.validate_public_result(good, stage=2, candidate_id="candidate-a")[
+        "retrieval_integrity"]["state"] == "PASS"
+
+
+def test_executor_attaches_v2_integrity_before_public_validation():
+    class Engine:
+        gas_list = ["Species_A"]
+    candidate = {"id": "candidate-a"}
+    originals = (CLI.FE.absolute_anchor_species, CLI.FE.production_stage1_callback,
+                 CLI.FE.run_stage1_vertical_slice, CLI.FE.t2_from_attempts,
+                 CLI.FE.t2_diagnostic_checks, CLI.FE.v2_retrieval_integrity,
+                 CLI.FE.reference_observability)
+    try:
+        CLI.FE.absolute_anchor_species = lambda *args: ()
+        CLI.FE.production_stage1_callback = lambda *args, **kwargs: object()
+        CLI.FE.run_stage1_vertical_slice = lambda *args, **kwargs: _result("candidate-a")
+        CLI.FE.t2_from_attempts = lambda *args, **kwargs: {"state": "UNAVAILABLE"}
+        CLI.FE.t2_diagnostic_checks = lambda *args, **kwargs: {"state": "fixture"}
+        CLI.FE.v2_retrieval_integrity = lambda *args, **kwargs: {
+            "schema": "explorer-v2-retrieval-integrity-v1", "state": "PASS",
+            "checks": {}, "limitations": ["No Apply"]}
+        CLI.FE.reference_observability = lambda *args, **kwargs: {"state": "AVAILABLE"}
+        report = CLI.execute_candidate("opaque", candidate, {
+            "cfg": {"ref_props": {}}, "engine": Engine(), "fitter": object(),
+            "stage": 1, "scans": [], "target": "Species_A", "sampling": {}, "source": {}})
+        assert FB.validate_public_result(report, stage=1, candidate_id="candidate-a")[
+            "retrieval_integrity"]["state"] == "PASS"
+    finally:
+        (CLI.FE.absolute_anchor_species, CLI.FE.production_stage1_callback,
+         CLI.FE.run_stage1_vertical_slice, CLI.FE.t2_from_attempts,
+         CLI.FE.t2_diagnostic_checks, CLI.FE.v2_retrieval_integrity,
+         CLI.FE.reference_observability) = originals
 
 
 def test_validation_is_fail_closed():
@@ -333,6 +384,11 @@ def test_cli_no_data_abstains_before_fit():
 
 
 def main():
+    test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys()
+    test_public_result_allows_slashes_in_prose_but_rejects_absolute_paths()
+    test_public_result_allows_sanitized_selected_alpha_provenance()
+    test_public_result_accepts_v2_retrieval_integrity_payload()
+    test_executor_attaches_v2_integrity_before_public_validation()
     test_validation_is_fail_closed()
     test_three_channels_resume_stale_and_failure_isolation()
     test_dry_run_writes_nothing_and_prepared_contract_precedes_execution()

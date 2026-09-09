@@ -1,5 +1,8 @@
 # Fit Setting Explorer 설계 정본 (2026-09)
 
+> 2026-09-10: 신규 V2 구현의 개념·추천 계약·작업 순서는 [Explorer V2 패키지](explorer_v2/README.md)를 따른다.
+> 아래는 V1 설계 및 구현 기록으로 보존한다. V2 문서 작성은 기존 코드/evidence 판정 변경을 뜻하지 않는다.
+
 > 상태: **설계 고정 / Phase A2·Explorer V1·Stage 0 synthetic·ROI1 및 cold·O4 portable 재현 증거 완료**
 > 선행 문서: `docs/fit_optimizer_handoff.md`, `docs/NO2_인젝션_실험_핸드오프_2026-08.md`,
 > `docs/ANs_분석_핸드오프_2026-07-23.md`  

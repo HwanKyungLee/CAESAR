@@ -1219,6 +1219,62 @@ def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):
             "successful_attempts": len(ok)}
 
 
+def v2_retrieval_integrity(eng, candidate, attempts, *, target="NO2", expected_count):
+    """Judge repeat-fit integrity without requiring an external amount anchor.
+
+    This is deliberately separate from the legacy T2 gate: a field mission can
+    establish that its planned fits completed with finite coefficients and an
+    identifiable target, while absolute concentration validation remains an
+    optional external-evidence question.
+    """
+    if isinstance(expected_count, bool) or not isinstance(expected_count, int) or expected_count < 1:
+        raise ValueError("expected_count must be a positive integer")
+    rows = list(attempts) if isinstance(attempts, (list, tuple)) else []
+    ok = [row for row in rows if isinstance(row, dict) and row.get("status") == "OK"]
+    complete = len(rows) == expected_count and len(ok) == expected_count
+    completeness = {
+        "state": "PASS" if complete else "UNAVAILABLE",
+        "expected_attempts": expected_count,
+        "executed_attempts": len(rows),
+        "successful_attempts": len(ok),
+        "reason": "ALL_PLANNED_ATTEMPTS_SUCCESSFUL" if complete else "PLANNED_ATTEMPTS_INCOMPLETE",
+    }
+    try:
+        diag = FP.differential_collinearity(
+            eng, list(eng.gas_list), candidate["px_min"], candidate["px_max"], candidate["poly"])
+        multiple_r = finite_or_none(diag["multiple_R"].get(target))
+        collinearity = {
+            "state": ("UNAVAILABLE" if multiple_r is None else
+                      "PASS" if multiple_r <= FP.COLLIN_HI_DEFAULT else "FAIL"),
+            "target_multiple_R": multiple_r, "threshold": FP.COLLIN_HI_DEFAULT,
+        }
+    except Exception as exc:
+        collinearity = {"state": "UNAVAILABLE", "reason": "COLLINEARITY_UNAVAILABLE",
+                         "exception_class": type(exc).__name__}
+    coefficients_available = complete and all(
+        isinstance(row.get("coeffs"), dict) and row["coeffs"] and all(
+            finite_or_none(value) is not None for value in row["coeffs"].values())
+        for row in ok)
+    coefficient_health = {
+        "state": ("PASS" if coefficients_available else
+                  "FAIL" if complete else "UNAVAILABLE"),
+        "reason": ("FINITE_COEFFICIENTS" if coefficients_available else
+                   "NONFINITE_OR_MISSING_COEFFICIENTS" if complete else
+                   "COEFFICIENTS_UNAVAILABLE_OR_INCOMPLETE"),
+    }
+    checks = {"attempt_completeness": completeness, "target_collinearity": collinearity,
+              "coefficient_health": coefficient_health,
+              "temperature_pressure": {"applicability": "NOT_REQUIRED",
+                                        "state": "UNAVAILABLE",
+                                        "reason": "NO_ABSOLUTE_AMOUNT_CHECK_REQUESTED"}}
+    applicable = (completeness["state"], collinearity["state"], coefficient_health["state"])
+    state = "FAIL" if "FAIL" in applicable else ("PASS" if all(s == "PASS" for s in applicable)
+                                                   else "UNAVAILABLE")
+    return {"schema": "explorer-v2-retrieval-integrity-v1", "state": state,
+            "checks": checks,
+            "limitations": ["No external absolute-concentration claim", "No Apply"]}
+
+
 def stage1_gate(preflight_state, n_ok, n_fail, attempt_t2_states,
                 expected=STAGE1_EXPECTED_ATTEMPTS):
     """Decide only whether conservative Stage 1 evidence may advance."""

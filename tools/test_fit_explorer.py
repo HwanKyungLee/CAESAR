@@ -699,6 +699,26 @@ def test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass():
         FE.FP.differential_collinearity = original
 
 
+def test_v2_retrieval_integrity_is_anchor_independent_but_complete():
+    class Engine:
+        gas_list = ["NO2"]
+        raw_references = {"NO2": np.arange(12.)}
+    candidate = {"px_min": 0, "px_max": 11, "poly": 2}
+    original = FE.FP.differential_collinearity
+    try:
+        FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": .1}}
+        good = [{"status": "OK", "coeffs": {"NO2": 1.}},
+                {"status": "OK", "coeffs": {"NO2": -1.}}]
+        result = FE.v2_retrieval_integrity(Engine(), candidate, good, expected_count=2)
+        assert result["state"] == "PASS"
+        assert result["checks"]["temperature_pressure"]["applicability"] == "NOT_REQUIRED"
+        incomplete = FE.v2_retrieval_integrity(Engine(), candidate, good[:1], expected_count=2)
+        assert incomplete["state"] == "UNAVAILABLE"
+        assert incomplete["checks"]["attempt_completeness"]["state"] != "PASS"
+    finally:
+        FE.FP.differential_collinearity = original
+
+
 def test_t2_never_infers_o4_anchor_from_name():
     class Engine:
         gas_list = ["NO2", "O4"]
@@ -775,6 +795,7 @@ def main():
     test_early_policy_abstain_cannot_overwrite_alpha_input()
     test_json_schema_and_no_apply()
     test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass()
+    test_v2_retrieval_integrity_is_anchor_independent_but_complete()
     test_t2_never_infers_o4_anchor_from_name()
     test_reference_observability_is_species_generic_and_static_only()
     print("test_fit_explorer: PASS")
