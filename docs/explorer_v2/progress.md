@@ -6,7 +6,7 @@
 |---|---|---|
 | 문서 패키지 | 완료 | README, contracts, work_cards, 이 기록 |
 | 1 평가 계약 | 완료 | legacy T2 보존, anchor-independent retrieval_integrity 추가 |
-| 2 mission→plan | 미착수 | 기존 cfg 기반 generator 재사용 예정 |
+| 2 mission→plan | 완료 | FitSet-free mission 검증 및 유한 candidate plan |
 | 3 다종 비교 | 미착수 | 기존 반복 피팅·ablation 재사용 예정 |
 | 4 graph/closure | 미착수 | 기존 문서상의 분석과 범용 구현을 구분 |
 | 5 holdout/export | 미착수 | 기존 Review verdict는 사람 입력 |
@@ -17,6 +17,14 @@
 판정한다. 외부 절대량·T/P provenance는 이 내부 판정의 필수조건이 아니며 legacy
 `t2_gate`는 변경하지 않았다. `test_fit_explorer.py`, `test_fit_explorer_batch.py`,
 `test_zero_base_candidates.py`, `validate_pipeline.py --no-data` 통과. / 다음: 카드 2.
+
+2026-09-10 / 카드 2 / `core/fit_explorer_v2.py`, `tools/test_fit_explorer_v2.py` /
+명시한 mission 파장축·reference·관측 identity·유한 search policy만으로 FitSet-free
+후보 계획을 만든다. 후보 identity는 input hash, 파장 좌표, ordered reference content,
+window/poly/registration 정책을 포함하며, candidate runtime spec은 worker 적용 전의
+순수 구성 정보다. 미상 단위·ILS 상태·좌표/holdout overlap·누락 driver는 거부한다.
+graph edge와 과학적 sensitivity criterion은 아직 선언하지 않아 각각 Card 4 및 Astra
+검토 전 `UNSET`이다. / 다음: 카드 3.
 
 ## 재사용 가능한 자산
 
