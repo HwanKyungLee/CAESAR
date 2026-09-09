@@ -88,6 +88,7 @@ def prepare_channel(channel, document):
     target = channel.get("target_species", "NO2")
     if cfg.get("allow_negative_gas") is not True:
         raise ValueError("FitSet must explicitly allow negative gas")
+    reference_roles = FE.validate_reference_roles(cfg)
     paths = sorted(glob.glob(channel["alpha_glob"]))
     if not paths:
         raise ValueError("alpha glob matched no files")
@@ -148,7 +149,7 @@ def prepare_channel(channel, document):
     input_hash, source = _source_hash(cfg, channel["fitset"], sampling, selected)
     return {"input_hash": input_hash, "candidates": chosen,
         "context": {"cfg": cfg, "scans": scans, "sampling": sampling,
-                     "target": target,
+                     "target": target, "reference_roles": reference_roles,
                     "source": source, "engine": engine,
                     "fitter": DoasFitter(engine), "stage": document["stage"]}}
 
@@ -156,6 +157,8 @@ def prepare_channel(channel, document):
 def execute_candidate(_label, candidate, context):
     cfg = context["cfg"]
     target = context.get("target", "NO2")
+    reference_roles = context.get("reference_roles")
+    absolute_anchors = FE.absolute_anchor_species(context["engine"], reference_roles)
     callback = FE.production_stage1_callback(context["engine"], context["fitter"], cfg, target=target)
     runner = FE.run_stage1_vertical_slice if context["stage"] == 1 \
         else FE.run_stage2_vertical_slice
@@ -164,9 +167,15 @@ def execute_candidate(_label, candidate, context):
     report["sampling"] = context["sampling"]
     report["source"] = context["source"]
     report["t2_gate"] = FE.t2_from_attempts(
-        context["engine"], candidate, report.get("attempts", []), target=target)
+        context["engine"], candidate, report.get("attempts", []), target=target,
+        absolute_anchors=absolute_anchors)
     report["t2_diagnostics"] = FE.t2_diagnostic_checks(
         context["engine"], candidate, report.get("attempts", []), target=target)
+    report["reference_roles"] = (reference_roles if reference_roles is not None else
+                                 {name: {"fit_role": "MODELED_REFERENCE",
+                                         "registration_role": "NONE",
+                                         "anchor_role": "UNSPECIFIED", "reason": None}
+                                  for name in context["engine"].gas_list})
     return report
 
 

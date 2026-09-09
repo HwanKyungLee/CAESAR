@@ -529,11 +529,14 @@ def test_t2_nan_and_partial_are_unavailable():
         scaling_factors = {"NO2": 1., "O4": 1.}
     candidate = {"px_min": 0, "px_max": 100, "poly": 2}
     nan_row = {"T_C": float("nan"), "P_mbar": 1013., "result": {"coeffs": {"O4": 1.}}}
-    assert FE.t2_tri_state(Engine(), candidate, [nan_row], expected_count=1)["state"] == "UNAVAILABLE"
+    assert FE.t2_tri_state(Engine(), candidate, [nan_row], expected_count=1,
+                            absolute_anchors=("O4",))["state"] == "UNAVAILABLE"
     good = {"T_C": 25., "P_mbar": 1013., "result": {"coeffs": {"O4": 1e-30}}}
-    assert FE.t2_tri_state(Engine(), candidate, [good], expected_count=2)["state"] == "UNAVAILABLE"
+    assert FE.t2_tri_state(Engine(), candidate, [good], expected_count=2,
+                            absolute_anchors=("O4",))["state"] == "UNAVAILABLE"
     bad_types = {"T_C": None, "P_mbar": "bad", "result": {"coeffs": {"O4": "nan"}}}
-    assert FE.t2_tri_state(Engine(), candidate, [bad_types], expected_count=1)["state"] == "UNAVAILABLE"
+    assert FE.t2_tri_state(Engine(), candidate, [bad_types], expected_count=1,
+                            absolute_anchors=("O4",))["state"] == "UNAVAILABLE"
     assert FE.finite_or_none(None) is None and FE.finite_or_none("bad") is None
     assert FE.finite_or_none(float("inf")) is None
 
@@ -696,6 +699,32 @@ def test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass():
         FE.FP.differential_collinearity = original
 
 
+def test_t2_never_infers_o4_anchor_from_name():
+    class Engine:
+        gas_list = ["NO2", "O4"]
+        raw_references = {"NO2": np.arange(12.), "O4": np.arange(12.)}
+        scaling_factors = {"O4": 1.}
+        multipliers = {"O4": 1.}
+    candidate = {"px_min": 0, "px_max": 11, "poly": 2}
+    row = {"T_C": 25., "P_mbar": 1013.25,
+           "temperature_pressure_source": "measured_raw_housekeeping",
+           "result": {"coeffs": {"O4": 99.}}}
+    original_col, original_theo, original_retrieved = (
+        FE.FP.differential_collinearity, FE.FP.theoretical_amount, FE.FP.retrieved_amount)
+    try:
+        FE.FP.differential_collinearity = lambda *a, **k: {"multiple_R": {"NO2": .1}}
+        FE.FP.theoretical_amount = lambda gas, *_: 1. if gas == "O4" else None
+        FE.FP.retrieved_amount = lambda *_: 99.
+        implicit = FE.t2_tri_state(Engine(), candidate, [row], expected_count=1)
+        explicit = FE.t2_tri_state(Engine(), candidate, [row], expected_count=1,
+                                   absolute_anchors=("O4",))
+        assert implicit["state"] == "UNAVAILABLE"
+        assert explicit["state"] == "FAIL" and explicit["reason"] == "O4 absolute amount exceeds bound"
+    finally:
+        (FE.FP.differential_collinearity, FE.FP.theoretical_amount,
+         FE.FP.retrieved_amount) = original_col, original_theo, original_retrieved
+
+
 def main():
     test_candidates_and_starts()
     test_stage1_global_bounds_and_boundary_diagnostic()
@@ -717,6 +746,7 @@ def main():
     test_early_policy_abstain_cannot_overwrite_alpha_input()
     test_json_schema_and_no_apply()
     test_tp_fallback_cannot_enter_t2_and_spread_is_not_pass()
+    test_t2_never_infers_o4_anchor_from_name()
     print("test_fit_explorer: PASS")
 
 

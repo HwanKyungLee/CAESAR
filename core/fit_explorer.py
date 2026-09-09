@@ -46,6 +46,10 @@ SEED_STABILITY_TOLERANCES = {
     "squeeze_abs": 1e-5, "rms_sig_rel": 0.01,
 }
 
+REFERENCE_FIT_ROLES = {"MODELED_REFERENCE", "OPTIONAL_REFERENCE"}
+REFERENCE_REGISTRATION_ROLES = {"PREFERRED", "LINKED", "NONE"}
+REFERENCE_ANCHOR_ROLES = {"ELIGIBLE", "INELIGIBLE", "UNSPECIFIED"}
+
 
 def validate_reference_policy(cfg):
     """Validate optional window-specific reference policy without changing refs.
@@ -80,6 +84,61 @@ def validate_reference_policy(cfg):
             "reason": str(policy["reason"]),
             "evidence": policy.get("evidence"),
             "t2_o4_state": policy.get("t2_o4_state")}
+
+
+def validate_reference_roles(cfg):
+    """Validate explicit per-reference roles without changing FitSet order.
+
+    Being included in a fit does not make a species a physical anchor.
+    ``ELIGIBLE`` only permits a later window-observability check; it never
+    creates a PASS on its own.
+    """
+    roles = cfg.get("reference_roles")
+    if roles is None:
+        return None
+    if not isinstance(roles, dict):
+        raise ValueError("reference_roles must be an object")
+    refs = cfg.get("refs", [])
+    if not isinstance(refs, list) or any(not isinstance(ref, dict) for ref in refs):
+        raise ValueError("FitSet refs must be a list of objects")
+    names = [ref.get("name") for ref in refs]
+    if set(roles) != set(names):
+        raise ValueError("reference_roles must cover exactly the FitSet references")
+    normalized = {}
+    for name in names:
+        role = roles[name]
+        if not isinstance(role, dict) or set(role) - {
+                "fit_role", "registration_role", "anchor_role", "reason"}:
+            raise ValueError("reference role has unsupported fields")
+        fit_role = role.get("fit_role")
+        registration_role = role.get("registration_role")
+        anchor_role = role.get("anchor_role", "UNSPECIFIED")
+        if fit_role not in REFERENCE_FIT_ROLES:
+            raise ValueError("reference role fit_role is invalid")
+        if registration_role not in REFERENCE_REGISTRATION_ROLES:
+            raise ValueError("reference role registration_role is invalid")
+        if anchor_role not in REFERENCE_ANCHOR_ROLES:
+            raise ValueError("reference role anchor_role is invalid")
+        reason = role.get("reason")
+        if anchor_role != "UNSPECIFIED" and (not isinstance(reason, str) or not reason.strip()):
+            raise ValueError("reference role anchor decision requires a reason")
+        normalized[name] = {"fit_role": fit_role,
+                            "registration_role": registration_role,
+                            "anchor_role": anchor_role,
+                            "reason": reason.strip() if isinstance(reason, str) else None}
+    return normalized
+
+
+def absolute_anchor_species(eng, reference_roles):
+    """Return only explicitly eligible anchors in engine order.
+
+    Missing roles are intentionally not guessed from a gas name.  This removes
+    the former implicit O4-only T2 policy.
+    """
+    if reference_roles is None:
+        return ()
+    return tuple(gas for gas in eng.gas_list
+                 if reference_roles.get(gas, {}).get("anchor_role") == "ELIGIBLE")
 
 
 def representative_indices(pool_size, requested=4):
@@ -952,7 +1011,8 @@ def stage0_candidate_grid(eng, candidates, target="NO2"):
             "limitations": ["Stage 0 is fit-free preflight only", "No ranking", "No Apply"]}
 
 
-def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=None):
+def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=None,
+                  absolute_anchors=()):
     """Conservative adapter: a negative exclusion decision is never a PASS."""
     sources = {str(row.get("temperature_pressure_source", "UNAVAILABLE"))
                for row in successful_runs if isinstance(row, dict)}
@@ -970,10 +1030,16 @@ def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=N
                "threshold": FP.COLLIN_HI_DEFAULT}
     if multiple_r is not None and multiple_r > FP.COLLIN_HI_DEFAULT:
         return {"state": "FAIL", "reason": "target differential collinearity", "details": details}
+    if (not isinstance(absolute_anchors, (tuple, list))
+            or any(not isinstance(gas, str) or gas not in eng.gas_list
+                   for gas in absolute_anchors)
+            or len(set(absolute_anchors)) != len(absolute_anchors)):
+        return {"state": "UNAVAILABLE", "reason": "T2_ABSOLUTE_ANCHOR_POLICY_INVALID",
+                "details": details}
     anchored, incomplete = [], []
-    for gas in eng.gas_list:
+    for gas in absolute_anchors:
         ratios = []
-        applicable = str(gas).upper() == "O4"
+        applicable = True
         for row in successful_runs:
             try:
                 theo = FP.theoretical_amount(gas, row.get("T_C"), row.get("P_mbar"))
@@ -1007,7 +1073,7 @@ def t2_tri_state(eng, candidate, successful_runs, target="NO2", expected_count=N
              "details": details})
 
 
-def t2_from_attempts(eng, candidate, attempts, target="NO2"):
+def t2_from_attempts(eng, candidate, attempts, target="NO2", absolute_anchors=()):
     """Adapt public Stage 2 attempts to the conservative T2 tri-state gate."""
     successful = []
     for attempt in attempts:
@@ -1022,7 +1088,7 @@ def t2_from_attempts(eng, candidate, attempts, target="NO2"):
     if not successful:
         return {"state": "UNAVAILABLE", "reason": "T2_NO_SUCCESSFUL_ATTEMPTS"}
     return t2_tri_state(eng, candidate, successful, target=target,
-                        expected_count=len(successful))
+                        expected_count=len(successful), absolute_anchors=absolute_anchors)
 
 
 def t2_diagnostic_checks(eng, candidate, attempts, target="NO2"):

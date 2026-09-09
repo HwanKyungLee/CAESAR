@@ -23,17 +23,18 @@ _RESERVED = {"CON", "PRN", "AUX", "NUL",
 _RESULT_FIELDS = {"schema", "candidate_id", "status", "policy", "budget",
     "translation", "policy_bounds", "planned_attempts", "executed_attempts",
     "successful_attempts", "objective_change_convention", "attempts",
-    "limitations", "sampling", "source", "quality_gate", "t2_gate", "t2_diagnostics"}
+    "limitations", "sampling", "source", "quality_gate", "t2_gate", "t2_diagnostics",
+    "reference_roles"}
 _PUBLIC_KEYS = _RESULT_FIELDS | {
-    "active_bands_nm", "allow_negative_gas", "attempts_per_scan", "bound",
+    "active_bands_nm", "allow_negative_gas", "anchor_role", "attempts_per_scan", "bound",
     "boundary_hits", "channel", "channel_source", "coeffs", "contract", "date", "quality_state", "quality_gate",
     "date_range", "derived_target_ref_props", "details", "eligible_per_date",
     "eligible_rows", "executed_attempts", "expected_channel", "file",
-    "final_shift", "final_squeeze", "fit_executed", "fitset", "gas_order",
+    "final_shift", "final_squeeze", "fit_executed", "fit_role", "fitset", "gas_order",
     "id", "independence_note", "initial_shift", "initial_squeeze", "lower",
     "manifest_reuse", "minimum_distinct_dates", "mode", "name", "nfev", "objective_change",
     "objective_final", "objective_initial", "observation_key", "parameter",
-    "planned_attempts", "reason", "references", "requested_scans", "row_index",
+    "planned_attempts", "reason", "references", "reference_roles", "registration_role", "requested_scans", "row_index",
     "sample_order", "samples", "scan_id", "scope", "seed_stability", "selected_alpha", "selected_per_date",
     "selected_zero_based_indices", "sh_mode", "sh_val", "sha256", "shift",
     "side", "solver_termination", "source_policy", "source_policy_stage",
@@ -85,9 +86,10 @@ def _validate_public_value(value, key=""):
     if key.casefold() in _FORBIDDEN_PUBLIC_KEYS:
         raise ValueError("public result contains a forbidden field")
     if isinstance(value, dict):
-        if key in {"t2_gate", "t2_diagnostics"}:
+        if key in {"t2_gate", "t2_diagnostics", "reference_roles"}:
             # T2 details contain dynamic gas names; retain safety checks while
-            # allowing domain-specific nested diagnostic keys.
+            # allowing domain-specific nested diagnostic keys.  Reference roles
+            # likewise use gas names as keys.
             def walk_t2(child):
                 if isinstance(child, dict):
                     for name, item in child.items():

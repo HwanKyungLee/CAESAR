@@ -54,7 +54,10 @@ def _result(candidate_id, stage=1):
         "quality_gate": {"state": "QUALITY_GATE_UNAVAILABLE", "threshold": None,
                          "median": None, "mad_scaled": None, "n": 0},
         "t2_gate": {"state": "UNAVAILABLE", "reason": "fixture"},
-        "t2_diagnostics": {"state": "fixture"}}
+        "t2_diagnostics": {"state": "fixture"},
+        "reference_roles": {
+            "NO2": {"fit_role": "MODELED_REFERENCE", "registration_role": "PREFERRED",
+                    "anchor_role": "UNSPECIFIED", "reason": None}}}
 
 
 def test_public_result_allows_iso_date_sampling_maps_but_rejects_bad_keys():

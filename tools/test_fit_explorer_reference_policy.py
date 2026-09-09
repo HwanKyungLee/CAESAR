@@ -7,7 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from core.fit_explorer import validate_reference_policy
+from core.fit_explorer import (absolute_anchor_species, validate_reference_policy,
+                               validate_reference_roles)
 
 
 def main() -> None:
@@ -16,6 +17,17 @@ def main() -> None:
     policy = validate_reference_policy(cold)
     assert policy["excluded_species"] == ["O4"]
     assert policy["t2_o4_state"] == "UNAVAILABLE"
+
+    roles = validate_reference_roles({**cold, "reference_roles": {
+        "CHOCHO": {"fit_role": "MODELED_REFERENCE", "registration_role": "LINKED",
+                    "anchor_role": "UNSPECIFIED"},
+        "H2O": {"fit_role": "MODELED_REFERENCE", "registration_role": "LINKED",
+                "anchor_role": "UNSPECIFIED"},
+        "NO2": {"fit_role": "MODELED_REFERENCE", "registration_role": "PREFERRED",
+                "anchor_role": "INELIGIBLE", "reason": "Target is not an independent anchor."},
+    }})
+    assert roles["NO2"]["registration_role"] == "PREFERRED"
+    assert absolute_anchor_species(type("E", (), {"gas_list": ["CHOCHO", "H2O", "NO2"]})(), roles) == ()
 
     with_o4 = dict(cold)
     with_o4["refs"] = [*cold["refs"], {"name": "O4", "path": "o4.dat", "mult": 0}]
