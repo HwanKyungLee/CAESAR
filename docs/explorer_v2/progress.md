@@ -8,7 +8,7 @@
 | 1 평가 계약 | 완료 | legacy T2 보존, anchor-independent retrieval_integrity 추가 |
 | 2 mission→plan | 완료 | FitSet-free mission 검증 및 유한 candidate plan |
 | 3 다종 비교 | 완료 | 전체 coeff 재사용·동일 observation/start 종별 delta |
-| 4 graph/closure | 미착수 | 기존 문서상의 분석과 범용 구현을 구분 |
+| 4 graph/closure | 완료 | 명시 edge graph·finite closure·대표 후보 진단 |
 | 5 holdout/export | 미착수 | 기존 Review verdict는 사람 입력 |
 | 6 GUI 인수 | 미착수 | 기존 탭은 batch 실행 및 Review 표시 가능 |
 
@@ -32,6 +32,13 @@ graph edge와 과학적 sensitivity criterion은 아직 선언하지 않아 각�
 날짜별 실제 농도 변화는 비교 대상이 아니다. sensitivity/detection 기준이 없으므로 결과는
 `COMPUTED` 또는 `UNAVAILABLE` 진단이며 PASS/FAIL 또는 residual 순위를 만들지 않는다.
 실제 V2 execution adapter와 graph edge는 다음 카드 범위다. / 다음: 카드 4.
+
+2026-09-10 / 카드 4 / `core/fit_explorer_v2.py`, `tools/test_fit_explorer_v2_graph.py` /
+명시된 candidate edge와 upstream 종별 edge state만으로 PASS 연결성분을 계산한다. unknown은
+실패가 아니라 예산 안 closure 요청이며 선언 영역 밖으로 후보를 만들지 않는다. 대표 후보는
+경계 hop이 큰 내부점 중 낮은 poly/작은 창을 동률 해소에만 사용한다. component는 대표와
+전체 pair 증거를 모두 요구하므로 A-B/B-C 통과만으로 A-C 불일치를 숨기지 않는다. 그래프
+자체는 추천을 내리지 않으며 holdout·export는 Card 5 범위다. / 다음: 카드 5.
 
 ## 재사용 가능한 자산
 

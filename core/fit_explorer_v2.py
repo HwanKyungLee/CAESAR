@@ -367,3 +367,162 @@ def compare_multispecies_attempts(candidate_reports, requested_species):
             "requested_species": list(requested_species), "candidates": per_candidate,
             "comparisons": comparisons,
             "limitations": ["No species sensitivity threshold", "No residual ranking across windows", "No Apply"]}
+
+
+_NODE_STATES = {"EVALUATED_PASS", "EVALUATED_FAIL", "PRUNED", "UNEVALUATED"}
+_EDGE_STATES = {"PASS", "FAIL", "UNAVAILABLE"}
+
+
+def _candidate_complexity(candidate):
+    """Deterministic tie-break only; it is never a scientific score."""
+    poly = candidate.get("poly")
+    width = candidate.get("px_max", 0) - candidate.get("px_min", 0)
+    return (poly if isinstance(poly, int) and not isinstance(poly, bool) else 10 ** 9,
+            width if isinstance(width, int) else 10 ** 9, candidate["candidate_id"])
+
+
+def _edge_state(row, requested_species):
+    if not isinstance(row, dict):
+        raise ValueError("edge evidence must be an object")
+    species = row.get("species")
+    if species is None:
+        state = row.get("state")
+        if state not in _EDGE_STATES:
+            raise ValueError("edge evidence state is invalid")
+        return state
+    if not isinstance(species, dict) or set(species) != set(requested_species):
+        raise ValueError("edge evidence must cover exactly requested_species")
+    states = []
+    for name in requested_species:
+        state = species[name].get("state") if isinstance(species[name], dict) else None
+        if state not in _EDGE_STATES:
+            raise ValueError("species edge evidence state is invalid")
+        states.append(state)
+    return "FAIL" if "FAIL" in states else "PASS" if all(state == "PASS" for state in states) else "UNAVAILABLE"
+
+
+def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_attempts=0):
+    """Evaluate only declared candidate edges and schedule finite closure work.
+
+    ``edge_evidence`` contains upstream science judgments; this function does
+    not convert coefficient deltas into PASS/FAIL.  Unknown frontier nodes are
+    queued within the declared budget, never treated as failed boundaries.
+    """
+    if not isinstance(plan, dict) or not isinstance(plan.get("candidates"), list):
+        raise ValueError("plan candidates are required")
+    requested = plan.get("requested_species")
+    if not isinstance(requested, list) or not requested or len(requested) != len(set(requested)):
+        raise ValueError("plan requested_species is invalid")
+    candidates = {row.get("candidate_id"): row for row in plan["candidates"]
+                  if isinstance(row, dict) and isinstance(row.get("candidate_id"), str)}
+    if len(candidates) != len(plan["candidates"]):
+        raise ValueError("plan candidate identity is invalid")
+    if not isinstance(candidate_states, dict) or set(candidate_states) != set(candidates):
+        raise ValueError("candidate_states must cover exactly plan candidates")
+    if any(state not in _NODE_STATES for state in candidate_states.values()):
+        raise ValueError("candidate state is invalid")
+    if isinstance(used_fit_attempts, bool) or not isinstance(used_fit_attempts, int) or used_fit_attempts < 0:
+        raise ValueError("used_fit_attempts is invalid")
+    budget = plan.get("budget")
+    if not isinstance(budget, dict) or not isinstance(budget.get("max_fit_attempts"), int) \
+            or not isinstance(budget.get("closure_max_attempts"), int):
+        raise ValueError("plan budget is invalid")
+    edges, edge_keys = [], set()
+    for edge in plan.get("edges", []):
+        if not isinstance(edge, dict) or set(edge) != {"left_candidate_id", "right_candidate_id", "kind"} \
+                or not isinstance(edge["kind"], str) or not edge["kind"]:
+            raise ValueError("plan edge is invalid")
+        left, right = edge["left_candidate_id"], edge["right_candidate_id"]
+        if left not in candidates or right not in candidates or left == right:
+            raise ValueError("plan edge endpoints are invalid")
+        key = tuple(sorted((left, right)))
+        if key in edge_keys:
+            raise ValueError("plan edges must be unique")
+        edge_keys.add(key); edges.append((key, edge["kind"]))
+    evidence = {}
+    if not isinstance(edge_evidence, list):
+        raise ValueError("edge_evidence must be a list")
+    for row in edge_evidence:
+        if not isinstance(row, dict):
+            raise ValueError("edge evidence is invalid")
+        left, right = row.get("left_candidate_id"), row.get("right_candidate_id")
+        key = tuple(sorted((left, right))) if isinstance(left, str) and isinstance(right, str) else None
+        if key not in edge_keys or key in evidence:
+            raise ValueError("edge evidence must match one declared edge")
+        evidence[key] = _edge_state(row, requested)
+    adjacency = {candidate_id: [] for candidate_id in candidates}
+    for (left, right), kind in edges:
+        state = evidence.get((left, right), "UNAVAILABLE")
+        adjacency[left].append((right, state, kind)); adjacency[right].append((left, state, kind))
+    components, unseen = [], {candidate_id for candidate_id, state in candidate_states.items()
+                               if state == "EVALUATED_PASS"}
+    while unseen:
+        start, stack, members = min(unseen), [min(unseen)], set()
+        while stack:
+            node = stack.pop()
+            if node in members:
+                continue
+            members.add(node); unseen.discard(node)
+            stack.extend(neighbor for neighbor, state, _kind in adjacency[node]
+                         if state == "PASS" and candidate_states[neighbor] == "EVALUATED_PASS")
+        components.append(sorted(members))
+    remaining = max(0, budget["max_fit_attempts"] - used_fit_attempts)
+    closure_cap = min(budget["closure_max_attempts"], remaining)
+    component_rows, scheduled = [], []
+    for members in components:
+        member_set = set(members)
+        unknown = sorted({neighbor for node in members for neighbor, _state, _kind in adjacency[node]
+                          if neighbor not in member_set and candidate_states[neighbor] == "UNEVALUATED"})
+        boundary = {node for node in members for neighbor, state, _kind in adjacency[node]
+                    if neighbor not in member_set and (candidate_states[neighbor] != "EVALUATED_PASS" or state != "PASS")}
+        distances = {}
+        if boundary:
+            for node in members:
+                frontier, visited, hops = [(node, 0)], {node}, None
+                while frontier:
+                    current, distance = frontier.pop(0)
+                    if current in boundary:
+                        hops = distance; break
+                    for neighbor, state, _kind in adjacency[current]:
+                        if neighbor in member_set and state == "PASS" and neighbor not in visited:
+                            visited.add(neighbor); frontier.append((neighbor, distance + 1))
+                distances[node] = hops
+        else:
+            distances = {node: None for node in members}
+        best_distance = max((value for value in distances.values() if value is not None), default=None)
+        interior = members if best_distance is None else [node for node in members if distances[node] == best_distance]
+        representative = min(interior, key=lambda node: _candidate_complexity(candidates[node]))
+        direct_states = []
+        for node in members:
+            if node == representative:
+                continue
+            direct_states.append(evidence.get(tuple(sorted((representative, node))), "UNAVAILABLE"))
+        representative_check = "FAIL" if "FAIL" in direct_states else (
+            "PASS" if all(state == "PASS" for state in direct_states) else "UNAVAILABLE")
+        pair_states = [evidence.get(tuple(sorted((left, right))), "UNAVAILABLE")
+                       for index, left in enumerate(members) for right in members[index + 1:]]
+        component_check = "FAIL" if "FAIL" in pair_states else (
+            "PASS" if all(state == "PASS" for state in pair_states) else "UNAVAILABLE")
+        local_schedule = [node for node in unknown if node not in scheduled][:max(0, closure_cap - len(scheduled))]
+        scheduled.extend(local_schedule)
+        state = ("ISOLATED_NO_ROBUSTNESS_EVIDENCE" if len(members) == 1 and not adjacency[members[0]] else
+                 "INCONSISTENT_COMPONENT" if component_check == "FAIL" else
+                 "OPEN_FRONTIER" if unknown else
+                 "INSUFFICIENT_COMPONENT_EVIDENCE" if component_check == "UNAVAILABLE" else
+                 "CLOSED_INTERNAL_COMPONENT")
+        component_rows.append({"members": members, "state": state, "representative_candidate_id": representative,
+                               "representative_boundary_hops": distances[representative],
+                               "representative_component_check": representative_check,
+                               "component_pair_check": component_check,
+                               "unknown_frontier": unknown, "closure_scheduled": local_schedule})
+    all_frontier = {node for row in component_rows for node in row["unknown_frontier"]}
+    return {"schema": "explorer-v2-graph-closure-v1", "state": "COMPUTED",
+            "components": component_rows,
+            "node_states": dict(candidate_states),
+            "edge_states": [{"left_candidate_id": left, "right_candidate_id": right,
+                             "kind": kind, "state": evidence.get((left, right), "UNAVAILABLE")}
+                            for (left, right), kind in edges],
+            "closure": {"requested_candidate_ids": scheduled, "remaining_fit_budget": remaining,
+                        "closure_capacity": closure_cap,
+                        "unscheduled_frontier_count": len(all_frontier.difference(scheduled))},
+            "limitations": ["No recommendation", "No automatic domain expansion", "No Apply"]}
