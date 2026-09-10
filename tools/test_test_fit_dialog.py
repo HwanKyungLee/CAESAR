@@ -24,7 +24,9 @@ if _ROOT not in sys.path:
 
 from gui.test_fit_dialog import (_TestFitOptimizerWorker, _resolve_px_bounds,
                                  _assemble_ref_props, _format_explorer_review,
-                                 _explorer_batch_command)
+                                 _explorer_batch_command, _explorer_v2_plan_command,
+                                 _explorer_v2_export_command, _format_v2_plan,
+                                 _format_v2_recommendation)
 from gui.app_window import CAESARAnalyzer, _scenario_gas_policy, _channel_worker_gas_policy
 
 _n_pass = 0
@@ -210,6 +212,24 @@ def test_explorer_batch_command_contract():
     check("사전검사에만 --dry-run 추가", dry[-1] == "--dry-run" and "--dry-run" not in run)
 
 
+def test_explorer_v2_gui_contract():
+    print("[9] Explorer V2 GUI는 file contract만 실행")
+    mission = os.path.join(_ROOT, "diagnostics", "mission.json")
+    plan = os.path.join(_ROOT, "diagnostics", "plan.json")
+    command = _explorer_v2_plan_command(mission, plan)
+    check("V2 plan은 별도 bridge와 명시 파일 사용",
+          os.path.basename(command[1]) == "run_fit_explorer_v2.py" and command[2:6] == ["plan", "--mission", os.path.abspath(mission), "--output"])
+    export = _explorer_v2_export_command(plan, "review.json", "base.json", "cand", "out.json")
+    check("V2 export는 plan/recommendation/base/candidate를 모두 명시",
+          export[2] == "export" and "--candidate-id" in export and "cand" in export)
+    html = _format_v2_plan({"schema": "explorer-plan-v2", "status": "READY_FOR_STAGE0",
+                            "mission_id": "opaque", "candidates": [], "plan_hash": "p"})
+    check("V2 plan은 실행/Apply가 아님", "실제 피팅" in html and "Apply" in html)
+    rec = {"schema": "explorer-recommendation-v2", "status": "PROVISIONAL", "candidate_id": "cand",
+           "scope": "MISSION_LOCAL_FROZEN_PLAN_ONLY"}
+    check("V2 recommendation은 수동 export만 안내", "자동 변경하지 않습니다" in _format_v2_recommendation(rec))
+
+
 if __name__ == "__main__":
     for t in (test_resolve_px_bounds, test_assemble_ref_props_target_limit_to_center,
               test_assemble_ref_props_target_fix,
@@ -217,7 +237,8 @@ if __name__ == "__main__":
               test_assemble_ref_props_preserves_user_fields,
               test_allow_negative_gas_roundtrip_policy,
               test_explorer_review_is_read_only_contract,
-              test_explorer_batch_command_contract):
+              test_explorer_batch_command_contract,
+              test_explorer_v2_gui_contract):
         t()
     print(f"\n{_n_pass} PASS · {_n_fail} FAIL")
     sys.exit(1 if _n_fail else 0)

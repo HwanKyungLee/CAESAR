@@ -1,6 +1,9 @@
 # Explorer V2 구현 패키지
 
-2026-09-10. 상태: 설계 계약 작성 완료, V2 구현 미착수. 확인한 코드: `73086f5`.
+2026-09-10. 상태: 카드 1~6의 계약·계획·증거·graph·추천/export·GUI bridge 구현 완료.
+V2 mission 계약은 현재 file identity/hash 중심이므로, 실제 alpha/reference 파일을 직접 열어
+V2 plan에서 반복 fit까지 실행하는 runtime adapter는 후속 통합 작업이다. 기존 V1 batch는 GUI에서
+계속 실제 fit/재개를 담당한다.
 
 ## 목적과 문서 우선순위
 

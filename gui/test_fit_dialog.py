@@ -185,6 +185,44 @@ def _explorer_batch_command(config_path: str, dry_run: bool) -> list[str]:
     return command
 
 
+def _explorer_v2_plan_command(mission_path: str, output_path: str) -> list[str]:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return [sys.executable, os.path.join(root, "tools", "run_fit_explorer_v2.py"), "plan",
+            "--mission", os.path.abspath(mission_path), "--output", os.path.abspath(output_path)]
+
+
+def _explorer_v2_export_command(plan_path: str, recommendation_path: str, base_fitset_path: str,
+                                candidate_id: str, output_path: str) -> list[str]:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return [sys.executable, os.path.join(root, "tools", "run_fit_explorer_v2.py"), "export",
+            "--plan", os.path.abspath(plan_path), "--recommendation", os.path.abspath(recommendation_path),
+            "--base-fitset", os.path.abspath(base_fitset_path), "--candidate-id", candidate_id,
+            "--output", os.path.abspath(output_path)]
+
+
+def _format_v2_plan(plan: dict) -> str:
+    if not isinstance(plan, dict) or plan.get("schema") != "explorer-plan-v2":
+        raise ValueError("not an explorer-plan-v2 document")
+    return (f"<h3>V2 plan: {plan.get('status', '?')}</h3>"
+            f"<p><b>Mission:</b> {plan.get('mission_id', '?')}<br>"
+            f"<b>Candidates:</b> {len(plan.get('candidates', []))}<br>"
+            f"<b>Plan hash:</b> {plan.get('plan_hash', '?')}</p>"
+            "<p>이 계획은 후보 범위만 고정합니다. 실제 피팅/추천/Apply를 수행하지 않습니다.</p>")
+
+
+def _format_v2_recommendation(recommendation: dict) -> str:
+    if not isinstance(recommendation, dict) or recommendation.get("schema") != "explorer-recommendation-v2":
+        raise ValueError("not an explorer-recommendation-v2 document")
+    status = recommendation.get("status")
+    if status not in {"MISSION_RECOMMENDED", "PROVISIONAL", "ABSTAIN"}:
+        raise ValueError("unknown V2 recommendation status")
+    candidate = recommendation.get("candidate_id") or "없음"
+    return (f"<h3>V2 recommendation: {status}</h3>"
+            f"<p><b>Candidate:</b> {candidate}<br><b>Scope:</b> {recommendation.get('scope', '?')}</p>"
+            "<p style='color:#C62828; font-weight:bold;'>새 FitSet 저장은 별도 Export 버튼을 눌러야 하며, "
+            "현재 FitSet·채널 설정은 자동 변경하지 않습니다.</p>")
+
+
 class _ExplorerBatchWorker(QThread):
     """Explorer CLI를 별도 스레드에서 실행해 Test Fit 창을 멈추지 않게 한다."""
 
@@ -207,6 +245,25 @@ class _ExplorerBatchWorker(QThread):
         except Exception as exc:
             self.completed.emit({"ok": False, "returncode": None, "stdout": "",
                                  "stderr": type(exc).__name__, "dry_run": self.dry_run})
+
+
+class _ExplorerCommandWorker(QThread):
+    """Run one explicit V2 file-contract command without touching GUI state."""
+    completed = pyqtSignal(object)
+
+    def __init__(self, command: list[str]):
+        super().__init__()
+        self.command = command
+
+    def run(self):
+        try:
+            result = subprocess.run(self.command,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                capture_output=True, text=True, errors="replace", check=False)
+            self.completed.emit({"ok": result.returncode == 0, "stdout": result.stdout,
+                                 "stderr": result.stderr})
+        except Exception as exc:
+            self.completed.emit({"ok": False, "stdout": "", "stderr": type(exc).__name__})
 
 
 class _TestFitOptimizerWorker(QThread):
@@ -417,6 +474,9 @@ class TestFitDialog(QDialog):
         self._worker: _TestFitOptimizerWorker | None = None
         self._explorer_worker: _ExplorerBatchWorker | None = None
         self._explorer_config_path = ""
+        self._explorer_v2_worker: _ExplorerCommandWorker | None = None
+        self._v2_mission_path = self._v2_plan_path = self._v2_recommendation_path = ""
+        self._v2_recommendation = None
         self.setWindowTitle("🧪 Test Fit")
         _s = getattr(parent, "_s", 1.0)
         self.resize(int(920 * _s), int(760 * _s))
@@ -716,6 +776,29 @@ class TestFitDialog(QDialog):
         self._explorer_run_edit.setPlaceholderText("Batch validation and execution output appears here.")
         lay.addWidget(self._explorer_run_edit, 1)
 
+        v2_note = QLabel("V2: 미션 JSON에서 후보 계획을 고정합니다. V2 plan은 아직 피팅을 실행하지 않으며, "
+                         "실제 반복 피팅/재개는 위의 기존 Batch Config 경로를 사용합니다.")
+        v2_note.setWordWrap(True); v2_note.setStyleSheet("color:#455A64;")
+        lay.addWidget(v2_note)
+        v2_bar = QHBoxLayout()
+        plan_btn = QPushButton("Build V2 Plan…")
+        plan_btn.clicked.connect(self._build_v2_plan)
+        v2_bar.addWidget(plan_btn)
+        load_plan_btn = QPushButton("Load V2 Plan…")
+        load_plan_btn.clicked.connect(self._load_v2_plan)
+        v2_bar.addWidget(load_plan_btn)
+        load_rec_btn = QPushButton("Load V2 Recommendation…")
+        load_rec_btn.clicked.connect(self._load_v2_recommendation)
+        v2_bar.addWidget(load_rec_btn)
+        export_btn = QPushButton("Export V2 FitSet…")
+        export_btn.clicked.connect(self._export_v2_fitset)
+        v2_bar.addWidget(export_btn); v2_bar.addStretch(1)
+        lay.addLayout(v2_bar)
+        self._v2_edit = QTextEdit(); self._v2_edit.setReadOnly(True)
+        self._v2_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._v2_edit.setPlaceholderText("V2 plan/recommendation status appears here.")
+        lay.addWidget(self._v2_edit, 1)
+
         bar = QHBoxLayout()
         bar.addWidget(QLabel("After a completed batch:"))
         btn = QPushButton("Load Explorer Review JSON…")
@@ -781,6 +864,68 @@ class TestFitDialog(QDialog):
             self._explorer_review_edit.setHtml(_format_explorer_review(review))
         except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Explorer Review", f"Cannot load review: {exc}")
+
+    def _run_v2_command(self, command, success_text):
+        if self._explorer_v2_worker is not None and self._explorer_v2_worker.isRunning():
+            return
+        self._v2_edit.setPlainText("Running V2 file contract…")
+        self._explorer_v2_worker = _ExplorerCommandWorker(command)
+        self._explorer_v2_worker.completed.connect(
+            lambda result: self._on_v2_command_completed(result, success_text))
+        self._explorer_v2_worker.start()
+
+    def _on_v2_command_completed(self, result, success_text):
+        output = (result.get("stdout") or "") + ("\n" if result.get("stderr") else "") + (result.get("stderr") or "")
+        self._v2_edit.setPlainText((success_text + "\n" if result.get("ok") else "V2 command stopped. No FitSet was changed.\n") + output[-16000:])
+
+    def _build_v2_plan(self):
+        mission, _ = QFileDialog.getOpenFileName(self, "Select Explorer V2 mission", "", "JSON Files (*.json)")
+        if not mission:
+            return
+        output, _ = QFileDialog.getSaveFileName(self, "Save frozen Explorer V2 plan", "", "JSON Files (*.json)")
+        if not output:
+            return
+        self._v2_mission_path, self._v2_plan_path = mission, output
+        self._run_v2_command(_explorer_v2_plan_command(mission, output),
+                             "✅ V2 plan created/reused — load it to inspect the frozen candidate domain.")
+
+    def _load_v2_plan(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load Explorer V2 plan", "", "JSON Files (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                plan = json.load(fh)
+            self._v2_plan_path = path
+            self._v2_edit.setHtml(_format_v2_plan(plan))
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            QMessageBox.warning(self, "Explorer V2", f"Cannot load plan: {exc}")
+
+    def _load_v2_recommendation(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load Explorer V2 recommendation", "", "JSON Files (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                recommendation = json.load(fh)
+            self._v2_recommendation_path, self._v2_recommendation = path, recommendation
+            self._v2_edit.setHtml(_format_v2_recommendation(recommendation))
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            QMessageBox.warning(self, "Explorer V2", f"Cannot load recommendation: {exc}")
+
+    def _export_v2_fitset(self):
+        candidate_id = (self._v2_recommendation or {}).get("candidate_id")
+        if not self._v2_plan_path or not self._v2_recommendation_path or not candidate_id:
+            QMessageBox.warning(self, "Explorer V2", "Load an exportable V2 plan and recommendation first.")
+            return
+        base, _ = QFileDialog.getOpenFileName(self, "Select base FitSet to copy", "", "JSON Files (*.json)")
+        if not base:
+            return
+        output, _ = QFileDialog.getSaveFileName(self, "Export new V2 FitSet copy", "", "JSON Files (*.json)")
+        if not output:
+            return
+        self._run_v2_command(_explorer_v2_export_command(self._v2_plan_path, self._v2_recommendation_path,
+                             base, candidate_id, output), "✅ New FitSet copy exported. Current GUI FitSet was not changed.")
 
     # ══════════════════════════════════════════════════════════════
     # 탭2 — 1스캔 미리보기 (기존 _show_test_fit_popup 이식, 로직 불변)
@@ -861,4 +1006,7 @@ class TestFitDialog(QDialog):
         if self._explorer_worker is not None and self._explorer_worker.isRunning():
             self._explorer_worker.terminate()
             self._explorer_worker.wait()
+        if self._explorer_v2_worker is not None and self._explorer_v2_worker.isRunning():
+            self._explorer_v2_worker.terminate()
+            self._explorer_v2_worker.wait()
         super().closeEvent(event)

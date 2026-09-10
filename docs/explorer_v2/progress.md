@@ -10,7 +10,7 @@
 | 3 다종 비교 | 완료 | 전체 coeff 재사용·동일 observation/start 종별 delta |
 | 4 graph/closure | 완료 | 명시 edge graph·finite closure·대표 후보 진단 |
 | 5 holdout/export | 완료 | frozen evidence 추천 상태·명시 export/worker roundtrip |
-| 6 GUI 인수 | 미착수 | 기존 탭은 batch 실행 및 Review 표시 가능 |
+| 6 GUI 인수 | 완료 (bridge) | V2 mission→plan·recommendation/export + V1 batch 실행/재개 |
 
 2026-09-10 / 카드 1 / `core/fit_explorer.py`, batch CLI/schema 및 계약 테스트 /
 `retrieval_integrity`가 계획한 모든 시도의 완료, target 공선성, 유한 계수를 별도로
@@ -46,6 +46,14 @@ graph edge와 과학적 sensitivity criterion은 아직 선언하지 않아 각�
 `PROVISIONAL`, multi-solution 또는 내부/종별 실패는 `ABSTAIN`이다. export는 추천된 후보를
 기존 FitSet config의 복사본에 번역하고 실제 worker bounds parser/validate_fitset을 되읽은
 뒤 새 파일에만 exclusive write한다. 활성 GUI/원본 config는 바꾸지 않는다. / 다음: 카드 6.
+
+2026-09-10 / 카드 6 / `gui/test_fit_dialog.py`, `tools/run_fit_explorer_v2.py`, GUI/CLI 계약 테스트 /
+Test Fit Explorer 탭에서 V2 mission JSON→frozen plan 생성/재사용, plan/recommendation 표시,
+추천 후보의 명시 FitSet export를 제공한다. 기존 batch config의 validate/run/resume 경로는 그대로
+실제 반복 fit을 수행한다. V2 mission은 현재 input identity/hash만 보관하므로 V2 plan 자체를
+실제 alpha/reference 파일에서 실행하는 runtime adapter는 아직 없다; 이를 V2 실행이라고 표시하지
+않는다. `ci_import_smoke.py`는 기존 QDOAS 진단의 고정 `/root/.claude/uploads/...ASC` 경로 때문에
+1 FAIL(160 OK/31 SKIP)이고, V2/GUI/Explorer 관련 검사는 통과했다. / 후속: mission runtime adapter.
 
 ## 재사용 가능한 자산
 
