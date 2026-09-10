@@ -256,3 +256,114 @@ def build_mission_plan(mission):
                             "GRAPH_EDGES_DEFERRED_TO_CARD4"]}
     plan["plan_hash"] = _canonical_hash(plan)
     return plan
+
+
+def _finite(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
+def _attempt_values(report, species):
+    """Return finite coefficients keyed by the exact observation/start identity."""
+    values, missing = {}, []
+    for row in report["attempts"]:
+        if not isinstance(row, dict) or not isinstance(row.get("scan_id"), str) or not isinstance(row.get("start_id"), str):
+            raise ValueError("attempt identity is invalid")
+        key = (row["scan_id"], row["start_id"])
+        if row.get("status") != "OK":
+            missing.append({"observation_id": key[0], "start_id": key[1], "reason": "FIT_NOT_SUCCESSFUL"})
+            continue
+        coeffs = row.get("coeffs")
+        value = _finite(coeffs.get(species)) if isinstance(coeffs, dict) else None
+        if value is None:
+            missing.append({"observation_id": key[0], "start_id": key[1], "reason": "COEFFICIENT_UNAVAILABLE"})
+        else:
+            values[key] = value
+    return values, missing
+
+
+def compare_multispecies_attempts(candidate_reports, requested_species):
+    """Compute fit evidence for every requested species, without a pass threshold.
+
+    Reports are outputs of one controlled-start fit run per candidate.  Deltas
+    are paired only on identical observation/start identities, so ordinary
+    temporal concentration changes never become an instability penalty.
+    """
+    if not isinstance(candidate_reports, list) or len(candidate_reports) < 1:
+        raise ValueError("candidate_reports must be a non-empty list")
+    if (not isinstance(requested_species, list) or not requested_species
+            or any(not isinstance(name, str) or not name for name in requested_species)
+            or len(requested_species) != len(set(requested_species))):
+        raise ValueError("requested_species must be unique non-empty labels")
+    reports = []
+    ids = set()
+    for report in candidate_reports:
+        if not isinstance(report, dict) or not isinstance(report.get("candidate_id"), str):
+            raise ValueError("candidate report identity is invalid")
+        if report["candidate_id"] in ids or not isinstance(report.get("attempts"), list):
+            raise ValueError("candidate reports must have unique identities and attempt lists")
+        planned = report.get("planned_attempts")
+        if isinstance(planned, bool) or not isinstance(planned, int) or planned < 0:
+            raise ValueError("candidate report planned_attempts is invalid")
+        ids.add(report["candidate_id"])
+        reports.append(report)
+    per_candidate, raw = [], {}
+    for report in reports:
+        successful = sum(isinstance(row, dict) and row.get("status") == "OK" for row in report["attempts"])
+        complete = len(report["attempts"]) == report["planned_attempts"] == successful
+        species_rows = {}
+        for species in requested_species:
+            values, missing = _attempt_values(report, species)
+            grouped = {}
+            for (observation, start), value in values.items():
+                grouped.setdefault(observation, []).append({"start_id": start, "coefficient": value})
+            starts = []
+            for observation in sorted(grouped):
+                entries = sorted(grouped[observation], key=lambda item: item["start_id"])
+                numbers = [item["coefficient"] for item in entries]
+                starts.append({"observation_id": observation, "values": entries,
+                               "range": float(max(numbers) - min(numbers)),
+                               "state": "COMPUTED"})
+            species_rows[species] = {
+                "state": "COMPUTED" if complete and not missing and values else "UNAVAILABLE",
+                "attempts": {"planned": report["planned_attempts"], "executed": len(report["attempts"]),
+                             "successful_fit": successful, "finite_coefficient": len(values),
+                             "coefficient_unavailable": len(missing),
+                             "complete": complete},
+                "missing": missing, "multi_start": starts,
+                "detection": {"state": "UNKNOWN", "reason": "NO_DECLARED_DETECTION_THRESHOLD"},
+            }
+            raw[(report["candidate_id"], species)] = values
+        per_candidate.append({"candidate_id": report["candidate_id"], "species": species_rows})
+    comparisons = []
+    for left_index, left in enumerate(reports):
+        for right in reports[left_index + 1:]:
+            species_rows = {}
+            for species in requested_species:
+                left_values = raw[(left["candidate_id"], species)]
+                right_values = raw[(right["candidate_id"], species)]
+                common = sorted(set(left_values).intersection(right_values))
+                deltas = [{"observation_id": key[0], "start_id": key[1],
+                           "delta": float(right_values[key] - left_values[key])} for key in common]
+                values = [row["delta"] for row in deltas]
+                species_rows[species] = {
+                    "state": "COMPUTED" if values else "UNAVAILABLE",
+                    "paired_attempts": len(deltas),
+                    "unpaired_attempts": len(set(left_values).symmetric_difference(right_values)),
+                    "median_delta": float(np.median(values)) if values else None,
+                    "range_delta": float(max(values) - min(values)) if values else None,
+                    "deltas": deltas,
+                    "criterion": {"state": "UNSET", "reason": "NO_SPECIES_SENSITIVITY_CRITERION"},
+                }
+            comparisons.append({"left_candidate_id": left["candidate_id"],
+                                "right_candidate_id": right["candidate_id"],
+                                "species": species_rows,
+                                "residual_comparison": {"state": "NOT_APPLICABLE",
+                                   "reason": "NO_COMMON_EVALUATION_BAND_OR_NOISE_NORMALIZATION"}})
+    return {"schema": "explorer-v2-multispecies-evidence-v1", "state": "COMPUTED",
+            "requested_species": list(requested_species), "candidates": per_candidate,
+            "comparisons": comparisons,
+            "limitations": ["No species sensitivity threshold", "No residual ranking across windows", "No Apply"]}

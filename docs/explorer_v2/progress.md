@@ -7,7 +7,7 @@
 | 문서 패키지 | 완료 | README, contracts, work_cards, 이 기록 |
 | 1 평가 계약 | 완료 | legacy T2 보존, anchor-independent retrieval_integrity 추가 |
 | 2 mission→plan | 완료 | FitSet-free mission 검증 및 유한 candidate plan |
-| 3 다종 비교 | 미착수 | 기존 반복 피팅·ablation 재사용 예정 |
+| 3 다종 비교 | 완료 | 전체 coeff 재사용·동일 observation/start 종별 delta |
 | 4 graph/closure | 미착수 | 기존 문서상의 분석과 범용 구현을 구분 |
 | 5 holdout/export | 미착수 | 기존 Review verdict는 사람 입력 |
 | 6 GUI 인수 | 미착수 | 기존 탭은 batch 실행 및 Review 표시 가능 |
@@ -25,6 +25,13 @@ window/poly/registration 정책을 포함하며, candidate runtime spec은 worke
 순수 구성 정보다. 미상 단위·ILS 상태·좌표/holdout overlap·누락 driver는 거부한다.
 graph edge와 과학적 sensitivity criterion은 아직 선언하지 않아 각각 Card 4 및 Astra
 검토 전 `UNSET`이다. / 다음: 카드 3.
+
+2026-09-10 / 카드 3 / `core/fit_explorer_v2.py`, `tools/test_fit_explorer_v2_multispecies.py` /
+한 candidate fit attempt의 전체 `coeffs`에서 요청한 모든 종의 완료분모·계수 누락·seed별
+값을 수집하고, candidate 간에는 동일 `scan_id`/`start_id`인 행만 pair하여 delta를 계산한다.
+날짜별 실제 농도 변화는 비교 대상이 아니다. sensitivity/detection 기준이 없으므로 결과는
+`COMPUTED` 또는 `UNAVAILABLE` 진단이며 PASS/FAIL 또는 residual 순위를 만들지 않는다.
+실제 V2 execution adapter와 graph edge는 다음 카드 범위다. / 다음: 카드 4.
 
 ## 재사용 가능한 자산
 
