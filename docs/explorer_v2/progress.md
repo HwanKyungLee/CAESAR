@@ -9,7 +9,7 @@
 | 2 mission→plan | 완료 | FitSet-free mission 검증 및 유한 candidate plan |
 | 3 다종 비교 | 완료 | 전체 coeff 재사용·동일 observation/start 종별 delta |
 | 4 graph/closure | 완료 | 명시 edge graph·finite closure·대표 후보 진단 |
-| 5 holdout/export | 미착수 | 기존 Review verdict는 사람 입력 |
+| 5 holdout/export | 완료 | frozen evidence 추천 상태·명시 export/worker roundtrip |
 | 6 GUI 인수 | 미착수 | 기존 탭은 batch 실행 및 Review 표시 가능 |
 
 2026-09-10 / 카드 1 / `core/fit_explorer.py`, batch CLI/schema 및 계약 테스트 /
@@ -39,6 +39,13 @@ graph edge와 과학적 sensitivity criterion은 아직 선언하지 않아 각�
 경계 hop이 큰 내부점 중 낮은 poly/작은 창을 동률 해소에만 사용한다. component는 대표와
 전체 pair 증거를 모두 요구하므로 A-B/B-C 통과만으로 A-C 불일치를 숨기지 않는다. 그래프
 자체는 추천을 내리지 않으며 holdout·export는 Card 5 범위다. / 다음: 카드 5.
+
+2026-09-10 / 카드 5 / `core/fit_explorer_v2.py`, `tools/test_fit_explorer_v2_recommendation.py` /
+동결 plan의 closed internal component와 명시 assessment/독립 holdout으로만 V2 상태를
+산출한다. external validation은 기록하지만 상태를 자동 승격하지 않는다. holdout 부재는
+`PROVISIONAL`, multi-solution 또는 내부/종별 실패는 `ABSTAIN`이다. export는 추천된 후보를
+기존 FitSet config의 복사본에 번역하고 실제 worker bounds parser/validate_fitset을 되읽은
+뒤 새 파일에만 exclusive write한다. 활성 GUI/원본 config는 바꾸지 않는다. / 다음: 카드 6.
 
 ## 재사용 가능한 자산
 

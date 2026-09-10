@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import copy
 
 import numpy as np
 
@@ -526,3 +528,147 @@ def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_
                         "closure_capacity": closure_cap,
                         "unscheduled_frontier_count": len(all_frontier.difference(scheduled))},
             "limitations": ["No recommendation", "No automatic domain expansion", "No Apply"]}
+
+
+def _assessment(value, requested_species):
+    if not isinstance(value, dict) or set(value) != {"internal_state", "numerical_state", "species"}:
+        raise ValueError("candidate assessment fields are invalid")
+    if value["internal_state"] not in _EDGE_STATES or value["numerical_state"] not in {
+            "IDENTIFIED", "MULTIPLE_SOLUTIONS", "UNAVAILABLE"}:
+        raise ValueError("candidate assessment state is invalid")
+    if not isinstance(value["species"], dict) or set(value["species"]) != set(requested_species) \
+            or any(state not in _EDGE_STATES for state in value["species"].values()):
+        raise ValueError("candidate assessment species states are invalid")
+    return value
+
+
+def build_recommendation(plan, graph, candidate_assessments, holdout=None, external_validation=None):
+    """Turn frozen internal/holdout evidence into an explicit V2 status.
+
+    This accepts upstream assessment states; it deliberately contains no hidden
+    numerical tolerance.  Missing holdout evidence can produce PROVISIONAL but
+    never MISSION_RECOMMENDED.
+    """
+    if not isinstance(plan, dict) or not isinstance(plan.get("plan_hash"), str):
+        raise ValueError("frozen plan_hash is required")
+    requested, split = plan.get("requested_species"), plan.get("split")
+    candidate_ids = {row.get("candidate_id") for row in plan.get("candidates", []) if isinstance(row, dict)}
+    if not requested or not isinstance(split, dict) or not candidate_ids:
+        raise ValueError("plan recommendation inputs are invalid")
+    if not isinstance(candidate_assessments, dict) or set(candidate_assessments) != candidate_ids:
+        raise ValueError("candidate assessments must cover exactly plan candidates")
+    assessments = {key: _assessment(value, requested) for key, value in candidate_assessments.items()}
+    if not isinstance(graph, dict) or graph.get("schema") != "explorer-v2-graph-closure-v1":
+        raise ValueError("graph closure evidence is invalid")
+    closed = [row for row in graph.get("components", []) if isinstance(row, dict)
+              and row.get("state") == "CLOSED_INTERNAL_COMPONENT"
+              and row.get("representative_candidate_id") in candidate_ids]
+    declared_holdout = set(split.get("holdout", []))
+    discovery = set(split.get("discovery", [])).union(split.get("validation", []))
+    if declared_holdout.intersection(discovery):
+        raise ValueError("plan holdout overlaps discovery/validation")
+    holdout_states = {}
+    holdout_state = "UNAVAILABLE"
+    if holdout is not None:
+        if not isinstance(holdout, dict) or set(holdout) != {"observation_ids", "candidate_states"}:
+            raise ValueError("holdout fields are invalid")
+        observed = set(holdout["observation_ids"])
+        if (not isinstance(holdout["observation_ids"], list) or observed != declared_holdout
+                or observed.intersection(discovery) or not isinstance(holdout["candidate_states"], dict)):
+            raise ValueError("holdout observations are not independent of discovery")
+        holdout_states = holdout["candidate_states"]
+        if any(key not in candidate_ids or state not in _EDGE_STATES for key, state in holdout_states.items()):
+            raise ValueError("holdout candidate state is invalid")
+        holdout_state = "AVAILABLE" if declared_holdout else "UNAVAILABLE"
+    if external_validation is not None and not isinstance(external_validation, dict):
+        raise ValueError("external_validation must be an object when supplied")
+    eligible, alternatives, reasons = [], [], []
+    for component in closed:
+        candidate_id = component["representative_candidate_id"]
+        assessment = assessments[candidate_id]
+        internal_ok = (assessment["internal_state"] == "PASS"
+                       and assessment["numerical_state"] == "IDENTIFIED"
+                       and all(state == "PASS" for state in assessment["species"].values()))
+        if not internal_ok:
+            alternatives.append(candidate_id); reasons.append({"candidate_id": candidate_id,
+                "reason": "INTERNAL_OR_SPECIES_EVIDENCE_NOT_PASSED"})
+            continue
+        if holdout_state == "AVAILABLE" and holdout_states.get(candidate_id) == "PASS":
+            eligible.append((candidate_id, "MISSION_RECOMMENDED"))
+        elif holdout_state == "UNAVAILABLE":
+            eligible.append((candidate_id, "PROVISIONAL"))
+        else:
+            alternatives.append(candidate_id); reasons.append({"candidate_id": candidate_id,
+                "reason": "HOLDOUT_NOT_PASSED_OR_UNAVAILABLE"})
+    if eligible:
+        candidate_id, status = sorted(eligible)[0]
+    else:
+        candidate_id, status = None, "ABSTAIN"
+    species_results = (assessments[candidate_id]["species"] if candidate_id else
+                       {name: "UNAVAILABLE" for name in requested})
+    return {"schema": "explorer-recommendation-v2", "plan_hash": plan["plan_hash"],
+            "input_hash": plan.get("input_hash"), "status": status,
+            "scope": "MISSION_LOCAL_FROZEN_PLAN_ONLY", "requested_species": list(requested),
+            "candidate_id": candidate_id, "exportable_candidate_ids": [candidate_id] if candidate_id else [],
+            "candidate_refs": sorted(candidate_ids), "species_results": species_results,
+            "checks": {"internal_graph": "AVAILABLE", "holdout": holdout_state,
+                       "external_validation": "AVAILABLE" if external_validation is not None else "UNAVAILABLE"},
+            "frontier": graph.get("closure"), "holdout": holdout, "external_validation": external_validation,
+            "code_provenance": {"state": "UNAVAILABLE", "reason": "CALLER_MUST_ATTACH_EXECUTION_PROVENANCE"},
+            "alternatives": alternatives, "reasons": reasons,
+            "limitations": ["External validation does not change status", "Manual export only", "No Apply"]}
+
+
+def export_recommended_fitset(base_config, candidate, recommendation, output_path):
+    """Write a new worker-roundtripped FitSet copy; never modify active config."""
+    if not isinstance(recommendation, dict) or recommendation.get("status") not in {
+            "MISSION_RECOMMENDED", "PROVISIONAL"}:
+        raise ValueError("only a recommendation or provisional candidate may be exported")
+    candidate_id = candidate.get("candidate_id") if isinstance(candidate, dict) else None
+    if candidate_id not in recommendation.get("exportable_candidate_ids", []):
+        raise ValueError("candidate is not exportable under this recommendation")
+    if not isinstance(base_config, dict) or not isinstance(base_config.get("refs"), list) \
+            or not isinstance(base_config.get("ref_props"), dict):
+        raise ValueError("base FitSet config is invalid")
+    runtime = candidate.get("runtime_spec")
+    registration = candidate.get("registration")
+    if not isinstance(runtime, dict) or not isinstance(registration, dict):
+        raise ValueError("candidate runtime specification is invalid")
+    reference_order = runtime.get("reference_order")
+    if [row.get("name") for row in base_config["refs"]] != reference_order:
+        raise ValueError("base FitSet reference order does not match candidate")
+    driver = registration.get("driver_species")
+    if driver not in base_config["ref_props"]:
+        raise ValueError("candidate registration driver is absent from base FitSet")
+    from core import fit_explorer as FE
+    from core.fitset_builder import validate_fitset
+    legacy_candidate = {"id": candidate_id, "px_min": runtime["f_min"], "px_max": runtime["f_max"],
+                        "poly": runtime["poly_deg"], "target": driver,
+                        "policy": {"shift": registration.get("shift"), "squeeze": registration.get("squeeze")},
+                        "policy_stage": "STAGE0_METADATA_ONLY"}
+    translated = FE.translate_zero_base_policy(base_config, base_config["ref_props"], legacy_candidate, driver)
+    exported = copy.deepcopy(base_config)
+    exported.update({"f_min": runtime["f_min"], "f_max": runtime["f_max"],
+                     "poly_deg": runtime["poly_deg"], "ref_props": translated["ref_props"],
+                     "explorer_v2_provenance": {"candidate_id": candidate_id,
+                         "recommendation_status": recommendation["status"], "plan_hash": recommendation["plan_hash"],
+                         "scope": "EXPORTED_COPY_MANUAL_SELECTION_ONLY"}})
+    problems = validate_fitset(exported, driver)
+    if problems:
+        raise ValueError("exported FitSet failed worker contract: " + "; ".join(problems))
+    output_path = os.path.abspath(output_path)
+    parent = os.path.dirname(output_path)
+    if not parent or not os.path.isdir(parent):
+        raise ValueError("export directory does not exist")
+    try:
+        with open(output_path, "x", encoding="utf-8", newline="\n") as fh:
+            json.dump(exported, fh, ensure_ascii=False, indent=2, sort_keys=True)
+            fh.write("\n")
+    except FileExistsError:
+        raise FileExistsError("export path already exists; refusing to overwrite") from None
+    with open(output_path, encoding="utf-8") as fh:
+        reread = json.load(fh)
+    if validate_fitset(reread, driver):
+        raise ValueError("written FitSet failed worker round-trip")
+    return {"path": output_path, "candidate_id": candidate_id, "status": recommendation["status"],
+            "active_fitset_changed": False}
