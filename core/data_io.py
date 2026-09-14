@@ -187,13 +187,17 @@ class DataIO:
     # Mega-Matrix detection threshold: META block (2053) + one full spectrum
     # channel (2048) = 4101 columns. A row this wide is unambiguously an Araon
     # multi-scan file (a plain 1D spectrum has ~1 col; a 2-col reference has 2).
-    # NOTE: must be ≤ the *truncated* cold width (6174). LabVIEW time-error +
-    # Continue can drop the trailing HK columns, leaving the first row at 6174
-    # (normal cold = 6179). The old ≥6175 threshold mis-classified those files
-    # as single-scan, so expand_to_scan_list() returned only [(fp, 0)] and alpha
-    # generation emitted just one trace per bin. 4101 keeps normal 6179/6177
-    # files detected while also catching the 6174 truncated files. See
-    # cold-alpha-6175-threshold-bug-2026-06.
+    # NOTE: must be <= the *truncated* cold width (6174). 2026-06-11 ~ 06-15 의
+    # 콜드 raw는 HK **선두 5열**이 빠진 6174열 구성이다(정상 콜드 = 6179).
+    # 전수조사(2026-09-15, E:/Yeosu_2026/CAESAR_Cold 751개): 6174가 97개이고
+    # 6/11-020 ~ 6/15-026 **5일치 연속 블록**이다 — "첫 행만" 짧은 게 아니라
+    # 파일 전체(각 ~3700행)가 그 구성이고, 경계는 둘 다 재시작 직후다
+    # (6/11-019가 1572행에서 끊기고 020부터 6174, 6/15-026이 1844행에서
+    #  끊기고 027부터 6179로 복귀). 손실이 **선두**라는 근거와 복구 방법은
+    # 아래 load_measurement_with_hk 의 hk_shift 주석 참고(거기가 정본).
+    # 옛 >=6175 문턱은 이 파일들을 단일스캔으로 오분류해 expand_to_scan_list()가
+    # [(fp, 0)]만 돌려줬고 알파가 bin당 한 줄만 나왔다. 4101이면 정상 6179/6177도
+    # 잡으면서 6174도 같이 잡는다. See cold-alpha-6175-threshold-bug-2026-06.
     _MEGA_MATRIX_MIN_COLS = _RP_META_COLS + _RP_CH_PIXELS   # 4101
 
     @staticmethod
