@@ -477,7 +477,7 @@ class TestFitDialog(QDialog):
         self._explorer_v2_worker: _ExplorerCommandWorker | None = None
         self._v2_mission_path = self._v2_plan_path = self._v2_recommendation_path = ""
         self._v2_recommendation = None
-        self.setWindowTitle("🧪 Test Fit")
+        self.setWindowTitle("Test Fit")
         _s = getattr(parent, "_s", 1.0)
         self.resize(int(920 * _s), int(760 * _s))
 
@@ -526,13 +526,13 @@ class TestFitDialog(QDialog):
         self._results_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay.addWidget(self._results_edit, 1)
 
-        self._btn_apply = QPushButton("✅ Apply Recommendations")
+        self._btn_apply = QPushButton("Apply Recommendations")
         self._btn_apply.setEnabled(False)
         self._btn_apply.clicked.connect(self._on_apply)
         lay.addWidget(self._btn_apply)
 
         self._last_result = None
-        self._tabs.addTab(page, "⚙️ Optimize")
+        self._tabs.addTab(page, "Optimize")
 
     def _clear_results(self):
         self._results_html = []
@@ -568,8 +568,8 @@ class TestFitDialog(QDialog):
             # 계산되는 기하학적 퇴화)은 서로 다른 원인이라 마크를 분리한다 — 둘 다 나쁘면 구조적
             # 문제, |ac1|만 나쁘면 탐색 문제일 가능성이 높다는 진단 힌트가 된다.
             collinear = np.isfinite(multi_r) and multi_r > PO.POLY_COLLIN_R_MAX
-            marks = ("⚠퇴화?" if degenerate else "") + ("⚠공선성?" if collinear else "")
-            mark = f" {marks}" if marks else (" ✅" if r["poly"] == rec_poly else "")
+            marks = ("퇴화?" if degenerate else "") + ("공선성?" if collinear else "")
+            mark = f" {marks}" if marks else ("" if r["poly"] == rec_poly else "")
             style = "color:#E65100;font-weight:bold" if (degenerate or collinear) else (
                 "font-weight:bold" if r["poly"] == rec_poly else "")
             rows.append(
@@ -589,11 +589,11 @@ class TestFitDialog(QDialog):
         n_files = len(paths)
         if n_files < 3:
             self._lbl_status.setText(
-                f"⚠ only {n_files} file(s) available — recommendations may be unstable.")
+                f"only {n_files} file(s) available — recommendations may be unstable.")
         unit, lo, hi = self._app._current_fit_px_window()
         self._clear_results()
         self._btn_apply.setEnabled(False)
-        self._btn_apply.setText("✅ Apply Recommendations")
+        self._btn_apply.setText("Apply Recommendations")
         self._btn_run.setEnabled(False)
         self._progress.setVisible(True)
         self._progress.setValue(0)
@@ -619,12 +619,12 @@ class TestFitDialog(QDialog):
         self._clear_results()
 
         if "error" in result:
-            self._lbl_status.setText("❌ Failed")
+            self._lbl_status.setText("Failed")
             self._add_result_label(f"<b>Optimizer failed:</b> {result['error']}", err=True)
             return
 
         self._lbl_status.setText(
-            f"✅ Done — {result['n_scans_used']}/{result['n_scans_total']} scans used "
+            f"Done — {result['n_scans_used']}/{result['n_scans_total']} scans used "
             f"({result['n_consec_used']} consecutive for step_limit)")
 
         target = result["target"]
@@ -659,7 +659,7 @@ class TestFitDialog(QDialog):
         degenerate_all = np.isfinite(best_ac1) and best_ac1 > _AC1_DEGENERATE_THRESHOLD
         if degenerate_all:
             self._add_result_label(
-                "<b>⚠ 모든 poly 후보의 잔차가 백색이 아닙니다</b> (최선도 |ac1|="
+                "<b> 모든 poly 후보의 잔차가 백색이 아닙니다</b> (최선도 |ac1|="
                 f"{best_ac1:.2f}, 진짜 핏은 보통 0.03~0.08) — §16-B에서 확인된 "
                 "<b>퇴화 분기</b>(통계적으로만 좋아 보이는 가짜 해, 실제 O4 오염 사례에서도 "
                 "동일 패턴)와 일치합니다. 이 표본에서 나온 농도·shift 추천은 <b>신뢰하지 말 것</b> "
@@ -715,7 +715,7 @@ class TestFitDialog(QDialog):
         problems = result["validate_problems"]
         if problems:
             self._add_result_label(
-                "<b>⚠ Cannot Apply — would break the fit engine:</b><br>" +
+                "<b> Cannot Apply — would break the fit engine:</b><br>" +
                 "<br>".join(f"• {p}" for p in problems), err=True)
             self._btn_apply.setEnabled(False)
             self._btn_apply.setToolTip("Fix the problems above (usually: widen step_limit or "
@@ -732,7 +732,7 @@ class TestFitDialog(QDialog):
         if not self._last_result or "error" in self._last_result:
             return
         self._app._apply_test_fit_recommendations(self._last_result)
-        self._btn_apply.setText("Applied ✓")
+        self._btn_apply.setText("Applied ")
         self._btn_apply.setEnabled(False)
 
     # ══════════════════════════════════════════════════════════════
@@ -791,6 +791,8 @@ class TestFitDialog(QDialog):
         load_rec_btn.clicked.connect(self._load_v2_recommendation)
         v2_bar.addWidget(load_rec_btn)
         export_btn = QPushButton("Export V2 FitSet…")
+        export_btn.setEnabled(False)
+        export_btn.setToolTip("V2 실행 증거와 설정 연결 검증이 완료될 때 활성화됩니다.")
         export_btn.clicked.connect(self._export_v2_fitset)
         v2_bar.addWidget(export_btn); v2_bar.addStretch(1)
         lay.addLayout(v2_bar)
@@ -813,7 +815,7 @@ class TestFitDialog(QDialog):
             "<i>Review JSON을 불러오면 여기 표시됩니다. "
             "tools/fit_explorer_review.py --output REPORT.json 으로 만들 수 있습니다.</i>")
         lay.addWidget(self._explorer_review_edit, 1)
-        self._tabs.addTab(page, "🧭 Explorer")
+        self._tabs.addTab(page, "Explorer")
 
     def _choose_explorer_config(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -847,11 +849,11 @@ class TestFitDialog(QDialog):
         self._explorer_run_edit.setPlainText(output[-20000:] or "(no command output)")
         if result.get("ok"):
             if result.get("dry_run"):
-                self._explorer_run_status.setText("✅ Config validated — run the batch when ready.")
+                self._explorer_run_status.setText("Config validated — run the batch when ready.")
             else:
-                self._explorer_run_status.setText("✅ Batch completed — load its Review JSON to inspect evidence.")
+                self._explorer_run_status.setText("Batch completed — load its Review JSON to inspect evidence.")
         else:
-            self._explorer_run_status.setText("❌ Explorer stopped; inspect the output. No FitSet was changed.")
+            self._explorer_run_status.setText("Explorer stopped; inspect the output. No FitSet was changed.")
 
     def _load_explorer_review(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -887,7 +889,7 @@ class TestFitDialog(QDialog):
             return
         self._v2_mission_path, self._v2_plan_path = mission, output
         self._run_v2_command(_explorer_v2_plan_command(mission, output),
-                             "✅ V2 plan created/reused — load it to inspect the frozen candidate domain.")
+                             "V2 plan created/reused — load it to inspect the frozen candidate domain.")
 
     def _load_v2_plan(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Explorer V2 plan", "", "JSON Files (*.json)")
@@ -925,7 +927,7 @@ class TestFitDialog(QDialog):
         if not output:
             return
         self._run_v2_command(_explorer_v2_export_command(self._v2_plan_path, self._v2_recommendation_path,
-                             base, candidate_id, output), "✅ New FitSet copy exported. Current GUI FitSet was not changed.")
+                             base, candidate_id, output), "New FitSet copy exported. Current GUI FitSet was not changed.")
 
     # ══════════════════════════════════════════════════════════════
     # 탭2 — 1스캔 미리보기 (기존 _show_test_fit_popup 이식, 로직 불변)
@@ -937,11 +939,11 @@ class TestFitDialog(QDialog):
             preview = self._app._compute_1scan_preview()
         except Exception as e:
             lay.addWidget(QLabel(f"Preview failed: {e}"))
-            self._tabs.addTab(page, "🧪 Preview (1 scan)")
+            self._tabs.addTab(page, "Preview (1 scan)")
             return
         if preview is None:
             lay.addWidget(QLabel("Preview unavailable."))
-            self._tabs.addTab(page, "🧪 Preview (1 scan)")
+            self._tabs.addTab(page, "Preview (1 scan)")
             return
 
         (fp, wl, data, model, resid, gas_models, ppb, shifts, squeezes,
@@ -994,7 +996,7 @@ class TestFitDialog(QDialog):
         pw3.setTitle(f"Residual (RMS={rms:.2e})")
         lay.addWidget(pw3, 1)
 
-        self._tabs.addTab(page, "🧪 Preview (1 scan)")
+        self._tabs.addTab(page, "Preview (1 scan)")
 
     # ══════════════════════════════════════════════════════════════
     def closeEvent(self, event):

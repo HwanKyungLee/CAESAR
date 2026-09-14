@@ -26,10 +26,10 @@ def _canonical_hash(value):
 
 def _array(value, label):
     try:
-        array = np.asarray(value, dtype=float).reshape(-1)
+        array = np.asarray(value, dtype=float)
     except (TypeError, ValueError):
         raise ValueError(f"{label} must be a finite numeric vector") from None
-    if array.size < 2 or not np.isfinite(array).all():
+    if array.ndim != 1 or array.size < 2 or not np.isfinite(array).all():
         raise ValueError(f"{label} must be a finite numeric vector")
     return array
 
@@ -91,8 +91,13 @@ def _normalize_mission(mission):
             raise ValueError("alpha_inputs must be a non-empty list")
         alpha_ids = []
         for row in alpha:
-            if not isinstance(row, dict) or set(row) != {"observation_id", "content_hash"}:
+            if not isinstance(row, dict) or not {"observation_id", "content_hash"}.issubset(row) or set(row) - {
+                    "observation_id", "content_hash", "date", "block_id", "previously_used"}:
                 raise ValueError("alpha input identity is invalid")
+            if any(key in row and (not isinstance(row[key], str) or not row[key]) for key in ("date", "block_id")):
+                raise ValueError("alpha block metadata is invalid")
+            if "previously_used" in row and type(row["previously_used"]) is not bool:
+                raise ValueError("alpha previously_used must be boolean")
             if not isinstance(row["observation_id"], str) or not row["observation_id"]:
                 raise ValueError("observation_id must be a non-empty opaque label")
             _hash_hex(row["content_hash"], "alpha content_hash")
@@ -110,8 +115,8 @@ def _normalize_mission(mission):
             species = ref["species_id"]
             if not isinstance(species, str) or not species or species in ref_ids:
                 raise ValueError("species_id must be unique and non-empty")
-            if not isinstance(ref["cross_section_unit"], str) or not ref["cross_section_unit"].strip():
-                raise ValueError("reference cross_section_unit is required")
+            if ref["cross_section_unit"] not in {"cm2/molecule", "cm5/molecule2", "arb"}:
+                raise ValueError("unsupported reference unit; arb is diagnostic only")
             if ref["ils_state"] not in _ILS_STATES:
                 raise ValueError("reference ILS state is unknown")
             ref_wave, values = (_array(ref["wavelength_nm"], "reference wavelength"),
@@ -126,7 +131,7 @@ def _normalize_mission(mission):
                                                                      "ils_state": ref["ils_state"]}),
                                     "ils_state": ref["ils_state"]})
         normalized.append({"channel_id": channel_id, "wave_nm": wave, "alpha_ids": alpha_ids,
-                           "alpha_hashes": [row["content_hash"] for row in alpha],
+                           "alpha_hashes": [row["content_hash"] for row in alpha], "alpha_inputs": copy.deepcopy(alpha),
                            "references": normalized_refs})
     requested = mission.get("requested_species")
     all_species = {ref["species_id"] for channel in normalized for ref in channel["references"]}
@@ -140,8 +145,8 @@ def _normalize_mission(mission):
 
 
 def _normalize_policy(policy, species):
-    if not isinstance(policy, dict) or set(policy) != {
-            "windows_nm", "poly_degrees", "registration_policies", "split", "budget"}:
+    if not isinstance(policy, dict) or not {"windows_nm", "poly_degrees", "registration_policies", "split", "budget"}.issubset(policy) or set(policy) - {
+            "windows_nm", "poly_degrees", "registration_policies", "registration_edges", "split", "budget"}:
         raise ValueError("search_policy fields do not match the v2 contract")
     windows = policy["windows_nm"]
     if not isinstance(windows, list) or not windows:
@@ -190,7 +195,16 @@ def _normalize_policy(policy, species):
         raise ValueError("budget fields are invalid")
     if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in budget.values()):
         raise ValueError("budget values must be nonnegative integers")
-    return {"windows_nm": normalized_windows, "poly_degrees": list(polys),
+    registration_edges = policy.get("registration_edges", [])
+    if not isinstance(registration_edges, list):
+        raise ValueError("registration_edges must be a list")
+    seen_edges = set()
+    for edge in registration_edges:
+        if (not isinstance(edge, list) or len(edge) != 2 or any(type(i) is not int or i < 0 or i >= len(registrations) for i in edge)
+                or edge[0] == edge[1] or tuple(sorted(edge)) in seen_edges):
+            raise ValueError("registration_edges must be unique explicit policy-index pairs")
+        seen_edges.add(tuple(sorted(edge)))
+    return {"windows_nm": normalized_windows, "poly_degrees": list(polys), "registration_edges": sorted(seen_edges),
             "registration_policies": normalized_registrations, "split": split, "budget": budget}
 
 
@@ -205,14 +219,10 @@ def build_mission_plan(mission):
     known_observations = set(observation_ids)
     if set(sum((policy["split"][name] for name in policy["split"]), [])) - known_observations:
         raise ValueError("split contains an observation absent from the mission")
-    drivers = {row["driver_species"] for row in policy["registration_policies"]}
-    if any(not drivers.issubset({ref["species_id"] for ref in channel["references"]})
-           for channel in normalized["channels"]):
-        raise ValueError("registration driver is absent from a mission channel")
     input_hash = _canonical_hash({"mission_id": normalized["mission_id"],
                                   "channels": [{"channel_id": ch["channel_id"],
                                                 "wave_nm": ch["wave_nm"].tolist(),
-                                                "alpha_hashes": ch["alpha_hashes"],
+                                                "alpha_inputs": ch["alpha_inputs"],
                                                 "references": ch["references"]}
                                                for ch in normalized["channels"]],
                                   "requested_species": normalized["requested_species"]})
@@ -221,6 +231,8 @@ def build_mission_plan(mission):
         common_lo = max([float(channel["wave_nm"][0])] + [ref["coverage_nm"][0] for ref in channel["references"]])
         common_hi = min([float(channel["wave_nm"][-1])] + [ref["coverage_nm"][1] for ref in channel["references"]])
         channel_candidates = []
+        seen_candidate_ids = set()
+        species = {ref["species_id"] for ref in channel["references"]}
         for window in policy["windows_nm"]:
             if window[0] < common_lo or window[1] > common_hi:
                 continue
@@ -230,10 +242,15 @@ def build_mission_plan(mission):
                 if hi - lo + 1 <= poly + len(channel["references"]):
                     continue
                 for registration in policy["registration_policies"]:
+                    if registration["driver_species"] not in species:
+                        continue
                     identity = {"input_hash": input_hash, "channel_id": channel["channel_id"],
                                 "px": [lo, hi], "poly": poly,
                                 "references": channel["references"], "registration": registration}
                     candidate = {"candidate_id": "v2_" + _canonical_hash(identity)[:20],
+                                 "requested_species": [name for name in normalized["requested_species"] if name in species],
+                                 "planned_fit_attempts": len(set(channel["alpha_ids"]).intersection(policy["split"]["discovery"])) *
+                                     (2 if any(registration[key]["mode"] == "Limit" for key in ("shift", "squeeze")) else 1),
                                  "channel_id": channel["channel_id"], "px_min": lo, "px_max": hi,
                                  "window_nm": [float(channel["wave_nm"][lo]), float(channel["wave_nm"][hi])],
                                  "poly": poly, "references": channel["references"],
@@ -241,6 +258,9 @@ def build_mission_plan(mission):
                                  "runtime_spec": {"f_min": lo, "f_max": hi, "poly_deg": poly,
                                                   "reference_order": [ref["species_id"] for ref in channel["references"]],
                                                   "wavecal_hash": _canonical_hash(channel["wave_nm"].tolist())}}
+                    if candidate["candidate_id"] in seen_candidate_ids:
+                        continue
+                    seen_candidate_ids.add(candidate["candidate_id"])
                     channel_candidates.append(candidate)
                     candidates.append(candidate)
         channels.append({"channel_id": channel["channel_id"], "wavecal_hash": _canonical_hash(channel["wave_nm"].tolist()),
@@ -252,15 +272,44 @@ def build_mission_plan(mission):
                        "poly_degrees": policy["poly_degrees"],
                        "registration_policies": policy["registration_policies"]},
             "status": "READY_FOR_STAGE0" if candidates else "ABSTAIN_NO_CANDIDATES",
-            "candidates": candidates, "edges": [], "split": policy["split"], "budget": policy["budget"],
+            "candidates": candidates, "edges": _geometric_edges(candidates, policy), "split": policy["split"], "budget": policy["budget"],
             "criteria": {"state": "UNSET", "reason": "SPECIES_SENSITIVITY_CRITERIA_NOT_DECLARED"},
             "assumptions": ["FINITE_EXPLICIT_SEARCH_POLICY", "NO_FIT_EXECUTED", "NO_APPLY",
-                            "GRAPH_EDGES_DEFERRED_TO_CARD4"]}
+                            "EXPLICIT_FINITE_GEOMETRIC_NEIGHBORS"]}
     plan["plan_hash"] = _canonical_hash(plan)
     return plan
 
 
+def _geometric_edges(candidates, policy):
+    """Immediate numeric-axis neighbors; categorical adjacency is explicit only."""
+    edges = []
+    registrations = [_canonical_hash(row) for row in policy["registration_policies"]]
+    categorical = {tuple(sorted((registrations[i], registrations[j]))) for i, j in policy["registration_edges"]}
+    for index, left in enumerate(candidates):
+        for right in candidates[index + 1:]:
+            if left["channel_id"] != right["channel_id"]:
+                continue
+            same_registration = left["registration"] == right["registration"]
+            kind = None
+            differing = [key for key in ("px_min", "px_max", "poly") if left[key] != right[key]]
+            if same_registration and len(differing) == 1:
+                key = differing[0]
+                lo, hi = sorted((left[key], right[key]))
+                if not any(row["channel_id"] == left["channel_id"] and row["registration"] == left["registration"]
+                           and all(row[other] == left[other] for other in ("px_min", "px_max", "poly") if other != key)
+                           and lo < row[key] < hi for row in candidates):
+                    kind = "poly" if key == "poly" else "window_" + key
+            elif not differing and tuple(sorted((_canonical_hash(left["registration"]), _canonical_hash(right["registration"])))) in categorical:
+                kind = "registration_explicit"
+            if kind:
+                a, b = sorted((left["candidate_id"], right["candidate_id"]))
+                edges.append({"left_candidate_id": a, "right_candidate_id": b, "kind": kind})
+    return sorted(edges, key=lambda row: (row["left_candidate_id"], row["right_candidate_id"]))
+
+
 def _finite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
+        return None
     try:
         value = float(value)
     except (TypeError, ValueError):
@@ -270,11 +319,14 @@ def _finite(value):
 
 def _attempt_values(report, species):
     """Return finite coefficients keyed by the exact observation/start identity."""
-    values, missing = {}, []
+    values, missing, seen = {}, [], set()
     for row in report["attempts"]:
         if not isinstance(row, dict) or not isinstance(row.get("scan_id"), str) or not isinstance(row.get("start_id"), str):
             raise ValueError("attempt identity is invalid")
         key = (row["scan_id"], row["start_id"])
+        if not all(key) or key in seen:
+            raise ValueError("duplicate or empty observation/start identity")
+        seen.add(key)
         if row.get("status") != "OK":
             missing.append({"observation_id": key[0], "start_id": key[1], "reason": "FIT_NOT_SUCCESSFUL"})
             continue
@@ -327,8 +379,8 @@ def compare_multispecies_attempts(candidate_reports, requested_species):
                 entries = sorted(grouped[observation], key=lambda item: item["start_id"])
                 numbers = [item["coefficient"] for item in entries]
                 starts.append({"observation_id": observation, "values": entries,
-                               "range": float(max(numbers) - min(numbers)),
-                               "state": "COMPUTED"})
+                               "range": float(max(numbers) - min(numbers)) if len(numbers) > 1 else None,
+                               "state": "COMPUTED" if len(numbers) > 1 else "UNAVAILABLE"})
             species_rows[species] = {
                 "state": "COMPUTED" if complete and not missing and values else "UNAVAILABLE",
                 "attempts": {"planned": report["planned_attempts"], "executed": len(report["attempts"]),
@@ -403,7 +455,7 @@ def _edge_state(row, requested_species):
     return "FAIL" if "FAIL" in states else "PASS" if all(state == "PASS" for state in states) else "UNAVAILABLE"
 
 
-def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_attempts=0):
+def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_attempts=0, pair_evidence=None):
     """Evaluate only declared candidate edges and schedule finite closure work.
 
     ``edge_evidence`` contains upstream science judgments; this function does
@@ -452,6 +504,23 @@ def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_
         if key not in edge_keys or key in evidence:
             raise ValueError("edge evidence must match one declared edge")
         evidence[key] = _edge_state(row, requested)
+    pair_states_by_key = dict(evidence)
+    if pair_evidence is not None:
+        if not isinstance(pair_evidence, list):
+            raise ValueError("pair_evidence must be a list")
+        seen_pairs = set()
+        for row in pair_evidence:
+            if not isinstance(row, dict):
+                raise ValueError("pair evidence must be an object")
+            left, right = row.get("left_candidate_id"), row.get("right_candidate_id")
+            if left not in candidates or right not in candidates or left == right:
+                raise ValueError("pair evidence endpoints are invalid")
+            key = tuple(sorted((left, right)))
+            state = _edge_state(row, requested)
+            if key in seen_pairs or (key in evidence and evidence[key] != state):
+                raise ValueError("duplicate or conflicting pair evidence")
+            seen_pairs.add(key)
+            pair_states_by_key[key] = state
     adjacency = {candidate_id: [] for candidate_id in candidates}
     for (left, right), kind in edges:
         state = evidence.get((left, right), "UNAVAILABLE")
@@ -470,13 +539,16 @@ def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_
         components.append(sorted(members))
     remaining = max(0, budget["max_fit_attempts"] - used_fit_attempts)
     closure_cap = min(budget["closure_max_attempts"], remaining)
-    component_rows, scheduled = [], []
+    component_rows, scheduled, scheduled_cost = [], [], 0
     for members in components:
         member_set = set(members)
         unknown = sorted({neighbor for node in members for neighbor, _state, _kind in adjacency[node]
                           if neighbor not in member_set and candidate_states[neighbor] == "UNEVALUATED"})
+        unresolved_edges = any((state == "UNAVAILABLE" and candidate_states[neighbor] == "EVALUATED_PASS")
+                               or candidate_states[neighbor] == "PRUNED"
+                               for node in members for neighbor, state, _kind in adjacency[node])
         boundary = {node for node in members for neighbor, state, _kind in adjacency[node]
-                    if neighbor not in member_set and (candidate_states[neighbor] != "EVALUATED_PASS" or state != "PASS")}
+                    if neighbor not in member_set and (candidate_states[neighbor] == "EVALUATED_FAIL" or state == "FAIL")}
         distances = {}
         if boundary:
             for node in members:
@@ -498,18 +570,25 @@ def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_
         for node in members:
             if node == representative:
                 continue
-            direct_states.append(evidence.get(tuple(sorted((representative, node))), "UNAVAILABLE"))
+            direct_states.append(pair_states_by_key.get(tuple(sorted((representative, node))), "UNAVAILABLE"))
         representative_check = "FAIL" if "FAIL" in direct_states else (
             "PASS" if all(state == "PASS" for state in direct_states) else "UNAVAILABLE")
-        pair_states = [evidence.get(tuple(sorted((left, right))), "UNAVAILABLE")
+        pair_states = [pair_states_by_key.get(tuple(sorted((left, right))), "UNAVAILABLE")
                        for index, left in enumerate(members) for right in members[index + 1:]]
         component_check = "FAIL" if "FAIL" in pair_states else (
             "PASS" if all(state == "PASS" for state in pair_states) else "UNAVAILABLE")
-        local_schedule = [node for node in unknown if node not in scheduled][:max(0, closure_cap - len(scheduled))]
+        local_schedule = []
+        for node in unknown:
+            cost = candidates[node].get("planned_fit_attempts")
+            if cost is not None and (type(cost) is not int or cost <= 0):
+                raise ValueError("planned_fit_attempts must be a positive integer")
+            if node not in scheduled and cost is not None and scheduled_cost + cost <= closure_cap:
+                local_schedule.append(node)
+                scheduled_cost += cost
         scheduled.extend(local_schedule)
-        state = ("ISOLATED_NO_ROBUSTNESS_EVIDENCE" if len(members) == 1 and not adjacency[members[0]] else
+        state = ("ISOLATED_NO_ROBUSTNESS_EVIDENCE" if len(members) == 1 else
                  "INCONSISTENT_COMPONENT" if component_check == "FAIL" else
-                 "OPEN_FRONTIER" if unknown else
+                 "OPEN_FRONTIER" if unknown or unresolved_edges else
                  "INSUFFICIENT_COMPONENT_EVIDENCE" if component_check == "UNAVAILABLE" else
                  "CLOSED_INTERNAL_COMPONENT")
         component_rows.append({"members": members, "state": state, "representative_candidate_id": representative,
@@ -525,6 +604,7 @@ def evaluate_candidate_graph(plan, candidate_states, edge_evidence, *, used_fit_
                              "kind": kind, "state": evidence.get((left, right), "UNAVAILABLE")}
                             for (left, right), kind in edges],
             "closure": {"requested_candidate_ids": scheduled, "remaining_fit_budget": remaining,
+                        "scheduled_fit_attempts": scheduled_cost,
                         "closure_capacity": closure_cap,
                         "unscheduled_frontier_count": len(all_frontier.difference(scheduled))},
             "limitations": ["No recommendation", "No automatic domain expansion", "No Apply"]}
@@ -549,6 +629,9 @@ def build_recommendation(plan, graph, candidate_assessments, holdout=None, exter
     numerical tolerance.  Missing holdout evidence can produce PROVISIONAL but
     never MISSION_RECOMMENDED.
     """
+    # The current API receives caller-supplied verdicts, not bound execution
+    # evidence.  Keep it diagnostic until the runtime validates observations,
+    # criteria, frozen candidate identity and holdout use history end to end.
     if not isinstance(plan, dict) or not isinstance(plan.get("plan_hash"), str):
         raise ValueError("frozen plan_hash is required")
     requested, split = plan.get("requested_species"), plan.get("split")
@@ -604,10 +687,14 @@ def build_recommendation(plan, graph, candidate_assessments, holdout=None, exter
         candidate_id, status = sorted(eligible)[0]
     else:
         candidate_id, status = None, "ABSTAIN"
+    diagnostic_status = status
+    candidate_id, status = None, "ABSTAIN"
+    reasons.append({"reason": "V2_EXECUTION_EVIDENCE_NOT_VERIFIED"})
     species_results = (assessments[candidate_id]["species"] if candidate_id else
                        {name: "UNAVAILABLE" for name in requested})
     return {"schema": "explorer-recommendation-v2", "plan_hash": plan["plan_hash"],
             "input_hash": plan.get("input_hash"), "status": status,
+            "diagnostic_status_from_supplied_verdicts": diagnostic_status,
             "scope": "MISSION_LOCAL_FROZEN_PLAN_ONLY", "requested_species": list(requested),
             "candidate_id": candidate_id, "exportable_candidate_ids": [candidate_id] if candidate_id else [],
             "candidate_refs": sorted(candidate_ids), "species_results": species_results,
@@ -620,55 +707,9 @@ def build_recommendation(plan, graph, candidate_assessments, holdout=None, exter
 
 
 def export_recommended_fitset(base_config, candidate, recommendation, output_path):
-    """Write a new worker-roundtripped FitSet copy; never modify active config."""
-    if not isinstance(recommendation, dict) or recommendation.get("status") not in {
-            "MISSION_RECOMMENDED", "PROVISIONAL"}:
-        raise ValueError("only a recommendation or provisional candidate may be exported")
-    candidate_id = candidate.get("candidate_id") if isinstance(candidate, dict) else None
-    if candidate_id not in recommendation.get("exportable_candidate_ids", []):
-        raise ValueError("candidate is not exportable under this recommendation")
-    if not isinstance(base_config, dict) or not isinstance(base_config.get("refs"), list) \
-            or not isinstance(base_config.get("ref_props"), dict):
-        raise ValueError("base FitSet config is invalid")
-    runtime = candidate.get("runtime_spec")
-    registration = candidate.get("registration")
-    if not isinstance(runtime, dict) or not isinstance(registration, dict):
-        raise ValueError("candidate runtime specification is invalid")
-    reference_order = runtime.get("reference_order")
-    if [row.get("name") for row in base_config["refs"]] != reference_order:
-        raise ValueError("base FitSet reference order does not match candidate")
-    driver = registration.get("driver_species")
-    if driver not in base_config["ref_props"]:
-        raise ValueError("candidate registration driver is absent from base FitSet")
-    from core import fit_explorer as FE
-    from core.fitset_builder import validate_fitset
-    legacy_candidate = {"id": candidate_id, "px_min": runtime["f_min"], "px_max": runtime["f_max"],
-                        "poly": runtime["poly_deg"], "target": driver,
-                        "policy": {"shift": registration.get("shift"), "squeeze": registration.get("squeeze")},
-                        "policy_stage": "STAGE0_METADATA_ONLY"}
-    translated = FE.translate_zero_base_policy(base_config, base_config["ref_props"], legacy_candidate, driver)
-    exported = copy.deepcopy(base_config)
-    exported.update({"f_min": runtime["f_min"], "f_max": runtime["f_max"],
-                     "poly_deg": runtime["poly_deg"], "ref_props": translated["ref_props"],
-                     "explorer_v2_provenance": {"candidate_id": candidate_id,
-                         "recommendation_status": recommendation["status"], "plan_hash": recommendation["plan_hash"],
-                         "scope": "EXPORTED_COPY_MANUAL_SELECTION_ONLY"}})
-    problems = validate_fitset(exported, driver)
-    if problems:
-        raise ValueError("exported FitSet failed worker contract: " + "; ".join(problems))
-    output_path = os.path.abspath(output_path)
-    parent = os.path.dirname(output_path)
-    if not parent or not os.path.isdir(parent):
-        raise ValueError("export directory does not exist")
-    try:
-        with open(output_path, "x", encoding="utf-8", newline="\n") as fh:
-            json.dump(exported, fh, ensure_ascii=False, indent=2, sort_keys=True)
-            fh.write("\n")
-    except FileExistsError:
-        raise FileExistsError("export path already exists; refusing to overwrite") from None
-    with open(output_path, encoding="utf-8") as fh:
-        reread = json.load(fh)
-    if validate_fitset(reread, driver):
-        raise ValueError("written FitSet failed worker round-trip")
-    return {"path": output_path, "candidate_id": candidate_id, "status": recommendation["status"],
-            "active_fitset_changed": False}
+    """Reject export until V2 execution evidence is bound to the actual config.
+
+    The former implementation checked names only and could export a changed
+    candidate, missing references and an unspecified gas-sign policy.
+    """
+    raise ValueError("V2 export unavailable: execution/config binding is not implemented")

@@ -25,7 +25,10 @@ def test_multispecies_comparison_preserves_missing_denominators_and_pairs_rows()
     evidence = V2.compare_multispecies_attempts([left, right], ["Species_A", "Species_B"])
     left_a = evidence["candidates"][0]["species"]["Species_A"]
     right_b = evidence["candidates"][1]["species"]["Species_B"]
-    assert left_a["multi_start"][0]["range"] == 0.0  # repeat seeds, not time-series stability
+    morning = next(row for row in left_a["multi_start"] if row["observation_id"] == "morning")
+    assert morning["range"] == 0.0
+    afternoon = next(row for row in left_a["multi_start"] if row["observation_id"] == "afternoon")
+    assert afternoon["state"] == "UNAVAILABLE" and afternoon["range"] is None
     assert right_b["state"] == "UNAVAILABLE" and right_b["attempts"]["coefficient_unavailable"] == 2
     assert right_b["attempts"]["complete"] is False
     a_delta = evidence["comparisons"][0]["species"]["Species_A"]

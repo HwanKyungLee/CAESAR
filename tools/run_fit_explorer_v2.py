@@ -21,7 +21,7 @@ def _write_plan(path, plan):
     encoded = json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if os.path.exists(path):
         existing = _load(path)
-        if existing.get("plan_hash") == plan.get("plan_hash"):
+        if existing == plan:
             return "REUSED"
         raise FileExistsError("plan path already exists with different content")
     parent = os.path.dirname(path)
@@ -38,6 +38,15 @@ def main(argv=None):
     plan_cmd = sub.add_parser("plan", help="validate mission and write/reuse a frozen V2 plan")
     plan_cmd.add_argument("--mission", required=True)
     plan_cmd.add_argument("--output", required=True)
+    run_cmd = sub.add_parser("run-discovery", help="execute/resume real discovery fits; no recommendation")
+    run_cmd.add_argument("--mission", required=True)
+    run_cmd.add_argument("--bindings", required=True)
+    run_cmd.add_argument("--output-directory", required=True)
+    chain_cmd = sub.add_parser("run-recommendation", help="real discovery, frozen selection, holdout and bounded recommendation")
+    chain_cmd.add_argument("--mission", required=True)
+    chain_cmd.add_argument("--bindings", required=True)
+    chain_cmd.add_argument("--output-directory", required=True)
+    chain_cmd.add_argument("--criteria")
     export_cmd = sub.add_parser("export", help="explicitly export one V2 recommendation candidate")
     export_cmd.add_argument("--plan", required=True)
     export_cmd.add_argument("--recommendation", required=True)
@@ -51,6 +60,15 @@ def main(argv=None):
             result = {"action": "plan", "state": _write_plan(args.output, plan),
                       "plan_hash": plan["plan_hash"], "candidate_count": len(plan["candidates"]),
                       "status": plan["status"]}
+        elif args.action == "run-recommendation":
+            from core.fit_explorer_v2_runtime import run_recommendation
+            report = run_recommendation(_load(args.mission), _load(args.bindings), args.output_directory,
+                                        criteria=_load(args.criteria) if args.criteria else None)
+            result = {key: report[key] for key in ("status", "execution_hash", "consumed_fit_attempts", "holdout")}
+        elif args.action == "run-discovery":
+            from core.fit_explorer_v2_runtime import run_mission
+            report = run_mission(_load(args.mission), _load(args.bindings), args.output_directory)
+            result = {key: report[key] for key in ("status", "execution_hash", "consumed_fit_attempts")}
         else:
             plan, recommendation, base = _load(args.plan), _load(args.recommendation), _load(args.base_fitset)
             candidate = next((row for row in plan.get("candidates", [])

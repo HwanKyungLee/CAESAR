@@ -1,9 +1,12 @@
 # Explorer V2 구현 패키지
 
-2026-09-10. 상태: 카드 1~6의 계약·계획·증거·graph·추천/export·GUI bridge 구현 완료.
-V2 mission 계약은 현재 file identity/hash 중심이므로, 실제 alpha/reference 파일을 직접 열어
-V2 plan에서 반복 fit까지 실행하는 runtime adapter는 후속 통합 작업이다. 기존 V1 batch는 GUI에서
-계속 실제 fit/재개를 담당한다.
+2026-09-10 재검토: 카드 1~6 전체 완료 주장을 철회한다. 현재는 미연결 구성요소 초안이다.
+추천 함수의 외부 PASS 입력만으로 추천을 생성하던 경로와 검증되지 않은 export를 차단했다.
+중복 시도 덮어쓰기, 단일 seed의 범위 0 표기, closure 예산 단위 오류를 수정했다.
+`run_fit_explorer_v2.py run-discovery`는 observation ID를 alpha 파일/행에 명시적으로 연결하고
+해시를 확인한 뒤 실제 VARPRO 엔진을 실행한다. 합성 alpha 2-start 실행·재개·캐시 변조 거부를
+검증했다. 현재 출력은 DIAGNOSTIC_ONLY이며 holdout·추천·export 완료를 뜻하지 않는다.
+기존 V1 batch는 GUI에서 계속 실제 fit/재개를 담당한다.
 
 ## 목적과 문서 우선순위
 

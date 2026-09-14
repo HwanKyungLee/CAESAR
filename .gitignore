@@ -50,3 +50,20 @@ cache/
 # PyInstaller 빌드 산출물 (Oculus.spec으로 재생성 가능, 수백MB — git 부적합, USB로 직접 이동)
 /build/
 /dist/
+
+# Local investigation artifacts and generated external-data evidence.
+# Keep the reproducible tools and hash-pinned contracts in source control, not
+# raw spectra, rendered figures, or per-run fit caches.
+/Claude outputs/
+/tmp/
+/diagnostics/araon_operational_2026-09/
+/diagnostics/asiaaq_operational_2026-09/
+/diagnostics/doasis_crossval_2026-09/
+/diagnostics/fit_explorer_v2_operational_2026-09/
+/diagnostics/injection_alpha_2026-08/
+/diagnostics/qdoas_crossval_2026-09/
+/diagnostics/seosan_operational_2026-09/
+/diagnostics/varpro_speed_2026-09/
+/diagnostics/yeosu_acceptance_2026-09/
+/diagnostics/yeosu_profile_2026-09/
+/diagnostics/yeosu_reprovenanced_alpha_2026-09/
