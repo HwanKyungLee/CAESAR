@@ -32,6 +32,25 @@
 - [x] **A3** 배치 통일 — `output/{campaign}/{YYYY-MM-DD}/{kind}/{날짜}_{CH}_{label}_{runid}`.
       디렉터리는 시간축만, 패싯은 meta로. 읽기는 세 구조 전부.
       검사 `python tools/test_result_layout.py`
+      · **2026-09-14 확장**: 핏만 쓰던 것을 **알파·R·그림까지** 같은 캠페인 폴더로 모았다
+        (그전엔 각자 사용자가 고른 폴더에 흩어져 "어느 핏이 어느 알파에서 나왔나"가 안 보였다).
+        알파 = `{out}/{campaign}/{날짜}/alpha/{채널}/`(worker), R = `{out}/{campaign}/`
+        루트만 이동(내부 `R_<채널>/{날짜}/`는 `r_trend_monitor.py` 것을 그대로 — CLI 단독
+        실행을 안 깨려고), R(t) npz = `{campaign}/calibration/`, 그림 = `{campaign}/figures/`
+        (저장 다이얼로그 **시작 위치**일 뿐 강제 아님. 그림은 여러 날을 걸쳐 날짜 폴더가 무의미).
+        캠페인 값은 `gui/dlg_dir.campaign_of(widget)`가 부모 사슬에서 한 번에 찾는다.
+      · **라벨↔구성 연결은 B안(2026-09-14 결정)**: 파싱 구성의 **선택은 데이터(raw 열 수)가**
+        하고, **기록만** 남긴다. 사람이 친 campaign 라벨(폴더 이름)과 기계가 고른 구성이
+        달라도 그건 오류가 아니라 정보다(예: `yeosu_2026` 폴더에 아라온 raw를 넣어 본 경우).
+        라벨이 파싱을 강제하는 C안은 **일부러 안 했다** — 열 수는 데이터고 라벨은 사람의
+        기억이라, 라벨이 이기면 조용히 틀린 파싱이 된다.
+        · 알파 헤더에 `# raw_layout: ncols=… campaign=… parser=DataIO-dynamic` 한 줄.
+          ⚠ 알파 생성은 `RawParser`가 아니라 `DataIO` 동적탐지를 쓰므로 레지스트리 이름은
+          **참조**일 뿐이다 — `parser=`를 같이 적어 그 구분을 남긴다.
+        · 핏 `.meta.json`에 `layout` 블록(`core.run_meta.layout_from_input`이 알파 헤더나
+          raw 열 수에서 뽑는다). **runid 해시엔 안 들어간다** — 설정이 아니라 입력의 성질이라
+          같은 설정이면 입력이 달라도 runid는 같아야 한다(자기검증에 불변식으로 걸어둠).
+        · 모르면 안 적는다(None) — 추측한 provenance는 없느니만 못하다.
 - [x] **A4** 레거시 backfill — `tools/backfill_meta.py`, dry-run 기본.
       검사 `python tools/backfill_meta.py --self-check`
 - [x] **D1** 측정일 감사 — `core/day_audit.py` (신설) · `gui/r_workers.DayAuditWorker` ·
@@ -108,7 +127,7 @@
 
 - [x] **B2** 종 스택 + flag 색 + 클릭 → 아래 패널 — `gui/ui_result_viewer.py` 대폭,
       `gui/result_viewer_io.load_fit_table`에 shift/squeeze 추가.
-      검사 `python tools/test_result_lanes.py` (4 케이스)
+      검사 `python tools/test_result_lanes.py` (5 케이스)
       · **종마다 레인**, x축만 링크. 예전엔 전 가스를 한 축에 겹쳐서 스케일이 다른 종
         (H2O ~1e-12 vs NO2 ppb)이 서로를 납작하게 만들었다
       · 레인 구성: 종별 N개 + shift/squeeze(squeeze는 1을 빼서 shift와 같은 축에) + RMS.
@@ -125,7 +144,8 @@
       · **사람이 GUI에서 확인할 것**: 실제 결과 파일을 열어 (a) 레인 높이가 종 수만큼
         늘어도 볼 만한지(4종이면 6레인), (b) 한 레인을 확대하면 나머지가 같이 움직이는지,
         (c) 이상한 점을 눌렀을 때 아래 α가 3초 안에 뜨는지
-      · ⚠ **안 한 것 — 진짜 '잔차'가 아니라 α 스펙트럼이다.** 아래 참조
+      · ✅ **잔차 패널 완료(2026-09-14, B안)** — 아래 "B2 잔차 패널" 절 참조.
+        α 패널은 그대로 두고 그 아래 **잔차 전용 레인**을 하나 더 붙였다(x축만 링크)
 
 - [x] **F2** UI 이모지 제거 — 화면 문자열 **0개** 잔존(주석 190·독스트링 142는 화면에
       안 나오므로 건드리지 않음).
@@ -143,34 +163,86 @@
 **없음 — 계획한 11항목 전부 완료.**
 
 
-## 결정이 필요한 것 — B2의 잔차 패널
+## B2 잔차 패널 — **B안(meta 기반 재핏)으로 완료 (2026-09-14, 사용자 결정)**
 
-원본 목록은 "점 클릭 → **잔차**"였는데 지금 뜨는 건 **그 스캔의 α 스펙트럼**이다.
-진짜 잔차를 못 넣은 이유:
+원본 목록은 "점 클릭 → 잔차"였는데 저장된 `.dat`에는 잔차 벡터도 핏 계수도 없다
+(`Params`는 저장 시 drop). 그래서 **그 스캔을 다시 핏**하되, *지금* 설정이 아니라
+**그때 설정(`.meta.json`)** 으로만 핏한다 — 지금 설정으로 그린 잔차는 화면의 그때 농도와
+대응하지 않는 "조용히 틀린 그림"이기 때문. A1이 설정 전량을 meta에 남겨둔 덕에 가능해졌다.
 
-1. **저장된 결과 파일만으로는 잔차를 복원할 수 없다.** `.dat`에는 스캔당 RMS는 있어도
-   잔차 벡터가 없고, 핏 계수(`Params`)는 저장 시 `df.drop(columns=['Params'])`로 빠진다.
-   → 잔차를 보려면 **그 스캔을 다시 핏**해야 한다.
-2. 원본 목록이 재사용하라던 `app_window._compute_1scan_preview()`는
-   **현재 로드된 파일의 첫 스캔 + 지금 살아있는 엔진**에 하드코딩돼 있다.
-   임의 결과 파일의 임의 스캔에는 못 쓴다.
-3. **더 중요한 문제**: 재핏을 하더라도 *지금* 설정으로 계산한 잔차는, *그때* 설정으로
-   나온 화면의 농도와 대응하지 않는다. 조용히 틀린 그림이 된다 — 이 저장소가 가장
-   경계하는 종류의 거짓말이다.
+구현: `core/refit.py`(신설) · `core/run_meta.meta_to_cfg`(build_meta의 역변환) ·
+`core/param_optimizer.fit_scan(return_model=True)` · `gui/ui_result_viewer._draw_residual`.
+검사 `python -m core.refit` · `python tools/test_result_lanes.py`
 
-가능한 길:
-- **(A) α만 유지** (현재). 정직하고 추가 작업 0. "왜 이 스캔이 이상한가"의 상당 부분은
-  α 모양으로 보인다.
-- **(B) meta 기반 재핏.** `.meta.json`이 이제 설정 전량을 갖고 있으므로(A1) 그걸로
-  엔진을 재구성해 그 스캔만 다시 핏한다. 레퍼런스는 basename만 저장돼 있어
-  `core.paths.resolve_ref_path`로 경로를 되찾아야 하고, 실패 시 "잔차 불가"로
-  명시해야 한다. `_compute_1scan_preview`를 `(alpha_path, row_idx, cfg)`로 일반화하는
-  작업이 딸린다. 중간 규모.
-- **(C) 저장 시 잔차를 남긴다.** 가장 정확하지만 결과 파일이 커지고 `.dat` 포맷
-  불변(불변식 2)과 충돌한다 — 사이드카(`.resid.npz`)로 빼야 한다.
+**규칙 — 복원이나 재현에 실패하면 잔차를 아예 안 그리고 사유를 적는다.** 거부 5종:
 
-**B가 유력하지만 임의로 정하지 않았다.** 재핏 비용(스캔당 수십 ms)과 "설정이 다르면
-잔차를 아예 안 보여준다"는 규칙에 동의가 필요하다.
+| # | 사유 | 왜 |
+|---|---|---|
+| 1 | `.meta.json` 없음 | 레거시 결과. `tools/backfill_meta.py`로 생성 가능 |
+| 2 | legacy meta(`L…`) | 헤더에서 복원한 **부분** 설정이라 그때 설정이 아님 |
+| 3 | 캘리브 확정 불가 | wavecal/레퍼런스를 못 찾거나 채널 확정 불가 |
+| 4 | 알파 행 없음 | 옆에 알파가 없거나 그 `row_idx`가 없음 |
+| 5 | **재현 실패** | 재핏 농도가 저장 농도와 1%(`REPRO_TOL_REL`) 넘게 어긋남 |
+
+설계상 짚어둘 것:
+
+- **웜스타트는 복원할 수 없다.** 그 행은 직전 스캔의 shift를 이어받아 핏된 결과인데
+  (§5.3 시간축 이어받기), 한 스캔만 떼어 재핏하면 그 이력이 없다. 그래서 **결과 표에 저장된
+  그 행의 shift/squeeze를 `controlled_start`로 주입**하고, 그래도 농도가 안 맞으면 5번으로
+  거부한다. 이것이 §10-9 경로의존성이 이 기능에 나타나는 지점이다.
+- **채널 확정은 이름이 아니라 알파의 파장축으로 한다.** meta는 머신 독립을 위해 basename만
+  갖는데(runid 계약) `Ref_NO2_Dynamic-ILS-Applied.dat`·`Calib_20260619_….txt`가 cold/roi1/roi2에
+  **같은 이름·다른 내용**으로 있다(md5 확인). 이름으로 고르면 다른 채널 단면으로 핏한다.
+  `resolve_calibration_dir`이 후보 wavecal을 알파 헤더의 파장축과 대조해 **데이터로** 고르고,
+  둘 이상이 맞으면 확정 불가로 거부한다.
+- **λ·robust는 meta의 `qc` 블록에서 가져온다.** 기본값(0/False)으로 때우면 다른 핏이 된다.
+- **읽기 전용** — 원본 파일도 활성 GUI 엔진도 건드리지 않는다. 임시 엔진을 새로 만든다.
+
+남은 것(사람 확인): 실제 결과 파일에서 (a) 재현이 통과하는 비율이 쓸 만한지,
+(b) `REPRO_TOL_REL` 1%가 너무 빡빡하지 않은지 — 실측 후 조정.
+
+## 점검에서 나온 것 (2026-09-14)
+
+- [x] **ppb 환산 단일화** — `n_air`(이상기체 수밀도)가 코어 4곳·GUI 3곳·도구 5곳에 **복사**돼
+      있었다. 농도를 만드는 마지막 한 줄인데 정작 `core/physics.py`엔 없었다(헌장 위반,
+      과거 Rayleigh 사본으로 R이 틀어진 사고와 같은 패턴).
+      `core.physics.air_number_density()` + `N_LOSCHMIDT` 상수로 모으고 전부 위임.
+      검사 `python -m core.physics` (STP 값·P/T 의존성·Rayleigh와 같은 상수 사용·
+      코어 4모듈이 사본이 아닌 **같은 함수 객체**를 쓰는지)
+      · ⚠ **상수가 두 값으로 돌아다니고 있었고, 둘 다 틀렸다**:
+        ppb 환산 `2.68678e19`(정답의 6자리 절단, 오차 −4.2e-8) · Rayleigh `2.6867811e19`
+        (**CODATA 2014 구값**, 오차 +3.7e-7 — 9배 나쁨). "소수점 많은 쪽"이 정확한 쪽이
+        아니었다. 2019 SI 재정의 이후 n₀ = p/(k_B·T)가 **정확히 계산되는 값**이므로
+        매직넘버 대신 정의 상수에서 **유도**한다(= CODATA 2018, 2.686780111e19).
+        결과 변화: 농도 **−4.2e-8**, Rayleigh α **+3.7e-7** (둘 다 상대) — 계통항이지만
+        이 저장소가 이미 잡아낸 계통편향(King factor 0.15%, O₂ 오타 0.5%)보다 네 자릿수 작다.
+      · `core/health_checks.py`·`tools/validate_pipeline.py`의 Rayleigh 검사도 **자기 N0 사본**
+        으로 α를 σ로 되돌리고 있었다 → 같은 상수를 쓰게 고쳤다. 이제 그 검사는 상수값이
+        바뀌어도 흔들리지 않는다(σ는 분자 고유값이라 밀도와 무관해야 하므로 이게 옳다).
+      · 보존된 진단 스크립트의 사본은 **일부러 안 고쳤다**(그때 그 계산의 증거라서):
+        `cold_validation_2026_05`, `parallel_shift_bench`,
+        `alpha_vs_matlab_2025_06_11/compare_alpha.py`(MATLAB 재현이 목적 — 주석 추가),
+        `qdoas_crossval_2026-09/compare_*.py`(nominal 값 유지 + 차이 설명 주석).
+        진행 중인 `qdoas_crossval_2026-09/AUGUR_realconc_TP_export_task.md`는
+        "식을 복사하지 말고 `core.physics.air_number_density`를 임포트하라"로 갱신
+      · **MATLAB과의 이탈은 의도된 것**: 두 구현에서 α의 N₀ **지수가 반대**다
+        (MATLAB σ에 N₀ 없음 → α ∝ N₀⁺¹ / Augur σ ∝ 1/N₀² → α ∝ N₀⁻¹). 같은 상수를 넣어도
+        α는 반대로 움직이므로 상수를 맞춰서 정렬되는 건 없고, 구값의 +3.7e-7 오차만 남는다.
+        근거는 `core/physics.py`의 MATLAB 경험식 주석에 기록
+      · `test_fit_explorer_cold_o4_*`의 공식 **문자열**(provenance)도 같이 갱신 —
+        안 고치면 기록이 거짓이 된다
+
+- [x] **오차 예산 스캐폴드** — `core/error_budget.py` (신설).
+      한 농도값의 불확도를 항목별로 분해하고, **정량화 안 된 항을 `미정량`으로 남긴다**
+      (빈칸이 보여야 뭘 모르는지 알고, 그게 채워지는 순서가 곧 우선순위).
+      검사 `python -m core.error_budget` · 실제 파일 `python -m core.error_budget <결과.dat> [가스]`
+      · 지금 계산되는 것: 핏 공분산 · T/P 전파(**TotalError에서 빼서** 분리 — 이중계산 금지)
+        · 이상기체 Z 편향(+0.02~0.05%, 계통)
+      · 미정량 4항(= 논문 §10-2에서 채워야 할 것): **단면 문헌 불확도**(3~5%로 최대항일
+        가능성) · **σ(R)→경로길이** · **캐비티 d·R_L** · **잔차 고정패턴**(§10-1)
+      · 무작위(√Σσ²)와 계통(선형합)을 **뭉개지 않는다** — 계통은 평균해도 안 줄어든다
+      · 표 하단에 "이 표는 **하한**이다"를 항상 찍는다. 미정량이 남은 채로 총 불확도를
+        말하지 않기 위해서
 
 ## 절대 깨뜨리지 말 것
 
@@ -188,6 +260,10 @@
 ```
 python tools/validate_pipeline.py --no-data
 python core/run_meta.py
+python -m core.physics
+python -m core.error_budget
+python -m core.refit
+python tools/test_raw_layout.py
 python -m core.day_audit
 python tools/test_result_layout.py
 python tools/backfill_meta.py --self-check

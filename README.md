@@ -81,6 +81,9 @@ Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없�
 | **shift / squeeze** | 파장축의 미세한 이동·신축. 피팅 중 자동 보정한다 |
 | **ZA / He** | Zero Air / Helium 보정 스캔. R(반사율) 계산에 쓰는 기준 측정 (flag 500 / 510) |
 | **Cold / Hot** | 두 측정 채널(저온·고온 캐비티). 데이터 컬럼 구조와 보정값이 다르다 |
+| **ch1 / ch2** | **물리 채널**(캐비티). ch1=ANs(300 ℃), ch2=PNs(180 ℃) — 장비 보수 초기에 붙인 이름이다. raw 폴더·알파 파일이 이 이름을 쓴다 |
+| **roi1 / roi2** | **검출기 판독 영역**(ROI). 파장보정 폴더 `reference_data/wv_cal/roi1|roi2`가 이것이다. ⚠ **번호가 ch와 반대로 붙어 있다 — roi1=PNs, roi2=ANs.** 같은 번호끼리 짝지으면(ch1↔roi1) 다른 채널의 파장보정·단면으로 핏하게 된다 |
+| **핏창(창/poly)** | 종을 가리키는 **가장 안전한 이름**. 실측 확인: 600–1270px·poly4 = 429.5–462.0 nm = **ANs**, 900–1450px·poly3 = 444.1–470.6 nm = **PNs** (운영 결과 파일명 `ANs_430-462nm_Poly4`·`PNs_444-471nm_Poly3`와 일치). 핏 시나리오 JSON의 `ROI1`/`ROI2` **라벨**은 검출기 roi와 또 다른 축이니 종을 가리킬 때 쓰지 말 것 |
 
 > ⚠ **Shift 부호 규약 — 외부 도구(QDOAS/DOASIS)와 비교할 때 반드시 확인**:
 > Augur의 `shift`는 `model(x) = reference(x + shift)`로 정의되어 있다. 이는
@@ -110,6 +113,10 @@ CAESAR/
 │   ├── doas_fit.py            ← 공유 VarPro DOAS 피터 (DoasFitter) — GUI/도구 공통
 │   ├── physics.py             ← 공용 물리 (RayleighPhysics, KalmanTracker)
 │   ├── result_io.py           ← 리트리벌 결과 파일 공통 IO (읽기/자르기/병합)
+│   ├── profile.py             ← 캠페인/인스트루먼트 프로파일 로더 (Augur·Oculus 공용 단일 리더)
+│   ├── refit.py               ← 저장된 결과 한 스캔을 그때 설정으로 재핏 (잔차 패널)
+│   ├── run_meta.py            ← 결과 `.meta.json` 사이드카 (runid=설정 해시, 버전 diff)
+│   ├── day_audit.py           ← 측정일 감사 (ZA/He 교정 블록이 주기대로 들어왔나)
 │   ├── provenance.py          ← 코드 출처(provenance) 스탬프
 │   └── session_log.py         ← stdout/stderr를 logs/session_*.log 로 tee
 │
