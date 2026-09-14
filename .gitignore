@@ -63,7 +63,7 @@ cache/
 /diagnostics/injection_alpha_2026-08/
 /diagnostics/qdoas_crossval_2026-09/
 /diagnostics/seosan_operational_2026-09/
-/diagnostics/varpro_speed_2026-09/
+/diagnostics/varpro_speed_2026-09/results_*.json
 /diagnostics/yeosu_acceptance_2026-09/
 /diagnostics/yeosu_profile_2026-09/
 /diagnostics/yeosu_reprovenanced_alpha_2026-09/

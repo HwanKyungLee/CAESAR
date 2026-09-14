@@ -59,6 +59,13 @@ jobs:
       - name: Etalon collinearity unit tests
         run: python tools/test_etalon_collinearity.py
 
+      # VarPro 선형/자코비안 불변식 (합성 레퍼런스, 데이터 불필요)
+      # - make_interp_spline == interp1d 비트동일: scipy 업그레이드로 깨지면
+      #   engine의 도함수가 핏의 보간기와 달라져 자코비안이 조용히 틀린다
+      # - 해석적(Golub-Pereyra) 자코비안 == 유한차분
+      - name: VarPro jacobian unit tests
+        run: python tools/test_varpro_jacobian.py
+
       # Pass2(alpha) 병렬 vs 순차 byte-exact 회귀 — 커밋된 작은 실데이터 fixture 사용
       - name: Pass2 parallel-vs-sequential byte-exact test
         run: python tools/test_pass2_parallel.py
