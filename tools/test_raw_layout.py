@@ -91,6 +91,37 @@ def test_unknown_ncols(d):
     check("행의 hk도 빔", next(p.iter_rows()).hk == {})
 
 
+def test_short_header_row(d):
+    """LabVIEW가 파일 맨 앞에 쓰는 flag=0 헤더행은 데이터행보다 열이 적다
+    (2026 여수 핫 실측: 헤더 6177 vs 데이터 6181, 1314개 중 22개).
+    첫 행 하나로 파일을 판정하면 등록 레이아웃과 안 맞아 hk_map={}로 조용히
+    떨어진다 — 실제로 2026-08-10-001.dat이 kind=unknown·HK 0개로 나왔었다."""
+    print("[2-B] 짧은 헤더행으로 시작하는 파일 → 데이터행 기준으로 판정")
+    path = os.path.join(d, "hdr.dat")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\t".join(str(3000 + i) for i in range(6177)) + "\n")   # 헤더행(짧음)
+        for _ in range(3):
+            vals = [str(3000 + i) for i in range(6181)]
+            vals[RP.COL_TIME_LO], vals[RP.COL_TIME_HI] = "1234", "5678"
+            vals[RP.COL_FLAG] = "500"
+            fh.write("\t".join(vals) + "\n")
+    p = RP.RawParser(path)
+    check("헤더행이 아니라 데이터행 열수로 판정", p.layout.ncols == 6181, p.layout.ncols)
+    check("kind=hot", p.layout.kind == "hot", p.layout.kind)
+    check("hk_map 채워짐", p.layout.hk_map is RP.HotHKMap)
+    row = next(r for r in p.iter_rows() if r.flag == 500)
+    check("HK 값이 실제로 읽힘(ANs_oven=6151)",
+          abs(row.hk["ANs_oven"] - (3000 + 6151) * 0.01) < 1e-9, row.hk.get("ANs_oven"))
+    # 등록 레이아웃이 하나도 안 나오면 기존 폴백(첫 데이터행 기준)을 유지해야 한다
+    path2 = os.path.join(d, "allshort.dat")
+    with open(path2, "w", encoding="utf-8") as fh:
+        for _ in range(3):
+            fh.write("\t".join(str(3000 + i) for i in range(6177)) + "\n")
+    p2 = RP.RawParser(path2)
+    check("전부 미등록이면 폴백 유지", "structural" in p2.layout.kind and p2.layout.ncols == 6177,
+          (p2.layout.kind, p2.layout.ncols))
+
+
 def test_register_guard():
     print("[3] 중복 등록 가드")
     try:
@@ -207,6 +238,7 @@ def main() -> int:
     d = tempfile.mkdtemp(prefix="raw-layout-")
     test_builtin_layouts(d)
     test_unknown_ncols(d)
+    test_short_header_row(d)
     test_register_guard()
     test_oculus_profile_adapter()
     test_channel_map_matches_profiles()

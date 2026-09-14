@@ -273,6 +273,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # 측정 PC 콘솔은 보통 cp949다. 한글은 cp949에 있어서 잘 나오지만 '≈' 같은 기호가
+    # 섞이면 UnicodeEncodeError로 메시지 대신 트레이스백이 뜬다 — 콘솔 인코딩은 그대로
+    # 두고(한글 정상 출력) 표현 못 하는 글자만 '?'로 떨어뜨린다.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):   # 리다이렉트/파이프 등 reconfigure 불가
+            pass
+
     args = build_arg_parser().parse_args(argv)
     if not os.path.isdir(args.dir):
         print(f"감시 폴더 없음: {args.dir}", file=sys.stderr)

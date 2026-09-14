@@ -44,7 +44,7 @@
         "cavity_pressure_hk": "p_cavity",
         "throttle_sec": 10,
         "seed_narrow_px": 2.0,
-        "alert": { "conc_min_ppb": -20, "conc_max_ppb": 50, "spike_ppb": 20, "rms_sig_alarm": 0.15, "flatline_n": 5 }
+        "alert": { "conc_max_ppb": 100, "spike_ppb": 20, "rms_alarm": 5e-8, "flatline_n": 5 }
       },
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260523_Hg_4line_400-497nm_Poly2.txt",

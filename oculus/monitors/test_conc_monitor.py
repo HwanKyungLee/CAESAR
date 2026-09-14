@@ -162,8 +162,9 @@ def test_classify():
     cm = _make_monitor(conc_min_ppb=-20, conc_max_ppb=50, spike_ppb=20,
                        rms_sig_alarm=0.15, flatline_n=3)
 
-    def _res(conc, rms_sig=0.05, perr_rel=0.05):
-        return dict(conc=conc, rms_sig=rms_sig, perr_rel=perr_rel, conc_all={"NO2": conc})
+    def _res(conc, rms_sig=0.05, perr_rel=0.05, rms=3e-9):
+        return dict(conc=conc, rms_sig=rms_sig, perr_rel=perr_rel, rms=rms,
+                    conc_all={"NO2": conc})
 
     status, msg, m = cm._classify(_res(3.5))
     check("정상 범위 → OK", status == OK, f"{status}: {msg}")
@@ -190,7 +191,19 @@ def test_classify():
     status, msg, m = cm5._classify(_res(4.0))
     check("N회 연속 동일값 → 평탄선 P2", status == P2, f"{status}: {msg}")
 
-    status, msg, m = cm5._classify(dict(conc=float("nan"), rms_sig=0.05, perr_rel=0.05, conc_all={}))
+    # rms_alarm — 저농도 채널용 절대 잔차 문턱(rms_sig는 신호가 작으면 폭발해서 못 씀).
+    cm6 = _make_monitor(rms_sig_alarm=None, rms_alarm=5e-8)
+    check("rms 정상(3e-9) → OK", cm6._classify(_res(1.0, rms=3e-9))[0] == OK)
+    st6, msg6, _ = cm6._classify(_res(1.0, rms=2e-7))
+    check("rms 큼(2e-7) → P1", st6 == P1, f"{st6}: {msg6}")
+    # 실측 근거: cold 748스캔에서 rms_sig>0.15가 56%에 걸렸고 그 대부분이 저농도(중앙
+    # 1.1ppb)였다 — 같은 스캔들이 rms 기준으론 정상으로 남아야 한다.
+    cm7 = _make_monitor(rms_sig_alarm=None, rms_alarm=5e-8)
+    check("저농도+높은 rms_sig라도 rms 정상이면 OK",
+          cm7._classify(_res(0.5, rms_sig=0.67, rms=3.5e-9))[0] == OK)
+
+    status, msg, m = cm5._classify(dict(conc=float("nan"), rms_sig=0.05, perr_rel=0.05,
+                                        rms=3e-9, conc_all={}))
     check("농도 NaN → P1", status == P1, f"{status}: {msg}")
 
 

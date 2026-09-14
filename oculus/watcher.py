@@ -76,11 +76,19 @@ class Watcher:
         self._profile_cache: dict = {}   # {path: Profile|False(=매치실패, 재시도 방지)}
 
     def _route(self, path: str, n_columns: int) -> Optional[Profile]:
+        """성공만 캐시한다. LabVIEW가 파일 첫 행에 쓰는 flag=0 헤더행은 데이터행보다
+        열이 몇 개 적어(핫 실측: 헤더 6177 vs 데이터 6181) 어느 프로파일과도 열수가
+        안 맞는다. 실패를 캐시하면 그 한 행 때문에 파일 전체가 영구 스킵된다 —
+        실제로 2026-08-10-001.dat 304행이 통째로 미배정됐다.
+        # ponytail: 어느 프로파일과도 안 맞는 파일은 매 행 route()를 다시 탄다.
+        # route()가 짧아 지금은 무시할 만하다. 감시 폴더에 남의 포맷 파일이 많이
+        # 섞이면 '연속 N행 실패 시 캐시' 같은 걸 넣을 것."""
         cached = self._profile_cache.get(path)
         if cached is not None:
-            return cached or None
+            return cached
         prof = self.profiles.route(filename=os.path.basename(path), n_columns=n_columns)
-        self._profile_cache[path] = prof if prof is not None else False
+        if prof is not None:
+            self._profile_cache[path] = prof
         return prof
 
     def _read_new_lines(self, path: str) -> list:

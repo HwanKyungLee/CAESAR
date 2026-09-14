@@ -179,6 +179,12 @@ class ConcentrationConfig:
     conc_max_ppb: Optional[float] = None
     spike_ppb: Optional[float] = None
     rms_sig_alarm: Optional[float] = None
+    # 절대 잔차 RMS 문턱. rms_sig(=rms/sig)는 신호가 작으면 분모가 0으로 가서 폭발하므로
+    # 저농도 채널(cold NO2 중앙값 ~2ppb)에선 핏 품질이 아니라 1/농도를 재게 된다 —
+    # 실측에서 rms_sig>0.15가 스캔의 56%에 걸렸고 그 대부분이 그냥 깨끗한 공기였다.
+    # rms는 농도와 무관하게 평평해서(0~20ppb 구간 중앙값 3.0e-9~4.2e-9) 저농도 채널의
+    # 핏 품질 문턱은 이쪽을 쓴다.
+    rms_alarm: Optional[float] = None
     flatline_n: Optional[int] = None
 
     @classmethod
@@ -199,6 +205,7 @@ class ConcentrationConfig:
             conc_max_ppb=(float(alert["conc_max_ppb"]) if "conc_max_ppb" in alert else None),
             spike_ppb=(float(alert["spike_ppb"]) if "spike_ppb" in alert else None),
             rms_sig_alarm=(float(alert["rms_sig_alarm"]) if "rms_sig_alarm" in alert else None),
+            rms_alarm=(float(alert["rms_alarm"]) if "rms_alarm" in alert else None),
             flatline_n=(int(alert["flatline_n"]) if "flatline_n" in alert else None),
         )
 

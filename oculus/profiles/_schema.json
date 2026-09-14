@@ -113,6 +113,7 @@
                   "conc_min_ppb": { "type": "number", "description": "이보다 작으면(큰 음수) 물리적으로 불가능 → P1." },
                   "conc_max_ppb": { "type": "number", "description": "이보다 크면 물리적으로 불가능 → P1." },
                   "spike_ppb": { "type": "number", "exclusiveMinimum": 0, "description": "직전 값 대비 이 이상 급변하면 → P2(스파이크 의심)." },
+                  "rms_alarm": { "type": "number", "exclusiveMinimum": 0, "description": "절대 잔차 RMS가 이보다 크면 → P1. 저농도 채널은 rms_sig 대신 이걸 쓴다(rms_sig는 신호가 작으면 분모가 0으로 가 폭발)." },
                   "rms_sig_alarm": { "type": "number", "exclusiveMinimum": 0, "description": "rms/sig가 이 이상이면 핏 신뢰 불가 → P1." },
                   "flatline_n": { "type": "integer", "exclusiveMinimum": 1, "description": "이 횟수 연속 동일값이면 센서 고착 의심 → P2." }
                 }

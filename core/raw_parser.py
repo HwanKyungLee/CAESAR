@@ -202,6 +202,10 @@ COL_EXPOSURE = 2
 COL_TEMP_CCD = 3
 COL_FLAG = 4
 
+# 레이아웃 판정 시 훑어볼 최대 데이터행 수. 헤더행(flag=0)은 1행뿐이라 2면 충분하지만
+# 여유를 둔다 — 등록 레이아웃과 맞는 행을 만나면 즉시 멈추므로 보통 1~2행만 읽는다.
+LAYOUT_PROBE_ROWS = 5
+
 # State flag categories.
 # Family rule: 5xx = Zero Air, 51x = Helium;
 #              x00 injecting · x01 setflow · x02 wait-before · x03 wait-after.
@@ -542,15 +546,30 @@ class RawParser:
     @staticmethod
     def _detect_layout(path: str) -> FileLayout:
         """Read first non-empty data row to determine ncols, then classify."""
+        # 파일을 첫 행 하나로 판정하면 안 된다 — LabVIEW가 가끔 파일 맨 앞에 쓰는
+        # flag=0 헤더행은 데이터행보다 열이 적다(2026 여수 핫 실측: 헤더 6177 vs
+        # 데이터 6181, 1314개 중 22개). 그 행으로 파일을 판정하면 등록 레이아웃과 안
+        # 맞아 구조적 폴백으로 떨어지고 hk_map이 조용히 빈 dict가 된다.
+        # core/data_io.py도 같은 6177/6181 혼재 때문에 행 단위로 읽는다(거기 주석 참고).
+        # 앞쪽 몇 행만 훑어 **등록된 레이아웃과 맞는 첫 ncols**를 파일 열수로 삼고,
+        # 하나도 안 맞으면 첫 데이터행 값을 그대로 써서 기존 폴백 동작을 유지한다.
         ncols = 0
+        probed = 0
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 s = line.strip()
                 if not s or s.startswith("#"):
                     continue
                 toks = s.split("\t") if "\t" in s else s.split()
-                ncols = len(toks)
-                break
+                n = len(toks)
+                if ncols == 0:
+                    ncols = n            # 폴백: 첫 데이터행
+                if n in CAMPAIGN_LAYOUTS:
+                    ncols = n
+                    break
+                probed += 1
+                if probed >= LAYOUT_PROBE_ROWS:
+                    break
         mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=KST)
 
         lay = CAMPAIGN_LAYOUTS.get(ncols)

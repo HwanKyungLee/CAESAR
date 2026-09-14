@@ -393,6 +393,31 @@ class DoasFitter:
 
         y_w_current = optical_depth * w_current
 
+        # theta에 안 걸리는 열(poly·custom_basis·etalon sin/cos)은 상수다. 목적함수
+        # 호출마다 다시 만들 이유가 없어 여기서 한 번만 조립한다. 열 순서는 종전과
+        # 동일(gas → poly → custom → sin → cos)이라 하류 인덱싱·반환값이 불변.
+        # etalon: sin·cos 두 선형열 — 진폭/위상을 선형으로 흡수(비선형 위상 e_p 제거).
+        # A·sin(f·x+φ)=A·cosφ·sin(f·x)+A·sinφ·cos(f·x) 라 같은 모델공간이며 전역 선형해.
+        const_cols = [T[:, j] for j in range(poly_order + 1)]
+        if CB is not None:
+            const_cols += [CB[:, kk] for kk in range(CB.shape[1])]
+        const_cols += [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
+        CONST = np.column_stack(const_cols)
+
+        def _gas_columns(val_dict):
+            """shift/squeeze가 걸리는 기체 열만. 창 밖 기체는 어차피 0으로 덮이므로
+            보간 자체를 건너뛴다(결과 동일, 스플라인 평가 1회 절약)."""
+            G = np.empty((len(pixel_idx), num_gases))
+            for i, name in enumerate(self.engine.gas_list):
+                if not gas_active[name]:
+                    G[:, i] = 0.0
+                    continue
+                sh_i, sq_i = val_dict[f"{name}_sh"], val_dict[f"{name}_sq"]
+                pixel_shifted = (pixel_idx - absolute_center) * sq_i + absolute_center + sh_i
+                raw_ref = fit_sign * self.engine.interpolators[name](pixel_shifted) / self.engine.scaling_factors[name]
+                G[:, i] = raw_ref * t_corr[name]
+            return G
+
         solver_runs = []
         for iteration in range(max_iters):
             def objective_varpro(theta):
@@ -401,27 +426,7 @@ class DoasFitter:
                 for v, t in linked_vars.items():
                     val_dict[v] = val_dict.get(t, 0.0)
 
-                cols = []
-                for name in self.engine.gas_list:
-                    sh_i, sq_i = val_dict[f"{name}_sh"], val_dict[f"{name}_sq"]
-                    pixel_shifted = (pixel_idx - absolute_center) * sq_i + absolute_center + sh_i
-                    raw_ref = fit_sign * self.engine.interpolators[name](pixel_shifted) / self.engine.scaling_factors[name]
-                    raw_ref = raw_ref * t_corr[name]
-                    if not gas_active[name]:
-                        raw_ref = np.zeros_like(raw_ref)
-                    cols.append(raw_ref)
-
-                for j in range(poly_order + 1):
-                    cols.append(T[:, j])
-                if CB is not None:
-                    for kk in range(CB.shape[1]):
-                        cols.append(CB[:, kk])
-                # etalon: sin·cos 두 선형열 — 진폭/위상을 선형으로 흡수(비선형 위상 e_p 제거).
-                # A·sin(f·x+φ)=A·cosφ·sin(f·x)+A·sinφ·cos(f·x) 라 같은 모델공간이며 전역 선형해.
-                cols.append(np.sin(fixed_e_f * pixel_idx))
-                cols.append(np.cos(fixed_e_f * pixel_idx))
-
-                A_weighted = np.column_stack(cols) * w_current[:, None]
+                A_weighted = np.hstack((_gas_columns(val_dict), CONST)) * w_current[:, None]
                 y_weighted = y_w_current   # theta 불변 — 루프 밖에서 1회 계산
 
                 num_cols = A_weighted.shape[1]
@@ -457,23 +462,7 @@ class DoasFitter:
             opt_shifts = [val_dict_opt[f"{g}_sh"] for g in self.engine.gas_list]
             opt_squeezes = [val_dict_opt[f"{g}_sq"] for g in self.engine.gas_list]
 
-            cols = []
-            for i, name in enumerate(self.engine.gas_list):
-                pixel_shifted = (pixel_idx - absolute_center) * opt_squeezes[i] + absolute_center + opt_shifts[i]
-                raw_ref = fit_sign * self.engine.interpolators[name](pixel_shifted) / self.engine.scaling_factors[name]
-                col = raw_ref * t_corr[name]
-                if not gas_active[name]:
-                    col = np.zeros_like(col)
-                cols.append(col)
-            for j in range(poly_order + 1):
-                cols.append(T[:, j])
-            if CB is not None:
-                for kk in range(CB.shape[1]):
-                    cols.append(CB[:, kk])
-            cols.append(np.sin(fixed_e_f * pixel_idx))
-            cols.append(np.cos(fixed_e_f * pixel_idx))
-
-            A_final = np.column_stack(cols)
+            A_final = np.hstack((_gas_columns(val_dict_opt), CONST))
             A_f_w = A_final * w_current[:, None]
             y_w = y_w_current
 

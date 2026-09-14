@@ -53,7 +53,7 @@
         "cavity_pressure_hk": "p_pns_cavity",
         "cavity_len_cm": 51.8,
         "rl_factor": 0.933,
-        "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
+        "alert": { "warn_drop": 8e-6, "alarm_drop": 2e-5 }
       } },
     { "id": "ch_ans",    "label": "ANs",         "role": "signal", "columns": [4101, 6148],
       "concentration": {
@@ -74,7 +74,7 @@
         "cavity_pressure_hk": "p_ans_cavity",
         "cavity_len_cm": 51.8,
         "rl_factor": 0.933,
-        "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
+        "alert": { "warn_drop": 8e-6, "alarm_drop": 2e-5 }
       } }
   ],
 
