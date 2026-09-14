@@ -71,7 +71,7 @@ class ReferenceGeneratorDialog(QDialog):
 
     def __init__(self, parent=None, current_wavelengths=None):
         super().__init__(parent)
-        self.setWindowTitle("✂️ Ultimate Reference Generator (with Advanced Deconvolution)")
+        self.setWindowTitle("Ultimate Reference Generator (with Advanced Deconvolution)")
         self._s = _ui_scale()
         self.resize(int(1150 * self._s), int(800 * self._s))
         
@@ -88,7 +88,7 @@ class ReferenceGeneratorDialog(QDialog):
         self.init_ui()
 
         if self.target_wavelengths is not None:
-            self.lbl_wave_info.setText(f"✅ Status: Synced with Main ({len(self.target_wavelengths)} px)")
+            self.lbl_wave_info.setText(f"Status: Synced with Main ({len(self.target_wavelengths)} px)")
             self.lbl_wave_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
     def init_ui(self):
@@ -108,13 +108,13 @@ class ReferenceGeneratorDialog(QDialog):
         grp_raw = QGroupBox("1. Load/Generate Raw High-Res Reference")
         lay_raw = QVBoxLayout()
         
-        self.btn_load_raw = QPushButton("📂 Load Raw File (.txt)")
+        self.btn_load_raw = QPushButton("Load Raw File (.txt)")
         self.btn_load_raw.clicked.connect(self.load_raw_reference)
         lay_raw.addWidget(self.btn_load_raw)
         
         # Literature FWHM Input (LabVIEW logic equivalent)
         lay_lit_fwhm = QHBoxLayout()
-        lay_lit_fwhm.addWidget(QLabel("📖 Literature FWHM (nm):"))
+        lay_lit_fwhm.addWidget(QLabel("Literature FWHM (nm):"))
         self.spin_lit_fwhm = QDoubleSpinBox()
         self.spin_lit_fwhm.setRange(0.0, 5.0)
         self.spin_lit_fwhm.setDecimals(5)
@@ -162,7 +162,7 @@ class ReferenceGeneratorDialog(QDialog):
         ])
         lay_hitran_action.addWidget(self.combo_hitran_gas)
         
-        self.btn_hitran = QPushButton("🌐 Generate from HITRAN")
+        self.btn_hitran = QPushButton("Generate from HITRAN")
         self.btn_hitran.setStyleSheet("background-color: #e3f2fd; font-weight: bold;")
         self.btn_hitran.clicked.connect(self.generate_hitran_gas)
         lay_hitran_action.addWidget(self.btn_hitran)
@@ -180,12 +180,12 @@ class ReferenceGeneratorDialog(QDialog):
 
         # One-shot auto-pickup: grabs Calib + FWHM from the same campaign
         # wv_cal folder (remembers it across sessions via QSettings).
-        self.btn_auto_pickup = QPushButton("🤖 Auto-pickup Calib + FWHM from campaign wv_cal folder")
+        self.btn_auto_pickup = QPushButton("Auto-pickup Calib + FWHM from campaign wv_cal folder")
         self.btn_auto_pickup.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
         self.btn_auto_pickup.clicked.connect(self._auto_pickup_calib_fwhm)
         lay_wave.addWidget(self.btn_auto_pickup)
 
-        self.btn_load_wave = QPushButton("📂 Load Wavelength Calibration (.txt)")
+        self.btn_load_wave = QPushButton("Load Wavelength Calibration (.txt)")
         self.btn_load_wave.clicked.connect(self.load_target_wavelength)
         status_text = 'Loaded from Main' if self.target_wavelengths is not None else 'Not Loaded'
         self.lbl_wave_info = QLabel(f"Status: {status_text}")
@@ -198,7 +198,7 @@ class ReferenceGeneratorDialog(QDialog):
         grp_conv = QGroupBox("3. Instrument Line Shape (ILS) Profile")
         lay_conv = QVBoxLayout()
         
-        self.btn_load_fwhm = QPushButton("📂 Load FWHM Profile (.txt)")
+        self.btn_load_fwhm = QPushButton("Load FWHM Profile (.txt)")
         self.btn_load_fwhm.clicked.connect(self.load_fwhm_profile)
         self.lbl_fwhm_info = QLabel("Status: Not Loaded")
         self.lbl_fwhm_info.setStyleSheet("color: #d32f2f;")
@@ -213,13 +213,13 @@ class ReferenceGeneratorDialog(QDialog):
         self.ils_sigmas = None
         
         # --- 4. Generate & Save ---
-        self.btn_generate = QPushButton("🪄 Generate Ultimate Reference")
+        self.btn_generate = QPushButton("Generate Ultimate Reference")
         self.btn_generate.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; font-size: 14px;")
         self.btn_generate.clicked.connect(self.apply_convolution)
         self.btn_generate.setMinimumHeight(int(50 * self._s))
         right_layout.addWidget(self.btn_generate)
         
-        self.btn_save = QPushButton("💾 Save & Auto-Register to Main")
+        self.btn_save = QPushButton("Save & Auto-Register to Main")
         self.btn_save.clicked.connect(self.save_reference)
         self.btn_save.setEnabled(False)
         self.btn_save.setMinimumHeight(int(40 * self._s))
@@ -255,7 +255,7 @@ class ReferenceGeneratorDialog(QDialog):
         lay_sweep.addLayout(lay_sweep_params)
 
         lay_sweep_out = QHBoxLayout()
-        self.btn_sweep_outdir = QPushButton("📁 Output Folder…")
+        self.btn_sweep_outdir = QPushButton("Output Folder…")
         self.btn_sweep_outdir.clicked.connect(self._pick_sweep_outdir)
         lay_sweep_out.addWidget(self.btn_sweep_outdir)
         self.lbl_sweep_outdir = QLabel("Status: Not Selected")
@@ -263,13 +263,13 @@ class ReferenceGeneratorDialog(QDialog):
         lay_sweep_out.addWidget(self.lbl_sweep_outdir, stretch=1)
         lay_sweep.addLayout(lay_sweep_out)
 
-        self.btn_run_sweep = QPushButton("🌀 Run FWHM Sweep")
+        self.btn_run_sweep = QPushButton("Run FWHM Sweep")
         self.btn_run_sweep.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold;")
         self.btn_run_sweep.clicked.connect(self.run_fwhm_sweep)
         self.btn_run_sweep.setMinimumHeight(int(40 * self._s))
         lay_sweep.addWidget(self.btn_run_sweep)
 
-        _hint = QLabel("After sweep finishes, validate in Setup tab → 🎯 FWHM Best-Match")
+        _hint = QLabel("After sweep finishes, validate in Setup tab →  FWHM Best-Match")
         _hint.setStyleSheet("color: #555; font-style: italic;")
         _hint.setWordWrap(True)
         lay_sweep.addWidget(_hint)
@@ -454,7 +454,7 @@ class ReferenceGeneratorDialog(QDialog):
         df = pd.read_csv(path, header=None)
         self.target_wavelengths = pd.to_numeric(df.iloc[:, 0], errors='coerce').dropna().values
         self.lbl_wave_info.setText(
-            f"✅ Loaded: {os.path.basename(path)} ({len(self.target_wavelengths)} px)"
+            f"Loaded: {os.path.basename(path)} ({len(self.target_wavelengths)} px)"
         )
         self.lbl_wave_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
@@ -524,21 +524,21 @@ class ReferenceGeneratorDialog(QDialog):
             calib_path = max(calib_hits, key=os.path.getmtime)
             try:
                 self.load_target_wavelength(path=calib_path)
-                messages.append(f"✅ Calib: {os.path.basename(calib_path)}")
+                messages.append(f"Calib: {os.path.basename(calib_path)}")
             except Exception as exc:
-                messages.append(f"❌ Calib load failed: {exc}")
+                messages.append(f"Calib load failed: {exc}")
         else:
-            messages.append(f"⚠️ No Calib_*.txt found")
+            messages.append(f"No Calib_*.txt found")
 
         if fwhm_hits:
             fwhm_path = max(fwhm_hits, key=os.path.getmtime)
             try:
                 self.load_fwhm_profile(path=fwhm_path)
-                messages.append(f"✅ FWHM: {os.path.basename(fwhm_path)}")
+                messages.append(f"FWHM: {os.path.basename(fwhm_path)}")
             except Exception as exc:
-                messages.append(f"❌ FWHM load failed: {exc}")
+                messages.append(f"FWHM load failed: {exc}")
         else:
-            messages.append(f"⚠️ No FWHM_Analysis_*.txt found")
+            messages.append(f"No FWHM_Analysis_*.txt found")
 
         QMessageBox.information(self, "Auto-pickup result", "\n".join(messages))
 
@@ -606,7 +606,7 @@ class ReferenceGeneratorDialog(QDialog):
                 auto_msg = f"\nSection 5 Center FWHM auto-set to {mean_fwhm_nm:.3f} nm."
 
             self.lbl_fwhm_info.setText(
-                f"✅ Loaded: {len(self.ils_pixels)} Sigma points "
+                f"Loaded: {len(self.ils_pixels)} Sigma points "
                 f"(mean FWHM ≈ {mean_fwhm_nm:.3f} nm)"
             )
             self.lbl_fwhm_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
@@ -627,7 +627,7 @@ class ReferenceGeneratorDialog(QDialog):
                 peak_idx = int(np.argmax(intensity_array))
                 self.spin_peak_px.setValue(peak_idx)
             if hasattr(self, 'btn_load_lamp'):
-                self.btn_load_lamp.setText("✅ Lamp Synced from Calibration")
+                self.btn_load_lamp.setText("Lamp Synced from Calibration")
                 self.btn_load_lamp.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; font-weight: bold;")
 
     # ---------------------------------------------------------
@@ -757,7 +757,7 @@ class ReferenceGeneratorDialog(QDialog):
         if not dirpath:
             return
         self._sweep_outdir = dirpath
-        self.lbl_sweep_outdir.setText(f"✅ {dirpath}")
+        self.lbl_sweep_outdir.setText(f"{dirpath}")
         self.lbl_sweep_outdir.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
     def run_fwhm_sweep(self):
@@ -829,7 +829,7 @@ class ReferenceGeneratorDialog(QDialog):
             ax_bottom = self.fig.axes[1]
             ax_bottom.clear()
             ax_bottom.text(0.5, 0.5,
-                           "Validation moved to:\nSetup tab → 🎯 FWHM Best-Match",
+                           "Validation moved to:\nSetup tab →  FWHM Best-Match",
                            ha="center", va="center", transform=ax_bottom.transAxes,
                            fontsize=11, color="#555", style="italic")
             ax_bottom.set_xticks([]); ax_bottom.set_yticks([])
@@ -842,7 +842,7 @@ class ReferenceGeneratorDialog(QDialog):
                 f"{self._sweep_outdir}\n\n"
                 f"FWHM range: {fwhm_list[0]:.3f} ~ {fwhm_list[-1]:.3f} nm "
                 f"(step {step})\n\n"
-                f"Next: Setup tab → 🎯 FWHM Best-Match → point to this folder + α."
+                f"Next: Setup tab →  FWHM Best-Match → point to this folder + α."
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"FWHM sweep failed:\n{e}")

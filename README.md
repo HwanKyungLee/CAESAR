@@ -82,6 +82,16 @@ Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없�
 | **ZA / He** | Zero Air / Helium 보정 스캔. R(반사율) 계산에 쓰는 기준 측정 (flag 500 / 510) |
 | **Cold / Hot** | 두 측정 채널(저온·고온 캐비티). 데이터 컬럼 구조와 보정값이 다르다 |
 
+> ⚠ **Shift 부호 규약 — 외부 도구(QDOAS/DOASIS)와 비교할 때 반드시 확인**:
+> Augur의 `shift`는 `model(x) = reference(x + shift)`로 정의되어 있다. 이는
+> QDOAS/DOASIS 등이 따르는 표준 DOAS 관례(Platt & Stutz), `model(x) =
+> reference(x - shift)`와 **부호가 정반대**다 — 즉 `shift_Augur = -shift_표준`.
+> Augur 내부적으로는(VarPro/완전비선형/웜스타트 전부 동일 관례를 씀) 전혀
+> 문제가 없지만, 외부 도구와 값을 직접 비교하거나 다른 도구의 bound를 그대로
+> 가져와 쓸 때는 반드시 부호를 뒤집어야 한다. 자세한 배경은
+> `core/engine.py::get_model_components` 독스트링과
+> `diagnostics/qdoas_crossval_2026-09/`(2026-09-08 발견) 참조.
+
 ---
 
 ## 폴더 구조

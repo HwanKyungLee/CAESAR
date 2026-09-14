@@ -69,7 +69,7 @@ class MonitorWidget(QWidget):
     # Shared toolbar factory
     def _create_reset_toolbar(self, target_glw=None, target_pw=None):
         toolbar = QHBoxLayout()
-        btn = QPushButton("🔄 Reset View (Auto Range)")
+        btn = QPushButton("Reset View (Auto Range)")
         btn.setStyleSheet("background-color: #f5f5f5; font-weight: bold; border: 1px solid #ccc; padding: 4px;")
         if target_glw:
             btn.clicked.connect(lambda: self._reset_glw_views(target_glw))
@@ -96,7 +96,7 @@ class MonitorWidget(QWidget):
         layout.addLayout(self._create_reset_toolbar(target_glw=self.glw_comp))
         layout.addWidget(self.glw_comp)
         
-        self.tabs.addTab(self.tab_comp, "🧩 Components (Fast)")
+        self.tabs.addTab(self.tab_comp, "Components (Fast)")
 
     # =========================================================
     # [Tab 2] Fit View
@@ -124,7 +124,7 @@ class MonitorWidget(QWidget):
         self.p_resid.addItem(pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('k', style=Qt.PenStyle.DashLine)))
         
         layout.addWidget(self.glw_spec)
-        self.tabs.addTab(self.tab_spec, "📊 Fit View (Fast)")
+        self.tabs.addTab(self.tab_spec, "Fit View (Fast)")
 
     # =========================================================
     # [Tab 3] Trend (full dataset with free zoom/scroll)
@@ -182,7 +182,7 @@ class MonitorWidget(QWidget):
             self._trend_data[1]['sq'], self._trend_data[1]['rms']
         
         layout.addWidget(self.glw_trend)
-        self.tabs.addTab(self.tab_trend, "📈 Trend (Fast)")
+        self.tabs.addTab(self.tab_trend, "Trend (Fast)")
 
     # =========================================================
     # [Tab 4] Viewer
@@ -221,7 +221,7 @@ class MonitorWidget(QWidget):
         
         l_view.addWidget(self.pw_view)
         
-        grp_stat = QGroupBox("📊 Statistics")
+        grp_stat = QGroupBox("Statistics")
         h_stat = QHBoxLayout(grp_stat)
         self.lbl_max = QLabel("Max: 0"); self.lbl_min = QLabel("Min: 0")
         self.lbl_mean = QLabel("Mean: 0"); self.lbl_sat = QLabel("Status: OK")
@@ -280,7 +280,7 @@ class MonitorWidget(QWidget):
         self.lbl_mean.setText(f"Mean: {format_val(ymean)}")
         
         if ymax > 60000: 
-            self.lbl_sat.setText("⚠️ SATURATED"); self.lbl_sat.setStyleSheet("color: red; font-weight: bold")
+            self.lbl_sat.setText("SATURATED"); self.lbl_sat.setStyleSheet("color: red; font-weight: bold")
         else: 
             self.lbl_sat.setText("Status: OK"); self.lbl_sat.setStyleSheet("color: green; font-weight: bold")
             
@@ -529,7 +529,7 @@ class MonitorWidget(QWidget):
         layout = QVBoxLayout(self.tab_conc)
 
         bar = QHBoxLayout()
-        btn_reset = QPushButton("🔄 Reset View")
+        btn_reset = QPushButton("Reset View")
         btn_reset.setStyleSheet("background-color:#f5f5f5; font-weight:bold; border:1px solid #ccc; padding:4px;")
         btn_reset.clicked.connect(lambda: self._reset_glw_views(self.glw_conc))
         bar.addWidget(btn_reset)
@@ -539,7 +539,7 @@ class MonitorWidget(QWidget):
         self.cb_conc_gas.setFixedWidth(140)
         self.cb_conc_gas.currentIndexChanged.connect(lambda *_: self._relayout_conc())
         bar.addWidget(self.cb_conc_gas)
-        btn_png = QPushButton("📷 Save PNG")
+        btn_png = QPushButton("Save PNG")
         btn_png.clicked.connect(self._export_conc_png)
         bar.addWidget(btn_png)
         bar.addStretch(1)
@@ -552,7 +552,7 @@ class MonitorWidget(QWidget):
         self._conc_curves = {}
         self._conc_data   = {}
         self._conc_gases  = []
-        self.tabs.addTab(self.tab_conc, "🧪 Conc")
+        self.tabs.addTab(self.tab_conc, "Conc")
 
     @staticmethod
     def _conc_time_x(result_dict, row_index):

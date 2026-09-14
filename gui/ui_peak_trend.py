@@ -134,7 +134,7 @@ class PeakTrendWorker(QThread):
 class PeakTrendDialog(QDialog):
     def __init__(self, parent=None, default_dir=""):
         super().__init__(parent)
-        self.setWindowTitle("📈 Peak Trend (He / ZA / Sampling)")
+        self.setWindowTitle("Peak Trend (He / ZA / Sampling)")
         self.resize(980, 600)
         self._worker = None
         self._build(default_dir)
@@ -231,7 +231,7 @@ class PeakTrendDialog(QDialog):
 
     def _on_fail(self, msg):
         self._btn_run.setEnabled(True)
-        self._lbl.setText("❌ Failed")
+        self._lbl.setText("Failed")
         QMessageBox.warning(self, "Failed", msg)
 
     def _plot(self, out):
@@ -249,4 +249,4 @@ class PeakTrendDialog(QDialog):
             self._pw.plot(T, d["LO"], pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DotLine))
             self._pw.plot(T, d["A"], pen=pg.mkPen(col, width=1.5), symbol="o", symbolSize=5,
                           symbolBrush=col, name=f"{_LABEL[flag]} (avg·min/max, {d['n']} rows)")
-        self._lbl.setText("✅ Done (avg points + min/max dotted)")
+        self._lbl.setText("Done (avg points + min/max dotted)")

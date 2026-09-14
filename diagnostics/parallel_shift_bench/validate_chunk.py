@@ -8,10 +8,18 @@ per-scan NO2/CHOCHO ppb·shift 를 대조해 '청크==순차'인지 확인.
 
 엔진=시나리오 CH1(cold): wavecal Calib_20260523 + ILS적용 ref(NO2/CHOCHO/H2O).
 """
-import os, sys, glob
+import os, sys, glob, argparse, time
 import numpy as np
 
-ROOT = r'C:\Doasis_Work\CAESAR\CAESAR'
+# 2026-09-05: ROOT가 r'C:\Doasis_Work\CAESAR\CAESAR'로 하드코딩돼 있었는데, 이 경로는
+# 이제 이 기기에 존재하지 않음(C:\Doasis_Work 최상위엔 "data analysis"/"filed log"/
+# "Output"뿐 — CAESAR 서브폴더 없음). 즉 이 스크립트를 그대로 돌리면 import가
+# 실패하거나(경로 없음), 있었다 해도 어느 시점의 스냅샷인지 알 수 없는 낡은 복사본을
+# 쓸 위험이 있었음 — "실제 프로덕션 코드"를 검증한다는 이 스크립트의 목적과 어긋남.
+# 그래서 ROOT를 이 파일 위치 기준 상대경로로 계산해 "지금 실행 중인 이 저장소"를
+# 항상 쓰도록 고침(diagnostics/parallel_shift_bench/ 의 두 단계 위 = repo root).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(_HERE))
 sys.path.insert(0, ROOT)
 
 from PyQt6.QtCore import QCoreApplication
@@ -20,6 +28,10 @@ _app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 from core.engine import UniversalEngine
 from gui.worker import AnalysisWorker
 
+# 하위호환 기본값(존재하지 않는 경로일 수 있음) — 실제로는 아래 --alpha-dir/--wv-dir로
+# 덮어써서 사용. 2026-09-05 기준 실데이터 위치:
+#   --alpha-dir "C:\GHL\2026 yeosu\Output\alpha\10s\cold"
+#   --wv-dir    "C:\GHL\2026 yeosu\Output\wv_cal\cold"
 ALPHA_DIR = r'C:\Doasis_Work\Output\alpha\cold'
 WV = r'C:\Doasis_Work\Output\wv_cal\cold'
 DAY = '2026-05-17'
@@ -84,6 +96,18 @@ def build_scans(files):
     return scans
 
 def main():
+    global ALPHA_DIR, WV, DAY, NFILES, NCHUNKS, WARMUP
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--alpha-dir', default=ALPHA_DIR, help='dir containing <day>/*_alpha_trace.dat')
+    ap.add_argument('--wv-dir', default=WV, help='dir containing Calib_*Poly2.txt + Ref_*Dynamic-ILS-Applied.dat')
+    ap.add_argument('--day', default=DAY)
+    ap.add_argument('--nfiles', type=int, default=NFILES)
+    ap.add_argument('--nchunks', type=int, default=NCHUNKS)
+    ap.add_argument('--warmup', type=int, default=WARMUP)
+    args = ap.parse_args()
+    ALPHA_DIR, WV, DAY = args.alpha_dir, args.wv_dir, args.day
+    NFILES, NCHUNKS, WARMUP = args.nfiles, args.nchunks, args.warmup
+
     eng, wave = build_engine()
     if not eng.is_engine_ready():
         print('ENGINE NOT READY'); return
@@ -92,24 +116,30 @@ def main():
     scans = build_scans(files)
     print(f'files={len(files)} scans={len(scans)}')
 
-    # 순차 기준
+    # 순차 기준 — 진짜 프로덕션 VarPro를 스캔마다 호출하므로 여기서 몇십초 정도
+    # 조용히 있을 수 있음(스캔당 진행률 출력이 없음). 멈춘 게 아니라 정상.
+    print(f'sequential fit 시작 (real _fit_alpha_range, {len(scans)} scans, 진행률 출력 없음 — 정상적으로 조용함)...', flush=True)
+    t0 = time.time()
     seq_res, seq_sh, etal = w._fit_alpha_range(scans, body_start=0, init_shift=0.0, etalon_freq=None)
     seq = {gi: r for gi, r in seq_res}
-    print(f'seq done. etalon_freq={etal:.4f}')
+    print(f'seq done in {time.time()-t0:.1f}s. etalon_freq={etal:.4f}')
 
-    # 청크
+    # 청크 — 이것도 프로세스 병렬 아님(정확성만 검증하는 스크립트), 청크를 순서대로
+    # 한 프로세스 안에서 도니까 seq만큼 또는 그보다 (워밍업 replay 때문에) 조금 더 걸림.
     n = len(scans)
     bounds = np.linspace(0, n, NCHUNKS + 1, dtype=int)
     chunk = {}
+    t0 = time.time()
     for ci in range(NCHUNKS):
         bs, be = int(bounds[ci]), int(bounds[ci + 1])
         ws = max(0, bs - WARMUP)
         sub = scans[ws:be]
         body_start = bs - ws
+        print(f'  chunk {ci+1}/{NCHUNKS}: scans[{ws}:{be}] (본체 {bs}:{be}, warmup {ws}:{bs})...', flush=True)
         res, sh, _ = w._fit_alpha_range(sub, body_start=body_start, init_shift=0.0, etalon_freq=etal)
         for gi, r in res:
             chunk[gi] = r
-    print(f'chunk done ({NCHUNKS} chunks, warmup={WARMUP})')
+    print(f'chunk done in {time.time()-t0:.1f}s ({NCHUNKS} chunks, warmup={WARMUP})')
 
     # 대조
     gases = list(eng.gas_list)

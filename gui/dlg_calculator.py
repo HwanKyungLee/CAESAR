@@ -75,7 +75,7 @@ class CalculatorDialog(QDialog):
 
     def __init__(self, parent=None, datasets=None):
         super().__init__(parent)
-        self.setWindowTitle("🧮 Data Calculator — 다단계 수식")
+        self.setWindowTitle("Data Calculator — 다단계 수식")
         self.resize(940, 560)
         self._tables = {}          # path -> load_fit_table 결과(캐시)
         self._paths = list(datasets or [])
@@ -89,7 +89,7 @@ class CalculatorDialog(QDialog):
         root.addLayout(left, 3)
 
         btnbar = QHBoxLayout()
-        b_add_ds = QPushButton("📂 Add file…")
+        b_add_ds = QPushButton("Add file…")
         b_add_ds.clicked.connect(self._add_dataset_file)
         btnbar.addWidget(b_add_ds)
         btnbar.addWidget(QLabel("변수에 (파일, 컬럼)을 매핑하고 아래 수식을 쓰세요"))
@@ -129,7 +129,7 @@ class CalculatorDialog(QDialog):
         b_calc = QPushButton("▶ Compute")
         b_calc.setStyleSheet("font-weight:bold; background:#2196F3; color:white; padding:4px;")
         b_calc.clicked.connect(self._compute)
-        b_save = QPushButton("💾 Save CSV")
+        b_save = QPushButton("Save CSV")
         b_save.clicked.connect(self._save_csv)
         actbar.addWidget(b_calc)
         actbar.addWidget(b_save)
@@ -258,7 +258,7 @@ class CalculatorDialog(QDialog):
             col_combo.addItems(cols)
         col_combo.blockSignals(False)
         if path and not cols and getattr(self, "_last_col_err", "") and hasattr(self, "_msg"):
-            self._msg.setText(f"⚠ {self._last_col_err}")
+            self._msg.setText(f"{self._last_col_err}")
             self._msg.setStyleSheet("color:#c62828;")
 
     def _refresh_ref(self):
@@ -314,7 +314,7 @@ class CalculatorDialog(QDialog):
             res = safe_eval(expr, aligned)
             res = np.asarray(res, float) * np.ones_like(ref_t)  # 스칼라 결과 방어
         except Exception as e:
-            self._msg.setText(f"⚠ {e}")
+            self._msg.setText(f"{e}")
             self._msg.setStyleSheet("color:#c62828;")
             return
 
@@ -327,7 +327,7 @@ class CalculatorDialog(QDialog):
                           pen=pg.mkPen("#1565C0", width=2), name=self._result[2])
         n_ok = int(finite.sum())
         self._msg.setText(
-            f"✓ {expr}  →  n={n_ok}/{len(res)} finite, "
+            f"{expr}  →  n={n_ok}/{len(res)} finite, "
             f"min={np.nanmin(res):.4g}  max={np.nanmax(res):.4g}  "
             f"mean={np.nanmean(res):.4g}   (aligned to {ref})")
         self._msg.setStyleSheet("color:#2E7D32;")

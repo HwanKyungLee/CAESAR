@@ -120,15 +120,15 @@ class _RTExportWorker(QThread):
                     rdir, wave, cfg, file_list=flist, parallel=True,
                     progress_cb=lambda d, t, _l=label: self.progress.emit(d, t, _l))
                 if len(ks) == 0:
-                    self.log.emit(f"[{label}] ⚠️ 0 knots — not saved")
+                    self.log.emit(f"[{label}]  0 knots — not saved")
                     continue
                 processed = [_os.path.basename(f) for f in all_files]
                 RTP.save_rt(outp, ks, od, wv, label=label, config=cfg,
                             processed_files=processed)
-                self.log.emit(f"[{label}] ✅ {len(ks)} knots ({len(processed)} files) → {_os.path.basename(outp)}")
+                self.log.emit(f"[{label}]  {len(ks)} knots ({len(processed)} files) → {_os.path.basename(outp)}")
                 done.append(f"{label}({len(ks)})")
             except Exception as e:
-                self.log.emit(f"[{label}] ❌ failed: {e}\n{traceback.format_exc()}")
+                self.log.emit(f"[{label}]  failed: {e}\n{traceback.format_exc()}")
         self.finished.emit("  |  ".join(done) if done else "no R(t) saved")
 
 
@@ -161,14 +161,14 @@ class _RTAppendWorker(QThread):
                     outp, rdir, wave, cfg, file_list=flist, parallel=True,
                     progress_cb=lambda d, t, _l=label: self.progress.emit(d, t, _l))
                 if n_new == 0 and added:
-                    self.log.emit(f"[{label}] ⚠️ {len(added)} files processed but 0 valid knots (no He/ZA?)")
+                    self.log.emit(f"[{label}]  {len(added)} files processed but 0 valid knots (no He/ZA?)")
                 elif n_new == 0:
                     self.log.emit(f"[{label}] no new files — skipped")
                 else:
-                    self.log.emit(f"[{label}] ✅ +{n_new} knots ({len(added)} files) → {_os.path.basename(outp)}")
+                    self.log.emit(f"[{label}]  +{n_new} knots ({len(added)} files) → {_os.path.basename(outp)}")
                     done.append(f"{label}(+{n_new})")
             except Exception as e:
-                self.log.emit(f"[{label}] ❌ failed: {e}\n{traceback.format_exc()}")
+                self.log.emit(f"[{label}]  failed: {e}\n{traceback.format_exc()}")
         self.finished.emit("  |  ".join(done) if done else "no knots added")
 
 
@@ -242,7 +242,7 @@ class _ChannelRWorker(QThread):
                     n_skip = len(candidates) - len(scan_list)
                     if n_skip:
                         self.log.emit(
-                            f"[{label}] ⏭️ skip {n_skip} already-computed file(s); "
+                            f"[{label}] ⏭ skip {n_skip} already-computed file(s); "
                             f"scanning {len(scan_list)} new")
 
                 _buf   = io.StringIO()
@@ -261,7 +261,7 @@ class _ChannelRWorker(QThread):
                 # 새로 계산된 파일: 곡선 저장 + npz 증분 머지 (재스캔 없이 results 재사용)
                 if results:
                     rtm.save_r_curves_per_file(results, f"R_{label}", self.out_dir)
-                    self.log.emit(f"[{label}] ✅ {len(results)} new cycles")
+                    self.log.emit(f"[{label}]  {len(results)} new cycles")
                     if self.auto_npz:
                         try:
                             import rt_precompute as RTP
@@ -269,7 +269,7 @@ class _ChannelRWorker(QThread):
                                 npz_path, results, raw_dir, wave_nm, rtcfg,
                                 file_list=flist)
                             self.log.emit(
-                                f"[{label}] 🔄 α npz +{n_new} new knots "
+                                f"[{label}]  α npz +{n_new} new knots "
                                 f"(total {n_tot}) → {_os.path.basename(npz_path)}")
                             # 계단 가드: 머지된 npz에서 계단 후보 감지 → 경고 로그
                             # (보고만 — knot은 건드리지 않음. 분절은 α 생성 시 적용)
@@ -282,13 +282,13 @@ class _ChannelRWorker(QThread):
                             npz_gaps = RTP.find_date_gaps(npz_path)
                             if npz_gaps:
                                 self.log.emit(
-                                    f"[{label}] ⚠️ {npz_gaps['n_days']} day(s) with no data "
+                                    f"[{label}]  {npz_gaps['n_days']} day(s) with no data "
                                     f"between {npz_gaps['first']}~{npz_gaps['last']}: "
                                     + ", ".join(npz_gaps["missing"]))
                         except Exception as _e:
-                            self.log.emit(f"[{label}] ⚠️ α npz update failed: {_e}")
+                            self.log.emit(f"[{label}]  α npz update failed: {_e}")
                 elif not self.skip_done:
-                    self.log.emit(f"[{label}] ⚠️ no results")
+                    self.log.emit(f"[{label}]  no results")
 
                 # ── 플롯/트렌드: 스킵 시 기존 트렌드 dat과 합쳐 전체를 보존 ──
                 # 스킵된 파일은 이번 results에 없으므로, 기존 트렌드 dat을 불러와
@@ -316,7 +316,7 @@ class _ChannelRWorker(QThread):
                                     "color": color, "npz_gaps": npz_gaps})
 
             except Exception as e:
-                self.log.emit(f"[{label}] ❌ {e}\n{traceback.format_exc()}")
+                self.log.emit(f"[{label}]  {e}\n{traceback.format_exc()}")
                 all_results.append({"label": label, "results": [], "color": color,
                                     "npz_gaps": None})
 
@@ -355,3 +355,38 @@ class _HeCheckWorker(QThread):
                 new_files, he_map = [], {}
             results.append((label, raw_dir, wave, rtcfg, flist, out_path, new_files, he_map))
         self.finished.emit(results)
+
+
+class DayAuditWorker(QThread):
+    """백그라운드 측정일 감사 (core.day_audit).
+
+    하루치 raw는 ~2 GB라 메인 스레드에서 돌리면 GUI가 수십 초 멈춘다. flag 열만
+    스트리밍하지만 파일 자체는 다 읽어야 하므로(한 줄 25 KB) I/O가 지배한다.
+    """
+    progress = pyqtSignal(str)          # 진행 중인 날짜
+    done = pyqtSignal(object)           # {date: AuditReport}
+    failed = pyqtSignal(str)
+
+    def __init__(self, jobs, expected_period_sec=None):
+        """jobs = [(date, [raw 파일경로, …]), …]"""
+        super().__init__()
+        self.jobs = list(jobs)
+        self.expected_period_sec = expected_period_sec
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        try:
+            from core.day_audit import audit_day
+            out = {}
+            for date, files in self.jobs:
+                if self._stop:
+                    break
+                self.progress.emit(date)
+                out[date] = audit_day("", date, files=files,
+                                      expected_period_sec=self.expected_period_sec)
+            self.done.emit(out)
+        except Exception as e:                       # noqa: BLE001 — 진단이 앱을 죽이면 안 된다
+            self.failed.emit(str(e))

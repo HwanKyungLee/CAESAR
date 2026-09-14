@@ -48,9 +48,9 @@ class TimeSeriesMode(PlotMode):
         row.addWidget(b_r)
         lay.addLayout(row)
         row2 = QHBoxLayout()
-        b_c = QPushButton("🎨 Color")
-        b_s = QPushButton("✏ Style")
-        b_n = QPushButton("✎ Name")
+        b_c = QPushButton("Color")
+        b_s = QPushButton("Style")
+        b_n = QPushButton("Name")
         b_del = QPushButton("− Remove")
         b_c.clicked.connect(self._pick_color)
         b_s.clicked.connect(self._edit_style)
@@ -66,7 +66,7 @@ class TimeSeriesMode(PlotMode):
         from PyQt6.QtWidgets import QTimeEdit
         from PyQt6.QtCore import QTime
         nrow = QHBoxLayout()
-        self._chk_night = QCheckBox("🌙 Night")
+        self._chk_night = QCheckBox("Night")
         self._chk_night.setToolTip("저녁~새벽 구간 음영(일별). 시각·색 지정 가능.\n"
                                    "시간축이 있을 때만 적용.")
         self._chk_night.toggled.connect(lambda *_: self.render())
@@ -75,7 +75,7 @@ class TimeSeriesMode(PlotMode):
         for te in (self._te_ns, self._te_ne):
             te.setFixedWidth(62)
             te.timeChanged.connect(lambda *_: self._sync_night())
-        b_nc = QPushButton("🎨"); b_nc.setFixedWidth(30); b_nc.setToolTip("음영 색")
+        b_nc = QPushButton("Col"); b_nc.setFixedWidth(30); b_nc.setToolTip("음영 색")
         b_nc.clicked.connect(self._pick_night_color)
         nrow.addWidget(self._chk_night)
         nrow.addWidget(self._te_ns); nrow.addWidget(QLabel("→")); nrow.addWidget(self._te_ne)
@@ -87,8 +87,8 @@ class TimeSeriesMode(PlotMode):
                                  "오차 컬럼이 있는 시리즈에만 표시.")
         self._chk_err.toggled.connect(lambda *_: self.render())
         lay.addWidget(self._chk_err)
-        self._chk_split = QCheckBox("📊 Split into panels (Publish)")
-        self._chk_split.setToolTip("내보내기(🖼 Publish) 시 시리즈를 종별 패널(세로 스택, x축 공유)로\n"
+        self._chk_split = QCheckBox("Split into panels (Publish)")
+        self._chk_split.setToolTip("내보내기( Publish) 시 시리즈를 종별 패널(세로 스택, x축 공유)로\n"
                                    "분리. 화면 미리보기는 겹쳐 표시(논문그림용).")
         self._chk_split.toggled.connect(
             lambda on: self.host.set_status("Split panels: Publish 시 적용됨" if on else ""))
@@ -122,9 +122,9 @@ class TimeSeriesMode(PlotMode):
             self._list.clearSelection()
             item.setSelected(True)
         menu = QMenu(self._list)
-        menu.addAction("🎨 Color", self._pick_color)
-        menu.addAction("✏ Style", self._edit_style)
-        menu.addAction("✎ Rename", self._rename)
+        menu.addAction("Color", self._pick_color)
+        menu.addAction("Style", self._edit_style)
+        menu.addAction("Rename", self._rename)
         menu.addAction("↔ Toggle L/R axis", lambda: self._toggle_axis(item))
         menu.addSeparator()
         menu.addAction("− Remove", self._remove)
@@ -477,7 +477,7 @@ class TimeSeriesMode(PlotMode):
             host.set_status(f"{len(specs)} series"
                             + (f" · resample {host.resample_sec:g}s" if host.resample_sec else "")
                             + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else "")
-                            + (f" · ⚠ time shift {host.time_shift_hours:+g}h" if host.time_shift_hours else ""))
+                            + (f"·  time shift {host.time_shift_hours:+g}h" if host.time_shift_hours else ""))
 
     def _render_mpl_split(self, specs, fig):
         """Publish 분할: 시리즈마다 패널 1개(세로 스택, x축 공유). 종별 분리 그림.
@@ -880,11 +880,11 @@ class HeatmapMode(PlotMode):
         lay.addWidget(QLabel("선반에서 컬럼 2개 이상 선택\n(없으면 전체 컬럼 사용).\n"
                              "시간축이 있으면 첫 컬럼 시각격자에 맞춰 정렬."))
         row = QHBoxLayout()
-        b_pin = QPushButton("📌 Pin selection")
+        b_pin = QPushButton("Pin selection")
         b_pin.setToolTip("현재 트리에서 선택된 컬럼들을 고정 — 이후 트리 선택이 바뀌어도\n"
                          "이 집합을 계속 사용하고, 설정 저장/불러오기에도 보존됨.")
         b_pin.clicked.connect(self._pin_selection)
-        b_unpin = QPushButton("✕ Unpin")
+        b_unpin = QPushButton("Unpin")
         b_unpin.setToolTip("고정 해제 — 다시 트리 선택을 실시간으로 따라감.")
         b_unpin.clicked.connect(self._unpin_selection)
         row.addWidget(b_pin); row.addWidget(b_unpin)
@@ -892,7 +892,7 @@ class HeatmapMode(PlotMode):
         self._lbl_pin = QLabel("")
         self._lbl_pin.setStyleSheet("color:#666;")
         lay.addWidget(self._lbl_pin)
-        b = QPushButton("↻ Compute")
+        b = QPushButton("Compute")
         b.clicked.connect(self.render)
         lay.addWidget(b)
         lay.addStretch(1)
@@ -901,7 +901,7 @@ class HeatmapMode(PlotMode):
 
     def _update_pin_label(self):
         if hasattr(self, "_lbl_pin"):
-            self._lbl_pin.setText(f"📌 {len(self._pinned_cols)}개 컬럼 핀됨"
+            self._lbl_pin.setText(f"{len(self._pinned_cols)}개 컬럼 핀됨"
                                   if self._pinned_cols else "핀 없음 (트리 선택 사용)")
 
     def _pin_selection(self):
@@ -1213,7 +1213,7 @@ class DiurnalMode(PlotMode):
         self._shift.setToolTip("로컬 시각에 더할 시간(예: 데이터가 UTC면 KST=+9)")
         self._shift.valueChanged.connect(lambda *_: self.render())
         lay.addWidget(self._shift)
-        self._chk_wrap = QCheckBox("🔁 하루 닫기 (0→24h)")
+        self._chk_wrap = QCheckBox("하루 닫기 (024h)")
         self._chk_wrap.setToolTip("0시 값을 24시에 복제해 하루 주기를 닫음 → 선이 오른쪽 끝까지\n"
                                   "이어져 '23~24시 빈 곳' 착시 제거. (데이터는 그대로 0–23시 24개)")
         self._chk_wrap.toggled.connect(lambda *_: self.render())

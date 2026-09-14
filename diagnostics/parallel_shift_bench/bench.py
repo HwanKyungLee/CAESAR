@@ -26,6 +26,13 @@ from scipy.interpolate import interp1d
 
 ALPHA_DIR = r'C:\Doasis_Work\Output\alpha\cold'
 REF_DIR   = r'C:\Doasis_Work\Output\wv_cal\cold'
+# 2026-09-05: C:\Doasis_Work\Output는 이 세션에서 접근이 막혀 있었음(폴더 권한
+# 거부). 이후 사용자가 "C:\GHL\2026 yeosu\Output"를 연결 — 여기에 실제 여수
+# 캠페인 alpha(10s/60s, cold/hot ch1/ch2, 2026-05-17~)와 wv_cal(cold/roi1/roi2)이
+# 있음을 확인. 위 두 상수는 하위호환용 기본값으로 남겨두고, --alpha-dir/--ref-dir로
+# 덮어쓸 수 있게 함. 실행 예:
+#   python bench.py --alpha-dir "C:\GHL\2026 yeosu\Output\alpha\10s\cold" \
+#                    --ref-dir   "C:\GHL\2026 yeosu\Output\wv_cal\cold"
 OUT_DIR   = os.path.join(os.path.dirname(__file__), 'out')
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -38,10 +45,10 @@ STEP_LIMIT  = 0.5                          # 시나리오 step_limit (px/scan)
 
 
 # ─── 데이터 로드 ──────────────────────────────────────────────────────────────
-def load_refs(n_pix):
+def load_refs(n_pix, ref_dir=REF_DIR):
     refs, scale = {}, {}
     for g in GAS_LIST:
-        fs = glob.glob(os.path.join(REF_DIR, f'Ref_{g}*Dynamic-ILS-Applied.dat'))
+        fs = glob.glob(os.path.join(ref_dir, f'Ref_{g}*Dynamic-ILS-Applied.dat'))
         arr = np.loadtxt(fs[0], comments='#')
         assert len(arr) == n_pix, f'{g}: {len(arr)} != {n_pix}'
         scale[g] = 10.0 ** np.floor(np.log10(np.max(np.abs(arr))))
@@ -192,13 +199,17 @@ def main():
     ap.add_argument('--nfiles', type=int, default=4)
     ap.add_argument('--warmup', type=int, default=40)
     ap.add_argument('--smooth', type=int, default=15)
+    ap.add_argument('--alpha-dir', default=None, help=f'override ALPHA_DIR (default: {ALPHA_DIR})')
+    ap.add_argument('--ref-dir', default=None, help=f'override REF_DIR (default: {REF_DIR})')
     args = ap.parse_args()
 
-    files = sorted(glob.glob(os.path.join(ALPHA_DIR, args.day, '*_alpha_trace.dat')))[:args.nfiles]
-    print(f'files: {len(files)}  ({args.day})')
+    alpha_dir = args.alpha_dir or ALPHA_DIR
+    ref_dir = args.ref_dir or REF_DIR
+    files = sorted(glob.glob(os.path.join(alpha_dir, args.day, '*_alpha_trace.dat')))[:args.nfiles]
+    print(f'files: {len(files)}  ({args.day}, alpha_dir={alpha_dir})')
     wave, A, T, P, doy = load_alpha_series(files)
     print(f'scans: {len(A)}  n_pix: {A.shape[1]}')
-    refs, scale = load_refs(A.shape[1])
+    refs, scale = load_refs(A.shape[1], ref_dir)
     A = A[:, :]                       # 전체 px (fit_idx로 잘림)
     F = InnerFit(wave, refs)
     Af = A[:, :]                      # fit 안에서 fit_idx 슬라이스

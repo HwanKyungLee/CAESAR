@@ -64,7 +64,7 @@ class MaskDialog(QDialog):
     """
     def __init__(self, gas_list):
         super().__init__()
-        self.setWindowTitle("✂️ Smart Masking Tool")
+        self.setWindowTitle("Smart Masking Tool")
         _s = _ui_scale()
         self.resize(int(400 * _s), int(250 * _s))
         
@@ -108,7 +108,7 @@ class MaskDialog(QDialog):
         layout_opt.addLayout(layout_manual)
         
         # [Option B] Auto-Cut
-        self.rb_auto = QRadioButton("🪄 Auto-Cut (Remove Weak Signal)")
+        self.rb_auto = QRadioButton("Auto-Cut (Remove Weak Signal)")
         self.bg.addButton(self.rb_auto)
         layout_opt.addWidget(self.rb_auto)
         

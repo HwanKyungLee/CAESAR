@@ -136,7 +136,7 @@ class RCalibratorDialog(QDialog):
         grp_ch_lay.setContentsMargins(6, 6, 6, 4)
 
         hdr = QHBoxLayout()
-        btn_load_panel = QPushButton("🔄  Load channels from left panel")
+        btn_load_panel = QPushButton("Load channels from left panel")
         btn_load_panel.setStyleSheet(
             "background-color:#1565C0;color:white;font-weight:bold;")
         btn_load_panel.setToolTip(
@@ -175,7 +175,7 @@ class RCalibratorDialog(QDialog):
 
         gl.addWidget(QLabel("Result folder:"), 0, 0, Qt.AlignmentFlag.AlignRight)
         self._le_out_dir = QLineEdit(".")
-        btn_out = QPushButton("📂"); btn_out.setFixedWidth(28)
+        btn_out = QPushButton("..."); btn_out.setFixedWidth(28)
         btn_out.clicked.connect(lambda: self._pick_dir(self._le_out_dir))
         _od = QHBoxLayout(); _od.addWidget(self._le_out_dir, stretch=1); _od.addWidget(btn_out)
         _od_w = QWidget(); _od_w.setLayout(_od)
@@ -240,7 +240,7 @@ class RCalibratorDialog(QDialog):
 
         # 평소엔 Start(auto-update 체크) 하나로 npz가 증분 관리된다. Rebuild는
         # 설정 변경/손상 시 npz를 처음부터 다시 만드는 비상용 탈출구(덮어쓰기).
-        btn_rt = QPushButton("🔁  Rebuild npz (full)")
+        btn_rt = QPushButton("Rebuild npz (full)")
         btn_rt.setStyleSheet(
             "background-color:#1976D2;color:white;font-weight:bold;height:36px;")
         btn_rt.setToolTip(
@@ -251,7 +251,7 @@ class RCalibratorDialog(QDialog):
         self._btn_rt_export = btn_rt
         btn_row.addWidget(btn_rt)
 
-        btn_verify = QPushButton("🔍  Verify npz")
+        btn_verify = QPushButton("Verify npz")
         btn_verify.setStyleSheet(
             "background-color:#00796B;color:white;font-weight:bold;height:36px;")
         btn_verify.setToolTip(
@@ -264,7 +264,7 @@ class RCalibratorDialog(QDialog):
 
         # 계단 가드 수동 분절 — 운영자가 아는 이벤트(거울 청소/재정렬 시각)를
         # npz에 기록하면 α 생성 시 그 시각에서 R(t) PCHIP 보간이 강제 분절된다.
-        btn_breaks = QPushButton("⛓  R(t) Breaks…")
+        btn_breaks = QPushButton("R(t) Breaks…")
         btn_breaks.setStyleSheet(
             "background-color:#5D4037;color:white;font-weight:bold;height:36px;")
         btn_breaks.setToolTip(
@@ -349,7 +349,7 @@ class RCalibratorDialog(QDialog):
         le_raw_dir.setPlaceholderText("Raw data folder")
         row.addWidget(le_raw_dir, stretch=1)
 
-        btn_dir = QPushButton("📂")
+        btn_dir = QPushButton("...")
         btn_dir.setFixedWidth(28)
         btn_dir.clicked.connect(
             lambda _ch=ch_num, _le=le_raw_dir: self._pick_raw_dir(_le, _ch))
@@ -366,7 +366,7 @@ class RCalibratorDialog(QDialog):
             "Hot 2-channel: same raw_dir, set ch1·ch2 separately")
         row.addWidget(cb_raw_ch)
 
-        lbl_wv = QLabel("✅ wavecal" if wv_ok else "❌ no wavecal")
+        lbl_wv = QLabel("wavecal" if wv_ok else "no wavecal")
         lbl_wv.setStyleSheet(
             "color:#2E7D32;font-weight:bold;" if wv_ok else "color:#C62828;")
         lbl_wv.setFixedWidth(104)
@@ -393,7 +393,7 @@ class RCalibratorDialog(QDialog):
         lbl_tz.setToolTip("TZ — set in left panel")
         row.addWidget(lbl_tz)
 
-        btn_del = QPushButton("✕")
+        btn_del = QPushButton("X")
         btn_del.setFixedWidth(22)
         btn_del.setStyleSheet("color:#AAA;")
         btn_del.setToolTip("Delete this channel row")
@@ -607,7 +607,7 @@ class RCalibratorDialog(QDialog):
             diffs.append(f"He primary={p_he}(panel)≠{_RHE}(R-cal)")
         if diffs:
             self._log.append(
-                f"⚠️ [flag mismatch] R-cal uses raw_parser pure-injecting flags "
+                f"[flag mismatch] R-cal uses raw_parser pure-injecting flags "
                 f"({_RZA}/{_RHE}), NOT the left-panel flags: " + "; ".join(diffs) +
                 f". R(t)/R-cal proceeds with {_RZA}/{_RHE}; set panel ZA/He back to "
                 f"{_RZA}/{_RHE} to keep R consistent with Alpha Generator's I0/He selection.")
@@ -617,7 +617,7 @@ class RCalibratorDialog(QDialog):
         """채널별 scan_directory → 시계열 + 스펙트럼 플롯."""
         if not self._ch_rows:
             QMessageBox.warning(self, "No channels",
-                "Load channels first.\nClick the '🔄 Load channels from left panel' button.")
+                "Load channels first.\nClick the ' Load channels from left panel' button.")
             return
         self._warn_flag_mismatch()
 
@@ -831,19 +831,19 @@ class RCalibratorDialog(QDialog):
             try:
                 rep = RTP.verify_npz(npz_path, raw_dir, file_list=flist)
             except Exception as e:
-                summary_lines.append(f"[{label}]  ❌ verify failed: {e}")
+                summary_lines.append(f"[{label}]   verify failed: {e}")
                 continue
 
             if not rep["exists"]:
                 summary_lines.append(
-                    f"[{label}]  ⚠️ no npz yet ({_os.path.basename(npz_path)}) — "
+                    f"[{label}]  no npz yet ({_os.path.basename(npz_path)}) — "
                     f"{rep['n_raw']} raw files uncomputed")
                 any_issue = True
                 continue
 
             gaps = rep["gaps"]
             unc  = rep["uncomputed"]
-            status = "✅ clean" if (not gaps and not unc) else "⚠️ issues"
+            status = "clean" if (not gaps and not unc) else "issues"
             if gaps or unc:
                 any_issue = True
             summary_lines.append(
@@ -1038,9 +1038,9 @@ class RCalibratorDialog(QDialog):
         self._t_start = None; self._btn_run.setEnabled(True)
         
         if out_dir:
-            self._log.append(f"\n✅ done → result folder: {out_dir}")
+            self._log.append(f"\n done → result folder: {out_dir}")
         else:
-            self._log.append("\n❌ error — check the log above.")
+            self._log.append("\n error — check the log above.")
 
     def closeEvent(self, event):
         if self._worker is not None and self._worker.isRunning():

@@ -96,13 +96,13 @@ class ResultViewerWidget(QWidget):
 
         bar = FlowLayout(spacing=6)
         bar.addWidget(_grp("Open"))
-        self._btn = QPushButton("📂 File")
+        self._btn = QPushButton("File")
         self._btn.clicked.connect(self._open)
         bar.addWidget(self._btn)
-        self._btn_folder = QPushButton("📁 Folder")
+        self._btn_folder = QPushButton("Folder")
         self._btn_folder.clicked.connect(self._open_folder)
         bar.addWidget(self._btn_folder)
-        self._btn_dates = QPushButton("📅 Dates")
+        self._btn_dates = QPushButton("Dates")
         self._btn_dates.setToolTip(
             "일별 핏 버킷({YYMMDD}/{neg}/{QC}/)에서 기간·시리즈를 골라 자동 머지해 열기.\n"
             "머지 파일은 _derived/에 저장(캐시 재사용) — 원본 일별 파일은 그대로.")
@@ -177,7 +177,7 @@ class ResultViewerWidget(QWidget):
         # ── 툴바 2줄: [분석] | [내보내기] (Overlay·Diurnal은 Plot Maker로 이관) ──
         fbar = FlowLayout(spacing=6)
         fbar.addWidget(_grp("Analyze"))
-        self._btn_calc = QPushButton("🧮 Calculator")
+        self._btn_calc = QPushButton("Calculator")
         self._btn_calc.setToolTip(
             "데이터 계산기: 여러 결과 컬럼을 변수(A,B,C…)에 매핑하고 (A-B)/C 같은 수식으로\n"
             "가공 → 미리보기 + CSV 저장. 교차 데이터셋은 시각격자에 자동 보간.\n"
@@ -188,7 +188,7 @@ class ResultViewerWidget(QWidget):
         self._btn_stats.setToolTip("Per-gas mean/median/σ/n for current fit (range-aware)")
         self._btn_stats.clicked.connect(self._show_stats)
         fbar.addWidget(self._btn_stats)
-        self._btn_to_pm = QPushButton("📉 To Plot Maker")
+        self._btn_to_pm = QPushButton("To Plot Maker")
         self._btn_to_pm.setToolTip("선택(없으면 현재) 파일을 Plot Maker 선반으로 보내\n"
                                    "겹쳐비교·Diurnal·산점도 등 자유 합성")
         self._btn_to_pm.clicked.connect(self._to_plot_maker)
@@ -196,7 +196,7 @@ class ResultViewerWidget(QWidget):
 
         fbar.addWidget(_sep())
         fbar.addWidget(_grp("Export"))
-        self._btn_region = QPushButton("⏱ Range")
+        self._btn_region = QPushButton("Range")
         self._btn_region.setCheckable(True)
         self._btn_region.setToolTip("Show draggable time-range handles on the plot")
         self._btn_region.toggled.connect(self._toggle_region)
@@ -212,7 +212,7 @@ class ResultViewerWidget(QWidget):
             de.setToolTip("Export/Stats time range (synced with drag handles)")
             de.editingFinished.connect(self._on_range_edited)
             fbar.addWidget(de)
-        self._btn_slice = QPushButton("✂ Export")
+        self._btn_slice = QPushButton("Export")
         self._btn_slice.setToolTip("Save the time range (or all) as a new result file.\n"
                                    "Multiple selected files in the list are merged first.\n"
                                    "Concentration CSV (e.g. Calculator output): saves the whole file "
@@ -220,11 +220,11 @@ class ResultViewerWidget(QWidget):
                                    "(0 shift = plain copy).")
         self._btn_slice.clicked.connect(self._export_region)
         fbar.addWidget(self._btn_slice)
-        self._btn_merge = QPushButton("🔗 Merge")
+        self._btn_merge = QPushButton("Merge")
         self._btn_merge.setToolTip("Merge selected same-format result files in time order")
         self._btn_merge.clicked.connect(self._merge_files)
         fbar.addWidget(self._btn_merge)
-        self._btn_png = QPushButton("📷 PNG")
+        self._btn_png = QPushButton("PNG")
         self._btn_png.setToolTip("Export current plots as high-resolution PNG (2400 px wide,\n"
                                  "top+bottom combined). For papers/reports.")
         self._btn_png.clicked.connect(self._export_png)
@@ -245,7 +245,30 @@ class ResultViewerWidget(QWidget):
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.itemClicked.connect(self._on_list_item)
         self._list.itemDoubleClicked.connect(self._on_list_double)
-        hsplit.addWidget(self._list)
+
+        # 좌측 아래: 같은 날·같은 채널의 **버전들**(B3). 파라미터를 바꿔 여러 번 돌리는 게
+        # 실제 작업 방식인데 지금껏 파일명으로만 구분했다 — 그런데 파일명이 설정을 다
+        # 담지 못한다. `.meta.json`을 읽어 무엇이 달라졌는지 한 줄로 보여준다.
+        lsplit = QSplitter(Qt.Orientation.Vertical)
+        lsplit.addWidget(self._list)
+        _vw = QWidget()
+        _vl = QVBoxLayout(_vw)
+        _vl.setContentsMargins(0, 4, 0, 0)
+        _vl.setSpacing(2)
+        self._ver_hdr = QLabel("Versions")
+        self._ver_hdr.setStyleSheet("color:#888; font-weight:bold;")
+        _vl.addWidget(self._ver_hdr)
+        self._ver_list = QListWidget()
+        self._ver_list.setToolTip(
+            "Other saved runs of the same day and channel, read from their .meta.json.\n"
+            "Each line: version · runid · saved time · median RMS · what changed vs the\n"
+            "previous version.  Click one to load it.\n"
+            "Files without a .meta.json do not appear — run tools/backfill_meta.py.")
+        self._ver_list.itemClicked.connect(self._on_version_click)
+        _vl.addWidget(self._ver_list)
+        lsplit.addWidget(_vw)
+        lsplit.setSizes([320, 200])
+        hsplit.addWidget(lsplit)
 
         self._fit_cache = None   # 최근 로드한 fit 테이블(포인트클릭 α 팝업용)
 
@@ -258,7 +281,29 @@ class ResultViewerWidget(QWidget):
             pw.addLegend(offset=(10, 10))
         psplit.addWidget(self._pw_top)
         psplit.addWidget(self._pw_bot)
-        psplit.setSizes([400, 250])
+
+        # ── B2: 핏 결과 전용 세로 스택 (종별 레인 + shift/squeeze + RMS) ──
+        # 기존 6개 핸들러(r_trend·r_curve·alpha·reference·concentration·array)는
+        # 계속 _pw_top/_pw_bot을 쓴다 — fit일 때만 이 스택으로 갈아끼운다.
+        self._stack_host = QWidget()
+        self._stack_lay = QVBoxLayout(self._stack_host)
+        self._stack_lay.setContentsMargins(0, 0, 0, 0)
+        self._stack_lay.setSpacing(2)
+        self._lanes: list = []          # [(key, PlotWidget)] — 재사용 풀
+        psplit.addWidget(self._stack_host)
+
+        # 클릭한 스캔의 상세(아래 패널) — 시계열을 가리지 않고 같은 화면에 뜬다.
+        # 예전엔 팝업이라 창을 옮겨가며 봐야 했다.
+        self._pw_detail = pg.PlotWidget()
+        self._pw_detail.setBackground('w')
+        self._pw_detail.showGrid(x=True, y=True, alpha=0.3)
+        self._pw_detail.addLegend(offset=(10, 10))
+        self._pw_detail.setLabel("bottom", "Wavelength (nm) / pixel")
+        self._pw_detail.setTitle("Scan detail — click a point above")
+        psplit.addWidget(self._pw_detail)
+
+        self._psplit = psplit
+        psplit.setSizes([400, 250, 500, 220])
         hsplit.addWidget(psplit)
         hsplit.setSizes([240, 780])
         root.addWidget(hsplit, 1)
@@ -302,17 +347,17 @@ class ResultViewerWidget(QWidget):
         self._browse_dir(d)
 
     def _open_by_date(self):
-        """📅 일별 버킷에서 기간·시리즈 선택 → 자동 머지 파일들을 목록에 올리고 첫 개 표시."""
+        """일별 버킷에서 기간·시리즈 선택  자동 머지 파일들을 목록에 올리고 첫 개 표시."""
         from gui.dlg_date_load import DateLoadDialog
         dlg = DateLoadDialog(self)
         if not dlg.exec() or not dlg.loaded_paths:
             return
         self._list.clear()
         for p in dlg.loaded_paths:
-            it = QListWidgetItem(f"📄  {os.path.basename(p)}")
+            it = QListWidgetItem(f"{os.path.basename(p)}")
             it.setData(Qt.ItemDataRole.UserRole, ("file", p))
             self._list.addItem(it)
-        self._lbl.setText(f"📅 {len(dlg.loaded_paths)} merged series — click to view")
+        self._lbl.setText(f"{len(dlg.loaded_paths)} merged series — click to view")
         self._lbl.setStyleSheet("color:#1565C0;")
         self._path = dlg.loaded_paths[0]
         self._reload()
@@ -329,7 +374,7 @@ class ResultViewerWidget(QWidget):
         # 상위로 가기
         parent = os.path.dirname(d.rstrip('\\/'))
         if parent and parent != d:
-            up = QListWidgetItem("📁  ..")
+            up = QListWidgetItem("..")
             up.setData(Qt.ItemDataRole.UserRole, ("dir", parent))
             self._list.addItem(up)
         # 하위 폴더 (결과파일을 품은 것만 — 빈 트리 숨김)
@@ -341,7 +386,7 @@ class ResultViewerWidget(QWidget):
                 continue
             nfile = sum(len(glob.glob(os.path.join(p, '**', '*' + e), recursive=True))
                         for e in self._RESULT_EXTS)
-            it = QListWidgetItem(f"📁  {os.path.basename(p)}/   ({nfile})")
+            it = QListWidgetItem(f"{os.path.basename(p)}/  ({nfile})")
             it.setData(Qt.ItemDataRole.UserRole, ("dir", p))
             self._list.addItem(it)
         # 이 폴더 직속 결과파일 (재귀 X)
@@ -352,10 +397,10 @@ class ResultViewerWidget(QWidget):
                 k = self._detect(f)
             except Exception:
                 k = "array"
-            it = QListWidgetItem(f"📄  {os.path.basename(f)}   [{_KIND_KO.get(k, k)}]")
+            it = QListWidgetItem(f"{os.path.basename(f)}  [{_KIND_KO.get(k, k)}]")
             it.setData(Qt.ItemDataRole.UserRole, ("file", f))
             self._list.addItem(it)
-        self._lbl.setText(f"📁 {os.path.basename(d) or d}  —  {len(subdirs)} folders · {len(files)} files"
+        self._lbl.setText(f"{os.path.basename(d) or d}  —  {len(subdirs)} folders · {len(files)} files"
                           + ("  (double-click folder to enter)" if subdirs else ""))
         self._lbl.setStyleSheet("color:#1565C0;")
 
@@ -377,6 +422,88 @@ class ResultViewerWidget(QWidget):
             self._path = data[1]
             self._reload()
 
+    # ── 버전 목록 (B3) ────────────────────────────────────────────────
+    def _refresh_versions(self, path):
+        """현재 파일과 같은 날·채널의 저장본들을 meta에서 읽어 목록으로."""
+        from core.run_meta import find_versions, diff_meta, summarize_diff, read_meta
+        self._ver_list.clear()
+        self._ver_hdr.setText("Versions")
+        try:
+            versions = find_versions(path) if path else []
+        except OSError:
+            versions = []
+        if not versions:
+            self._ver_hdr.setText("Versions  —  no .meta.json found")
+            it = QListWidgetItem("(run tools/backfill_meta.py to index existing results)")
+            it.setForeground(Qt.GlobalColor.gray)
+            self._ver_list.addItem(it)
+            return
+
+        cur = os.path.abspath(path)
+        me = read_meta(path) or {}
+        self._ver_hdr.setText(f"Versions  —  {len(versions)} run(s), "
+                              f"ch{me.get('channel')} {me.get('label') or ''}".rstrip())
+        prev = None
+        for i, v in enumerate(versions, 1):
+            m = v["meta"]
+            when = str(m.get("created") or "")[:16].replace("T", " ")
+            rms = self._median_rms(v["path"])
+            rms_s = f"RMS {rms:.4g}" if rms is not None else "RMS —"
+            active = "  ← open" if os.path.abspath(v["path"]) == cur else ""
+            legacy = "  (partial)" if str(m.get("runid", "")).startswith("L") else ""
+            change = summarize_diff(diff_meta(prev, m)) if prev else "first version"
+            it = QListWidgetItem(
+                f"v{i}  {m.get('runid')}{legacy}{active}\n"
+                f"      {when} · {rms_s} · {change}")
+            it.setData(Qt.ItemDataRole.UserRole, v["path"])
+            it.setToolTip(self._version_tooltip(m, prev))
+            if active:
+                f = it.font()
+                f.setBold(True)
+                it.setFont(f)
+            self._ver_list.addItem(it)
+            prev = m
+
+    @staticmethod
+    def _version_tooltip(meta, prev):
+        """그 버전의 전체 설정 diff(줄바꿈). 요약 한 줄로 안 보이는 나머지."""
+        from core.run_meta import diff_meta
+        head = [f"runid {meta.get('runid')}   saved {meta.get('created')}",
+                f"window px {meta.get('window', {}).get('px')}  poly {meta.get('poly_deg')}",
+                f"species: {', '.join(s.get('name') or '?' for s in meta.get('species') or [])}"]
+        if str(meta.get("runid", "")).startswith("L"):
+            head.append("rebuilt from the .dat header — some settings unknown (null)")
+        aud = meta.get("day_audit") or {}
+        for d, rep in sorted(aud.items()):
+            if rep.get("status") in ("WARN", "FAIL"):
+                head.append(f"! day audit {rep['status']} on {d}: "
+                            + "; ".join(rep.get("messages") or [])[:200])
+        if prev:
+            d = diff_meta(prev, meta)
+            head.append("")
+            head.append(f"changed vs previous ({len(d)}):" if d else "no setting change")
+            head += [f"  {k}: {o!r} → {n!r}" for k, o, n in d[:20]]
+        return "\n".join(head)
+
+    def _median_rms(self, path):
+        """그 버전의 RMS 중앙값. 읽기 실패·컬럼 없음이면 None(빈칸으로 표시)."""
+        try:
+            t = self._load_fit_table(path)
+        except Exception:
+            return None
+        rms = t.get("rms") if isinstance(t, dict) else None
+        if rms is None:
+            return None
+        arr = np.asarray(rms, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        return float(np.median(arr)) if arr.size else None
+
+    def _on_version_click(self, item):
+        p = item.data(Qt.ItemDataRole.UserRole)
+        if p and os.path.exists(p):
+            self._path = p
+            self._reload()
+
     def _on_shift_changed(self, v):
         self._time_shift_hours = float(v)
         self._range_init_path = None   # 시프트 값이 바뀌면 범위입력칸도 새 시프트로 재초기화
@@ -390,7 +517,15 @@ class ResultViewerWidget(QWidget):
         self._current_kind = kind
         self._pw_top.clear()
         self._pw_bot.clear()
-        self._pw_bot.show()
+        # B2 스택은 fit 전용 — 다른 종류는 예전 2단 플롯으로 되돌린다.
+        if kind == "fit":
+            self._pw_top.hide(); self._pw_bot.hide()
+        else:
+            self._stack_host.hide()
+            self._pw_detail.hide()
+            for pw in self._lanes:
+                pw.hide()
+            self._pw_top.show(); self._pw_bot.show()
         try:
             handler = {
                 "fit": self._plot_fit,
@@ -403,13 +538,23 @@ class ResultViewerWidget(QWidget):
             }.get(kind, self._plot_array)
             handler(self._path)
             auto = "" if forced != "auto" else " (auto-detected)"
-            shift_tag = (f"  ⚠ time shift {self._time_shift_hours:+g}h (display only)"
+            shift_tag = (f"time shift {self._time_shift_hours:+g}h (display only)"
                         if self._time_shift_hours else "")
-            self._lbl.setText(f"✅ {os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
+            self._lbl.setText(f"{os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
             self._lbl.setStyleSheet("color:#C62828;" if self._time_shift_hours else "color:#1565C0;")
         except Exception as e:
-            self._lbl.setText(f"❌ Failed to display: {e}  (try selecting Type manually)")
+            self._lbl.setText(f"Failed to display: {e}  (try selecting Type manually)")
             self._lbl.setStyleSheet("color:#C62828;")
+        # 버전 목록은 핏 결과에만 의미가 있다(R 커브·α엔 meta가 없다).
+        # 표시가 실패해도 목록은 갱신한다 — 어느 버전이 열려 있는지가 그때 더 궁금하다.
+        try:
+            if kind == "fit":
+                self._refresh_versions(self._path)
+            else:
+                self._ver_list.clear()
+                self._ver_hdr.setText("Versions  —  (fit results only)")
+        except Exception as _ve:                 # noqa: BLE001 — 부가 패널이 본체를 막지 않는다
+            self._ver_hdr.setText(f"Versions  —  unavailable ({_ve})")
 
     # ── 자동 판별 ──────────────────────────────────────────────────
 
@@ -638,6 +783,58 @@ class ResultViewerWidget(QWidget):
                         mask[i] = True
         return mask
 
+    # ── B2: flag 색 · 세로 스택 레인 ─────────────────────────────────
+    # 값은 **절대 지우지 않는다**(헌장 ①) — 색으로만 구분한다. 'Hide QC' 체크박스는
+    # 사용자가 명시적으로 켰을 때만 숨기고, 그때도 숨긴 개수를 제목에 적는다.
+    _FLAG_COLOR = {
+        "ok":       None,          # 가스 고유색 그대로
+        "unstable": "#c62828",     # 붉음 — 핏이 흔들린 스캔
+        "settling": "#9e9e9e",     # 회색 — 정착 구간(값은 살아있음)
+        "qc":       "#e0a020",     # 주황 — 자동 QC가 걸러낸 스캔
+        "cal":      "#7e57c2",     # 보라 — ZA/He 등 교정 스캔
+    }
+
+    @staticmethod
+    def _flag_of(status):
+        """Status 문자열 → flag 키. 자유형식이라 부분일치로 본다."""
+        s = (status or "").strip().lower()
+        if not s:
+            return "ok"
+        if s.startswith("qc"):
+            return "qc"
+        if "unstable" in s:
+            return "unstable"
+        if "settl" in s:
+            return "settling"
+        if "zero-air" in s or "helium" in s or s.startswith("skip"):
+            return "cal"
+        return "ok"
+
+    def _lane(self, key, i, n_total):
+        """스택 레인 하나를 얻는다(없으면 만들고, 있으면 비워서 재사용).
+
+        레인을 매번 새로 만들면 파일을 바꿀 때마다 위젯이 쌓여 메모리가 샌다.
+        X축은 첫 레인에 링크해 시간축을 공유한다."""
+        while len(self._lanes) <= i:
+            pw = pg.PlotWidget()
+            pw.setBackground('w')
+            pw.showGrid(x=True, y=True, alpha=0.3)
+            pw.addLegend(offset=(10, 6))
+            self._stack_lay.addWidget(pw)
+            self._lanes.append(pw)
+        pw = self._lanes[i]
+        pw.clear()
+        pw.show()
+        if i > 0:
+            pw.setXLink(self._lanes[0])
+        # 맨 아래 레인만 x축 눈금·라벨을 보인다(위쪽은 공간 낭비)
+        pw.getAxis("bottom").setStyle(showValues=(i == n_total - 1))
+        return pw
+
+    def _hide_extra_lanes(self, n_used):
+        for pw in self._lanes[n_used:]:
+            pw.hide()
+
     def _plot_fit(self, path):
         t = self._load_fit_table(path)
         self._fit_cache = t
@@ -665,82 +862,153 @@ class ResultViewerWidget(QWidget):
                 self._set_range_edits(fin_t.min(), fin_t.max())
                 self._range_init_path = path
 
+        # ── 종별 세로 스택 + 공유 시간축 (B2) ──────────────────────────
+        # 예전엔 전 가스를 한 축에 겹쳐 그려서 스케일이 다른 종(H2O ~1e-12 vs NO2 ppb)이
+        # 서로를 납작하게 만들었다. 종마다 레인을 주고 x축만 링크한다.
+        flags = [self._flag_of(s) for s in (t.get("status") or [""] * len(x))]
+        lanes_spec = [("gas", g) for g in names]
+        if t.get("shift") is not None or t.get("squeeze") is not None:
+            lanes_spec.append(("shsq", None))
+        lanes_spec.append(("rms", None))
+        n_lanes = len(lanes_spec)
+
         stats = []
-        for i, g in enumerate(names):
-            y = t["gases"].get(g)
-            if y is None:
-                continue
-            y = y.copy()
-            y[hide] = np.nan          # QC행 숨김(시각적 + 통계)
-            col = _PALETTE[i % len(_PALETTE)]
-            # 오차 표시(단일 가스 + Error 컬럼 있을 때) — NaN 구간을 가로지르는
-            # fill 폴리곤이 깨져 보이던 것을 ErrorBar(유한 점만·데시메이션)로 교체.
-            if (len(names) == 1 and getattr(self, '_chk_err', None)
-                    and self._chk_err.isChecked()):
-                err = (t.get("errs") or {}).get(g)
-                if err is not None:
-                    ok = np.isfinite(y) & np.isfinite(err) & np.isfinite(x)
-                    xs, ys, es = x[ok], y[ok], err[ok]
-                    if xs.size:
-                        step = max(1, xs.size // 1500)
-                        eb = pg.ErrorBarItem(x=xs[::step], y=ys[::step],
-                                             height=2 * es[::step],
-                                             pen=pg.mkPen(col, width=1))
-                        self._pw_top.addItem(eb)
-            self._pw_top.plot(x, y, pen=pg.mkPen(col, width=2), symbol="o",
-                              symbolSize=4, symbolBrush=col, name=f"{g} (ppb)")
-            # (±3σ X마커 제거 — QC와 무관한데 혼동만 줬음. 이상치는 Σ Stats에서 확인)
-            fin = y[np.isfinite(y)]
-            if fin.size:
-                mu, sd = float(np.mean(fin)), float(np.std(fin))
-                stats.append(f"{g}: μ={mu:.3g}±{sd:.2g} ppb")
-        self._pw_top.setLabel("left", "Conc (ppb)")
-        self._pw_top.setLabel("bottom", xlabel)
+        self._scatters = []
+        for i, (kind, g) in enumerate(lanes_spec):
+            pw = self._lane(kind, i, n_lanes)
+            self._set_time_axis(pw, has_time)
+            if i == n_lanes - 1:
+                pw.setLabel("bottom", xlabel)
+
+            if kind == "gas":
+                y = t["gases"].get(g)
+                if y is None:
+                    continue
+                y = y.copy()
+                y[hide] = np.nan          # 'Hide QC'를 켠 경우에만 숨긴다
+                col = _PALETTE[names.index(g) % len(_PALETTE)]
+                if (getattr(self, '_chk_err', None) and self._chk_err.isChecked()):
+                    err = (t.get("errs") or {}).get(g)
+                    if err is not None:
+                        ok = np.isfinite(y) & np.isfinite(err) & np.isfinite(x)
+                        xs, ys, es = x[ok], y[ok], err[ok]
+                        if xs.size:
+                            step = max(1, xs.size // 1500)
+                            pw.addItem(pg.ErrorBarItem(
+                                x=xs[::step], y=ys[::step], height=2 * es[::step],
+                                pen=pg.mkPen(col, width=1)))
+                pw.plot(x, y, pen=pg.mkPen(col, width=1.2))
+                # 점 색 = flag. 값을 지우는 게 아니라 **표시만** 다르게 한다.
+                brushes = [pg.mkBrush(self._FLAG_COLOR[f] or col) for f in flags]
+                sc = pg.ScatterPlotItem(x=x, y=y, size=5, brush=brushes,
+                                        pen=None, hoverable=True)
+                sc.sigClicked.connect(self._on_lane_points_clicked)
+                pw.addItem(sc)
+                self._scatters.append(sc)
+                pw.setLabel("left", f"{g} (ppb)")
+                fin = y[np.isfinite(y)]
+                if fin.size:
+                    stats.append(f"{g}: mu={float(np.mean(fin)):.3g}"
+                                 f"+-{float(np.std(fin)):.2g} ppb")
+
+            elif kind == "shsq":
+                sh, sq = t.get("shift"), t.get("squeeze")
+                if sh is not None:
+                    pw.plot(x, sh, pen=pg.mkPen("#1f5fa9", width=1.2), name="Shift (px)")
+                if sq is not None:
+                    # squeeze는 1.0 근처라 shift(px)와 축이 다르다 → 1을 뺀 편차로 겹친다
+                    pw.plot(x, np.asarray(sq, float) - 1.0,
+                            pen=pg.mkPen("#7e57c2", width=1.2), name="Squeeze - 1")
+                pw.setLabel("left", "Shift px / Sq-1")
+
+            else:  # rms
+                pw.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=1.2), name="RMS")
+                pw.setLabel("left", "RMS (cm^-1)")
+        self._hide_extra_lanes(n_lanes)
+
+        # 스택을 쓰는 동안 예전 2단 플롯은 숨긴다(다른 종류 파일은 그쪽을 계속 쓴다)
+        self._pw_top.hide()
+        self._pw_bot.hide()
+        self._stack_host.show()
+        self._pw_detail.show()
+
+        n_flag = {f: flags.count(f) for f in set(flags) if f != "ok"}
+        flag_tag = ("  ·  " + " ".join(f"{k}:{v}" for k, v in sorted(n_flag.items()))
+                    if n_flag else "")
         qc_tag = f" · QC hidden {n_hidden}" if n_hidden else ""
-        self._pw_top.setTitle(f"Fit — {os.path.basename(path)} ({len(x)} scans{qc_tag})")
+        self._lanes[0].setTitle(
+            f"Fit - {os.path.basename(path)} ({len(x)} scans{qc_tag}){flag_tag}")
+
         # 구간선택이 켜져 있었으면 새 플롯에도 다시 부착
         if getattr(self, '_btn_region', None) and self._btn_region.isChecked():
             self._attach_region()
 
-        self._pw_bot.show()
-        self._pw_bot.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=2), name="RMS")
-        self._pw_bot.setLabel("left", "RMS (cm⁻¹)")
-        self._pw_bot.setLabel("bottom", xlabel)
-        self._pw_bot.setTitle("RMS")
-
         self._stats_lbl.setText("   |   ".join(stats))
-        # 포인트 클릭 → 해당 scan의 α 스펙트럼 팝업(형제 alpha_trace.dat 있으면)
-        try:
-            self._pw_top.scene().sigMouseClicked.disconnect(self._on_fit_point_clicked)
-        except (TypeError, RuntimeError):
-            pass
-        self._pw_top.scene().sigMouseClicked.connect(self._on_fit_point_clicked)
 
-    def _on_fit_point_clicked(self, ev):
-        """ppb 그래프 클릭 → 가장 가까운 scan의 α 스펙트럼을 팝업(형제 alpha_trace)."""
+    def _on_lane_points_clicked(self, *args):
+        """레인의 점 클릭 → 아래 패널에 그 스캔의 상세. **시계열은 그대로 보인다.**
+
+        예전엔 팝업이 떠서 창을 옮겨가며 봐야 했다. 그리고 클릭 위치에서 가장 가까운
+        점을 x좌표로 되짚었는데, 이제 산점도가 **어느 점을 눌렀는지 직접** 알려주므로
+        시간 시프트 보정·최근접 탐색이 통째로 사라졌다(오차 원인 하나 제거).
+        """
+        pts = None
+        for a in args:
+            if isinstance(a, (list, tuple)) and len(a):
+                pts = a
+                break
         t = self._fit_cache
-        if not t or self._path is None:
+        if not pts or not t or self._path is None:
             return
         try:
-            vb = self._pw_top.getViewBox()
-            mp = vb.mapSceneToView(ev.scenePos())
-            xclick = float(mp.x())
+            j = int(pts[0].index())
         except Exception:
             return
-        # 플롯에 쓴 x축(시간 우선, 없으면 row_idx)으로 가장 가까운 점을 찾는다.
-        # xarr(t["time"])은 항상 원본 시각 — 클릭좌표는 표시 시프트가 적용된 화면
-        # 좌표계이므로 비교 전에 되돌린다.
-        has_time = t.get("time") is not None and np.isfinite(t["time"]).any()
-        xarr = t["time"] if has_time else t["row_idx"]
-        if has_time and self._time_shift_hours:
-            xclick -= self._time_shift_hours * 3600.0
-        j = int(np.nanargmin(np.abs(xarr - xclick)))
-        row_idx = int(t["row_idx"][j])
+        self._show_scan_detail(j)
+
+    def _show_scan_detail(self, j):
+        """행 j의 상세를 아래 패널에 그린다: α 스펙트럼 + 그 스캔의 수치 요약."""
+        t = self._fit_cache
+        self._pw_detail.clear()
+        try:
+            row_idx = int(t["row_idx"][j])
+        except Exception:
+            return
+
+        bits = [f"row {row_idx}"]
+        st = (t.get("status") or [None] * (j + 1))[j]
+        if st:
+            bits.append(str(st))
+        if t.get("rms") is not None and np.isfinite(t["rms"][j]):
+            bits.append(f"RMS {t['rms'][j]:.4g}")
+        for k, lab in (("shift", "shift"), ("squeeze", "squeeze")):
+            arr = t.get(k)
+            if arr is not None and np.isfinite(arr[j]):
+                bits.append(f"{lab} {arr[j]:.4g}")
+        for g, y in (t.get("gases") or {}).items():
+            if np.isfinite(y[j]):
+                bits.append(f"{g} {y[j]:.4g}")
+
         alpha_path = self._sibling_alpha(self._path)
         if not alpha_path:
-            self._stats_lbl.setText(f"row {row_idx}: sibling alpha_trace.dat not found → cannot open α popup")
+            # α가 없어도 수치 요약은 보여준다 — 클릭이 아무 반응 없는 것보다 낫다.
+            self._pw_detail.setTitle("  ·  ".join(bits)
+                                     + "   |   no sibling alpha_trace.dat -> no spectrum")
+            self._stats_lbl.setText(f"row {row_idx}: sibling alpha_trace.dat not found")
             return
-        self._show_alpha_popup(alpha_path, row_idx)
+        from gui.result_viewer_io import read_alpha_trace
+        wave, alpha = read_alpha_trace(alpha_path, want_id=row_idx)
+        if alpha is None:
+            self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   row {row_idx} not in alpha_trace")
+            return
+        xs = wave if (wave is not None and len(wave) == len(alpha)) else np.arange(len(alpha))
+        self._pw_detail.plot(xs, alpha, pen=pg.mkPen("#1f5fa9", width=1.4),
+                             name=f"alpha (row {row_idx})")
+        self._pw_detail.setLabel("left", "alpha (cm^-1)")
+        self._pw_detail.setLabel(
+            "bottom", "Wavelength (nm)" if (wave is not None and len(wave) == len(alpha))
+            else "Pixel")
+        self._pw_detail.setTitle("  ·  ".join(bits))
 
     @staticmethod
     def _sibling_alpha(fit_path):
@@ -779,15 +1047,22 @@ class ResultViewerWidget(QWidget):
     # ══════════════════════════════════════════════════════════════════
     # 구간선택 / 구간저장 / 병합 / 통계 / 일주기  (core.result_io 공용 로직)
     # ══════════════════════════════════════════════════════════════════
+    def _primary_plot(self):
+        """구간선택·범위 조작이 붙을 주 플롯. fit이면 첫 레인, 아니면 예전 상단 플롯."""
+        if getattr(self, '_current_kind', None) == "fit" and getattr(self, '_lanes', None):
+            return self._lanes[0]
+        return self._pw_top
+
     def _attach_region(self):
         """현재 상단 플롯 x범위 가운데 1/3에 드래그 가능한 구간 핸들 부착."""
         if self._region is not None:
             try:
+                self._primary_plot().removeItem(self._region)
                 self._pw_top.removeItem(self._region)
             except Exception:
                 pass
             self._region = None
-        vb = self._pw_top.getViewBox()
+        vb = self._primary_plot().getViewBox()
         (x0, x1), _ = vb.viewRange()
         a = x0 + (x1 - x0) / 3.0
         b = x0 + 2.0 * (x1 - x0) / 3.0
@@ -803,18 +1078,19 @@ class ResultViewerWidget(QWidget):
                                            brush=pg.mkBrush(33, 150, 243, 30))
         self._region.setZValue(50)
         self._region.sigRegionChanged.connect(self._on_region_dragged)
-        self._pw_top.addItem(self._region)
+        self._primary_plot().addItem(self._region)
         self._on_region_dragged()   # 입력칸 즉시 동기
 
     def _toggle_region(self, on):
         if on:
             self._attach_region()
-            self._stats_lbl.setText("Drag handles or type exact times, then [✂ Export] / [Σ Stats]")
+            self._stats_lbl.setText("Drag handles or type exact times, then [Export] / [Stats]")
         elif self._region is not None:
-            try:
-                self._pw_top.removeItem(self._region)
-            except Exception:
-                pass
+            for pw in [self._pw_top] + list(getattr(self, '_lanes', [])):
+                try:
+                    pw.removeItem(self._region)
+                except Exception:
+                    pass
             self._region = None
 
     def _set_range_edits(self, t0_epoch, t1_epoch, block=True):

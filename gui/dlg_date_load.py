@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QDateEdit, QCheckBox, QFileDialog, QMessageBox)
 
 _DAY_DIR = re.compile(r'^\d{6}$')
+_ISO_DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
 # ── 스캔/머지 로직(GUI 무관 — 단위테스트 가능) ─────────────────────────────
@@ -41,12 +42,30 @@ def _scan_day_root(droot: str, day: str, cfg: str, out: dict) -> None:
                 out.setdefault((cfg, stem, neg, qc), {})[day] = os.path.join(qd, f)
 
 
+def _scan_campaign_day(kind_dir: str, day: str, campaign: str, out: dict) -> None:
+    """A3 배치의 하루: `{campaign}/{YYYY-MM-DD}/fitting/*.dat`.
+
+    neg/QC는 이제 폴더가 아니라 `.meta.json`에 있다(같은 어휘를 쓰려면
+    `core.run_meta.bucket_labels`가 단일 출처). meta가 없어도 파일명의 runid가
+    세팅을 이미 가르므로 시리즈 분리 자체는 깨지지 않는다."""
+    from core.run_meta import read_meta, bucket_labels
+    for f in sorted(os.listdir(kind_dir)):
+        if not f.lower().endswith('.dat'):
+            continue
+        fp = os.path.join(kind_dir, f)
+        meta = read_meta(fp)
+        neg, qc = bucket_labels(meta) if meta else ('neg_?', 'QC?')
+        stem = re.sub(r'^\d{6}_', '', os.path.splitext(f)[0])
+        out.setdefault((campaign, stem, neg, qc), {})[day] = fp
+
+
 def scan_daily_tree(base: str) -> dict:
-    """핏 버킷 트리 스캔 → {(cfg, stem, neg, qc): {'YYMMDD': 파일경로}}.
-    두 구조를 모두 인식(하위호환):
-      • 신규:  base/{fit-config}/{YYMMDD}/{neg}/{QC}/*.dat   (cfg = config 폴더명)
-      • 레거시: base/{YYMMDD}/{neg}/{QC}/*.dat                (cfg = '')
-    stem = 파일명에서 날짜 프리픽스·확장자 제거(= 채널/세팅 태그)."""
+    """핏 트리 스캔 → {(cfg, stem, neg, qc): {'YYMMDD': 파일경로}}.
+    세 구조를 모두 인식(읽기는 관대하게 — 기존 파일은 하나도 안 옮긴다):
+      • A3:     base/{campaign}/{YYYY-MM-DD}/fitting/*.dat  (cfg = campaign, neg/qc는 meta에서)
+      • 구:     base/{fit-config}/{YYMMDD}/{neg}/{QC}/*.dat (cfg = config 폴더명)
+      • 레거시: base/{YYMMDD}/{neg}/{QC}/*.dat              (cfg = '')
+    stem = 파일명에서 날짜 프리픽스·확장자 제거(= 채널/세팅 태그 또는 CH_label_runid)."""
     out: dict = {}
     if not base or not os.path.isdir(base):
         return out
@@ -56,12 +75,20 @@ def scan_daily_tree(base: str) -> dict:
             continue
         if _DAY_DIR.match(name):                 # 레거시 flat: base/{YYMMDD}/...
             _scan_day_root(top, name, '', out)
-        elif name in ('_archive', '_derived'):   # 특수 폴더는 config 폴더 아님
+        elif name.startswith('_'):               # _archive/_derived/_autosave/_export
             continue
-        else:                                    # config 폴더: base/{cfg}/{YYMMDD}/...
+        else:                                    # campaign 또는 config 폴더
             for day in sorted(os.listdir(top)):
                 droot = os.path.join(top, day)
-                if _DAY_DIR.match(day) and os.path.isdir(droot):
+                if not os.path.isdir(droot):
+                    continue
+                if _ISO_DAY.match(day):          # A3: {campaign}/{YYYY-MM-DD}/{kind}/
+                    ymd = f"{day[2:4]}{day[5:7]}{day[8:10]}"
+                    for kind in sorted(os.listdir(droot)):
+                        kdir = os.path.join(droot, kind)
+                        if kind == 'fitting' and os.path.isdir(kdir):
+                            _scan_campaign_day(kdir, ymd, name, out)
+                elif _DAY_DIR.match(day):        # 구: {cfg}/{YYMMDD}/{neg}/{QC}/
                     _scan_day_root(droot, day, name, out)
     return out
 
@@ -107,7 +134,7 @@ class DateLoadDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         from gui.dlg_dir import dlg_dir
-        self.setWindowTitle("📅 Load fit results by date")
+        self.setWindowTitle("Load fit results by date")
         self.resize(560, 420)
         self.loaded_paths: list[str] = []
         self._tree: dict = {}
@@ -119,7 +146,7 @@ class DateLoadDialog(QDialog):
         self._ed_base = QLineEdit(dlg_dir("fitting_base"))
         self._ed_base.editingFinished.connect(self._rescan)
         row.addWidget(self._ed_base, 1)
-        b = QPushButton("📁")
+        b = QPushButton("...")
         b.setToolTip("핏 버킷({핏config}/{YYMMDD}/{neg}/{QC}/ 또는 레거시 {YYMMDD}/...)이 있는 fitting 최상위 폴더")
         b.clicked.connect(self._browse)
         row.addWidget(b)
@@ -185,7 +212,7 @@ class DateLoadDialog(QDialog):
             cfg_disp = f"{cfg} · " if cfg else ""
             it = QListWidgetItem(
                 f"{cfg_disp}{stem}   [{neg}/{qc}]   {days[0]}~{days[-1]} · {len(days)}d"
-                f"   💾 {datetime.fromtimestamp(last):%m-%d %H:%M}")
+                f"{datetime.fromtimestamp(last):%m-%d %H:%M}")
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Unchecked)
             it.setData(Qt.ItemDataRole.UserRole, key)

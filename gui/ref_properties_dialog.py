@@ -47,19 +47,36 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
 
 
-class RefPropertiesDialog(QDialog):
-    """
-    Dialog to dynamically edit Shift and Squeeze fitting parameters 
-    (Free, Limit, Fix, Link) for each loaded reference gas.
-    """
-    def __init__(self, parent, gas_list, current_props):
-        super().__init__(parent)
-        self.setWindowTitle("⚙️ Edit Reference Properties")
-        _s = _ui_scale()
-        self.resize(int(1200 * _s), int(350 * _s))
-        layout = QVBoxLayout(self)
+class RefPropertiesTable(QWidget):
+    """가스별 Shift/Squeeze 정책 8컬럼 테이블 (Free · Limit · Fix · Link · Center).
 
-        self.table = QTableWidget(len(gas_list), 8)
+    원래 `RefPropertiesDialog` 안에만 있었다. link 정책은 피팅 결과를 좌우하는 1급
+    결정인데 팝업 안에 숨어 있어 메인 화면엔 한 줄 요약뿐이었다 — 논문 방식
+    ("NO2를 맞추고 나머지는 그 값에 link")이 화면에서 안 보였다.
+    다이얼로그는 이 위젯을 감싸기만 하고, `get_properties()` 계약은 그대로다.
+
+    `changed`는 사용자가 무언가 바꿀 때마다 뜬다 → 메인 패널이 OK 버튼 없이
+    `ref_props`를 즉시 갱신할 수 있다(다이얼로그는 이 시그널을 안 듣고 OK에서만 읽는다 —
+    Cancel이 취소로 남아야 하므로).
+    """
+    changed = pyqtSignal()
+
+    def __init__(self, gas_list, current_props, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.table = QTableWidget(0, 8)
+        layout.addWidget(self.table)
+        self.set_gases(gas_list, current_props)
+
+    def set_gases(self, gas_list, current_props):
+        """가스 목록이 바뀌면(레퍼런스 재락) 테이블을 다시 만든다."""
+        self.table.clearContents()
+        self.table.setRowCount(len(gas_list))
+        self._build(gas_list, current_props or {})
+
+    def _build(self, gas_list, current_props):
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
             "Gas Name", "Shift Mode", "Shift Params",
             "Squeeze Mode", "Squeeze Params",
@@ -190,14 +207,16 @@ class RefPropertiesDialog(QDialog):
                 "bands_edit": bands_edit,
             }
         
-        layout.addWidget(self.table)
-        
-        # OK and Cancel buttons
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
-        
+            # 편집 즉시 알린다 — 상시 노출 패널은 OK 버튼이 없다.
+            for w in (cmb_sh, cmb_sq):
+                w.currentIndexChanged.connect(self.changed)
+            for w in (sh_lim, sh_fix, sh_ctr, sq_lim, sq_fix, bands_edit):
+                w.editingFinished.connect(self.changed)
+            for w in (sh_lnk, sq_lnk):
+                w.currentIndexChanged.connect(self.changed)
+            for w in (t_ref_spin, t_coeff_spin):
+                w.valueChanged.connect(self.changed)
+
     def get_properties(self):
         """Extracts the configured properties from the table widgets into a dictionary."""
         props = {}
@@ -227,3 +246,45 @@ class RefPropertiesDialog(QDialog):
                 "active_bands_nm": w["bands_edit"].text().strip(),
             }
         return props
+
+
+class RefPropertiesDialog(QDialog):
+    """`RefPropertiesTable`을 감싼 팝업. 기존 호출부와 계약이 같다.
+
+    상시 노출 패널(C1)이 생겼어도 이 팝업은 남긴다 — 넓은 창에서 한 번에 훑고
+    **Cancel로 되돌릴 수 있는** 편집 경로가 여전히 필요하다(패널은 즉시 반영이라
+    취소가 없다).
+    """
+
+    def __init__(self, parent, gas_list, current_props):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Reference Properties")
+        _s = _ui_scale()
+        self.resize(int(1200 * _s), int(350 * _s))
+        layout = QVBoxLayout(self)
+
+        self._w = RefPropertiesTable(gas_list, current_props, self)
+        layout.addWidget(self._w)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    # 하위호환 — 예전에 dialog.table / .gas_list / .param_widgets를 직접 보던 코드용
+    @property
+    def table(self):
+        return self._w.table
+
+    @property
+    def gas_list(self):
+        return self._w.gas_list
+
+    @property
+    def param_widgets(self):
+        return self._w.param_widgets
+
+    def get_properties(self):
+        """계약 불변 — 호출부는 이 메서드만 안다."""
+        return self._w.get_properties()

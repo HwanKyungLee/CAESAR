@@ -157,7 +157,7 @@ class WavelengthCalibrationDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🛠️ Wavelength Calibration Tool (Interactive)")
+        self.setWindowTitle("Wavelength Calibration Tool (Interactive)")
         _s = _ui_scale()
         self.resize(int(1100 * _s), int(700 * _s))
         
@@ -186,7 +186,7 @@ class WavelengthCalibrationDialog(QDialog):
         self.canvas.mpl_connect('button_press_event', self.on_graph_click)
         
         # Help Label
-        self.help_label = QLabel("💡 Tip: Click near a peak on the graph to automatically snap to the exact pixel.")
+        self.help_label = QLabel("Tip: Click near a peak on the graph to automatically snap to the exact pixel.")
         self.help_label.setStyleSheet("color: #666; font-size: 11px;")
         left_layout.addWidget(self.help_label)
         layout.addLayout(left_layout, stretch=3)
@@ -211,7 +211,7 @@ class WavelengthCalibrationDialog(QDialog):
         right_layout.addWidget(self.table)
         
         # Delete Table Row Button
-        btn_del = QPushButton("❌ Delete Selected Peak (or Press 'Del')")
+        btn_del = QPushButton("Delete Selected Peak (or Press 'Del')")
         btn_del.clicked.connect(self.delete_selected_row)
         btn_del.setStyleSheet("color: #cc0000;")
         right_layout.addWidget(btn_del)
@@ -221,7 +221,7 @@ class WavelengthCalibrationDialog(QDialog):
         btn_fit.clicked.connect(self.fit_calibration)
         right_layout.addWidget(btn_fit)
         
-        btn_save_fwhm = QPushButton("💾 Save FWHM & Sigma Records")
+        btn_save_fwhm = QPushButton("Save FWHM & Sigma Records")
         btn_save_fwhm.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
         btn_save_fwhm.clicked.connect(self.save_fwhm_data)
         right_layout.addWidget(btn_save_fwhm)
@@ -304,7 +304,7 @@ class WavelengthCalibrationDialog(QDialog):
                 # 5. Redraw graph markers
                 self.refresh_graph_markers()
                 
-                msg = f"✅ [Left Click] Peak registered: {snapped_px} px"
+                msg = f"[Left Click] Peak registered: {snapped_px} px"
                 if hasattr(self, 'help_label'):
                     self.help_label.setText(msg)
                     self.help_label.setStyleSheet("color: #2E7D32; font-weight: bold; font-size: 13px;")
@@ -317,13 +317,13 @@ class WavelengthCalibrationDialog(QDialog):
             fwhm_px, fwhm_nm = self.calculate_fwhm(snapped_px, actual_y_data, current_wave)
 
             if fwhm_nm is not None:
-                msg = f"🔍 [Right Click] 📍 Pixel: {snapped_px} | 📏 FWHM: {fwhm_nm:.3f} nm ({fwhm_px:.1f} px)"
+                msg = f"[Right Click]  Pixel: {snapped_px} |  FWHM: {fwhm_nm:.3f} nm ({fwhm_px:.1f} px)"
                 self.fwhm_records[round(snapped_px, 3)] = {"fwhm_nm": fwhm_nm, "fwhm_px": fwhm_px}
             elif fwhm_px is not None:
-                msg = f"🔍 [Right Click] 📍 Pixel: {snapped_px} | 📏 FWHM: {fwhm_px:.1f} px (nm calculation pending)"
+                msg = f"[Right Click]  Pixel: {snapped_px} |  FWHM: {fwhm_px:.1f} px (nm calculation pending)"
                 self.fwhm_records[round(snapped_px, 3)] = {"fwhm_nm": None, "fwhm_px": fwhm_px}
             else:
-                msg = f"❌ [Right Click] FWHM Calculation Failed"
+                msg = f"[Right Click] FWHM Calculation Failed"
                 
             print(msg)
             
@@ -719,7 +719,7 @@ class WavelengthCalibrationDialog(QDialog):
         poly_func = np.poly1d(self.poly_coeffs)
         
         # 7. Output Status Message
-        msg = f"✅ Fitting Complete! R² = {r_squared:.5f} | Eq: {self.poly_coeffs[0]:.2e}x² + {self.poly_coeffs[1]:.4f}x + {self.poly_coeffs[2]:.2f}"
+        msg = f"Fitting Complete! R² = {r_squared:.5f} | Eq: {self.poly_coeffs[0]:.2e}x² + {self.poly_coeffs[1]:.4f}x + {self.poly_coeffs[2]:.2f}"
         print(msg)
         if hasattr(self, 'help_label'):
             self.help_label.setText(msg)
@@ -884,7 +884,7 @@ class RangeSelectorDialog(QDialog):
                  channel_paths=None, active_channel=None, channel_files=None,
                  chosen_files=None, channel_ranges=None):
         super().__init__()
-        self.setWindowTitle("🔍 Fit Range Selector")
+        self.setWindowTitle("Fit Range Selector")
         _s = _ui_scale()
         self.resize(int(900 * _s), int(600 * _s))
 
@@ -941,7 +941,7 @@ class RangeSelectorDialog(QDialog):
             self.max_sel = int(max(lo_v, hi_v))
 
     def _pick_file_for_channel(self, ch):
-        """채널의 표시 파일 선택: 고정(★Score/수동)이 있으면 우선, 없으면 대표(중간) 파일."""
+        """채널의 표시 파일 선택: 고정(Score/수동)이 있으면 우선, 없으면 대표(중간) 파일."""
         try:
             chi = int(ch)
         except (TypeError, ValueError):
@@ -1009,7 +1009,7 @@ class RangeSelectorDialog(QDialog):
             self.combo_file.setToolTip("Representative file to display (default: middle of the list)")
             self.combo_file.currentIndexChanged.connect(self._on_file_combo)
             top_layout.addWidget(self.combo_file)
-            self.btn_score = QPushButton("★ Score")
+            self.btn_score = QPushButton("Score")
             self.btn_score.setToolTip(
                 "Score every alpha file of this channel: correlation r of its median Δα\n"
                 "against the NO2 reference within the current pixel band.\n"
@@ -1021,7 +1021,7 @@ class RangeSelectorDialog(QDialog):
             self._populate_file_combo()
 
         top_layout.addStretch(1)
-        top_layout.addWidget(QLabel("🖱️ Left: Select Range | Right: Pan | Wheel: Zoom"))
+        top_layout.addWidget(QLabel("Left: Select Range | Right: Pan | Wheel: Zoom"))
         self.main_layout.addLayout(top_layout)
         
         # --- 2. Center Graph Area ---
@@ -1198,7 +1198,7 @@ class RangeSelectorDialog(QDialog):
         ref_name = 'NO2' if 'NO2' in self.engine.interpolators else \
                    (next(iter(self.engine.interpolators), None))
         if ref_name is None:
-            self.btn_score.setText("★ no ref")
+            self.btn_score.setText("no ref")
             return
         ref = np.asarray(self.engine.interpolators[ref_name](np.arange(2048, dtype=float)),
                          dtype=float)
@@ -1216,7 +1216,7 @@ class RangeSelectorDialog(QDialog):
 
         scores = []
         for i, f in enumerate(files):
-            self.btn_score.setText(f"★ {i + 1}/{len(files)}")
+            self.btn_score.setText(f"{i + 1}/{len(files)}")
             QApplication.processEvents()
             s = None
             try:
@@ -1236,7 +1236,7 @@ class RangeSelectorDialog(QDialog):
             except Exception:
                 s = None
             scores.append(s)
-        self.btn_score.setText("★ Score")
+        self.btn_score.setText("Score")
 
         best_i, best_s = None, None
         self.combo_file.blockSignals(True)
@@ -1544,8 +1544,8 @@ class RangeSelectorDialog(QDialog):
             self.apply_channel.emit(int(ch), float(lo_v), float(hi_v), bool(is_nm))
             unit = "nm" if is_nm else "px"
             self.lbl_applied.setText(
-                f"✓ Applied CH{ch}: {float(lo_v):.1f}–{float(hi_v):.1f} {unit}")
+                f"Applied CH{ch}: {float(lo_v):.1f}–{float(hi_v):.1f} {unit}")
         else:
             self.apply_range.emit(self.min_sel, self.max_sel)
-            self.lbl_applied.setText(f"✓ Applied: px {self.min_sel}–{self.max_sel}")
+            self.lbl_applied.setText(f"Applied: px {self.min_sel}–{self.max_sel}")
 

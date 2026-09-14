@@ -230,7 +230,15 @@ def load_fit_table(path):
                "gases": {g: colf_r(idx[g]) for g in gases},
                "errs": {g: (colf_r(idx[g + "_Error"]) if (g + "_Error") in idx else None)
                         for g in gases},
-               "status": status, "channel": channel, "path": path}
+               "status": status, "channel": channel, "path": path,
+               # B2: shift/squeeze 레인용. 전역 컬럼(Shift/Squeeze)이 있으면 그걸,
+               # 없으면 첫 가스의 것으로 폴백(구 포맷). 없으면 None.
+               "shift": (colf_r(idx["Shift"]) if "Shift" in idx else
+                         (colf_r(idx[gases[0] + "_Shift"])
+                          if gases and (gases[0] + "_Shift") in idx else None)),
+               "squeeze": (colf_r(idx["Squeeze"]) if "Squeeze" in idx else
+                           (colf_r(idx[gases[0] + "_Squeeze"])
+                            if gases and (gases[0] + "_Squeeze") in idx else None))}
         return out
     idx = {n: i for i, n in enumerate(hdr)}
     rms_i = idx.get("rms_cm-1", len(hdr) - 1)
@@ -250,7 +258,7 @@ def load_fit_table(path):
     out = {"row_idx": colf(idx.get("row_idx", 0)), "T": colf(idx.get("T_C")),
            "P": colf(p_i), "rms": colf(rms_i), "doy": colf(idx.get("doy")),
            "time": None, "gases": {}, "errs": {}, "status": None,
-           "channel": None, "path": path}
+           "channel": None, "path": path, "shift": None, "squeeze": None}
     for j in gas_cols:
         out["gases"][hdr[j]] = colf(j)
 

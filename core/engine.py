@@ -279,6 +279,28 @@ class UniversalEngine:
           - etalon is a sinusoidal fringe:  A · sin(freq·x + phase)
           - custom covers optional ring effect or PCA-background terms
 
+        ⚠ SIGN CONVENTION (important for cross-tool comparison):
+          Augur's `shift` here is defined as "how far the REFERENCE is moved"
+          (model(x) = reference(x + shift)). This is the mathematical OPPOSITE of
+          the standard DOAS convention used by QDOAS / Platt & Stutz, where shift
+          is defined as "how far the measured spectrum is shifted relative to the
+          reference" (model(x) = reference(x - shift)). In other words:
+
+              shift_Augur == -shift_QDOAS   (same physical wavelength offset,
+                                              opposite sign)
+
+          This is self-consistent throughout Augur (VarPro, full-nonlinear,
+          warm-start carryover all use this same convention), so it causes no
+          problems internally. It DOES matter the moment you compare Augur's
+          Shift output/bounds against QDOAS, DOASIS, or any paper using the
+          textbook convention — negate first, or you'll get nonsensical results
+          (e.g. an optimizer bound that looks reasonable but is actually mirrored
+          around zero, causing the fit to pin against the wrong edge). Discovered
+          2026-09-08 during QDOAS cross-validation (see
+          diagnostics/qdoas_crossval_2026-09/), where importing Augur's shift
+          bounds into QDOAS unmodified caused >99% of scans to pin against one
+          bound edge.
+
         Returns:
           (full_model, total_absorption, baseline, etalon_wave, custom_effect)
         """

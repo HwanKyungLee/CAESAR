@@ -25,7 +25,7 @@ class AlphaGeneratorDialog(QDialog):
         self._ch_tab_map = {}       # {raw 채널:int -> 사용할 채널 탭:int} 핏세팅(wavecal/범위) 출처
         self._tab_combos = {}       # {raw 채널 -> QComboBox}
         self._ch_enable = {}        # {raw 채널 -> QCheckBox} 생성 여부
-        self.setWindowTitle("🧪 Alpha Generator — Raw → Alpha")
+        self.setWindowTitle("Alpha Generator — Raw → Alpha")
         self.resize(640, 520)
         self._build()
 
@@ -40,9 +40,9 @@ class AlphaGeneratorDialog(QDialog):
 
         # raw 파일 로드 버튼
         bar = QHBoxLayout()
-        btn_files = QPushButton("📂 Select Raw Files")
+        btn_files = QPushButton("Select Raw Files")
         btn_files.clicked.connect(self._pick_files)
-        btn_folder = QPushButton("📁 Select Raw Folder")
+        btn_folder = QPushButton("Select Raw Folder")
         btn_folder.clicked.connect(self._pick_folder)
         btn_clear = QPushButton("Clear")
         btn_clear.clicked.connect(self._clear)
@@ -103,7 +103,7 @@ class AlphaGeneratorDialog(QDialog):
 
         # 저장 폴더
         sav = QHBoxLayout()
-        btn_out = QPushButton("💾 Output Folder")
+        btn_out = QPushButton("Output Folder")
         btn_out.clicked.connect(self._pick_out)
         self._lbl_out = QLabel("(no output folder)")
         self._lbl_out.setStyleSheet("color:gray;")
@@ -124,7 +124,7 @@ class AlphaGeneratorDialog(QDialog):
 
         self._mat_row = QWidget()
         mr = QHBoxLayout(self._mat_row); mr.setContentsMargins(0, 0, 0, 0)
-        btn_mat = QPushButton("📂 _avg_60s.mat (std_t grid)")
+        btn_mat = QPushButton("_avg_60s.mat (std_t grid)")
         btn_mat.clicked.connect(self._pick_mat)
         self._lbl_mat = QLabel("(no std_t .mat)")
         self._lbl_mat.setStyleSheet("color:gray;")
@@ -147,7 +147,7 @@ class AlphaGeneratorDialog(QDialog):
         root.addWidget(self._pbar)
 
         run = QHBoxLayout()
-        self._btn_gen = QPushButton("🧪 Generate Alpha")
+        self._btn_gen = QPushButton("Generate Alpha")
         self._btn_gen.setStyleSheet("font-weight:bold; padding:8px;")
         self._btn_gen.clicked.connect(self._generate)
         btn_close = QPushButton("Close")
@@ -288,12 +288,12 @@ class AlphaGeneratorDialog(QDialog):
             # 이 채널의 R(t) npz — R Trend의 'α용 R(t) 저장'으로 만든 R_<채널>.npz.
             # 지정하면 이 채널 알파에 채널창 기반 R 적용(핫 정상). 비우면 자체 R.
             row.addWidget(QLabel("   R(t):"))
-            btn_rt = QPushButton("📈")
+            btn_rt = QPushButton("R(t)")
             btn_rt.setFixedWidth(30)
             btn_rt.setToolTip(f"Pick R(t) npz for raw CH{ch} (none = self R)")
             rt_lbl = QLabel("self R")
             rt_lbl.setStyleSheet("color:gray;")
-            btn_rtx = QPushButton("✕")
+            btn_rtx = QPushButton("X")
             btn_rtx.setFixedWidth(24)
             btn_rtx.setToolTip("Clear R(t)")
             btn_rt.clicked.connect(lambda _x, c=ch, lb=rt_lbl: self._pick_ch_rt(c, lb))
@@ -383,7 +383,7 @@ class AlphaGeneratorDialog(QDialog):
     def _on_done(self, out_dir, msgs):
         self._btn_gen.setEnabled(True)
         self._pbar.setValue(100)
-        self._lbl_status.setText("✅ Done")
+        self._lbl_status.setText("Done")
         QMessageBox.information(
             self, "Alpha generation complete",
             "Per-channel α saved:\n" + "\n".join(msgs) +

@@ -1,5 +1,6 @@
 import os
 import re
+import copy
 import math
 import datetime
 import json
@@ -25,8 +26,11 @@ from core.engine import UniversalEngine
 from .worker import AnalysisWorker, AlphaExportWorker
 from .test_fit_dialog import TestFitDialog
 from core.data_io import DataIO
-from core.paths import WV_CAL_DIR, DEFAULT_OUTPUT_DIR, resolve_ref_path
+from core.paths import (WV_CAL_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_CAMPAIGN,
+                        resolve_ref_path, out_path as _out_path,
+                        campaign_dir as _campaign_dir, special_dir as _special_dir)
 from core.__version__ import __version__
+from core import run_meta
 from .ui_dialogs import *
 
 
@@ -136,6 +140,26 @@ class CAESARAnalyzer(QMainWindow):
         self._channel_files = {1: []}        # ch -> 그 채널이 들고 있는 데이터 파일 리스트(자동분배 안 함)
         self._active_channel = 1
         self._switching_channel = False
+
+        # 캠페인 = 산출물의 최상위 스코프(채널보다 바깥) → 채널 탭 위에 따로 한 줄.
+        # 저장 경로 output/{campaign}/{YYYY-MM-DD}/{kind}/ 의 첫 조각이 된다.
+        _camp_bar = QHBoxLayout()
+        _camp_bar.addWidget(QLabel("Campaign:"))
+        self._ed_campaign = QLineEdit()
+        self._ed_campaign.setPlaceholderText(DEFAULT_CAMPAIGN)
+        self._ed_campaign.setToolTip(
+            "Campaign name — the top-level folder for everything this measurement produces\n"
+            "(fitting / alpha / R / figures / calibration).  e.g. yeosu_2026, araon_2026\n"
+            "Letters, digits, _ and - only; other characters become '_'.\n"
+            "Empty = 'default'.  Remembered between sessions.")
+        self._ed_campaign.setText(
+            self._qsettings.value("campaign", "", type=str))
+        self._ed_campaign.editingFinished.connect(
+            lambda: self._qsettings.setValue(
+                "campaign", self._ed_campaign.text().strip()))
+        _camp_bar.addWidget(self._ed_campaign, 1)
+        left_layout.addLayout(_camp_bar)
+
         _chtab_bar = QHBoxLayout()
         self._channel_tabbar = QTabBar()
         self._channel_tabbar.setExpanding(False)
@@ -143,10 +167,10 @@ class CAESARAnalyzer(QMainWindow):
         self._channel_tabbar.setTabData(i0, 1)
         self._channel_tabbar.currentChanged.connect(self._on_channel_tab_changed)
         _chtab_bar.addWidget(self._channel_tabbar, 1)
-        _btn_addc = QPushButton("➕"); _btn_addc.setFixedWidth(int(30 * self._s))
+        _btn_addc = QPushButton("+"); _btn_addc.setFixedWidth(int(30 * self._s))
         _btn_addc.setToolTip("Add channel (copy current channel settings to a new channel)")
         _btn_addc.clicked.connect(self._add_channel_tab)
-        _btn_delc = QPushButton("✕"); _btn_delc.setFixedWidth(int(30 * self._s))
+        _btn_delc = QPushButton("X"); _btn_delc.setFixedWidth(int(30 * self._s))
         _btn_delc.setToolTip("Delete current channel")
         _btn_delc.clicked.connect(self._del_channel_tab)
         _chtab_bar.addWidget(_btn_addc); _chtab_bar.addWidget(_btn_delc)
@@ -186,12 +210,12 @@ class CAESARAnalyzer(QMainWindow):
             "→ when fitting those, enter the measured value here manually or regenerate the alpha.")
         _chtab_bar.addWidget(self.spin_gas_temp)
         # L4: 시나리오(전 채널 핏세팅) 로드/저장 — 분석의 출발점이라 왼쪽 상단 상주
-        _btn_scn_load = QPushButton("📋")
+        _btn_scn_load = QPushButton("Load")
         _btn_scn_load.setFixedWidth(int(30 * self._s))
         _btn_scn_load.setToolTip("Load fit scenario (all channels)")
         _btn_scn_load.clicked.connect(self.load_scenario)
         _chtab_bar.addWidget(_btn_scn_load)
-        _btn_scn_save = QPushButton("💾")
+        _btn_scn_save = QPushButton("Save")
         _btn_scn_save.setFixedWidth(int(30 * self._s))
         _btn_scn_save.setToolTip("Save fit scenario (all channels)")
         _btn_scn_save.clicked.connect(self.save_scenario)
@@ -219,7 +243,7 @@ class CAESARAnalyzer(QMainWindow):
         btn_batch.clicked.connect(self.batch_load_refs)
         btn_add = QPushButton("Add")
         btn_add.clicked.connect(self.add_ref_row)
-        btn_mask = QPushButton("✂️ Mask")
+        btn_mask = QPushButton("Mask")
         btn_mask.clicked.connect(self.open_mask_dialog)
         btn_mask.setStyleSheet("color: #cc0000; font-weight: bold;") 
         
@@ -229,7 +253,7 @@ class CAESARAnalyzer(QMainWindow):
         lay_ref.addLayout(layout_load)
         
         # Lock References Button (L5: dirty면 빨강으로 강조)
-        btn_lock = QPushButton("🔒 Lock References (Commit)")
+        btn_lock = QPushButton("Lock References (Commit)")
         btn_lock.clicked.connect(self.lock_ref)
         btn_lock.setStyleSheet("font-weight: bold; padding: 5px;")
         self._btn_lock_ref = btn_lock
@@ -302,13 +326,13 @@ class CAESARAnalyzer(QMainWindow):
         # 안 보여서 생긴 0608/0523 오정렬 사고의 재발 방지(채널 전환 시 자동 갱신).
         # 긴 파일명이 패널 폭을 밀어내지 않게: 고정폭(min=max) + 중간 생략(전체 경로는 툴팁).
         # ※ SizePolicy.Ignored는 폭을 0으로 접어 라벨이 사라지므로 쓰지 않는다.
-        self.lbl_wavecal = QLabel("📐 wavecal: none")
+        self.lbl_wavecal = QLabel("wavecal: none")
         self.lbl_wavecal.setStyleSheet("color: #B71C1C; font-weight: bold; padding: 2px;")
         self.lbl_wavecal.setToolTip("Wavelength calibration loaded for this channel tab. Red = not loaded.")
         self.lbl_wavecal.setFixedWidth(int(180 * self._s))
         layout_px.addWidget(self.lbl_wavecal)
 
-        self.lbl_fwhm_display = QLabel("💡 FWHM: —")
+        self.lbl_fwhm_display = QLabel("FWHM: —")
         self.lbl_fwhm_display.setStyleSheet("color: #757575; font-weight: bold; padding: 3px;")
         self.lbl_fwhm_display.setFixedWidth(int(85 * self._s))
         layout_px.addWidget(self.lbl_fwhm_display)
@@ -423,7 +447,7 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_lambda.setValue(0.0000)
         self.spin_lambda.setToolTip("Ridge Penalty: 0 = Off, 1e-4 = Monitoring")
 
-        self.chk_robust = QCheckBox("🛡 Robust")
+        self.chk_robust = QCheckBox("Robust")
         self.chk_robust.setToolTip("Robust (IRLS): auto-ignore spike noise and cosmic rays")
         self.chk_robust.setChecked(False)
 
@@ -434,7 +458,7 @@ class CAESARAnalyzer(QMainWindow):
         self.chk_allow_neg.setChecked(True)
 
         self.ref_props = {}
-        btn_props = QPushButton("⚙️ Properties")
+        btn_props = QPushButton("Properties")
         btn_props.setStyleSheet("font-weight: bold;")
         btn_props.clicked.connect(self.open_ref_properties)
 
@@ -448,7 +472,7 @@ class CAESARAnalyzer(QMainWindow):
             "10% = standard DOAS quality criterion.\n"
             "Lower = stricter. Raise only if data is extremely noisy.")
 
-        self.chk_qc = QCheckBox("🚫 QC")
+        self.chk_qc = QCheckBox("QC")
         self.chk_qc.setToolTip(
             "Checked: for 'Unstable' rows above the threshold (OK RMS Threshold) or below the SNR floor,\n"
             "set gas concentration to NaN to exclude from time-series·stats·export. Reason shown in Status.\n"
@@ -479,7 +503,7 @@ class CAESARAnalyzer(QMainWindow):
         self.spin_qc_snr.setDecimals(0)
         self.spin_qc_snr.setValue(0.0)
         self.spin_qc_snr.setToolTip("Additional SNR floor (0 = off). Rows below this are also QC-excluded.")
-        self.chk_settle = QCheckBox("⏱ Settling")
+        self.chk_settle = QCheckBox("Settling")
         self.chk_settle.setToolTip(
             "Skip settling scans: drop the first N scans of EACH bin (purge transient right\n"
             "after a He/ZA cycle — cavity not yet refilled, so gas reads biased LOW).\n"
@@ -496,7 +520,7 @@ class CAESARAnalyzer(QMainWindow):
             "Reapply the following in order, without refitting:\n"
             "  1) OK RMS% — re-judge OK/Unstable when threshold changes\n"
             "  2) Kalman Q/R — recompute the _Smooth column with new Q/R\n"
-            "  3) Settling skip (⏱) — drop first N scans/bin (gas→NaN)\n"
+            "3) Settling skip () — drop first N scans/bin (gas→NaN)\n"
             "  4) Auto QC (K/RMS max/SNR) — re-filter gas values to NaN\n"
             "Tikhonov λ and Robust change the fit matrix itself, so they need a refit.\n"
             "Restores original concentrations before re-filtering, so it's safe to press multiple times.")
@@ -535,14 +559,40 @@ class CAESARAnalyzer(QMainWindow):
         _pg.addWidget(_lbl("K"),     1, 2); _pg.addWidget(self.spin_qc_k,      1, 3)
         _pg.addWidget(self.chk_settle,    1, 4); _pg.addWidget(self.spin_settle_n, 1, 5)
         _pg.addWidget(self.btn_reapply_qc,1, 6, 1, 2)
-        # r2: 가스별 Shift/Squeeze 요약
+        # r2: 가스별 Shift/Squeeze 요약 한 줄 (테이블이 접혀 있을 때의 요약)
         from PyQt6.QtWidgets import QSizePolicy as _SPsq
         self.lbl_shsq = QLabel("Sh/Sq: (lock refs to show)")
         self.lbl_shsq.setStyleSheet("color:#555;")
-        self.lbl_shsq.setToolTip("Per-gas Shift/Squeeze modes (edit in ⚙️ Properties)")
+        self.lbl_shsq.setToolTip("Per-gas Shift/Squeeze modes — expand the table below to edit")
         self.lbl_shsq.setSizePolicy(_SPsq.Policy.Ignored, _SPsq.Policy.Preferred)
         _pg.addWidget(self.lbl_shsq, 2, 0, 1, 8)
         lay_calib_main.addLayout(_pg)
+
+        # ── 종 정책 테이블 상시 노출 (C1) ──────────────────────────────
+        # shift/squeeze link 정책은 피팅 결과를 좌우하는 1급 결정인데 지금껏
+        # ⚙️ Properties 팝업 안에만 있었고 메인엔 위 한 줄 요약뿐이었다.
+        # 논문 방식("NO2를 맞추고 나머지는 그 값에 link")이 화면에서 안 보였다.
+        # 팝업은 그대로 남는다 — 넓은 창 + Cancel 되돌리기가 필요한 경우가 있다.
+        self._btn_shsq_tbl = QPushButton("▼ Reference policy (Shift / Squeeze / T / bands)")
+        self._btn_shsq_tbl.setFlat(True)
+        self._btn_shsq_tbl.setStyleSheet("text-align:left; color:#1565C0; font-weight:bold;")
+        self._btn_shsq_tbl.setToolTip(
+            "Per-gas fitting policy, always visible and editable here.\n"
+            "Edits apply immediately (no OK button) — use  Properties if you want\n"
+            "a wider view with Cancel.")
+        self._btn_shsq_tbl.clicked.connect(self._toggle_shsq_table)
+        lay_calib_main.addWidget(self._btn_shsq_tbl)
+
+        from gui.ref_properties_dialog import RefPropertiesTable
+        self.tbl_shsq = RefPropertiesTable([], {})
+        self.tbl_shsq.setMinimumHeight(int(120 * self._s))
+        self.tbl_shsq.setMaximumHeight(int(220 * self._s))
+        self.tbl_shsq.changed.connect(self._on_shsq_table_changed)
+        # 명시적 플래그 — isVisible()은 부모 탭이 숨으면 False라 토글이 어긋난다
+        # (이 파일의 _adv_params_visible과 같은 방식).
+        self._shsq_table_visible = True
+        self.tbl_shsq.setVisible(True)
+        lay_calib_main.addWidget(self.tbl_shsq)
 
         # ── ADVANCED (접이, 기본 닫힘): 우리 데이터엔 보통 불필요한 것 ──
         # Tikhonov λ(조건수 안정→0 권장), Robust(알파 60s평균이라 효과 작음·QC가 행단위 대체),
@@ -706,16 +756,16 @@ class CAESARAnalyzer(QMainWindow):
         # Tab 0: Setup (Daily Run 흡수 + Tools/α파이프라인/Cavity/진단)
         self.setup_tab = QWidget()
         self.setup_cavity_tab()
-        self.main_tabs.addTab(_tab_scroll(self.setup_tab), "🛠️ Setup")
+        self.main_tabs.addTab(_tab_scroll(self.setup_tab), "Setup")
 
         # Tab 2: Analysis Monitor
         self.monitor = MonitorWidget(self.engine)
-        self.main_tabs.addTab(_tab_scroll(self.monitor), "📈 Analysis Monitor")
+        self.main_tabs.addTab(_tab_scroll(self.monitor), "Analysis Monitor")
 
         # Tab 3: Result Viewer (저장된 R/α/레퍼런스/농도 결과 파일을 불러와 표시)
         from .ui_result_viewer import ResultViewerWidget
         self.result_viewer = ResultViewerWidget(self)
-        self.main_tabs.addTab(_tab_scroll(self.result_viewer), "📂 Result Lab")
+        self.main_tabs.addTab(_tab_scroll(self.result_viewer), "Result Lab")
 
         # Tab 4: Plot Maker (여러 결과를 메모리에 올려 자유 합성·시계열/산점도/Allan)
         from .ui_plot_maker import PlotMakerWidget
@@ -723,7 +773,7 @@ class CAESARAnalyzer(QMainWindow):
         # Plot Maker는 스크롤 영역으로 감싸지 않는다 — 플롯이 남는 공간을 채우는
         # 위젯이라, 스크롤로 감싸면 툴바가 여러 줄일 때 전체가 세로 스크롤돼 불편.
         # 직접 붙이면 툴바(상단 고정)+플롯(stretch)으로 스크롤 없이 한 화면에 들어온다.
-        self.main_tabs.addTab(self.plot_maker, "📉 Plot Maker")
+        self.main_tabs.addTab(self.plot_maker, "Plot Maker")
         self._tab_pages[self.plot_maker] = self.plot_maker
         # 결과뷰어 → Plot Maker 브리지: 선택 파일을 선반에 싣고 탭 전환
         self.result_viewer.send_to_plotmaker.connect(
@@ -815,24 +865,40 @@ class CAESARAnalyzer(QMainWindow):
 
         # (Fit Scenario 저장/로드 그룹 제거 — 왼쪽 패널 채널탭바 📋/💾 버튼으로 일원화, S2)
 
-        grp_status = QGroupBox("✅ Setup Status")
+        grp_status = QGroupBox("Setup Status")
         grp_status.setStyleSheet("QGroupBox { font-weight: bold; color: #1565C0; }")
         lay_status = QVBoxLayout()
 
-        self.lbl_st_wl    = QLabel("❌  Wavelength calibration: not loaded")
-        self.lbl_st_i0    = QLabel("⚠️   I₀ (Zero-Air): not set (auto from ZA scans)")
-        self.lbl_st_r     = QLabel("⚠️   R-Curve: not loaded (auto from He scans)")
-        self.lbl_st_refs  = QLabel("❌  References: not locked")
-        self.lbl_st_range = QLabel("⚠️   Fit range: 0–2047 px (full sensor)")
+        self.lbl_st_wl    = QLabel("Wavelength calibration: not loaded")
+        self.lbl_st_i0    = QLabel("I₀ (Zero-Air): not set (auto from ZA scans)")
+        self.lbl_st_r     = QLabel("R-Curve: not loaded (auto from He scans)")
+        self.lbl_st_refs  = QLabel("References: not locked")
+        self.lbl_st_range = QLabel("Fit range: 0–2047 px (full sensor)")
+        # 위 다섯은 "로드됐나"만 본다. 이건 "그날 데이터가 성립하나"를 본다 —
+        # He 빠진 구간은 R(t)가 외삽되고 결과는 경로길이가 틀린 농도가 되는데
+        # 위 다섯은 전부 초록불이다.
+        self.lbl_st_audit = QLabel("Day audit: not run  (checks ZA/He cadence in raw)")
 
         for lbl in (self.lbl_st_wl, self.lbl_st_i0, self.lbl_st_r,
-                    self.lbl_st_refs, self.lbl_st_range):
+                    self.lbl_st_refs, self.lbl_st_range, self.lbl_st_audit):
             lbl.setStyleSheet("padding: 2px 6px; font-size: 11px;")
             lay_status.addWidget(lbl)
 
-        btn_refresh = QPushButton("🔄 Refresh Status")
+        _st_btns = QHBoxLayout()
+        btn_refresh = QPushButton("Refresh Status")
         btn_refresh.clicked.connect(self._refresh_setup_status)
-        lay_status.addWidget(btn_refresh)
+        _st_btns.addWidget(btn_refresh)
+        self.btn_day_audit = QPushButton("Audit Day")
+        self.btn_day_audit.setToolTip(
+            "Scan the loaded raw files' ZA/He flag timeline and report missing or\n"
+            "over-long gaps in the calibration sequence.\n"
+            "A missing He block means R(t) is extrapolated across it — the resulting\n"
+            "concentrations have the wrong path length, and nothing else on this\n"
+            "checklist would notice.\n"
+            "Read-only: it changes no data. Runs in the background (raw is ~2 GB/day).")
+        self.btn_day_audit.clicked.connect(self._start_day_audit)
+        _st_btns.addWidget(self.btn_day_audit)
+        lay_status.addLayout(_st_btns)
         grp_status.setLayout(lay_status)
         left_v.addWidget(grp_status)
         left_v.addStretch(1)
@@ -851,7 +917,7 @@ class CAESARAnalyzer(QMainWindow):
         if wl_ok:
             wl = np.asarray(self.wavelengths).flatten()
             self.lbl_st_wl.setText(
-                f"✅  Wavelength: {wl.min():.2f}–{wl.max():.2f} nm  ({len(wl)} px)")
+                f"Wavelength: {wl.min():.2f}–{wl.max():.2f} nm  ({len(wl)} px)")
             self.lbl_st_wl.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
             # Auto-correct txt_max if it still holds the default 2047 and wl is shorter
             try:
@@ -861,7 +927,7 @@ class CAESARAnalyzer(QMainWindow):
             except ValueError:
                 pass
         else:
-            self.lbl_st_wl.setText("❌  Wavelength calibration: not loaded")
+            self.lbl_st_wl.setText("Wavelength calibration: not loaded")
             self.lbl_st_wl.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
 
         # 입력 종류 판별 — 알파면 I0/R가 이미 반영돼 있어 '해당 없음(✅)'으로 표시.
@@ -879,13 +945,13 @@ class CAESARAnalyzer(QMainWindow):
         i0_ok = hasattr(self, 'i0_data') and self.i0_data is not None
         if i0_ok:
             self.lbl_st_i0.setText(
-                f"✅  I₀: loaded ({len(self.i0_data)} px,  mean={self.i0_data.mean():.1f})")
+                f"I₀: loaded ({len(self.i0_data)} px,  mean={self.i0_data.mean():.1f})")
             self.lbl_st_i0.setStyleSheet(_green)
         elif _is_alpha:
-            self.lbl_st_i0.setText("✅  I₀: N/A  (already applied in alpha)")
+            self.lbl_st_i0.setText("I₀: N/A  (already applied in alpha)")
             self.lbl_st_i0.setStyleSheet(_gray)
         else:
-            self.lbl_st_i0.setText("ℹ️   I₀: auto from ZA scans during run")
+            self.lbl_st_i0.setText("I₀: auto from ZA scans during run")
             self.lbl_st_i0.setStyleSheet(_amber)
 
         # R-curve
@@ -897,26 +963,26 @@ class CAESARAnalyzer(QMainWindow):
                 r_med = float(np.median(r_fin))
                 leff  = self.spin_d_len.value() / (1.0 - r_med)
                 self.lbl_st_r.setText(
-                    f"✅  R: {r_med*100:.4f}%  Leff ≈ {leff:.0f} cm")
+                    f"R: {r_med*100:.4f}%  Leff ≈ {leff:.0f} cm")
             else:
-                self.lbl_st_r.setText("✅  R: loaded (no finite values in pixel range)")
+                self.lbl_st_r.setText("R: loaded (no finite values in pixel range)")
             self.lbl_st_r.setStyleSheet(_green)
             self._update_daily_r_chart()
         elif _is_alpha:
-            self.lbl_st_r.setText("✅  R: N/A  (already applied in alpha)")
+            self.lbl_st_r.setText("R: N/A  (already applied in alpha)")
             self.lbl_st_r.setStyleSheet(_gray)
         else:
-            self.lbl_st_r.setText("ℹ️   R-Curve: auto from He scans during run")
+            self.lbl_st_r.setText("R-Curve: auto from He scans during run")
             self.lbl_st_r.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
 
         # References locked
         refs_ok = hasattr(self, 'engine') and len(self.engine.gas_list) > 0
         if refs_ok:
             self.lbl_st_refs.setText(
-                f"✅  References locked: {', '.join(self.engine.gas_list)}")
+                f"References locked: {', '.join(self.engine.gas_list)}")
             self.lbl_st_refs.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
         else:
-            self.lbl_st_refs.setText("❌  References: not locked  (lock before RUN)")
+            self.lbl_st_refs.setText("References: not locked  (lock before RUN)")
             self.lbl_st_refs.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
 
         # Fit range
@@ -929,14 +995,127 @@ class CAESARAnalyzer(QMainWindow):
                 lo = wl[fmin] if fmin < len(wl) else 0
                 hi = wl[min(fmax, len(wl)-1)]
                 self.lbl_st_range.setText(
-                    f"✅  Fit range: px {fmin}–{fmax}  ({lo:.1f}–{hi:.1f} nm,  {rng} px)")
+                    f"Fit range: px {fmin}–{fmax}  ({lo:.1f}–{hi:.1f} nm,  {rng} px)")
             else:
                 self.lbl_st_range.setText(
-                    f"✅  Fit range: px {fmin}–{fmax}  ({rng} px)")
+                    f"Fit range: px {fmin}–{fmax}  ({rng} px)")
             self.lbl_st_range.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
         except ValueError:
-            self.lbl_st_range.setText("❌  Fit range: invalid pixel values")
+            self.lbl_st_range.setText("Fit range: invalid pixel values")
             self.lbl_st_range.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+
+        self._render_day_audit()   # 캐시된 감사 결과는 Refresh로 지워지지 않는다
+
+    # ── 측정일 감사 (D1) ───────────────────────────────────────────────
+    _AUDIT_STYLE = {
+        "PASS": "color: #2E7D32; padding: 2px 6px; font-size: 11px;",
+        "WARN": "color: #e65100; padding: 2px 6px; font-size: 11px;",
+        "FAIL": "color: #c62828; padding: 2px 6px; font-weight: bold; font-size: 11px;",
+        "SKIP": "color: #757575; padding: 2px 6px; font-size: 11px;",
+    }
+
+    def _raw_days(self):
+        """로드된 파일 중 **raw만** 날짜별로 묶는다 → [(YYYY-MM-DD, [경로…])].
+
+        알파는 감사 대상이 아니다 — ZA는 I₀로, He는 R로 소비돼 알파 파일엔 안 남는다
+        (`fit_optimizer_handoff.md` §12). 알파만 로드된 상태면 빈 목록이고 SKIP이 뜬다.
+        """
+        jobs = {}
+        for entry in getattr(self, 'file_list', None) or []:
+            try:
+                fp = self._entry_filepath(entry)
+            except Exception:
+                continue
+            if not fp or not os.path.exists(fp):
+                continue
+            m = re.match(r'^(\d{4}-\d{2}-\d{2})-\d+', os.path.basename(fp))
+            if not m:
+                continue
+            try:
+                if DataIO._is_alpha_trace_format(fp):
+                    continue
+            except Exception:
+                pass
+            jobs.setdefault(m.group(1), []).append(fp)
+        return sorted((d, sorted(f)) for d, f in jobs.items())
+
+    def _start_day_audit(self):
+        """로드된 raw의 ZA/He 케이던스 감사를 백그라운드로 시작."""
+        if getattr(self, '_audit_worker', None) is not None:
+            return
+        jobs = self._raw_days()
+        if not jobs:
+            self.lbl_st_audit.setText(
+                "Day audit: no raw files loaded  "
+                "(alpha input has no ZA/He blocks to check)")
+            self.lbl_st_audit.setStyleSheet(self._AUDIT_STYLE["SKIP"])
+            return
+        from gui.r_workers import DayAuditWorker
+        n = sum(len(f) for _d, f in jobs)
+        self.btn_day_audit.setEnabled(False)
+        self.lbl_st_audit.setText(
+            f"Day audit: scanning {n} raw file(s) over {len(jobs)} day(s)...")
+        self.lbl_st_audit.setStyleSheet(self._AUDIT_STYLE["SKIP"])
+        w = DayAuditWorker(jobs)
+        w.progress.connect(lambda d: self.lbl_st_audit.setText(f"Day audit: {d}…"))
+        w.done.connect(self._on_day_audit_done)
+        w.failed.connect(self._on_day_audit_failed)
+        self._audit_worker = w
+        w.start()
+
+    def _on_day_audit_failed(self, msg):
+        self._audit_worker = None
+        self.btn_day_audit.setEnabled(True)
+        self.lbl_st_audit.setText(f"Day audit: failed ({msg})")
+        self.lbl_st_audit.setStyleSheet(self._AUDIT_STYLE["SKIP"])
+
+    def _on_day_audit_done(self, reports):
+        self._audit_worker = None
+        self.btn_day_audit.setEnabled(True)
+        self._day_audit = reports          # {date: AuditReport} — save()가 meta에 싣는다
+        self._render_day_audit()
+        worst = self._day_audit_worst()
+        if worst in ("WARN", "FAIL"):
+            # 조용히 지나가면 안 되는 발견이라 상태줄에도 남긴다(자동 차단은 하지 않음 —
+            # 판정은 보고이고, RUN 여부는 사람이 정한다).
+            lines = [f"{d}: {m}" for d, rep in sorted(reports.items())
+                     for s, m in rep.messages if s in ("WARN", "FAIL")]
+            self.status.setText(f"Day audit {worst} — " + " | ".join(lines[:3]))
+            self.status.setStyleSheet(
+                "color: %s; font-weight: bold;" % ("#c62828" if worst == "FAIL" else "#e65100"))
+
+    def _day_audit_worst(self):
+        rank = {"SKIP": 0, "PASS": 1, "WARN": 2, "FAIL": 3}
+        reports = getattr(self, '_day_audit', None) or {}
+        return max((r.status for r in reports.values()),
+                   key=lambda s: rank.get(s, 0), default="SKIP")
+
+    def _render_day_audit(self):
+        """캐시된 감사 결과를 한 줄로. 결과가 없으면 안내만."""
+        if not hasattr(self, 'lbl_st_audit'):
+            return
+        reports = getattr(self, '_day_audit', None)
+        if not reports:
+            if getattr(self, '_audit_worker', None) is None:
+                self.lbl_st_audit.setText(
+                    "Day audit: not run  (checks ZA/He cadence in raw)")
+                self.lbl_st_audit.setStyleSheet(self._AUDIT_STYLE["SKIP"])
+            return
+        worst = self._day_audit_worst()
+        bad = [(d, m) for d, rep in sorted(reports.items())
+               for s, m in rep.messages if s in ("WARN", "FAIL")]
+        if bad:
+            d, m = bad[0]
+            more = f"  (+{len(bad) - 1} more)" if len(bad) > 1 else ""
+            txt = f"Day audit {worst}: {d} — {m}{more}"
+        else:
+            n_blk = sum(len(b) for rep in reports.values() for b in rep.blocks.values())
+            txt = (f"Day audit {worst}: "
+                   f"{len(reports)} day(s), {n_blk} ZA/He blocks, no gaps")
+        self.lbl_st_audit.setText(txt)
+        self.lbl_st_audit.setToolTip(
+            "\n".join(f"{d}: {rep.summary()}" for d, rep in sorted(reports.items())))
+        self.lbl_st_audit.setStyleSheet(self._AUDIT_STYLE.get(worst, self._AUDIT_STYLE["SKIP"]))
 
     def _update_fwhm_px_from_nm(self, nm_val):
         """Convert FWHM nm → px using loaded wavelength axis; update spin_fwhm."""
@@ -1138,7 +1317,7 @@ class CAESARAnalyzer(QMainWindow):
                 contrast = _med([r.get('he_za_contrast') for r in res])
                 valid    = _med([r.get('valid_frac') for r in res]) * 100.0
                 # 낮은 contrast/valid = 인젝션 불량 신호 → 경고 마크
-                flag = " ⚠️" if (np.isfinite(valid) and valid < 30.0) else ""
+                flag = "" if (np.isfinite(valid) and valid < 30.0) else ""
                 con_str = f"{contrast:.2f}" if np.isfinite(contrast) else "n/a"
                 lines.append(
                     f"{ch['label']:<8} R̄={r_pct:6.3f}%  Leff={leff:5.2f}km  "
@@ -1286,14 +1465,14 @@ class CAESARAnalyzer(QMainWindow):
         grp_calib = QGroupBox("Tools")
         lay_calib = QVBoxLayout()
 
-        btn_calib_tool = QPushButton("🔍 Wavelength Calibration Tool")
+        btn_calib_tool = QPushButton("Wavelength Calibration Tool")
         btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
 
-        btn_ref_gen = QPushButton("✂️ Reference Generator")
+        btn_ref_gen = QPushButton("Reference Generator")
         btn_ref_gen.clicked.connect(self.open_reference_generator)
         btn_ref_gen.setStyleSheet("font-weight: bold;")
 
-        btn_r_trend = QPushButton("📐 R Calibrator")
+        btn_r_trend = QPushButton("R Calibrator")
         btn_r_trend.clicked.connect(self.open_r_trend_monitor)
         btn_r_trend.setStyleSheet("font-weight: bold;")
         btn_r_trend.setToolTip(
@@ -1319,7 +1498,7 @@ class CAESARAnalyzer(QMainWindow):
 
         # Alpha Generator — raw → alpha 생성은 별도 팝업창에서(분석=알파 피팅과 분리).
         # 분석(좌측)은 알파를 넣고 RUN해 피팅. 알파 생성만 여기 Setup에서 창으로.
-        btn_alpha_gen = QPushButton("🧪 Alpha Generator")
+        btn_alpha_gen = QPushButton("Alpha Generator")
         btn_alpha_gen.clicked.connect(self.open_alpha_generator)
         btn_alpha_gen.setStyleSheet("font-weight: bold; padding: 8px; border: 1px solid #90CAF9;")
         btn_alpha_gen.setToolTip(
@@ -1328,7 +1507,7 @@ class CAESARAnalyzer(QMainWindow):
 
         # Test Fit — RUN 전에 세팅을 검증: 탭1(자동 파라미터 최적화 추천+Apply) +
         # 탭2(첫 알파 스캔 1개 즉석 핏 미리보기, 기존 동작 그대로).
-        btn_test_fit = QPushButton("🧪 Test Fit")
+        btn_test_fit = QPushButton("Test Fit")
         btn_test_fit.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
         btn_test_fit.setToolTip(
             "Optimize tab: auto-recommend poly/shift/squeeze/step_limit from a 12-scan\n"
@@ -1436,7 +1615,7 @@ class CAESARAnalyzer(QMainWindow):
         _ov_outer = QVBoxLayout(self._manual_override_container)
         _ov_outer.setContentsMargins(0, 0, 0, 0)
 
-        grp_ov = QGroupBox("⚙️ Manual Override")
+        grp_ov = QGroupBox("Manual Override")
         grp_ov.setStyleSheet("QGroupBox { color: #546E7A; }")
         lay_ov = QFormLayout()
 
@@ -1448,7 +1627,7 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_i0_path.setSizePolicy(_SPi0.Policy.Ignored, _SPi0.Policy.Preferred)
         btn_browse_i0 = QPushButton("Browse I₀")
         btn_browse_i0.clicked.connect(self.browse_i0_file)
-        btn_auto_i0 = QPushButton("🔍 Auto")   # 텍스트 축약(폭 절감) — 설명은 툴팁
+        btn_auto_i0 = QPushButton("Auto")   # 텍스트 축약(폭 절감) — 설명은 툴팁
         btn_auto_i0.setToolTip("Auto-extract I₀ by averaging ZA-flagged scans in the loaded files.")
         btn_auto_i0.clicked.connect(self.auto_extract_i0)
         lay_i0 = QHBoxLayout()
@@ -1486,7 +1665,7 @@ class CAESARAnalyzer(QMainWindow):
         self.txt_flag_za.setToolTip(
             "Flag numbers averaged into Zero-Air I₀ (comma-separated)\n"
             "CAESAR Araon: 500=injecting(pure), 501=setflow, 502/503=wait\n"
-            "★ default 500 (strict) — 501-503 are cavity-unfilled and contaminate I0.\n"
+            "default 500 (strict) — 501-503 are cavity-unfilled and contaminate I0.\n"
             "  For legacy data, you can manually enter \"500,501,502,503\" here."
         )
         lay_flags.addWidget(QLabel("ZA:"))
@@ -1497,7 +1676,7 @@ class CAESARAnalyzer(QMainWindow):
         self.txt_flag_he.setToolTip(
             "Flag numbers used for Helium R-cal (comma-separated)\n"
             "CAESAR Araon: 510=injecting(pure), 511=setflow, 512/513=wait\n"
-            "★ default 510 (strict) — 511-513 are cavity-unfilled and contaminate R-cal.\n"
+            "default 510 (strict) — 511-513 are cavity-unfilled and contaminate R-cal.\n"
             "  For legacy data, you can manually enter \"510,511,512,513\" here."
         )
         lay_flags.addWidget(QLabel("He:"))
@@ -1681,7 +1860,7 @@ class CAESARAnalyzer(QMainWindow):
         self.p1.vb.sigResized.connect(updateViews)
 
         lay_spectral.addWidget(self.plot_diagnostic)
-        self._diag_tabs.addTab(tab_spectral, "📊 R(λ) Spectrum")
+        self._diag_tabs.addTab(tab_spectral, "R(λ) Spectrum")
 
         # ── Tab 1: R(t) + Leff(t) time-series from R Trend Monitor ──────────
         tab_trend = QWidget()
@@ -1718,7 +1897,7 @@ class CAESARAnalyzer(QMainWindow):
 
         lay_trend.addWidget(self._setup_r_trend_pw, stretch=1)
         lay_trend.addWidget(self._setup_leff_pw, stretch=1)
-        self._diag_tabs.addTab(tab_trend, "📈 R/Leff Trend")
+        self._diag_tabs.addTab(tab_trend, "R/Leff Trend")
 
         # ── Tab 2: Pipeline Health — RUN 전에 "이 산출물로 긴 핏을 돌려도 되나?"를 사전점검 ──
         # α 폴더 스캔(너희가 반복적으로 데인 "조용히 오염된 알파" — 트렁케이트·6175 bin당
@@ -1732,12 +1911,12 @@ class CAESARAnalyzer(QMainWindow):
         lay_aqc.setSpacing(4)
 
         _aqc_ctl = QHBoxLayout()
-        _btn_aqc_dir = QPushButton("📁 α Folder…")
+        _btn_aqc_dir = QPushButton("α Folder…")
         _btn_aqc_dir.clicked.connect(self._alpha_qc_pick_folder)
         self.lbl_aqc_dir = QLabel("(none)")
         self.lbl_aqc_dir.setStyleSheet("color:#555;")
         self.lbl_aqc_dir.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        _btn_aqc_rnpz = QPushButton("🔬 R(t) npz…")
+        _btn_aqc_rnpz = QPushButton("R(t) npz…")
         _btn_aqc_rnpz.setToolTip(
             "Optional: R_<channel>.npz (R Trend ▸ 'save R(t) for α') to physics-check R/Leff.\n"
             "Skipped if not set.")
@@ -1745,7 +1924,7 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_aqc_rnpz = QLabel("(none)")
         self.lbl_aqc_rnpz.setStyleSheet("color:#555;")
         self._aqc_r_npz = None
-        self._btn_aqc_run = QPushButton("🩺 Run Pipeline Check")
+        self._btn_aqc_run = QPushButton("Run Pipeline Check")
         self._btn_aqc_run.setStyleSheet("font-weight:bold;")
         self._btn_aqc_run.clicked.connect(self._alpha_qc_run)
         self._aqc_folder = None
@@ -1753,7 +1932,7 @@ class CAESARAnalyzer(QMainWindow):
         self.chk_aqc_auto.setToolTip(
             "When Alpha Generator finishes, jump to this tab with the output folder\n"
             "pre-filled and (if checked) run the health check automatically.")
-        self._btn_aqc_fitwin = QPushButton("🔍 Fit window")
+        self._btn_aqc_fitwin = QPushButton("Fit window")
         self._btn_aqc_fitwin.setToolTip(
             "Zoom X to the fit window (Setup ▸ fit start~end nm) and auto-fit Y to the\n"
             "mean α inside it — strips the edge noise so the real structure is visible.")
@@ -1792,7 +1971,7 @@ class CAESARAnalyzer(QMainWindow):
         lay_aqc.addWidget(self._aqc_pw, stretch=1)
 
         self._tab_aqc = tab_aqc
-        self._diag_tabs.addTab(tab_aqc, "🩺 Pipeline Health")
+        self._diag_tabs.addTab(tab_aqc, "Pipeline Health")
 
         # ── Tab 3: FWHM Best-Match (validate sweep refs against measured α) ──
         from matplotlib.figure import Figure as _FwhmFigure
@@ -1811,7 +1990,7 @@ class CAESARAnalyzer(QMainWindow):
         self._fwhm_best_ref_path = None
         self._fwhm_last_scores = None
 
-        btn_pick_folder = QPushButton("📁 Sweep Folder…")
+        btn_pick_folder = QPushButton("Sweep Folder…")
         btn_pick_folder.clicked.connect(self._fwhm_pick_sweep_folder)
         self.lbl_fwhm_folder = QLabel("Not selected")
         self.lbl_fwhm_folder.setStyleSheet("color: #d32f2f;")
@@ -1834,7 +2013,7 @@ class CAESARAnalyzer(QMainWindow):
         row_a1.addWidget(self.rb_fwhm_alpha_folder)
         ctl_lay.addRow("α source:", row_a1)
 
-        btn_pick_alpha = QPushButton("📂 Pick α file…")
+        btn_pick_alpha = QPushButton("Pick α file…")
         btn_pick_alpha.clicked.connect(self._fwhm_pick_alpha_file)
         self.lbl_fwhm_alpha = QLabel("(auto)")
         self.lbl_fwhm_alpha.setStyleSheet("color: #555;")
@@ -1843,7 +2022,7 @@ class CAESARAnalyzer(QMainWindow):
         row_a2.addWidget(self.lbl_fwhm_alpha, stretch=1)
         ctl_lay.addRow("α file:", row_a2)
 
-        btn_pick_alpha_dir = QPushButton("📁 Pick α folder…")
+        btn_pick_alpha_dir = QPushButton("Pick α folder…")
         btn_pick_alpha_dir.clicked.connect(self._fwhm_pick_alpha_folder)
         self.lbl_fwhm_alpha_dir = QLabel("(none)")
         self.lbl_fwhm_alpha_dir.setStyleSheet("color: #555;")
@@ -1854,10 +2033,10 @@ class CAESARAnalyzer(QMainWindow):
         ctl_lay.addRow("α folder:", row_a3)
 
         row_btn = QHBoxLayout()
-        self.btn_fwhm_run = QPushButton("🌀 Run Validation")
+        self.btn_fwhm_run = QPushButton("Run Validation")
         self.btn_fwhm_run.setStyleSheet("font-weight: bold;")
         self.btn_fwhm_run.clicked.connect(self._fwhm_run_validation)
-        self.btn_fwhm_set_active = QPushButton("✅ Set as NO2 ref")
+        self.btn_fwhm_set_active = QPushButton("Set as NO2 ref")
         self.btn_fwhm_set_active.setEnabled(False)
         self.btn_fwhm_set_active.clicked.connect(self._fwhm_set_active_ref)
         row_btn.addWidget(self.btn_fwhm_run)
@@ -1898,7 +2077,7 @@ class CAESARAnalyzer(QMainWindow):
         self._fwhm_sweep_folder = d
         import glob
         n = len(glob.glob(os.path.join(d, "Ref_*_FWHM*nm.dat")))
-        self.lbl_fwhm_folder.setText(f"✅ {d}  ({n} sweep refs)")
+        self.lbl_fwhm_folder.setText(f"{d}  ({n} sweep refs)")
         self.lbl_fwhm_folder.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
     def _fwhm_pick_alpha_file(self):
@@ -1911,7 +2090,7 @@ class CAESARAnalyzer(QMainWindow):
             return
         self._fwhm_alpha_file_path = f
         self.rb_fwhm_alpha_file.setChecked(True)
-        self.lbl_fwhm_alpha.setText(f"✅ {os.path.basename(f)}")
+        self.lbl_fwhm_alpha.setText(f"{os.path.basename(f)}")
         self.lbl_fwhm_alpha.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
     def _fwhm_pick_alpha_folder(self):
@@ -1923,7 +2102,7 @@ class CAESARAnalyzer(QMainWindow):
             return
         self._fwhm_alpha_folder = d
         self.rb_fwhm_alpha_folder.setChecked(True)
-        self.lbl_fwhm_alpha_dir.setText(f"✅ {d}")
+        self.lbl_fwhm_alpha_dir.setText(f"{d}")
         self.lbl_fwhm_alpha_dir.setStyleSheet("color: #2E7D32; font-weight: bold;")
 
     def _fwhm_mean_alpha_from_file(self, path):
@@ -1989,7 +2168,7 @@ class CAESARAnalyzer(QMainWindow):
         if not d:
             return
         self._aqc_folder = d
-        self.lbl_aqc_dir.setText(f"✅ {d}")
+        self.lbl_aqc_dir.setText(f"{d}")
         self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
 
     def _pipeline_qc_pick_r_npz(self):
@@ -2001,7 +2180,7 @@ class CAESARAnalyzer(QMainWindow):
             return
         self._dlg_dir('rt_path', fp)
         self._aqc_r_npz = fp
-        self.lbl_aqc_rnpz.setText(f"✅ {os.path.basename(fp)}")
+        self.lbl_aqc_rnpz.setText(f"{os.path.basename(fp)}")
         self.lbl_aqc_rnpz.setStyleSheet("color:#2E7D32; font-weight:bold;")
 
     def _pipeline_health_checks(self):
@@ -2111,7 +2290,7 @@ class CAESARAnalyzer(QMainWindow):
         if not out_dir or not hasattr(self, 'lbl_aqc_dir'):
             return
         self._aqc_folder = out_dir
-        self.lbl_aqc_dir.setText(f"✅ {out_dir}")
+        self.lbl_aqc_dir.setText(f"{out_dir}")
         self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
         try:
             if hasattr(self, '_diag_tabs') and hasattr(self, '_tab_aqc'):
@@ -2122,7 +2301,7 @@ class CAESARAnalyzer(QMainWindow):
             self._alpha_qc_run()
         elif hasattr(self, 'lbl_aqc_readout'):
             self.lbl_aqc_readout.setText(
-                "Pipeline health: folder set from last export — click 🩺 Run Pipeline Check.")
+                "Pipeline health: folder set from last export — click  Run Pipeline Check.")
 
     def _alpha_qc_run(self):
         """전체 파이프라인 헬스체크: α 폴더 스캔(선택) + wavecal/references/Rayleigh/R(t)
@@ -2135,7 +2314,7 @@ class CAESARAnalyzer(QMainWindow):
         try:
             if self._aqc_folder:
                 def _st(k, n):
-                    self.status.setText(f"🩺 Pipeline Health scanning α {k}/{n}…")
+                    self.status.setText(f"Pipeline Health scanning α {k}/{n}…")
                     QApplication.processEvents()
                 r = self._alpha_qc_scan_folder(self._aqc_folder, status_cb=_st)
             pipe_results = self._pipeline_health_checks()
@@ -2206,7 +2385,7 @@ class CAESARAnalyzer(QMainWindow):
             return (str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                      .replace(' ', '&nbsp;'))
         _CLR = {HC.PASS: '#2E7D32', HC.WARN: '#E65100', HC.FAIL: '#C62828', HC.SKIP: '#78909C'}
-        _ICON = {HC.PASS: '✅', HC.WARN: '⚠️', HC.FAIL: '❌', HC.SKIP: '⏭️'}
+        _ICON = {HC.PASS: '', HC.WARN: '', HC.FAIL: '', HC.SKIP: ''}
         html = [f'<span style="color:{_CLR[overall_status]}; font-weight:bold;">'
                 f'{_ICON[overall_status]} {_esc(overall_msg)}</span>']
         for name, status, msg, _m in pipe_results:
@@ -2217,7 +2396,7 @@ class CAESARAnalyzer(QMainWindow):
         self.lbl_aqc_readout.setText('<br>'.join(html))
         self.lbl_aqc_readout.setStyleSheet(
             "font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
-        self.status.setText(f"🩺 Pipeline Health: {overall_status} — {overall_msg}")
+        self.status.setText(f"Pipeline Health: {overall_status} — {overall_msg}")
 
     def _alpha_qc_zoom_fit(self):
         """🔍 Fit window: X를 Setup의 핏범위(start~end nm)로 줌 + 그 구간 mean α에 Y 오토핏.
@@ -2226,7 +2405,7 @@ class CAESARAnalyzer(QMainWindow):
         data = getattr(self, '_aqc_plot_data', None)
         if not data:
             QMessageBox.information(self, "Pipeline Health",
-                "α 폴더를 지정하고 먼저 🩺 Run Pipeline Check를 실행하세요.")
+                "α 폴더를 지정하고 먼저  Run Pipeline Check를 실행하세요.")
             return
         wl, mean, _lo, _hi = data
         lo_nm = float(self.spin_fit_start_nm.value())
@@ -2429,11 +2608,11 @@ class CAESARAnalyzer(QMainWindow):
         self._fwhm_ax.legend()
         self._fwhm_canvas.draw()
 
-        _warn = ("\n⚠️ legacy single-column refs with length≠α detected — index-aligned "
+        _warn = ("\n legacy single-column refs with length≠α detected — index-aligned "
                  "(may be unreliable). Re-run the FWHM Sweep to save wavelength-tagged refs."
                  if self._fwhm_legacy_mismatch else "")
         self.lbl_fwhm_best.setText(
-            f"🏆 Best FWHM = {best_fv:.3f} nm  (RMS = {best_rms:.3e})\n"
+            f"Best FWHM = {best_fv:.3f} nm  (RMS = {best_rms:.3e})\n"
             f"   → {os.path.basename(best_path)}{_warn}"
         )
         if self._fwhm_legacy_mismatch:
@@ -2646,7 +2825,7 @@ class CAESARAnalyzer(QMainWindow):
         self._alpha_total       = 0
         self._alpha_ch_done     = 0          # 완료된 채널 수(멀티채널 진행 표시용)
         self._alpha_n_ch        = n_ch
-        self.status.setText(f"📁 Alpha export started ({n_ch} channels)...")
+        self.status.setText(f"Alpha export started ({n_ch} channels)...")
         self._start_next_alpha_export()
         return True
 
@@ -2762,7 +2941,7 @@ class CAESARAnalyzer(QMainWindow):
     def _start_next_alpha_export(self):
         if not getattr(self, '_alpha_queue', None):
             done = getattr(self, '_alpha_done_msgs', [])
-            self.status.setText(f"✅ Alpha export complete → {self._alpha_out_dir}")
+            self.status.setText(f"Alpha export complete  {self._alpha_out_dir}")
             cb = getattr(self, '_alpha_user_done_cb', None)
             if cb:   # Alpha Generator 팝업이 띄운 경우 콜백으로 알림(자체 메시지)
                 cb(self._alpha_out_dir, list(done))
@@ -2777,7 +2956,7 @@ class CAESARAnalyzer(QMainWindow):
             self._alpha_qc_after_export(self._alpha_out_dir)
             return
         cfg = self._alpha_queue.pop(0)
-        self._alpha_status(f"📁 Alpha [{cfg['label']}] computing (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
+        self._alpha_status(f"Alpha [{cfg['label']}] computing (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
         self._alpha_export_worker = AlphaExportWorker(
             file_list     = self._alpha_file_list,
             pixel_min     = cfg['pixel_min'],
@@ -2814,7 +2993,7 @@ class CAESARAnalyzer(QMainWindow):
         # 로그(print) + GUI 상태줄/팝업 둘 다 — Indexing/cache/saved 진행이 사용자에게 보이게
         self._alpha_export_worker.status_msg.connect(
             lambda m, _lbl=cfg['label']: (print(f"[AlphaExport] {m}"),
-                                          self._alpha_status(f"📁 [{_lbl}] {m}")))
+                                          self._alpha_status(f"[{_lbl}] {m}")))
         self._alpha_export_worker.finished.connect(
             lambda res, lbl=cfg['label']: self._on_alpha_channel_done(res, lbl))
         self._alpha_export_worker.start()
@@ -2849,7 +3028,7 @@ class CAESARAnalyzer(QMainWindow):
         frac = min(1.0, done / tot)
         ch_done = int(getattr(self, '_alpha_ch_done', 0))
         pct = int(((ch_done + frac) / max(1, n_ch_tot)) * 100)
-        self._alpha_status(f"📁 [{lbl}] {pct}%  ({done:,}/{tot:,} scans)")
+        self._alpha_status(f"[{lbl}] {pct}%  ({done:,}/{tot:,} scans)")
         cb = getattr(self, '_alpha_progress_cb', None)
         if cb:
             cb(pct, 100)
@@ -2857,9 +3036,9 @@ class CAESARAnalyzer(QMainWindow):
     def _on_alpha_channel_done(self, result, label):
         if str(result).startswith("ERROR"):
             self._alpha_done_msgs.append(f"  [{label}] failed: {result}")
-            self.status.setText(f"❌ Alpha [{label}] failed")
+            self.status.setText(f"Alpha [{label}] failed")
         else:
-            self._alpha_done_msgs.append(f"  [{label}] ✅")
+            self._alpha_done_msgs.append(f"[{label}] ")
         self._alpha_ch_done = int(getattr(self, '_alpha_ch_done', 0)) + 1
         self._alpha_total = 0   # 다음 채널 total 재설정 대기
         # 끝난 워커를 wait()로 완전 종료시키고 참조 보관 — 다음 채널 워커로 덮어쓸 때
@@ -2959,7 +3138,7 @@ class CAESARAnalyzer(QMainWindow):
             return
             
         menu = QMenu()
-        action_i0 = menu.addAction("🎯 Set as I0 (Zero-Air)")
+        action_i0 = menu.addAction("Set as I0 (Zero-Air)")
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
         
         if action == action_i0:
@@ -2979,7 +3158,7 @@ class CAESARAnalyzer(QMainWindow):
         """Updates the I0 state, loads data, and updates UI."""
         self.lbl_i0_path.setText(os.path.basename(filepath))
         self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
-        self.status.setText(f"🎯 I0 set to: {os.path.basename(filepath)}")
+        self.status.setText(f"I0 set to: {os.path.basename(filepath)}")
         
         # 🌟 Load I0 data and plot
         try:
@@ -3108,14 +3287,14 @@ class CAESARAnalyzer(QMainWindow):
                 print("✅ [Lamp Sync] Lamp data auto-saved for the reference generator.")
 
             # 4. Smart UI Update for FWHM Label + auto-fill nm spinbox
-            fwhm_text = "✅ Wavelength Updated"
+            fwhm_text = "Wavelength Updated"
             if hasattr(dialog, 'fwhm_records') and dialog.fwhm_records:
                 valid_fwhms = [v['fwhm_nm'] for v in dialog.fwhm_records.values()
                                if v.get('fwhm_nm') is not None]
                 if valid_fwhms:
                     avg_fwhm  = float(np.mean(valid_fwhms))
                     avg_sigma = avg_fwhm / 2.3548
-                    fwhm_text = (f"💡 FWHM={avg_fwhm:.3f} nm  "
+                    fwhm_text = (f"FWHM={avg_fwhm:.3f} nm  "
                                  f"σ={avg_sigma:.3f} nm  "
                                  f"({len(valid_fwhms)} peaks)")
                     # Auto-populate the nm spinbox (triggers px conversion)
@@ -3142,7 +3321,7 @@ class CAESARAnalyzer(QMainWindow):
             self.monitor.set_wavelengths(wl_array)
             self.monitor.refresh_current_plot()
             
-            msg = f"✅ Wavelength Updated: {wl_array.min():.2f} ~ {wl_array.max():.2f} nm"
+            msg = f"Wavelength Updated: {wl_array.min():.2f} ~ {wl_array.max():.2f} nm"
             self.status.setText(msg)
             self.status.setStyleSheet("color: blue; font-weight: bold;")
             
@@ -3200,12 +3379,12 @@ class CAESARAnalyzer(QMainWindow):
                 self.engine.set_wavelength_axis(wl_data)  # register immediately so pixel_to_wavelength works before lock_ref
                 self.monitor.set_wavelengths(wl_data)
                 # 파일명은 lbl_wavecal(생략표시)에만 — 여기(FWHM 라벨)는 짧게 상태만
-                self.lbl_fwhm_display.setText("💡 WL ✓")
+                self.lbl_fwhm_display.setText("WL ")
                 if hasattr(self, 'lbl_wavecal'):
                     from PyQt6.QtGui import QFontMetrics
                     from PyQt6.QtCore import Qt as _Qt
                     _fm = QFontMetrics(self.lbl_wavecal.font())
-                    _el = _fm.elidedText(f"📐 {os.path.basename(filepath)}",
+                    _el = _fm.elidedText(f"{os.path.basename(filepath)}",
                                          _Qt.TextElideMode.ElideMiddle, int(180 * self._s))
                     self.lbl_wavecal.setText(_el)
                     self.lbl_wavecal.setStyleSheet("color: #1565C0; font-weight: bold; padding: 2px;")
@@ -3607,7 +3786,7 @@ class CAESARAnalyzer(QMainWindow):
             if hasattr(self, '_btn_lock_ref'):
                 self._btn_lock_ref.setStyleSheet("font-weight: bold; padding: 5px;")
             if silent:
-                self.status.setText(f"🔒 {success_count} references locked (auto, channel switch)")
+                self.status.setText(f"{success_count} references locked (auto, channel switch)")
             else:
                 QMessageBox.information(self, "Locked", f"{success_count} references have been successfully locked into the Engine.")
 
@@ -3633,7 +3812,7 @@ class CAESARAnalyzer(QMainWindow):
             self._refresh_shsq_summary()
         else:
             if silent:
-                self.status.setText("⚠️ no references to lock (channel switch)")
+                self.status.setText("no references to lock (channel switch)")
             else:
                 QMessageBox.warning(self, "Error", "No valid references found to lock, or an error occurred.")
 
@@ -3655,8 +3834,8 @@ class CAESARAnalyzer(QMainWindow):
         msg_box.setIcon(QMessageBox.Icon.Question)
         
         # Add custom buttons
-        btn_files = msg_box.addButton("📄 Select Files", QMessageBox.ButtonRole.ActionRole)
-        btn_folder = msg_box.addButton("📁 Load Entire Folder", QMessageBox.ButtonRole.ActionRole)
+        btn_files = msg_box.addButton("Select Files", QMessageBox.ButtonRole.ActionRole)
+        btn_folder = msg_box.addButton("Load Entire Folder", QMessageBox.ButtonRole.ActionRole)
         msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         
         msg_box.exec()
@@ -3703,7 +3882,7 @@ class CAESARAnalyzer(QMainWindow):
                         else:
                             _n_skip += 1
             if _n_skip:
-                self.status.setText(f"⚠ Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref 등)")
+                self.status.setText(f"Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref 등)")
             # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지
             files = sorted(set(files), key=lambda f: (os.path.basename(f), f))
             if not files:
@@ -3791,7 +3970,7 @@ class CAESARAnalyzer(QMainWindow):
             ndup = len(keys) - len(set(keys))
             if ndup:
                 dupwarn.append(f"  CH{ch}({key}): {ndup} duplicate scans")
-        warn = ("\n\n⚠️ DUPLICATE scans found (same date-scan in >1 folder —\n"
+        warn = ("\n\n DUPLICATE scans found (same date-scan in >1 folder —\n"
                 "possible mislabeled alphas):\n" + "\n".join(dupwarn)) if dupwarn else ""
         ret = QMessageBox.question(self, "Auto-distribute channels",
                                    "Distribute alpha files to channel tabs by label:\n\n" + "\n".join(lines)
@@ -3812,7 +3991,7 @@ class CAESARAnalyzer(QMainWindow):
         for i, fp in enumerate(self.file_list):
             self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(fp)))
         total = sum(len(self._channel_files[c]) for c in mapping)
-        self.status.setText("📦 distributed: " + " · ".join(
+        self.status.setText("distributed: " + " · ".join(
             f"CH{c} {len(self._channel_files[c])}" for c in sorted(mapping)) + f" (total {total})")
         self._auto_detect_channels()
         return True
@@ -3921,7 +4100,7 @@ class CAESARAnalyzer(QMainWindow):
         _ds = sorted({m.group(0) for fp in self.file_list
                       for m in [_re.search(r'\d{4}-\d{2}-\d{2}', os.path.basename(fp))] if m})
         _rng = f" · {_ds[0]}~{_ds[-1]}" if len(_ds) > 1 else (f" · {_ds[0]}" if _ds else "")
-        self.status.setText(f"📁 CH{ch} — {len(self.file_list)} file(s){_rng}")
+        self.status.setText(f"CH{ch} — {len(self.file_list)} file(s){_rng}")
         self._auto_detect_channels()
         self._refresh_setup_status()   # 입력 종류(알파/raw) 반영 → I0/R status 갱신
 
@@ -3947,7 +4126,7 @@ class CAESARAnalyzer(QMainWindow):
             self.lbl_channel_info.setStyleSheet(
                 f"color: {colours.get(n, '#333')}; font-weight: bold;")
             self.status.setText(
-                f"📁 {len(self.file_list)} file(s) loaded  —  {ch_names.get(n, str(n)+'CH')} detected")
+                f"{len(self.file_list)} file(s) loaded  —  {ch_names.get(n, str(n)+'CH')} detected")
         except Exception as e:
             print(f"[channel detect] {e}")
 
@@ -4053,7 +4232,7 @@ class CAESARAnalyzer(QMainWindow):
             if cfg is not None:
                 cfg['fit_start_nm'] = lo
                 cfg['fit_end_nm'] = hi
-        self.status.setText(f"✅ CH{ch} Fit range = {lo:.1f}~{hi:.1f} nm")
+        self.status.setText(f"CH{ch} Fit range = {lo:.1f}~{hi:.1f} nm")
 
     def apply_roi_from_graph(self, min_val, max_val):
         """Updates the fitting range directly from the fast monitor ROI selection."""
@@ -4166,7 +4345,7 @@ class CAESARAnalyzer(QMainWindow):
         if getattr(self, '_refs_dirty', False):
             ret = QMessageBox.question(
                 self, "References not locked",
-                "References were changed but 🔒 Lock was not pressed.\n"
+                "References were changed but  Lock was not pressed.\n"
                 "The engine will fit with the previously locked set. Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if ret != QMessageBox.StandardButton.Yes:
@@ -4195,7 +4374,7 @@ class CAESARAnalyzer(QMainWindow):
             self._analysis_running = False
             return
         if empty_chs:
-            self.status.setText(f"⚠️ Skipped channels with no data: {', '.join('CH'+str(c) for c in empty_chs)}")
+            self.status.setText(f"Skipped channels with no data: {', '.join('CH'+str(c) for c in empty_chs)}")
 
         # ── 핏은 알파 입력 전용 (2026-06 워크플로 변경) ──────────────────────
         # 워크플로가 'raw→알파 생성 후 알파 핏'으로 통일됨. raw(Araon mega-matrix/
@@ -4381,6 +4560,13 @@ class CAESARAnalyzer(QMainWindow):
         # 채널 = 좌측 채널 탭. 각 탭이 자기 데이터로 병렬 피팅(현재 탭 설정 먼저 스냅샷).
         if self._active_channel in self._channel_configs:
             self._channel_configs[self._active_channel] = self._capture_config()
+        # .meta.json 용 동결: 핏설정·캘리브는 **이 숫자를 만든 값**이어야 하므로 RUN 시점에
+        # 얼려둔다(RUN 뒤 Save 전에 UI를 만져도 meta는 안 흔들린다). QC는 재핏 없는 후처리라
+        # 저장 시점 값이 맞아서 여기서 얼리지 않는다 — save()가 그때 읽는다.
+        self._run_frozen = {
+            "configs": copy.deepcopy(self._channel_configs),
+            "calibration": self._calibration_state(),
+        }
         ch_list = sorted(self._alpha_groups)        # 데이터 있는 채널만(early 블록에서 구성)
         per_channel = len(ch_list) > 1
         self._workers_total = len(ch_list)
@@ -4515,12 +4701,12 @@ class CAESARAnalyzer(QMainWindow):
             w.scan_count_ready.connect(lambda n, ch=ch: self._on_scan_count_ready(n, ch))
 
             # L2: RUN 확인 다이얼로그용 채널별 설정 요약
-            _wlname = os.path.basename(wl_ch) if wl_ch else '⚠️none'
+            _wlname = os.path.basename(wl_ch) if wl_ch else 'none'
             _gt = f"{gtemp_ch:.0f}°C" if gtemp_ch > 0 else "auto"
             _gases = list(eng_ch.gas_list)
             self._run_summary.append(
                 f"CH{ch} {lbl_ch or ''}\n"
-                f"   📐 {_wlname}\n"
+                f"{_wlname}\n"
                 f"   range px {pmin}-{pmax} ({funit_ch}) · Poly{cfg.get('poly_deg', self.spin_poly_deg.value()) if ch != self._active_channel and self._channel_configs.get(ch) else self.spin_poly_deg.value()}\n"
                 f"   refs {len(_gases)}: {', '.join(_gases)}\n"
                 f"   {self._shsq_text(_gases, rp_ch)}\n"
@@ -4576,7 +4762,7 @@ class CAESARAnalyzer(QMainWindow):
         # Lock UI controls to prevent interference
         self.b_run.setEnabled(False)
         self.b_stop.setEnabled(True)
-        self.status.setText("🏃 Analysis in progress...")
+        self.status.setText("Analysis in progress...")
 
         # Switch to the Analysis Monitor automatically
         self.main_tabs.setCurrentWidget(self._tab_pages.get(self.monitor, self.monitor))
@@ -4617,16 +4803,16 @@ class CAESARAnalyzer(QMainWindow):
             # Multi-channel: rows arrive interleaved from parallel workers — grow dynamically
             n_ch = self._workers_total
             self.status.setText(
-                f"🏃 {total_all:,} scans ({n_ch} CH) / {len(self.file_list)} file(s) — processing..."
+                f"{total_all:,} scans ({n_ch} CH) / {len(self.file_list)} file(s) — processing..."
             )
         elif getattr(self, '_fast_mode_active', False):
             # Fast mode renders the table once at the end (capped) — don't pre-allocate
             # tens of thousands of empty rows here (memory + slow).
-            self.status.setText(f"⚡ Fast: {total_scans:,} scans / {len(self.file_list)} file(s) — fitting...")
+            self.status.setText(f"Fast: {total_scans:,} scans / {len(self.file_list)} file(s) — fitting...")
         else:
             # Single-channel Step: pre-allocate rows for O(1) update_table writes
             self.table.setRowCount(total_scans)
-            self.status.setText(f"🏃 {total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
+            self.status.setText(f"{total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
 
     def stop_analysis(self):
         """Safely stops all worker threads and re-enables UI controls."""
@@ -4643,7 +4829,7 @@ class CAESARAnalyzer(QMainWindow):
             self._stop_requested = True
             for w in running:
                 w.stop()
-            self.status.setText("🛑 Stopping… (finishing current scan)")
+            self.status.setText("Stopping… (finishing current scan)")
             self.status.setStyleSheet("color: red; font-weight: bold;")
             self.b_stop.setEnabled(False)
 
@@ -4690,6 +4876,77 @@ class CAESARAnalyzer(QMainWindow):
                     pass
         event.accept()
 
+    def _campaign(self):
+        """산출물 최상위 스코프. 비면 'default' — save()·autosave가 같은 값을 써야 한다."""
+        w = getattr(self, '_ed_campaign', None)
+        return (w.text().strip() if w is not None else "") or DEFAULT_CAMPAIGN
+
+    def _build_run_meta(self, ch, *, campaign=None, data_days=(), rows=None):
+        """채널 하나의 `.meta.json`. 실패하면 None(저장 자체는 살린다).
+
+        save()와 autosave가 **같은 runid**를 쓰도록 한 곳에 둔다 — autosave 파일명이
+        `{runid}.tsv`인데 나중에 저장되는 결과의 runid와 다르면 그 이름이 거짓말이 된다.
+        `data_days`·`rows`는 runid 해시에 안 들어가므로 autosave가 비워 불러도
+        같은 값이 나온다.
+        """
+        try:
+            ch = int(ch) if ch is not None else int(self._active_channel)
+            frozen = getattr(self, '_run_frozen', None) or {}
+            cfg = ((frozen.get('configs') or self._channel_configs).get(ch)
+                   or self._channel_configs.get(ch) or {})
+            from core.provenance import code_version as _cv
+            meta = run_meta.build_meta(
+                cfg, channel=ch,
+                qc=self._qc_state(),
+                calibration=frozen.get('calibration') or self._calibration_state(),
+                data_days=data_days, rows=rows,
+                campaign=campaign if campaign is not None else self._campaign(),
+                scenario=getattr(self, '_scenario_name', None),
+                code_version=_cv(), app_version=__version__,
+            )
+            # 측정일 감사(D1) 결과를 결과 파일에 붙인다 — "이 농도가 R(t) 외삽 구간
+            # 위에서 나왔나"를 나중에 물을 수 있어야 한다. runid 해시엔 안 들어간다
+            # (설정이 아니라 그날 데이터의 성질).
+            audit = getattr(self, '_day_audit', None) or {}
+            hit = {d: audit[d].to_meta() for d in data_days if d in audit}
+            if hit:
+                meta['day_audit'] = hit
+            return meta
+        except Exception as e:                  # noqa: BLE001 — meta가 저장을 막지 않는다
+            print(f"[run_meta] no sidecar: {e}")
+            return None
+
+    def _run_runids(self):
+        """이번 런에 걸린 채널들의 runid(정렬·중복제거). autosave 파일명용."""
+        chans = sorted((getattr(self, '_run_frozen', None) or {}).get('configs')
+                       or self._channel_configs or {self._active_channel: None})
+        out = []
+        for ch in chans:
+            m = self._build_run_meta(ch)
+            if m and m.get('runid') not in out:
+                out.append(m['runid'])
+        return out
+
+    def _autosave_retire(self):
+        """정식 저장이 성공했으면 그 런의 autosave를 치운다 (E3).
+
+        autosave의 존재 이유는 "이 런은 아직 정식 저장이 없다"이므로, 저장이 끝나면
+        남아 있을 이유가 없다 — 남겨두면 `_autosave/`가 어느 게 미완인지 알 수 없는
+        더미가 된다. **지우지 않고** `_archive/`로 옮긴다(헌장 ①).
+        """
+        p = getattr(self, '_autosave_path', None)
+        if not p or not os.path.exists(p):
+            return
+        try:
+            self._autosave_close()
+            from core.result_io import archive_existing
+            from gui.dlg_dir import dlg_dir
+            base = dlg_dir('save_results') or os.path.join(DEFAULT_OUTPUT_DIR, 'fitting')
+            archive_existing(p, _campaign_dir(base, self._campaign()))
+            self._autosave_path = None
+        except Exception as e:                  # noqa: BLE001 — 정리 실패가 저장을 무르지 않는다
+            print(f"[autosave] retire skipped: {e}")
+
     # ── 실시간 자동저장(autosave) ─────────────────────────────────────────
     # 밤샘 런이 크래시로 죽어도 그 시점까지의 결과가 디스크에 남도록, 결과가
     # 도착할 때마다 TSV에 append한다(50행마다 flush). 완료 시 정식 Save와 별개로
@@ -4702,10 +4959,18 @@ class CAESARAnalyzer(QMainWindow):
                 base = dlg_dir('save_results') or os.path.join(DEFAULT_OUTPUT_DIR, 'fitting')
             except Exception:
                 base = os.getcwd()
-            folder = os.path.join(base, '_autosave')
+            # E3: 캠페인 안으로 + 이름을 runid로. 예전 `autosave_20260908_143207.tsv`는
+            # 실행 시각뿐이라 여러 런 뒤 _autosave/를 열면 어느 설정이었는지 열어봐야 알았다.
+            folder = _special_dir(base, self._campaign(), '_autosave')
             os.makedirs(folder, exist_ok=True)
-            self._autosave_path = os.path.join(
-                folder, f'autosave_{_t.strftime("%Y%m%d_%H%M%S")}.tsv')
+            rids = self._run_runids()
+            stem = "_".join(rids) if rids else f'autosave_{_t.strftime("%Y%m%d_%H%M%S")}'
+            self._autosave_path = os.path.join(folder, f'{stem}.tsv')
+            # 같은 설정으로 다시 돌리면 이름이 겹친다 — 남아 있는 건 **정식 저장이 안 된
+            # 런**(크래시 등)이므로 덮지 않고 _archive로 밀어둔다(헌장 ①: 지우지 말 것).
+            if os.path.exists(self._autosave_path):
+                from core.result_io import archive_existing
+                archive_existing(self._autosave_path, _campaign_dir(base, self._campaign()))
             cols = ['File', 'Channel', 'Time', 'RMS', 'Chi2', 'SNR', 'Status',
                     'Shift', 'Squeeze', 'T_used_C', 'P_used_mbar']
             for g in self.engine.gas_list:
@@ -4752,24 +5017,77 @@ class CAESARAnalyzer(QMainWindow):
     # ══════════════════════════════════════════════════════════════════════
     @staticmethod
     def _shsq_text(gases, props):
-        """가스별 Shift/Squeeze 모드 한 줄 요약 (Link 관계 포함)."""
+        """가스별 Shift/Squeeze 모드 한 줄 요약 (Link 관계 포함).
+
+        ⚠ Center를 빠뜨리면 안 된다. 예전엔 모드 사다리가 Link/Limit/Fix 아니면
+        전부 'Free'로 떨어져서 `Center -5.25, 1.9`가 **'Free'로 표시**됐다 —
+        의미가 정확히 반대다(Free=제약 없음, Center=선언된 중심에 앵커).
+        이 함수는 RUN 직전 확인 다이얼로그도 쓰므로 밤샘 런의 마지막 검문이 거짓이 된다.
+        모르는 모드는 'Free'로 뭉개지 말고 이름 그대로 드러낸다."""
         props = props or {}
+
+        def fmt(mode, val, default_mode, default_val):
+            mode = mode or default_mode
+            raw = str(val if val not in (None, '') else default_val).strip()
+            compact = raw.replace(' ', '')
+            if mode == 'Link':
+                return f"→{raw}"
+            if mode == 'Limit':
+                return f"[{compact}]"
+            if mode == 'Fix':
+                return f"={compact}"
+            if mode == 'Center':
+                return f"@{compact}"      # 중심,반폭 — 0이 아니라 여기에 앵커된다
+            if mode == 'Free':
+                return 'Free'
+            return f"?{mode}"             # 모르는 모드를 Free로 속이지 않는다
+
         def one(g):
             p = props.get(g, {})
-            shm = p.get('sh_mode', 'Limit'); shv = str(p.get('sh_val', '-0.5, 0.5')).replace(' ', '')
-            sqm = p.get('sq_mode', 'Fix');   sqv = str(p.get('sq_val', '1.0')).replace(' ', '')
-            sh = f"→{p.get('sh_val','').strip()}" if shm == 'Link' else \
-                 (f"[{shv}]" if shm == 'Limit' else (f"={shv}" if shm == 'Fix' else 'Free'))
-            sq = f"→{p.get('sq_val','').strip()}" if sqm == 'Link' else \
-                 (f"[{sqv}]" if sqm == 'Limit' else (f"={sqv}" if sqm == 'Fix' else 'Free'))
+            sh = fmt(p.get('sh_mode'), p.get('sh_val'), 'Limit', '-0.5, 0.5')
+            sq = fmt(p.get('sq_mode'), p.get('sq_val'), 'Fix', '1.0')
             return f"{g} Sh{sh}·Sq{sq}"
         return "Sh/Sq:  " + "  │  ".join(one(g) for g in gases)
 
+    def _toggle_shsq_table(self):
+        show = not getattr(self, '_shsq_table_visible', True)
+        self._shsq_table_visible = show
+        self.tbl_shsq.setVisible(show)
+        self._btn_shsq_tbl.setText(
+            ("▼ " if show else "▶ ") + "Reference policy (Shift / Squeeze / T / bands)")
+
+    def _on_shsq_table_changed(self):
+        """상시 노출 테이블은 OK 버튼이 없다 — 편집 즉시 ref_props에 반영.
+
+        ⚙️ Properties 팝업과 달리 되돌리기가 없으므로, 값을 **읽어 담기만** 하고
+        엔진이나 결과는 건드리지 않는다(다음 RUN/Test Fit부터 적용)."""
+        try:
+            self.ref_props = self.tbl_shsq.get_properties()
+        except Exception as e:                  # noqa: BLE001 — 편집 중 반쪽 상태 방어
+            print(f"[ref policy] not applied: {e}")
+            return
+        if hasattr(self, 'lbl_shsq'):
+            gases = list(getattr(self.engine, 'gas_list', []) or [])
+            if gases:
+                self.lbl_shsq.setText(self._shsq_text(gases, self.ref_props))
+
     def _refresh_shsq_summary(self):
-        """Parameters 그리드의 가스별 Sh/Sq 요약 라벨 갱신."""
+        """Parameters 그리드의 Sh/Sq 요약 라벨 + 상시 노출 테이블 갱신.
+
+        가스 목록이 바뀌는 지점(레퍼런스 락·채널 전환·시나리오 적용)에서 이미
+        전부 호출되고 있어서, 테이블 재구성도 여기에 붙인다(새 훅을 만들지 않는다)."""
+        gases = list(getattr(self.engine, 'gas_list', []) or [])
+        if hasattr(self, 'tbl_shsq'):
+            # 재구성 중의 changed 시그널이 ref_props를 덮어쓰지 않게 막는다
+            self.tbl_shsq.blockSignals(True)
+            try:
+                self.tbl_shsq.set_gases(gases, getattr(self, 'ref_props', {}))
+            except Exception as e:              # noqa: BLE001 — 표시가 핏을 막지 않는다
+                print(f"[ref policy] table rebuild failed: {e}")
+            finally:
+                self.tbl_shsq.blockSignals(False)
         if not hasattr(self, 'lbl_shsq'):
             return
-        gases = list(getattr(self.engine, 'gas_list', []) or [])
         if not gases:
             self.lbl_shsq.setText("Sh/Sq: (lock refs to show)")
             return
@@ -4852,15 +5170,27 @@ class CAESARAnalyzer(QMainWindow):
             item = self.table.item(row, 0)
             if item:
                 self.table.scrollToItem(item)
-        self.pbar.setValue(len(self.results))
+        n = len(self.results)
+        self.pbar.setValue(n)
+        # E2: Step 모드도 진행 숫자를 한 줄로 보여준다(예전엔 막대만 움직였다).
+        # 처리율·ETA는 넣지 않는다 — 워커가 emit하는 건 progress/total_ready 둘뿐이라
+        # 어떤 속도 예측도 근거가 없다(있는 척하면 밤샘 런의 판단을 흐린다).
+        if not getattr(self, '_fast_mode_active', False) and n % 10 == 0:
+            self.status.setText(self._progress_text(n))
+
+    def _progress_text(self, n):
+        """RUN 진행 한 줄. 숫자는 실제로 아는 것만 — 완료/전체 스캔."""
+        total = self.pbar.maximum() or n
+        tag = f"{self._workers_total} CH · " if getattr(self, '_multi_channel_mode', False) else ""
+        return (f"Fitting… {tag}{n:,} / {total:,} scans"
+                "   (settings frozen for this run — edits apply to the next RUN)")
 
     def _flush_fast(self):
         """Fast mode: light periodic feedback while fitting (progress bar + status).
         The heavy table/plot render is done once at the end in _render_fast_results."""
         n = len(self.results)
         self.pbar.setValue(n)
-        total = self.pbar.maximum() or n
-        self.status.setText(f"⚡ Fast fitting… {n:,}/{total:,} scans")
+        self.status.setText(self._progress_text(n))
 
     def _render_fast_results(self):
         """Render everything ONCE after a Fast run: table (capped preview) + plots.
@@ -4885,7 +5215,7 @@ class CAESARAnalyzer(QMainWindow):
         self.pbar.setValue(len(res))
         if len(res) > n_show:
             self.status.setText(
-                f"⚡ Fast complete: {len(res):,} scans fitted — table previews only {n_show:,} rows, "
+                f"Fast complete: {len(res):,} scans fitted — table previews only {n_show:,} rows, "
                 f"see full results in the graph + autosave file (Result Viewer).")
 
     def _fast_finalize(self):
@@ -4908,7 +5238,7 @@ class CAESARAnalyzer(QMainWindow):
             self._autosave_close()
             self.b_run.setEnabled(True)
             self.b_stop.setEnabled(False)
-            self.status.setText("🛑 Analysis stopped by user.")
+            self.status.setText("Analysis stopped by user.")
             self.status.setStyleSheet("color: red; font-weight: bold;")
             return
 
@@ -4920,7 +5250,7 @@ class CAESARAnalyzer(QMainWindow):
             # Still waiting for other channels
             remaining = total - self._workers_done
             self.status.setText(
-                f"✅ CH{self._workers_done} done — waiting for {remaining} more channel(s)..."
+                f"CH{self._workers_done} done — waiting for {remaining} more channel(s)..."
             )
             return
 
@@ -4940,10 +5270,10 @@ class CAESARAnalyzer(QMainWindow):
         was_stopped = getattr(self, '_stop_requested', False)
         self._stop_requested = False
         if was_stopped:
-            self.status.setText(f"🛑 Stopped — partial results ({len(self.results):,} rows)")
+            self.status.setText(f"Stopped — partial results ({len(self.results):,} rows)")
             self.status.setStyleSheet("color: orange; font-weight: bold;")
         else:
-            self.status.setText(f"✅ {ch_label}Analysis Completed!")
+            self.status.setText(f"{ch_label}Analysis Completed!")
             self.status.setStyleSheet("color: green; font-weight: bold;")
         # L3: 완료 시 자동 저장 (QC 적용 후, 정식 파일명 규칙)
         saved_msg = ""
@@ -4951,9 +5281,9 @@ class CAESARAnalyzer(QMainWindow):
                 and self.chk_auto_save.isChecked() and self.results):
             try:
                 self.save(auto=True)
-                saved_msg = "\n💾 Auto-saved (see status bar)"
+                saved_msg = "\n Auto-saved (see status bar)"
             except Exception as _e:
-                saved_msg = f"\n⚠️ Auto-save failed: {_e}"
+                saved_msg = f"\n Auto-save failed: {_e}"
 
         qc_msg = f"\nAuto QC excluded: {len(qc_changed)} rows (gas → NaN)" if qc_changed else ""
         head = "Analyzed up to the stop point." if was_stopped else f"All files analyzed successfully ({n_ch} channel(s))."
@@ -5197,27 +5527,6 @@ class CAESARAnalyzer(QMainWindow):
         gtag = f"_gT{int(gasT)}" if gasT > 0 else ""
         return lbl, f"{win}_Poly{poly}_{sh}{gtag}"
 
-    def _fit_config_folder(self, chans):
-        """저장에 포함된 채널들의 핏 윈도우를 결합한 최상위 폴더명.
-        예: ch1_429.5~461.9__ch2_444.1~470.6__ch3_438.4~475.8
-        탐색기에서 폴더만 봐도 '어떤 윈도우로 핏한 자료인지' 즉시 식별 가능.
-        (poly/shift/λ 등 나머지 세팅은 파일명 태그·헤더에 그대로 남는다.)"""
-        parts = []
-        for ch in chans:
-            cfg = self._channel_configs.get(int(ch)) or {}
-            if cfg.get('fit_unit') == 'px':
-                seg = f"px{cfg.get('f_min', '?')}-{cfg.get('f_max', '?')}"
-            else:
-                try:
-                    seg = (f"{float(cfg.get('fit_start_nm', 0)):.1f}"
-                           f"~{float(cfg.get('fit_end_nm', 0)):.1f}")
-                except Exception:
-                    seg = "win?"
-            parts.append(f"ch{int(ch)}_{seg}")
-        name = "__".join(parts) if parts else "fit"
-        # 윈도우 금지문자만 치환(~ 는 허용) — 폴더명 안전
-        return re.sub(r'[<>:"/\\|?*]', '_', name)
-
     # ══════════════════════════════════════════════════════════════════════
     # §13 저장 + 결과뷰어 연동
     # ══════════════════════════════════════════════════════════════════════
@@ -5413,6 +5722,27 @@ class CAESARAnalyzer(QMainWindow):
                         else:
                             _df.to_csv(f, sep='\t', index=False, lineterminator='\n')
 
+                def _build_meta(_df, _ch, campaign):
+                    """이 파일 몫의 meta. **파일명보다 먼저** 필요하다 — runid가 이름이 된다.
+
+                    실제 조립은 `_build_run_meta`(메서드)가 한다 — autosave 파일명도 같은
+                    runid를 써야 하므로 클로저에 가둬둘 수 없다."""
+                    try:
+                        _t = pd.to_datetime(_df['Time'], errors='coerce').dropna()
+                        days = sorted({d.strftime('%Y-%m-%d') for d in _t})
+                    except Exception:
+                        days = []
+                    return self._build_run_meta(_ch, campaign=campaign,
+                                                data_days=days, rows=_meta_rows(_df))
+
+                def _meta_rows(_df):
+                    """행수 요약. Status 문자열이 자유형식이라 고정 3분류 대신 실측 집계."""
+                    out = {"total": int(len(_df))}
+                    if 'Status' in _df.columns:
+                        counts = _df['Status'].astype(str).value_counts()
+                        out["by_status"] = {str(k): int(v) for k, v in counts.items()}
+                    return out
+
                 def _ch_header(ch):
                     """채널별 세팅 헤더 한 줄(파일 상단)."""
                     lbl, tag = self._channel_settings_tag(int(ch))
@@ -5420,74 +5750,76 @@ class CAESARAnalyzer(QMainWindow):
                     return (f"# Channel {int(ch)} ({lbl}) settings: {tag}  "
                             f"gas_temp={cfg.get('gas_temp', 0)}°C  refs={','.join(g for g in self.engine.gas_list)}")
 
-                # ── 세팅 '버킷' 폴더: (하루) / (±Neg) / (QC) 3단으로 자동 라우팅 ──
-                # 핏은 스캔 단위 독립이므로 결과를 날짜별로 잘라 저장해도 무손실.
-                # 하루=폴더 하나 → 로드 기간이 달라도 겹치는 범위 폴더가 생기지 않고,
-                # 같은 날+같은 세팅을 재핏하면 같은 자리로 가되 기존 파일은 _archive/로
-                # 자동 이동(비파괴 — 이전 버전 전부 보존). 날짜 경계는 행 타임스탬프 그대로.
-                # 폴더로 가르는 건 날짜·±Neg·QC뿐. 나머지 결과변경 세팅(window/poly/shift/λ 등)은
-                # 파일명과 .dat 인라인 헤더에 남으므로 머지/슬라이스 후에도 확인 가능.
-                from core.result_io import archive_existing, clean_stem
-                neg_bucket = "neg_o" if allow_neg_on else "neg_x"   # neg_o=음수허용, neg_x=0하한
-                if qc_on and qc_k > 0:
-                    qc_bucket = f"QCk{qc_k:g}"
-                elif qc_on:
-                    qc_bucket = "QCmanual"
-                else:
-                    qc_bucket = "QCoff"
+                # ── 배치: output/{campaign}/{YYYY-MM-DD}/fitting/ (A3) ──
+                # 디렉터리는 **시간축만** 인코딩한다. 옛 `{창}/{날짜}/{neg}/{QC}/` 4단은
+                # 파일시스템을 인덱스로 쓴 것이라 패싯 순서가 고정됐다("QC 끈 것 전부"를
+                # 보려면 창 폴더를 전부 걸어야 함). 이제 그 패싯은 전부 `.meta.json`에
+                # 있으므로 폴더로 나눌 이유가 없다.
+                # 세팅 구분은 파일명의 **runid**가 한다 — 다른 세팅 = 다른 runid = 다른
+                # 파일이라 서로 못 덮는다. 같은 세팅 재핏만 같은 이름으로 와서
+                # `_archive`로 밀린다(비파괴 — 이전 버전 전부 보존).
+                # 핏은 스캔 단위 독립이라 날짜별로 잘라 저장해도 무손실.
+                from core.result_io import archive_existing
+                campaign = (getattr(self, '_ed_campaign', None)
+                            and self._ed_campaign.text().strip()) or DEFAULT_CAMPAIGN
 
                 chans = sorted(df['Channel'].dropna().unique()) if 'Channel' in df.columns else []
                 base_dir = os.path.dirname(path) or (self._dlg_dir('save') or '.')
-                # 최상위 '핏 config' 폴더 = 저장에 포함된 채널들의 윈도우 결합.
-                # 서로 다른 윈도우 실험이 최상위에서 깔끔히 분리되고, 그 안은
-                # 기존 날짜/±Neg/QC 3단을 그대로 유지 → 날짜 로더 무손실.
-                cfg_folder = self._fit_config_folder(chans if len(chans) else [self._active_channel])
+                arch_base = _campaign_dir(base_dir, campaign)   # {base}/{campaign}/_archive/…
                 _tt_all = pd.to_datetime(df['Time'], errors='coerce')
                 day_keys = _tt_all.dt.strftime('%y%m%d').where(_tt_all.notna(), 'nodate')
+                multi = len(chans) > 1
 
-                written, n_files, n_archived = [], 0, 0
-                user_stem = clean_stem(path)   # 단일채널 때 사용자가 고른 이름(날짜프리픽스 제거)
+                written, n_files, n_archived, runids = [], 0, 0, []
                 for day_tag in sorted(day_keys.unique()):
                     dsub = df[day_keys == day_tag]
-                    run_dir = os.path.join(base_dir, cfg_folder, day_tag, neg_bucket, qc_bucket)
-                    os.makedirs(run_dir, exist_ok=True)
-                    if len(chans) > 1:
-                        for ch in chans:
-                            ssub = dsub[dsub['Channel'] == ch]
-                            if ssub.empty:
-                                continue
-                            lbl, tag = self._channel_settings_tag(int(ch))
-                            fname = f"{day_tag}_{lbl}_{tag}{ext}".lstrip('_')
-                            fpath = os.path.join(run_dir, fname)
-                            if archive_existing(fpath, base_dir):
-                                n_archived += 1
-                            _write_df(ssub, fpath, _ch_header(ch))
-                            n_files += 1
-                            written.append(f"{day_tag} CH{int(ch)} → {fname}  ({len(ssub)} rows)")
+                    if multi:
+                        targets = [(ch, dsub[dsub['Channel'] == ch]) for ch in chans]
                     else:
-                        fname = f"{day_tag}_{user_stem}{ext}"
-                        fpath = os.path.join(run_dir, fname)
-                        if archive_existing(fpath, base_dir):
+                        targets = [((chans[0] if chans else self._active_channel), dsub)]
+                    for ch, ssub in targets:
+                        if ssub.empty:
+                            continue
+                        meta = _build_meta(ssub, ch, campaign)
+                        lbl, _tag = self._channel_settings_tag(int(ch))
+                        fpath = _out_path(base_dir, campaign, day_tag, kind='fitting',
+                                          channel=ch, label=lbl,
+                                          runid=(meta or {}).get('runid'), ext=ext)
+                        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+                        # 밀려나는 `.dat`의 meta도 같이 보낸다 — 안 그러면 아카이브된
+                        # 결과가 설정 없는 고아가 되고, 새 meta가 그 자리를 덮는다.
+                        if archive_existing(fpath, arch_base):
                             n_archived += 1
-                        _write_df(dsub, fpath)
+                            archive_existing(run_meta.meta_path_for(fpath), arch_base)
+                        _write_df(ssub, fpath, _ch_header(ch) if multi else "")
+                        if meta:
+                            run_meta.write_meta(fpath, meta)   # `.dat` 포맷 불변 — 옆에 쓴다
+                            runids.append(meta['runid'])
                         n_files += 1
-                        written.append(f"{fname}  ({len(dsub)} rows)")
+                        written.append(f"{os.path.basename(fpath)}  ({len(ssub)} rows)")
+
+                self._autosave_retire()   # E3: 정식 저장 성공 → autosave는 역할 끝
 
                 n_days = day_keys.nunique()
                 arch_note = f", {n_archived} previous → _archive" if n_archived else ""
-                bucket_disp = os.path.join(neg_bucket, qc_bucket)
+                rid_disp = "/".join(sorted(set(runids))) or "no-runid"
                 if auto:
                     self.status.setText(
-                        f"💾 Auto-saved → {cfg_folder}/{n_days} day(s)/[{bucket_disp}] ({n_files} file{arch_note})")
+                        f"Auto-saved → {campaign}/{n_days} day(s)/fitting  "
+                        f"[{rid_disp}] ({n_files} file{arch_note})")
                 else:
                     _shown = written if len(written) <= 12 else written[:12] + [f"… +{len(written)-12} more"]
                     QMessageBox.information(
                         self, "Success",
-                        "🎉 Saved into fit-config folder (per day / settings bucket)!\n\n"
-                        f"📁 {base_dir}\\{cfg_folder}\\{{YYMMDD}}\\{bucket_disp}\n"
-                        f"   (±Neg={allow_neg} / QC={qc_str} / {n_days} day(s), {n_files} file(s){arch_note})\n\n"
+                        "Saved!\n\n"
+                        f"{base_dir}\\{campaign}\\{{YYYY-MM-DD}}\\fitting\n"
+                        f"   runid {rid_disp}  (±Neg={allow_neg} / QC={qc_str})\n"
+                        f"   {n_days} day(s), {n_files} file(s){arch_note}\n\n"
                         "Saved files:\n  " + "\n  ".join(_shown) +
-                        "\n\n※ All settings are written in each .dat's top # header — preserved through merge/slice.")
+                        "\n\n※ Every .dat has a .meta.json beside it with the full settings,\n"
+                        "   and the same settings stay in the .dat's top # header.\n"
+                        "※ The file dialog now picks the LOCATION; the name is uniform\n"
+                        "   ({date}_{CH}_{label}_{runid}) so different settings never collide.")
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"An error occurred while saving:\n{e}")
@@ -5505,7 +5837,7 @@ class CAESARAnalyzer(QMainWindow):
         any individual spectrum without re-running the full analysis.
         """
         def _fail(msg):
-            self.status.setText(f"⚠ Double-click: {msg}")
+            self.status.setText(f"Double-click: {msg}")
             self.status.setStyleSheet("color: red; font-weight: bold;")
 
         # Bring the Analysis Monitor into view regardless of which main tab the
@@ -5624,7 +5956,7 @@ class CAESARAnalyzer(QMainWindow):
                 _fail(f"replay is CH{ch} but Monitor 'Show channel' is stuck on CH{view_ch} "
                       "— plot was skipped by the channel filter.")
             else:
-                self.status.setText(f"✅ Replay: {fname} (CH{ch})")
+                self.status.setText(f"Replay: {fname} (CH{ch})")
                 self.status.setStyleSheet("color: green;")
         except Exception as e:
             print(f"Double-click viewer failed to load: {e}")
@@ -5760,18 +6092,18 @@ class CAESARAnalyzer(QMainWindow):
         사라진 것처럼 보인다. file_list 자체는(Setup 등 다른 코드가 참조하므로) 그대로 갱신한다."""
         self.file_list = list(self._channel_files.get(ch, []))
         if self.results:
-            self.status.setText(f"📁 CH{ch} config — results table kept ({len(self.results)} rows)")
+            self.status.setText(f"CH{ch} config — results table kept ({len(self.results)} rows)")
             return
         self.table.setRowCount(len(self.file_list))
         self.table.clearContents()
         for i, fp in enumerate(self.file_list):
             self.table.setItem(i, 0, QTableWidgetItem(os.path.basename(self._entry_filepath(fp))))
-        self.status.setText(f"📁 CH{ch} — {len(self.file_list)} file(s)")
+        self.status.setText(f"CH{ch} — {len(self.file_list)} file(s)")
         if self.file_list:
             self._auto_detect_channels()
 
     def _add_channel_tab(self):
-        """➕ — 현재 채널 설정을 복사한 새 채널 탭 생성(시작값=복사본)."""
+        """— 현재 채널 설정을 복사한 새 채널 탭 생성(시작값=복사본)."""
         import copy
         self._channel_configs[self._active_channel] = self._capture_config()
         new_ch = (max(self._channel_configs.keys()) + 1) if self._channel_configs else 1
@@ -5782,7 +6114,7 @@ class CAESARAnalyzer(QMainWindow):
         self._channel_tabbar.setCurrentIndex(i)   # currentChanged → 복사본 적용
 
     def _del_channel_tab(self):
-        """✕ — 현재 채널 삭제(최소 1채널 유지)."""
+        """— 현재 채널 삭제(최소 1채널 유지)."""
         if self._channel_tabbar.count() <= 1:
             return
         idx = self._channel_tabbar.currentIndex()
@@ -5839,6 +6171,61 @@ class CAESARAnalyzer(QMainWindow):
             "rl_factor": self.spin_rl_factor.value() if hasattr(self, 'spin_rl_factor') else 1.0,
         }
 
+    def _calibration_state(self):
+        """`.meta.json`용 캘리브 세트 식별자. `_capture_config`가 안 담는 것들만 모은다.
+
+        파일은 **basename**으로 남긴다 — 절대경로를 넣으면 같은 캘리브가 머신마다 다른
+        runid가 된다. 'Auto from ZA/He scans'처럼 파일이 아닌 상태도 그 문구 그대로 남겨야
+        "무엇으로 보정했나"가 보존된다."""
+        def _lbl(name, default=""):
+            w = getattr(self, name, None)
+            return w.text().strip() if w is not None else default
+
+        def _val(name, default=None):
+            w = getattr(self, name, None)
+            return w.value() if w is not None else default
+
+        return {
+            "wavecal": os.path.basename(getattr(self, 'loaded_wl_path', "") or ""),
+            "ils_fwhm_nm": _val('spin_fwhm_nm'),
+            "ils_fwhm_px": _val('spin_fwhm'),
+            "i0": _lbl('lbl_i0_path'),
+            "r": _lbl('lbl_r_path'),
+            "dark": _lbl('lbl_dark_path'),
+            "dark_scale": _val('spin_dark_scale'),
+            "offset": _lbl('lbl_offset_path'),
+            "offset_scale": _val('spin_offset_scale'),
+            "stray_light": _val('spin_stray_light'),
+            "temporal_i0": bool(getattr(self, 'chk_temporal_i0', None)
+                                and self.chk_temporal_i0.isChecked()),
+            "d_cm": _val('spin_d_len'),
+            "rl_factor": _val('spin_rl_factor'),
+        }
+
+    def _qc_state(self):
+        """`.meta.json`용 QC/후처리 상태. 재핏 없이 적용되는 값이라 **저장 시점**이 정본이다."""
+        def _val(name, default=None):
+            w = getattr(self, name, None)
+            return w.value() if w is not None else default
+
+        def _chk(name):
+            w = getattr(self, name, None)
+            return bool(w is not None and w.isChecked())
+
+        return {
+            "enabled": _chk('chk_qc'),
+            "auto_k": _val('spin_qc_k'),
+            "rms_max": _val('spin_qc_rms'),
+            "snr_floor": _val('spin_qc_snr'),
+            "settling": _chk('chk_settle'),
+            "settling_n": _val('spin_settle_n'),
+            "ok_rms_pct": _val('spin_rms_thresh'),
+            "tikhonov": _val('spin_lambda', 0.0),
+            "robust": _chk('chk_robust'),
+            "kalman_q": _val('spin_kalman_q'),
+            "kalman_r": _val('spin_kalman_r'),
+        }
+
     def _apply_config(self, scenario, load_refs=True):
         """_capture_config 로 만든 dict를 UI/엔진에 복원. load_refs=False면 레퍼런스/엔진은 건드리지 않음."""
         self.txt_min.setText(str(scenario.get("f_min", "")))
@@ -5887,7 +6274,7 @@ class CAESARAnalyzer(QMainWindow):
         if wl_path and os.path.exists(wl_path):
             self.load_wavelength_cal(auto_path=wl_path)
         elif hasattr(self, 'lbl_wavecal'):
-            self.lbl_wavecal.setText("📐 wavecal: none")
+            self.lbl_wavecal.setText("wavecal: none")
             self.lbl_wavecal.setStyleSheet("color: #B71C1C; font-weight: bold; padding: 2px;")
             self.lbl_wavecal.setToolTip("No wavelength calibration loaded for this channel tab.")
         # L7: 가스별 Sh/Sq 모드 요약 갱신
@@ -5960,6 +6347,7 @@ class CAESARAnalyzer(QMainWindow):
         if not path:
             return
         self._dlg_dir('scenario', path)
+        self._scenario_name = os.path.splitext(os.path.basename(path))[0]  # .meta.json provenance
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 scenario = json.load(f)
@@ -5978,11 +6366,11 @@ class CAESARAnalyzer(QMainWindow):
                         f"They were explicitly migrated to the current value ({fallback}); verify before RUN.")
                 self._load_channel_scenario(chans, scenario.get("active", sorted(chans)[0]))
                 QMessageBox.information(self, "Auto-Load Success",
-                                        f"🚀 {len(chans)} channels config restored (channel tabs).\n[Load Data] then RUN!")
+                                        f"{len(chans)} channels config restored (channel tabs).\n[Load Data] then RUN!")
             else:   # v1 단일(하위호환)
                 self._apply_config(scenario, load_refs=True)
                 self._channel_configs = {1: self._capture_config()}
-                QMessageBox.information(self, "Success", "📂 Config restored (single channel).")
+                QMessageBox.information(self, "Success", "Config restored (single channel).")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load scenario:\n{e}")
 
