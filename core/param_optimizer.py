@@ -41,8 +41,8 @@ def _require_bool(value):
     return bool(value)
 
 
-def air_number_density(T_C, P_mbar):
-    return 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+# ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
+from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              px_min, px_max, poly_deg, step_limit, target="NO2",
              seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
              controlled_start=None, controlled_bounds=None, controlled_initial_values=None,
-             return_solver_diagnostics=False):
+             return_solver_diagnostics=False, return_model=False):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
     이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
     allow_negative_gas = _require_bool(allow_negative_gas)
@@ -229,6 +229,12 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                                           "lower": list(map(float, lb)),
                                           "upper": list(map(float, ub))},
                 normalization_factor=float(scale_factor))
+    if return_model:
+        # Result Lab 잔차 패널용. **기본 OFF여야 한다** — explorer/batch는 이 dict를
+        # 그대로 JSON으로 떨구는데 ndarray는 json이 못 삼킨다. opt-in으로만 실어보낸다.
+        result["wavelength_nm"] = wl
+        result["model"] = full
+        result["residual"] = resid
     if return_solver_diagnostics:
         result["solver_diagnostics"] = solver_diagnostics
     return result

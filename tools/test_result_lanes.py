@@ -6,6 +6,7 @@
   3. 점을 클릭하면 아래 패널에 그 스캔의 상세가 뜨고, **시계열 레인은 계속 보인다**.
   4. fit이 아닌 종류(R 커브 등)는 예전 2단 플롯으로 되돌아간다(스택은 fit 전용).
   5. `load_fit_table`이 shift/squeeze를 준다 — 없으면 레인이 통째로 빈다.
+  6. 잔차 패널은 **그때 설정을 복원 못 하면 안 그리고 사유를 적는다**(레거시 = meta 없음).
 
     python tools/test_result_lanes.py
 """
@@ -132,6 +133,26 @@ def test_lanes_and_click(w):
     assert "row 2" in w._pw_detail.plotItem.titleLabel.text
 
 
+def test_residual_refuses_without_meta(w):
+    """레거시 결과(= `.meta.json` 없음)는 잔차를 **그리지 않고 사유를 적는다**.
+
+    그때 설정을 복원 못 하면 지금 설정으로 계산한 잔차가 나오는데, 그건 화면의 그때
+    농도와 대응하지 않는 조용히 틀린 그림이다 — 빈 패널이 아니라 이유가 떠야 한다.
+    """
+    d = tempfile.mkdtemp()
+    fit = _write_fit(d)
+    _write_alpha(d, "260904_CH1_PNs_r3f8a1")
+    w._path = fit
+    w._reload()
+    w._show_scan_detail(1)
+
+    assert not w._pw_resid.plotItem.listDataItems(), "복원 못 했는데 잔차를 그렸다"
+    title = w._pw_resid.plotItem.titleLabel.text
+    assert "불가" in title and "meta" in title, title
+    # α는 그대로 보여야 한다 — 잔차가 없다고 상세가 통째로 사라지면 안 된다
+    assert len(w._pw_detail.plotItem.listDataItems()) == 1, "alpha까지 사라졌다"
+
+
 def test_non_fit_restores_old_plots(w):
     """스택은 fit 전용 — R 커브 같은 건 예전 2단 플롯으로 돌아가야 한다."""
     d = tempfile.mkdtemp()
@@ -153,6 +174,7 @@ def main() -> int:
     for fn, args in ((test_loader_exposes_shift_squeeze, ()),
                      (test_flag_classification, ()),
                      (test_lanes_and_click, (w,)),
+                     (test_residual_refuses_without_meta, (w,)),
                      (test_non_fit_restores_old_plots, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")

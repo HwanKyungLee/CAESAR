@@ -302,8 +302,20 @@ class ResultViewerWidget(QWidget):
         self._pw_detail.setTitle("Scan detail — click a point above")
         psplit.addWidget(self._pw_detail)
 
+        # 잔차 패널 — 그때 설정(.meta.json)으로 재핏해서만 그린다(core/refit.py).
+        # α와 스케일이 100배쯤 다르므로 같은 축에 겹치면 잔차가 직선으로 보인다 → 별도 축,
+        # x만 링크해서 같은 파장 구간을 본다.
+        self._pw_resid = pg.PlotWidget()
+        self._pw_resid.setBackground('w')
+        self._pw_resid.showGrid(x=True, y=True, alpha=0.3)
+        self._pw_resid.addLegend(offset=(10, 10))
+        self._pw_resid.setLabel("left", "residual (cm^-1)")
+        self._pw_resid.setTitle("Residual - click a point above")
+        self._pw_resid.setXLink(self._pw_detail)
+        psplit.addWidget(self._pw_resid)
+
         self._psplit = psplit
-        psplit.setSizes([400, 250, 500, 220])
+        psplit.setSizes([400, 250, 500, 220, 180])
         hsplit.addWidget(psplit)
         hsplit.setSizes([240, 780])
         root.addWidget(hsplit, 1)
@@ -970,6 +982,8 @@ class ResultViewerWidget(QWidget):
         """행 j의 상세를 아래 패널에 그린다: α 스펙트럼 + 그 스캔의 수치 요약."""
         t = self._fit_cache
         self._pw_detail.clear()
+        self._pw_resid.clear()
+        self._pw_resid.setTitle("Residual - click a point above")
         try:
             row_idx = int(t["row_idx"][j])
         except Exception:
@@ -1009,6 +1023,51 @@ class ResultViewerWidget(QWidget):
             "bottom", "Wavelength (nm)" if (wave is not None and len(wave) == len(alpha))
             else "Pixel")
         self._pw_detail.setTitle("  ·  ".join(bits))
+        self._draw_residual(j, row_idx, alpha_path)
+
+    def _draw_residual(self, j, row_idx, alpha_path):
+        """그 행을 **그때 설정(.meta.json)** 으로 재핏해 잔차를 그린다.
+
+        저장된 결과 파일만으로는 잔차를 복원할 수 없다(`.dat`에 잔차 벡터도 핏 계수도
+        없음) — 그래서 재핏한다. 다만 *지금* 설정으로 계산한 잔차는 화면의 *그때* 농도와
+        대응하지 않으므로, 설정 복원이나 재현에 실패하면 **그리지 않고 사유만 적는다**
+        (규칙·거부 5종은 `core/refit.py` 참조).
+        """
+        from core.refit import refit_row
+        t = self._fit_cache
+
+        def _v(key):
+            arr = t.get(key)
+            if arr is None or j >= len(arr) or not np.isfinite(arr[j]):
+                return None
+            return float(arr[j])
+
+        saved = {g: float(y[j]) for g, y in (t.get("gases") or {}).items()
+                 if j < len(y) and np.isfinite(y[j])}
+        try:
+            r = refit_row(self._path, alpha_path, row_idx, saved_conc=saved,
+                          saved_shift=_v("shift"), saved_squeeze=_v("squeeze"))
+        except Exception as e:                      # noqa: BLE001
+            r = {"ok": False, "reason": "잔차 불가: %s" % e}
+        if not r.get("ok"):
+            # 사유를 그대로 보여준다 — 빈 패널보다 "왜 없는지"가 중요하다.
+            self._pw_resid.setTitle(r.get("reason") or "잔차 불가")
+            return
+
+        x = np.asarray(r["wave"], dtype=float)
+        self._pw_resid.plot(x, np.asarray(r["residual"], dtype=float),
+                            pen=pg.mkPen("#c0392b", width=1.2), name="residual")
+        head = "Residual - RMS %.3g" % r["rms"]
+        if r.get("rms_sig") is not None and np.isfinite(r["rms_sig"]):
+            head += "  ·  rms/sig %.1f%%" % (r["rms_sig"] * 100)
+        if r.get("runid"):
+            head += "  ·  %s" % r["runid"]
+        self._pw_resid.setTitle(head)
+        # 모델을 α 위에 겹쳐 그린다 — "얼마나 맞았나"가 한 화면에서 보인다.
+        self._pw_detail.plot(x, np.asarray(r["model"], dtype=float),
+                             pen=pg.mkPen("#e67e22", width=1.2,
+                                          style=Qt.PenStyle.DashLine),
+                             name="model (refit)")
 
     @staticmethod
     def _sibling_alpha(fit_path):
