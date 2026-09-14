@@ -38,8 +38,12 @@ def resolve_ref_path(path: str) -> str:
 # `.meta.json`에 있다(core/run_meta.py). 폴더로 패싯을 나누면 그 순서로만 탐색
 # 가능해진다 — 옛 `{창}/{날짜}/{neg}/{QC}/` 4단이 그래서 답답했다.
 #
-#   output/{campaign}/{YYYY-MM-DD}/{fitting|alpha|R|figures}/
-#   output/{campaign}/calibration/    wavecal · ILS · dark · offset
+#   output/{campaign}/{YYYY-MM-DD}/{fitting|alpha}/   핏 결과 · 알파(+채널 하위폴더)
+#   output/{campaign}/R_<채널>/{YYYY-MM-DD}/          R — 내부 구조는 tools/r_trend_monitor.py
+#                                                      것을 그대로 둔다(CLI 단독 실행 겸용)
+#   output/{campaign}/figures/        그림 — 여러 날을 걸치므로 날짜 폴더를 안 쓴다
+#                                     (저장 다이얼로그의 시작 위치일 뿐, 강제 아님)
+#   output/{campaign}/calibration/    wavecal · ILS · dark · offset · R(t) npz
 #   output/{campaign}/_autosave/      진행 중(정식 저장 성공 시 제거)
 #   output/{campaign}/_archive/       밀려난 것 (절대 삭제 안 함)
 #   output/{campaign}/_export/        사람에게 건네는 병합본

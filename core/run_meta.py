@@ -22,6 +22,11 @@ import os
 import re
 from datetime import datetime
 
+try:                                  # 패키지로 임포트된 평소 경로
+    from core.paths import resolve_ref_path
+except ImportError:                   # `python core/run_meta.py` 직접 실행(자기검증)
+    from paths import resolve_ref_path
+
 SCHEMA = "augur-run-meta-v1"
 
 
@@ -81,7 +86,7 @@ def _species(cfg: dict) -> list:
 def build_meta(cfg: dict, *, channel, qc: dict, calibration: dict,
                data_days=(), rows=None, campaign=None, scenario=None,
                code_version=None, app_version=None, created=None,
-               meta_source="live") -> dict:
+               meta_source="live", layout=None) -> dict:
     """채널 하나의 설정 스냅샷(`_channel_configs[ch]` 형태) → meta dict.
 
     `cfg`는 `app_window._capture_config()`가 만드는 dict를 그대로 받는다(새 수집 경로를
@@ -113,6 +118,9 @@ def build_meta(cfg: dict, *, channel, qc: dict, calibration: dict,
         "calibration": dict(calibration or {}),
         "qc": dict(qc or {}),
         "rows": dict(rows or {}),
+        # 이 결과가 **어떤 raw 구성에서** 나왔나(B안). 사람이 친 campaign 라벨과 다를 수
+        # 있고, 그건 정보다. runid 해시에는 안 넣는다 — 설정이 아니라 입력의 성질이므로.
+        "layout": dict(layout) if layout else None,
         "provenance": {
             "commit": code_version,
             "augur": app_version,
@@ -289,6 +297,129 @@ def read_meta(dat_path: str) -> dict | None:
         return None
 
 
+def layout_from_input(path: str) -> dict | None:
+    """이 입력 파일이 **실제로 어떤 raw 구성에서 나왔는지**를 알아낸다(선택은 안 한다).
+
+    B안: 파싱 구성의 **선택은 데이터(열 수)가** 하고, **기록은 여기서** 한다. 사람이 친
+    캠페인 라벨(폴더 이름)과 기계가 고른 구성이 다를 수 있는데, 그건 오류가 아니라 정보다
+    (예: `yeosu_2026` 폴더에 아라온 raw를 넣어 돌려본 경우 — meta를 보면 바로 보인다).
+
+    * 알파(`*_alpha_trace.dat`): 헤더의 `# raw_layout:` 줄을 읽는다(알파를 만들 때 기록됨).
+    * raw `.dat`: 첫 데이터행의 열 수로 레지스트리를 조회한다.
+    * 그 외/실패: None — **모르면 안 적는다**(추측한 provenance가 없는 것보다 나쁘다).
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            first_data = None
+            for line in fh:
+                if line.startswith("# raw_layout:"):
+                    out = {}
+                    for tok in line.split(":", 1)[1].split():
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            out[k] = int(v) if v.isdigit() else v
+                    return out or None
+                if line.startswith("#") or not line.strip():
+                    continue
+                first_data = line
+                break
+    except OSError:
+        return None
+    if not first_data:
+        return None
+    toks = first_data.split("\t") if "\t" in first_data else first_data.split()
+    ncols = len(toks)
+    try:
+        try:                               # 패키지로 임포트된 평소 경로
+            from core.raw_parser import CAMPAIGN_LAYOUTS
+        except ImportError:                # `python core/run_meta.py` 직접 실행(자기검증)
+            from raw_parser import CAMPAIGN_LAYOUTS
+    except Exception:                      # noqa: BLE001
+        return {"ncols": ncols}
+    lay = CAMPAIGN_LAYOUTS.get(ncols)
+    if lay is None:
+        return {"ncols": ncols, "campaign": "unregistered"}
+    return {"ncols": ncols, "campaign": lay.campaign or lay.kind, "kind": lay.kind,
+            "source": lay.source}
+
+
+def meta_to_cfg(meta: dict, ref_dir: str | None = None) -> tuple:
+    """meta → `_capture_config()` 모양의 cfg + 못 찾은 파일 목록. `build_meta`의 역변환.
+
+    **왜 필요한가**: 저장된 결과의 잔차를 보려면 *그때* 설정으로 엔진을 다시 세워야 한다.
+    지금 GUI 설정으로 계산한 잔차는 화면의 농도와 대응하지 않는다 — 조용히 틀린 그림이다.
+
+    `ref_dir`: 레퍼런스·wavecal의 basename을 붙일 디렉터리. meta는 머신 독립을 위해
+    **basename만** 갖고 있으므로(runid 계약) 어느 폴더인지는 호출부가 정해 넘긴다.
+    같은 이름의 `Ref_NO2_Dynamic-ILS-Applied.dat`가 cold/roi1/roi2에 각각 **다른 내용**
+    으로 있으므로, 폴더를 잘못 고르면 다른 채널의 단면으로 핏하게 된다 — 이 함수는
+    추측하지 않고, 폴더 결정은 `core.refit.resolve_calibration_dir`가 알파의 파장축과
+    대조해서 한다.
+
+    반환: (cfg, unresolved) — unresolved는 실제로 존재하지 않는 경로들의 basename 목록.
+    비어있지 않으면 호출부는 **재핏을 포기**해야 한다(있는 것만으로 핏하면 레퍼런스가
+    빠진 채 계산돼 농도가 달라진다).
+    """
+    def _path(name):
+        if not name:
+            return ""
+        if ref_dir:
+            cand = os.path.join(ref_dir, name)
+            if os.path.exists(cand):
+                return cand
+        return resolve_ref_path(name)
+
+    unresolved = []
+    refs, props = [], {}
+    for sp in meta.get("species") or []:
+        name = sp.get("name")
+        if not name:
+            continue
+        fp = _path(sp.get("xs"))
+        if not fp or not os.path.exists(fp):
+            unresolved.append(sp.get("xs") or name)
+        refs.append({"name": name, "path": fp, "mult": sp.get("mult") or 0})
+        props[name] = {
+            "sh_mode": sp.get("sh_mode") or "Free",
+            "sh_val": sp.get("sh_val") or "",
+            "sq_mode": sp.get("sq_mode") or "Free",
+            "sq_val": sp.get("sq_val") or "",
+            "t_ref": sp.get("t_ref"),
+            "t_coeff": sp.get("t_coeff"),
+            "active_bands_nm": sp.get("active_bands_nm") or "",
+        }
+
+    calib = meta.get("calibration") or {}
+    wl = _path(calib.get("wavecal"))
+    if not wl or not os.path.exists(wl):
+        unresolved.append(calib.get("wavecal") or "(wavecal 미기록)")
+
+    win = meta.get("window") or {}
+    px = win.get("px") or [None, None]
+    nm = win.get("nm") or [None, None]
+    qc = meta.get("qc") or {}
+    cfg = {
+        "wl_path": wl,
+        "refs": refs,
+        "ref_props": props,
+        "data_label": meta.get("label") or "",
+        "f_min": "" if px[0] is None else str(px[0]),
+        "f_max": "" if px[1] is None else str(px[1]),
+        "fit_start_nm": nm[0],
+        "fit_end_nm": nm[1],
+        "fit_unit": win.get("unit") or "nm",
+        "poly_deg": meta.get("poly_deg"),
+        "step_limit": meta.get("step_limit"),
+        "allow_negative_gas": bool(meta.get("allow_neg")),
+        "gas_temp": meta.get("gas_temp") or 0,
+        "time_shift_h": meta.get("time_shift_h") or 0,
+        # 핏 수치를 바꾸는 값이라 반드시 meta에서 가져온다(기본값으로 때우면 안 됨).
+        "tikhonov_lambda": qc.get("tikhonov") or 0.0,
+        "use_robust": bool(qc.get("robust")),
+    }
+    return cfg, unresolved
+
+
 def _demo():
     """자기검증: runid가 설정에만 반응하는지 (핵심 계약)."""
     cfg = {
@@ -417,6 +548,46 @@ def _demo():
     assert len(find_versions(fp3)) == 2, "legacy: QC 버킷 가로지르기 실패"
     assert os.path.basename(version_search_root(fp3)) == "260905"
     assert os.path.basename(version_search_root(fp)) == "2026-09-04"
+
+    # meta → cfg 왕복: 핏 수치를 바꾸는 값이 하나도 새지 않아야 한다.
+    back, missing = meta_to_cfg(a)
+    assert back["poly_deg"] == cfg["poly_deg"]
+    assert back["allow_negative_gas"] == cfg["allow_negative_gas"]
+    assert back["step_limit"] == cfg["step_limit"]
+    assert [r["name"] for r in back["refs"]] == [r["name"] for r in cfg["refs"]]
+    assert back["ref_props"]["NO2"]["sh_mode"] == "Center"
+    assert back["ref_props"]["NO2"]["sh_val"] == "-0.21, 1.9"
+    assert back["f_min"] == "512" and back["f_max"] == "1240"
+    assert missing, "없는 파일은 unresolved로 보고돼야 한다(조용히 넘어가면 안 됨)"
+    # λ·robust는 meta의 qc 블록에 있다 — 기본값으로 때우면 다른 핏이 된다.
+    q = build_meta(cfg, channel=1, qc={"enabled": True, "auto_k": 6.0, "tikhonov": 0.02,
+                                       "robust": True},
+                   calibration=calib, data_days=["2026-09-04"])
+    qb, _ = meta_to_cfg(q)
+    assert qb["tikhonov_lambda"] == 0.02 and qb["use_robust"] is True
+
+    # layout_from_input — 알파 헤더 / raw 열 수 / 모르면 None
+    ap = os.path.join(root, "x_alpha_trace.dat")
+    with open(ap, "w", encoding="utf-8") as fh:
+        fh.write("# CAESAR Pro Alpha Export\n")
+        fh.write("# raw_layout: ncols=6181 campaign=2026-yeosu parser=DataIO-dynamic\n")
+        fh.write("row_idx\tT_C\tP_mbar\tpx100\n1\t25\t1013\t1e-7\n")
+    lay = layout_from_input(ap)
+    assert lay == {"ncols": 6181, "campaign": "2026-yeosu",
+                   "parser": "DataIO-dynamic"}, lay
+
+    rp = os.path.join(root, "raw_like.dat")
+    with open(rp, "w", encoding="utf-8") as fh:
+        fh.write("\t".join(["0"] * 6179) + "\n")
+    lay2 = layout_from_input(rp)
+    assert lay2 and lay2["ncols"] == 6179, lay2
+    assert lay2.get("campaign") in ("2026-yeosu", "unregistered"), lay2
+
+    # layout은 runid 해시에 들어가면 안 된다 — 같은 설정이면 입력이 달라도 같은 runid
+    m1 = build_meta(cfg, channel=1, qc={}, calibration=calib, layout=lay)
+    m2 = build_meta(cfg, channel=1, qc={}, calibration=calib, layout=lay2)
+    assert m1["runid"] == m2["runid"], (m1["runid"], m2["runid"])
+    assert m1["layout"] == lay and m2["layout"] == lay2
 
     print("run_meta self-check OK:", a["runid"])
 

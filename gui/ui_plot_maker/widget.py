@@ -2028,13 +2028,33 @@ class PlotMakerWidget(QWidget):
         dlg.resize(min(pix.width() + 40, 1280), min(pix.height() + 60, 820))
         dlg.exec()
 
+    def _figure_dir(self):
+        """그림 저장 다이얼로그가 처음 열릴 폴더: `{마지막 폴더}/{campaign}/figures/`.
+
+        핏·알파·R과 같은 캠페인 아래로 그림도 모은다(A3). 다만 **강제하지 않는다** —
+        저장 다이얼로그의 시작 위치일 뿐이라 사용자는 어디로든 갈 수 있다.
+        날짜 폴더를 쓰지 않는 이유: 그림은 보통 여러 날을 걸친다.
+        """
+        from gui.dlg_dir import dlg_dir, campaign_of
+        from core.paths import campaign_dir
+        base = dlg_dir("figure") or dlg_dir("result") or "."
+        d = os.path.join(campaign_dir(base, campaign_of(self)), "figures")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            return base
+        return d
+
     def _export_publish(self):
         """현재 모드를 matplotlib로 재렌더 → 고화질 PNG / 벡터 PDF·SVG."""
         out, _ = QFileDialog.getSaveFileName(
-            self, "Publish (high quality)", self._default_export_name() + ".png",
+            self, "Publish (high quality)",
+            os.path.join(self._figure_dir(), self._default_export_name() + ".png"),
             "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)")
         if not out:
             return
+        from gui.dlg_dir import dlg_dir as _dd
+        _dd("figure", out)          # 다음 저장은 여기서 시작
         if not os.path.splitext(out)[1]:
             out += ".png"
         try:

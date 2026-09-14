@@ -521,7 +521,14 @@ class RCalibratorDialog(QDialog):
             COL_PRESS_COLD = 6160;     COL_TEMP_COLD = 6173
             COL_PRESS_HOT_ANS = 6164;  COL_TEMP_HOT = 6155
 
-        out_dir = self._le_out_dir.text().strip() or "."
+        out_dir = self._out_root()
+        # R(t) npz는 하루짜리가 아니라 기간 전체의 교정 산출물이라 날짜 폴더가 아니라
+        # {campaign}/calibration/ 에 둔다(wavecal·ILS·dark와 같은 성격).
+        _calib_dir = _os.path.join(out_dir, "calibration")
+        try:
+            _os.makedirs(_calib_dir, exist_ok=True)
+        except OSError:
+            pass
         ds = self._le_date_start.text().strip()
         de = self._le_date_end.text().strip()
 
@@ -575,7 +582,7 @@ class RCalibratorDialog(QDialog):
                     f"{ds or '*'}~{de or '*'} → skipped")
                 continue
             tasks.append((label, raw_dir, wave_nm, rtcfg,
-                          flist, _os.path.join(out_dir, f"R_{label}.npz")))
+                          flist, _os.path.join(_calib_dir, f"R_{label}.npz")))
         return tasks
 
     def _warn_flag_mismatch(self):
@@ -641,7 +648,7 @@ class RCalibratorDialog(QDialog):
                 "• Wavecal must be loaded from the left panel")
             return
 
-        out_dir = self._le_out_dir.text().strip() or "."
+        out_dir = self._out_root()
         channel_cfgs = [
             {"label":     label, "raw_dir": raw_dir, "wave_nm": wave,
              "rtcfg":     cfg,   "file_list": flist, "npz_path": npz_path,
@@ -667,6 +674,23 @@ class RCalibratorDialog(QDialog):
         self._worker.start()
 
     # ── R(t) 공통 태스크 빌더 ──────────────────────────────────────────────
+    def _out_root(self):
+        """사용자가 고른 출력 폴더 아래 **캠페인 폴더**. 폴더가 없으면 만든다.
+
+        R 산출물도 핏·알파와 같은 `{출력폴더}/{campaign}/…` 아래로 모은다(A3).
+        내부 구조(`R_<채널>/<날짜>/`)는 `tools/r_trend_monitor.py`가 정하므로 그대로 두고,
+        여기선 **루트만** 캠페인으로 옮긴다 — CLI로 단독 실행하는 그 도구를 건드리지 않으려고.
+        """
+        import os as _o
+        from core.paths import campaign_dir as _cd
+        from gui.dlg_dir import campaign_of as _co
+        root = _cd(self._le_out_dir.text().strip() or ".", _co(self))
+        try:
+            _o.makedirs(root, exist_ok=True)
+        except OSError:
+            pass
+        return root
+
     def _build_rt_tasks(self, RTP):
         """채널 행에서 태스크 목록 반환 (_collect_channel_cfgs로 위임)."""
         return self._collect_channel_cfgs(RTP)
@@ -753,7 +777,7 @@ class RCalibratorDialog(QDialog):
         if RTP is None:
             return
 
-        out_dir = self._le_out_dir.text().strip() or "."
+        out_dir = self._out_root()
         tasks = self._build_rt_tasks(RTP)
         if not tasks:
             QMessageBox.warning(self, "Input error",

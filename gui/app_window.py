@@ -2983,7 +2983,7 @@ class CAESARAnalyzer(QMainWindow):
             # wide 형식: 멀티채널이면 ch{N}/ 하위폴더로 분리(단일이면 평면)
             channel_subdir = (f"ch{cfg['channel']}" if int(getattr(self, '_detected_channels', 1) or 1) > 1 else ""),
             rt_path        = getattr(self, '_alpha_rt_map', {}).get(cfg['channel']),   # 채널별 R(t)
-
+            campaign       = self._campaign(),   # A3: {out}/{campaign}/{날짜}/alpha/…
         )
         n_ch_tot = max(1, int(getattr(self, '_alpha_n_ch', 1) or 1))
         self._alpha_export_worker.total_ready.connect(
@@ -3526,7 +3526,8 @@ class CAESARAnalyzer(QMainWindow):
             except Exception:
                 gas_models.append(None)
         rms = float(np.sqrt(np.mean(resid ** 2)))
-        n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+        from core.physics import air_number_density
+        n_air = air_number_density(T_C, P_mbar)   # ppb 환산 단일 출처
         ppb = {}
         for gi, nm in enumerate(eng.gas_list):
             sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
@@ -4881,6 +4882,20 @@ class CAESARAnalyzer(QMainWindow):
         w = getattr(self, '_ed_campaign', None)
         return (w.text().strip() if w is not None else "") or DEFAULT_CAMPAIGN
 
+    def _input_layout(self, ch):
+        """이 채널의 **첫 입력 파일**이 어떤 raw 구성에서 나왔는지. 모르면 None.
+
+        알파 입력이면 그 헤더의 `# raw_layout:` 줄(알파 생성 때 기록됨)을 읽고, raw 입력이면
+        열 수로 레지스트리를 본다 — 판단은 `core.run_meta.layout_from_input`이 한다.
+        """
+        try:
+            files = (self._channel_files.get(int(ch)) or self.file_list or [])
+            if not files:
+                return None
+            return run_meta.layout_from_input(self._entry_filepath(files[0]))
+        except Exception:                       # noqa: BLE001 — provenance가 저장을 막지 않는다
+            return None
+
     def _build_run_meta(self, ch, *, campaign=None, data_days=(), rows=None):
         """채널 하나의 `.meta.json`. 실패하면 None(저장 자체는 살린다).
 
@@ -4903,6 +4918,9 @@ class CAESARAnalyzer(QMainWindow):
                 campaign=campaign if campaign is not None else self._campaign(),
                 scenario=getattr(self, '_scenario_name', None),
                 code_version=_cv(), app_version=__version__,
+                # 이 결과가 어떤 raw 구성에서 나왔나(B안). 선택은 데이터(열 수)가 하고
+                # 여기선 기록만 한다 — 사람이 친 campaign 라벨과 달라도 그건 정보다.
+                layout=self._input_layout(ch),
             )
             # 측정일 감사(D1) 결과를 결과 파일에 붙인다 — "이 농도가 R(t) 외삽 구간
             # 위에서 나왔나"를 나중에 물을 수 있어야 한다. runid 해시엔 안 들어간다

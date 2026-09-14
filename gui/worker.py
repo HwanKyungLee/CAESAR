@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 # RayleighPhysics / KalmanTracker → core/physics.py 에서 공유
-from core.physics import RayleighPhysics, KalmanTracker
+from core.physics import RayleighPhysics, KalmanTracker, air_number_density
 
 
 class AnalysisWorker(QThread):
@@ -698,7 +698,7 @@ class AnalysisWorker(QThread):
                         # Dividing by air number density N_air converts to a dimensionless mixing ratio.
                         # Multiplying by 1e9 converts to parts-per-billion (ppb).
                         # N_air from the ideal gas law at measured T and P:
-                        n_air = 2.68678e19 * (self.pressure / 1013.25) * (273.15 / (self.temperature + 273.15))
+                        n_air = air_number_density(self.temperature, self.pressure)
                         
                         # n_air uncertainty propagation (assuming T: ±1°C, P: ±1 mbar, Washenfelder 2008)
                         dn_air_dT = -n_air / (self.temperature + 273.15)
@@ -968,7 +968,7 @@ class AnalysisWorker(QThread):
                         for gj, nm in enumerate(self.engine.gas_list):
                             result[f"{nm}_RealConc"] = float(raw_concentrations[gj])
 
-                        n_air = 2.68678e19 * (self.pressure / 1013.25) * (273.15 / (self.temperature + 273.15))
+                        n_air = air_number_density(self.temperature, self.pressure)
                         dn_air_dT = -n_air / (self.temperature + 273.15)
                         dn_air_dP = n_air / self.pressure
                         rel_err_n = np.sqrt((dn_air_dT * 1.0) ** 2 + (dn_air_dP * 1.0) ** 2) / n_air
@@ -1470,12 +1470,35 @@ def _pass2_write_file(fp, rows, ctx):
 
     stem = os.path.splitext(os.path.basename(fp))[0]
     _md = _re_date.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', stem)
-    _file_dir = (os.path.join(ctx['base_dir'], f"{_md.group(1)}-{_md.group(2)}-{_md.group(3)}")
-                if _md else ctx['base_dir'])
+    # A3 산출물 배치: {출력폴더}/{campaign}/{YYYY-MM-DD}/alpha/{채널}/…
+    # (핏 결과와 같은 캠페인 폴더 아래로 모은다 — 예전엔 {출력폴더}/{채널}/{날짜}/ 였다.)
+    from core.paths import campaign_dir as _cdir, day_dir as _ddir
+    if _md:
+        _file_dir = _ddir(ctx['out_root'], ctx['campaign'],
+                          f"{_md.group(1)}-{_md.group(2)}-{_md.group(3)}", 'alpha')
+    else:
+        _file_dir = os.path.join(_cdir(ctx['out_root'], ctx['campaign']), 'alpha')
+    if ctx.get('channel_subdir'):
+        _file_dir = os.path.join(_file_dir, ctx['channel_subdir'])
     os.makedirs(_file_dir, exist_ok=True)
     lbl_tag = f"_{ctx['channel_label']}" if ctx['channel_label'] else ""
     out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
     _yr = DataIO._file_year(fp) or 2026
+
+    # raw 첫 데이터행의 열 수 = 그 파일의 구성 식별자. 첫 줄만 읽으므로 비용은 없다.
+    _ncols, _lay_name = 0, "unknown"
+    try:
+        with open(fp, encoding="utf-8", errors="replace") as _fh:
+            for _ln in _fh:
+                if _ln.startswith("#") or not _ln.strip():
+                    continue
+                _ncols = len(_ln.split("\t") if "\t" in _ln else _ln.split())
+                break
+        from core.raw_parser import CAMPAIGN_LAYOUTS as _CL
+        _l = _CL.get(_ncols)
+        _lay_name = (_l.campaign or _l.kind) if _l else "unregistered"
+    except Exception:      # noqa: BLE001 — provenance 한 줄 때문에 알파를 못 만들면 안 된다
+        pass
 
     def _doy_iso(sec):
         if not np.isfinite(sec):
@@ -1491,6 +1514,11 @@ def _pass2_write_file(fp, rows, ctx):
         f.write(f"# RL_factor={ctx['rl_factor']}  d={ctx['cavity_len']} cm\n")
         f.write(f"# I0_mode={ctx['i0_mode']}  ZA_count={ctx['n_za']}\n")
         f.write("# T_P_PROVENANCE: measured_raw_housekeeping\n")
+        # 이 알파가 **어떤 raw 구성**에서 나왔나(B안 — 선택은 데이터가, 기록은 여기서).
+        # ⚠ 알파 생성은 RawParser가 아니라 DataIO의 동적 채널탐지를 쓴다. 그래서 레지스트리
+        # 이름은 "그 열 수를 우리가 뭐라 부르는가"의 **참조**일 뿐, 파싱에 쓴 표가 아니다 —
+        # parser= 를 같이 적어 그 구분이 나중에도 남게 한다.
+        f.write(f"# raw_layout: ncols={_ncols} campaign={_lay_name} parser=DataIO-dynamic\n")
         f.write(f"# ambient_avg_sec={ctx['avg_sec']:.0f}  (alpha after {ctx['avg_sec']:.0f}s time-average of ambient)\n")
         dark = ctx['dark']
         dark_note = f"mean={dark.mean():.1f}×{ctx['dark_scale_factor']:g}" if dark is not None else "None"
@@ -1607,7 +1635,8 @@ class AlphaExportWorker(QThread):
                  drnam_date="",         # 박사님 형식 폴더/파일명용 YYYYMMDD
                  drnam_chlabel="",      # 박사님 형식 채널 접두(ch1/ch2/ch3)
                  channel_subdir="",     # wide 형식: 멀티채널 시 출력 하위폴더(ch1/ch2/…), 단일이면 ""
-                 rt_path=None):         # R(t) npz 경로(rt_precompute). 주면 자체 R 대신 이걸 시간보간해 사용
+                 rt_path=None,          # R(t) npz 경로(rt_precompute). 주면 자체 R 대신 이걸 시간보간해 사용
+                 campaign=""):          # 산출물 최상위 폴더(A3). 비면 'default'
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
           기본값(0.90 / 1e-5)은 high-finesse cavity (R>0.999, omr_d ~ 1e-6) 가정.
@@ -1637,6 +1666,7 @@ class AlphaExportWorker(QThread):
         self.drnam_chlabel   = str(drnam_chlabel)
         self.channel_subdir  = str(channel_subdir)
         self.rt_path         = rt_path
+        self.campaign        = str(campaign or "")
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
         if dark_spectrum is not None:
@@ -2362,7 +2392,13 @@ class AlphaExportWorker(QThread):
                     if 0 <= b < nbin and sec < st[b, 1]:
                         bin_groups.setdefault(b, []).append((g, t, p, i))
             chp = self.drnam_chlabel or f"ch{self.channel}"
-            folder = os.path.join(self.output_dir, f"{chp}_{self.drnam_date}_000000")
+            # 박사님 per-bin 형식도 같은 캠페인 폴더 아래로 모은다.
+            # drnam_date는 YYYYMMDD(8자리)라 iso_day()가 못 읽는다 — 여기서 바꿔 넘긴다.
+            from core.paths import day_dir as _ddir2
+            _d = str(self.drnam_date or "")
+            _iso = f"{_d[:4]}-{_d[4:6]}-{_d[6:8]}" if len(_d) == 8 else (_d or "unknown-date")
+            folder = os.path.join(_ddir2(self.output_dir, self.campaign, _iso, 'alpha'),
+                                  f"{chp}_{self.drnam_date}_000000")
             os.makedirs(folder, exist_ok=True)
             n_written = 0
             for b in range(nbin):
@@ -2413,8 +2449,9 @@ class AlphaExportWorker(QThread):
         i0_mode  = (f"PCHIP({'t' if _i0_axis_is_sec else 'idx'})" if use_pchip else "static")
         n_za     = len(za_gidx)
 
+        # 실제 파일 폴더는 파일의 날짜를 알아야 정해지므로(_pass2_write_file) 여기선
+        # 루트만 넘긴다. 캠페인 폴더는 그때 붙는다.
         base_dir = os.path.join(self.output_dir, self.channel_subdir) if self.channel_subdir else self.output_dir
-        os.makedirs(base_dir, exist_ok=True)
 
         ctx = {
             'use_pchip': use_pchip, 'i0_axis_is_sec': _i0_axis_is_sec,
@@ -2434,6 +2471,7 @@ class AlphaExportWorker(QThread):
             'avg_sec': avg_sec,
             'amb_spool_path': _amb_spool_path, 'row_bytes': _row_bytes, 'n_pix': n_pix,
             'base_dir': base_dir, 'channel_subdir': self.channel_subdir,
+            'out_root': self.output_dir, 'campaign': self.campaign,
             'channel_label': self.channel_label,
             'pix_min': pix_min, 'wave_nm': wave_nm,
             'channel': self.channel, 'cavity_len': self.cavity_len,
