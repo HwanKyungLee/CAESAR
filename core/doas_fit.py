@@ -16,7 +16,7 @@ worker.AnalysisWorker에서 **그대로 추출**한 단일 구현.
   따라서 항상 픽셀 공간에서 평가한다.
 """
 import numpy as np
-from scipy.linalg import lstsq as scipy_lstsq
+from scipy.linalg import lstsq as scipy_lstsq, solve_triangular
 from scipy.optimize import least_squares, lsq_linear
 from numpy.polynomial import chebyshev
 
@@ -404,6 +404,46 @@ class DoasFitter:
         const_cols += [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
         CONST = np.column_stack(const_cols)
 
+        # ── 해석적(Golub–Pereyra) 자코비안 준비 ─────────────────────
+        # 쓸 수 있는 조건: 선형 단계가 **무제약**일 때만. gas_lb=0(±Neg OFF)이면 해가
+        # 0 경계에 붙는 순간 투영이 미분 불가능해져 해석해가 틀린 값을 준다 → 그때는
+        # scipy 유한차분(기존 동작)으로 떨어진다.
+        # engine은 덕타이핑으로 들어올 수 있다(테스트 대역 등) → getattr로 본다.
+        _ref_deriv = getattr(self.engine, "ref_derivatives", {})
+        use_analytic_jac = (gas_lb == -np.inf) and bool(self.engine.gas_list) and all(
+            name in _ref_deriv for name in self.engine.gas_list)
+
+        # θ_k가 어느 기체 열에 어떤 형태로 걸리는지. Link면 한 θ가 여러 기체를 움직인다.
+        jac_targets = {v: [] for v in active_vars}
+        for _i, _name in enumerate(self.engine.gas_list):
+            if not gas_active[_name]:
+                continue
+            for _kind, _is_sq in (("sh", False), ("sq", True)):
+                _var = f"{_name}_{_kind}"
+                _src = linked_vars.get(_var, _var)
+                if _src in jac_targets:
+                    jac_targets[_src].append((_i, _is_sq))
+        # 창 밖 기체 열은 항상 0 → A가 랭크부족이라 QR이 깨진다. 그 열을 빼고 풀고
+        # 계수는 0으로 되돌린다(현 lsq_linear의 최소노름 해와 같은 값).
+        keep_mask = np.array([gas_active[n] for n in self.engine.gas_list]
+                             + [True] * CONST.shape[1])
+        # 남긴 열 목록에서 기체 i가 몇 번째인지(자코비안 2항이 쓴다)
+        keep_pos = {gi: k for k, gi in enumerate(
+            [i for i, n in enumerate(self.engine.gas_list) if gas_active[n]])}
+        dpx_dsq = (pixel_idx - absolute_center).astype(float)
+
+        def _gas_dcolumns(val_dict):
+            """∂(기체 열)/∂px. shift 미분은 이것, squeeze 미분은 여기에 (px−center)를 곱한 것."""
+            D = np.zeros((len(pixel_idx), num_gases))
+            for i, name in enumerate(self.engine.gas_list):
+                if not gas_active[name]:
+                    continue
+                sh_i, sq_i = val_dict[f"{name}_sh"], val_dict[f"{name}_sq"]
+                pixel_shifted = (pixel_idx - absolute_center) * sq_i + absolute_center + sh_i
+                d = fit_sign * _ref_deriv[name](pixel_shifted) / self.engine.scaling_factors[name]
+                D[:, i] = np.asarray(d).ravel() * t_corr[name]
+            return D
+
         def _gas_columns(val_dict):
             """shift/squeeze가 걸리는 기체 열만. 창 밖 기체는 어차피 0으로 덮이므로
             보간 자체를 건너뛴다(결과 동일, 스플라인 평가 1회 절약)."""
@@ -420,31 +460,93 @@ class DoasFitter:
 
         solver_runs = []
         for iteration in range(max_iters):
-            def objective_varpro(theta):
+            jac_state = {}   # objective ↔ jacobian 사이 (같은 θ일 때만) A·Q·c 재활용
+
+            def _theta_to_vals(theta):
                 val_dict = {v: theta[i] for i, v in enumerate(active_vars)}
                 val_dict.update(fixed_vars)
                 for v, t in linked_vars.items():
                     val_dict[v] = val_dict.get(t, 0.0)
+                return val_dict
 
+            def _augment(val_dict):
                 A_weighted = np.hstack((_gas_columns(val_dict), CONST)) * w_current[:, None]
-                y_weighted = y_w_current   # theta 불변 — 루프 밖에서 1회 계산
-
                 num_cols = A_weighted.shape[1]
-
                 if lam > 0:
-                    A_aug = np.vstack((A_weighted, _penalty(num_cols)))
-                    y_aug = np.concatenate((y_weighted, np.zeros(num_cols)))
-                else:
-                    A_aug, y_aug = A_weighted, y_weighted
+                    return (np.vstack((A_weighted, _penalty(num_cols))),
+                            np.concatenate((y_w_current, np.zeros(num_cols))))
+                return A_weighted, y_w_current
 
+            def _solve_qr(theta):
+                """무제약 선형 단계를 QR로 푼다. Q는 자코비안의 투영 P⊥=I−QQᵀ에 그대로 쓴다."""
+                val_dict = _theta_to_vals(theta)
+                A_aug, y_aug = _augment(val_dict)
+                A_keep = A_aug[:, keep_mask]
+                Q, R = np.linalg.qr(A_keep)
+                c_keep = solve_triangular(R, Q.T @ y_aug, lower=False)
+                c = np.zeros(A_aug.shape[1])
+                c[keep_mask] = c_keep
+                st = {"theta": np.array(theta, dtype=float), "val_dict": val_dict,
+                      "Q": Q, "R": R, "c": c, "resid": y_aug - A_keep @ c_keep}
+                jac_state.clear(); jac_state.update(st)
+                return st
+
+            def objective_varpro(theta):
+                if use_analytic_jac:
+                    return _solve_qr(theta)["resid"]
+
+                val_dict = _theta_to_vals(theta)
+                A_aug, y_aug = _augment(val_dict)
+                num_cols = A_aug.shape[1]
                 lb_inner = [gas_lb] * num_gases + [-np.inf] * (num_cols - num_gases)
                 ub_inner = [np.inf] * num_cols
-
                 res_temp = lsq_linear(A_aug, y_aug, bounds=(lb_inner, ub_inner))
                 return y_aug - A_aug @ res_temp.x
 
+            def jacobian_varpro(theta):
+                """Golub–Pereyra 완전 자코비안 (Kaufman 근사가 아님 — 2항 모두):
+
+                    J_k = −[ P⊥ D_k c  +  A⁺ᵀ D_kᵀ r ],   P⊥ = I − QQᵀ,  A⁺ᵀ = Q R⁻ᵀ
+
+                D_k = ∂A/∂θ_k는 기체 열만 0이 아니다(poly·etalon·Tikhonov 행은 θ 불변).
+                2항은 k-벡터 삼각해 하나 + Q 곱 하나라 거의 공짜인데, 이게 있어야
+                유한차분과 일치해 검증을 게이트로 쓸 수 있다.
+
+                least_squares는 보통 fun(x) 직후 같은 x에서 jac(x)를 부르므로 그때
+                만든 A·Q·R·c를 재활용하고, 어긋나면 다시 푼다(결과는 같고 느릴 뿐)."""
+                st = jac_state if (jac_state and np.array_equal(jac_state["theta"], theta))                      else _solve_qr(theta)
+                Q, R, c, val_dict, resid = st["Q"], st["R"], st["c"], st["val_dict"], st["resid"]
+                D = _gas_dcolumns(val_dict)
+                n_pix = len(pixel_idx)
+                n_pen = Q.shape[0] - n_pix          # Tikhonov 증강 행 수(없으면 0)
+                r_top = resid[:n_pix]
+                J = np.empty((Q.shape[0], len(active_vars)))
+                for k, var in enumerate(active_vars):
+                    v = np.zeros(n_pix)
+                    g = np.zeros(Q.shape[1])
+                    for gi, is_sq in jac_targets[var]:
+                        dcol = (D[:, gi] * dpx_dsq if is_sq else D[:, gi]) * w_current
+                        v += dcol * c[gi]
+                        g[keep_pos[gi]] = dcol @ r_top
+                    if n_pen:
+                        v = np.concatenate((v, np.zeros(n_pen)))
+                    term1 = v - Q @ (Q.T @ v)
+                    term2 = Q @ solve_triangular(R, g, trans='T', lower=False)
+                    J[:, k] = -(term1 + term2)
+                return J
+
             if len(theta0) > 0:
-                res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub), max_nfev=1500)
+                try:
+                    res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub),
+                                               jac=(jacobian_varpro if use_analytic_jac else '2-point'),
+                                               max_nfev=1500)
+                except np.linalg.LinAlgError:
+                    # A가 정확히 랭크부족(중복 레퍼런스 등) → QR 경로가 못 푼다.
+                    # 이 핏은 예전처럼 lsq_linear + 유한차분으로 간다(동작 보존).
+                    use_analytic_jac = False
+                    jac_state.clear()
+                    res_nonlin = least_squares(objective_varpro, x0=theta0, bounds=(theta_lb, theta_ub),
+                                               jac='2-point', max_nfev=1500)
                 theta_opt = res_nonlin.x
                 solver_runs.append({"status": int(res_nonlin.status),
                                     "success": bool(res_nonlin.success),

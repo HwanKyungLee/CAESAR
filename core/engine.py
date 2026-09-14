@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, make_interp_spline
 from scipy.signal import convolve
 from scipy.stats import norm
 from numpy.polynomial import chebyshev
@@ -41,6 +41,11 @@ class UniversalEngine:
         # interpolators: name → scipy interp1d object that lets us evaluate the
         # reference at non-integer (shifted/squeezed) pixel positions
         self.interpolators = {}
+
+        # ref_derivatives: name → d(reference)/d(pixel). VarPro의 해석적 자코비안
+        # (shift/squeeze 미분)이 쓴다. interpolators와 **항상 같이** 갱신돼야 하므로
+        # 둘 다 _set_interpolator() 한 곳에서만 만든다.
+        self.ref_derivatives = {}
 
         # gas_list: ordered list of gas names, e.g. ['NO2', 'H2O', 'O4']
         # The order here matches the order of coefficients in fit results.
@@ -142,12 +147,8 @@ class UniversalEngine:
 
             self.raw_references[name] = intensity_processed
 
-            # Build a cubic interpolator indexed by pixel number
-            pixel_idx = np.arange(len(intensity_processed))
-            self.interpolators[name] = interp1d(
-                pixel_idx, intensity_processed,
-                kind='cubic', bounds_error=False, fill_value="extrapolate"
-            )
+            # Build a cubic interpolator (and its derivative) indexed by pixel number
+            self._set_interpolator(name, intensity_processed)
 
             if name not in self.gas_list:
                 self.gas_list.append(name)
@@ -177,11 +178,7 @@ class UniversalEngine:
 
         if fwhm_gaussian <= 0.1 and fwhm_lorentzian <= 0.1:
             for name in self.gas_list:
-                pixel_idx = np.arange(len(self.raw_references[name]))
-                self.interpolators[name] = interp1d(
-                    pixel_idx, self.raw_references[name],
-                    kind='cubic', fill_value="extrapolate"
-                )
+                self._set_interpolator(name, self.raw_references[name])
             return
 
         sigma_g = fwhm_gaussian / 2.3548
@@ -202,11 +199,7 @@ class UniversalEngine:
 
         for name in self.gas_list:
             convolved_y = convolve(self.raw_references[name], kernel, mode='same')
-            pixel_idx = np.arange(len(self.raw_references[name]))
-            self.interpolators[name] = interp1d(
-                pixel_idx, convolved_y,
-                kind='cubic', fill_value="extrapolate"
-            )
+            self._set_interpolator(name, convolved_y)
             max_abs_val = np.max(np.abs(convolved_y))
             self.scaling_factors[name] = max_abs_val if max_abs_val != 0 else 1.0
 
@@ -244,16 +237,27 @@ class UniversalEngine:
         self._sync_reference_update(name, data)
         return True
 
+    def _set_interpolator(self, name, data):
+        """레퍼런스 보간기 + 그 도함수를 함께 만든다(단일 출처).
+
+        `make_interp_spline(x, y, k=3)`는 `interp1d(..., kind='cubic',
+        fill_value="extrapolate")`와 **비트단위로 동일**하다(외삽 구간 포함, 검증함).
+        interp1d는 도함수를 공개 API로 안 주므로 같은 스플라인을 한 번 더 만들어
+        `.derivative()`를 보관한다 — scipy 비공개 속성(`_spline`)에 의존하지 않기 위함.
+        """
+        pixel_idx = np.arange(len(data))
+        self.interpolators[name] = interp1d(
+            pixel_idx, data, kind='cubic', bounds_error=False, fill_value="extrapolate"
+        )
+        self.ref_derivatives[name] = make_interp_spline(pixel_idx, data, k=3).derivative()
+
     def _sync_reference_update(self, name, data):
         """
         Internal helper: saves modified reference data and rebuilds its interpolator.
         Called after any masking operation to keep raw_references and interpolators in sync.
         """
         self.raw_references[name] = data
-        pixel_idx = np.arange(len(data))
-        self.interpolators[name] = interp1d(
-            pixel_idx, data, kind='cubic', fill_value="extrapolate"
-        )
+        self._set_interpolator(name, data)
         max_abs_val = np.max(np.abs(data))
         self.scaling_factors[name] = max_abs_val if max_abs_val != 0 else 1.0
 
