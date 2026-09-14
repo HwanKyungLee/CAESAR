@@ -546,30 +546,38 @@ class RawParser:
     @staticmethod
     def _detect_layout(path: str) -> FileLayout:
         """Read first non-empty data row to determine ncols, then classify."""
-        # 파일을 첫 행 하나로 판정하면 안 된다 — LabVIEW가 가끔 파일 맨 앞에 쓰는
-        # flag=0 헤더행은 데이터행보다 열이 적다(2026 여수 핫 실측: 헤더 6177 vs
-        # 데이터 6181, 1314개 중 22개). 그 행으로 파일을 판정하면 등록 레이아웃과 안
-        # 맞아 구조적 폴백으로 떨어지고 hk_map이 조용히 빈 dict가 된다.
-        # core/data_io.py도 같은 6177/6181 혼재 때문에 행 단위로 읽는다(거기 주석 참고).
-        # 앞쪽 몇 행만 훑어 **등록된 레이아웃과 맞는 첫 ncols**를 파일 열수로 삼고,
-        # 하나도 안 맞으면 첫 데이터행 값을 그대로 써서 기존 폴백 동작을 유지한다.
+        # 파일을 첫 행 하나로 판정하면 안 된다 — LabVIEW가 파일 맨 앞에 쓰는 flag=0
+        # 헤더행은 데이터행과 열 수가 다르다. 실측은 **양방향 다** 나온다:
+        #   · 핫  : 헤더 6177 <  데이터 6181 (1314개 중 22개)
+        #   · 콜드: 헤더 6177 >  데이터 6174 — 2026-06-11-020.dat은 데이터행 3693개가
+        #           전부 6174다(HK 선두 5열이 통째로 빠진 파일. 파일 전체의 성질이지
+        #           첫 행만의 사고가 아니다). core/data_io.py는 이 5열 손실을
+        #           hk_shift로 복구한다(거기 주석 참고).
+        #
+        # 등록 레이아웃과 맞는 행이 있으면 그 열수가 정답이다. **하나도 없으면 첫 행이
+        # 아니라 훑은 행들의 최빈 열수를 쓴다.** 첫 행을 쓰면 그게 헤더행일 때
+        # layout.ncols가 데이터행보다 **커지고**, iter_rows의 `len(toks) < ncols`
+        # 가드가 데이터행을 전부 버린다 — 위 콜드 파일에서 실제로 3694행 중 1행
+        # (그 헤더행)만 나왔다.
         ncols = 0
-        probed = 0
+        seen: dict[int, int] = {}
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 s = line.strip()
                 if not s or s.startswith("#"):
                     continue
-                toks = s.split("\t") if "\t" in s else s.split()
+                toks = s.split("	") if "	" in s else s.split()
                 n = len(toks)
-                if ncols == 0:
-                    ncols = n            # 폴백: 첫 데이터행
                 if n in CAMPAIGN_LAYOUTS:
                     ncols = n
                     break
-                probed += 1
-                if probed >= LAYOUT_PROBE_ROWS:
+                seen[n] = seen.get(n, 0) + 1
+                if sum(seen.values()) >= LAYOUT_PROBE_ROWS:
                     break
+        if ncols == 0 and seen:
+            # 최빈값, 동률이면 좁은 쪽. 넓게 잡으면 iter_rows가 행을 버리고,
+            # 좁게 잡으면 안 버린다 — 틀리더라도 데이터를 조용히 잃지 않는 쪽으로.
+            ncols = min(seen, key=lambda k: (-seen[k], k))
         mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=KST)
 
         lay = CAMPAIGN_LAYOUTS.get(ncols)

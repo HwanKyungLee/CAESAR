@@ -122,6 +122,40 @@ def test_short_header_row(d):
           (p2.layout.kind, p2.layout.ncols))
 
 
+def test_wide_header_row(d):
+    """헤더행이 데이터행보다 **넓은** 경우 — 콜드 실측.
+
+    2026-06-11-020.dat: 헤더 6177 > 데이터 6174 (HK 선두 5열 손실, 파일 전체 성질).
+    첫 행으로 판정하면 layout.ncols=6177이 되고, iter_rows의 `len(toks) < ncols`
+    가드가 데이터행을 **전부** 버린다 — 실측으로 3694행 중 1행(그 헤더행)만 나왔다.
+    콜드 751개 중 4개가 이 모양이다(census 2026-09-15). 훑은 행들의 최빈 열수를 써야 한다."""
+    print("[2-C] 헤더행이 데이터행보다 넓은 파일 -> 데이터행을 버리지 않는다")
+    path = os.path.join(d, "widehdr.dat")
+    n_data = 8
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\t".join(str(3000 + i) for i in range(6177)) + "\n")   # 헤더행(넓음)
+        for _ in range(n_data):
+            vals = [str(3000 + i) for i in range(6174)]                  # 데이터행(좁음)
+            vals[RP.COL_FLAG] = "1"
+            fh.write("\t".join(vals) + "\n")
+    p = RP.RawParser(path)
+    check("헤더행이 아니라 데이터행 열수로 판정", p.layout.ncols == 6174, p.layout.ncols)
+    got = sum(1 for _ in p.iter_rows())
+    check("데이터행을 버리지 않는다(헤더 포함 전부)", got == n_data + 1, got)
+    # 등록 안 된 구성이므로 HK는 추측하지 않는다(틀린 HK > 없는 HK)
+    check("HK는 빈 맵", p.layout.hk_map == {}, p.layout.hk_map)
+    # 등록 레이아웃이 섞여 있으면 그쪽이 최빈값보다 우선
+    path2 = os.path.join(d, "mixed.dat")
+    with open(path2, "w", encoding="utf-8") as fh:
+        fh.write("\t".join(str(3000 + i) for i in range(6177)) + "\n")
+        fh.write("\t".join(str(3000 + i) for i in range(6174)) + "\n")
+        vals = [str(3000 + i) for i in range(6179)]
+        vals[RP.COL_FLAG] = "1"
+        fh.write("\t".join(vals) + "\n")
+    p2 = RP.RawParser(path2)
+    check("등록 구성(6179)이 최빈값보다 우선", p2.layout.ncols == 6179, p2.layout.ncols)
+    check("그때 kind=cold", p2.layout.kind == "cold", p2.layout.kind)
+
 def test_register_guard():
     print("[3] 중복 등록 가드")
     try:
@@ -239,6 +273,7 @@ def main() -> int:
     test_builtin_layouts(d)
     test_unknown_ncols(d)
     test_short_header_row(d)
+    test_wide_header_row(d)
     test_register_guard()
     test_oculus_profile_adapter()
     test_channel_map_matches_profiles()
