@@ -63,7 +63,52 @@ def _load_channel_map(path=CHANNEL_MAP_PATH):
     return chan_alpha, key2wldir, key2label, cfg["wavecal_root"]
 
 
+def verify_channel_map_against_profiles(key2wldir=None, key2label=None, profiles_dir=None):
+    """channel_map의 채널→wavecal 폴더가 **캠페인 프로파일과 같은지** 대조.
+
+    같은 매핑이 두 파일에 있으면 언젠가 어긋난다 — 실제로 2026-09-14에 ch 번호와 roi
+    번호를 같은 번호끼리 짝지어 `tools/channel_map.json`과 Oculus 프로파일 **둘 다**
+    반대로 들어가 있었다(2026 여수는 roi1=PNs, roi2=ANs로 ch와 번호가 반대).
+
+    기준은 **캠페인 프로파일**이다(계측기 진실). channel_map은 기계별 경로를 담는 파일이라
+    지우지 않고 남기되, 매핑이 어긋나면 여기서 드러난다. **차단하지 않고 보고만 한다**
+    (헌장: 검증 ≠ 필터). 회귀 검사는 `tools/test_raw_layout.py`.
+
+    반환: 불일치 목록 [(채널키, channel_map값, 프로파일값)]
+    """
+    key2wldir = KEY2WLDIR if key2wldir is None else key2wldir
+    key2label = KEY2LABEL if key2label is None else key2label
+    try:
+        from core.profile import ProfileSet
+        ps = (ProfileSet.load_default() if profiles_dir is None
+              else ProfileSet.load(profiles_dir))
+    except Exception as e:                       # noqa: BLE001 — 프로파일이 없어도 도구는 돈다
+        return [("(프로파일 로드 실패)", "", str(e))]
+
+    prof_wldir = {}
+    for prof in ps.profiles:
+        for ch in prof.channels:
+            wl = getattr(ch.concentration, "wl_dir", None) if ch.concentration else None
+            if ch.role == "signal" and wl:
+                for name in (ch.label, ch.id):
+                    if name:
+                        prof_wldir[str(name).casefold()] = wl
+
+    bad = []
+    for key, wldir in key2wldir.items():
+        want = prof_wldir.get(str(key).casefold()) or             prof_wldir.get(str(key2label.get(key, key)).casefold())
+        if want and want != wldir:
+            bad.append((key, wldir, want))
+    return bad
+
+
 CHAN_ALPHA, KEY2WLDIR, KEY2LABEL, WAVECAL_ROOT = _load_channel_map()
+
+for _k, _have, _want in verify_channel_map_against_profiles():
+    print(f"[channel_map] ⚠ 채널 '{_k}'의 wavecal 폴더가 캠페인 프로파일과 다르다: "
+          f"channel_map='{_have}' vs 프로파일='{_want}'. "
+          f"어느 쪽이 이 캠페인의 실제 구성인지 확인할 것 — 틀리면 **다른 채널의 "
+          f"파장보정으로 핏**하게 된다.")
 N_SCANS = 12
 POLYS = [2, 3, 4, 5, 6, 8]
 

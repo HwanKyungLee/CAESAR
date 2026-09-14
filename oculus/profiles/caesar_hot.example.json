@@ -1,7 +1,7 @@
 {
   "profile_id": "caesar_hot_2026yeosu",
   "profile_version": "1.0.0",
-  "description": "CAESAR Hot-cavity raw layout (2026 Yeosu). PRIMARY=PNs cell('좌측'), SECONDARY=ANs cell('우측') 2채널. core/raw_parser.py의 VALUE-INSPECTION 기록에서 파생 — 값은 캠페인별로 복제·조정.",
+  "description": "CAESAR Hot-cavity raw layout (2026 Yeosu). PRIMARY=PNs cell('좌측'), SECONDARY=ANs cell('우측') 2채널. core/raw_parser.py의 VALUE-INSPECTION 기록에서 파생 — 값은 캠페인별로 복제·조정. ⚠ wl_dir(검출기 ROI)은 채널 번호와 **같은 번호끼리 짝지으면 안 된다** — 2026 여수 구성은 roi1=PNs, roi2=ANs로 ch 번호와 반대다(2026-09-14 계기 담당자 확인). 다른 캠페인은 이 프로파일을 복제해 그 구성의 값으로 바꿀 것.",
   "instrument": "CAESAR",
 
   "match": {
@@ -38,7 +38,7 @@
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
-        "wl_dir": "roi2",
+        "wl_dir": "roi1",
         "target": "NO2",
         "cavity_temp_hk": "oven_pns_setpoint",
         "cavity_pressure_hk": "p_pns_cavity",
@@ -47,7 +47,7 @@
         "alert": { "conc_min_ppb": -20, "conc_max_ppb": 50, "spike_ppb": 20, "rms_sig_alarm": 0.15, "flatline_n": 5 }
       },
       "reflectance": {
-        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi2/Calib_20260619_Hg_400-499nm_Poly2.txt",
+        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi1/Calib_20260619_Hg_400-499nm_Poly2.txt",
         "roi_nm": [444.1, 470.6],
         "cavity_temp_hk": "oven_pns_setpoint",
         "cavity_pressure_hk": "p_pns_cavity",
@@ -59,7 +59,7 @@
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
-        "wl_dir": "roi1",
+        "wl_dir": "roi2",
         "target": "NO2",
         "cavity_temp_hk": "oven_ans_setpoint",
         "cavity_pressure_hk": "p_ans_cavity",
@@ -68,7 +68,7 @@
         "alert": { "conc_min_ppb": -20, "conc_max_ppb": 50, "spike_ppb": 20, "rms_sig_alarm": 0.15, "flatline_n": 5 }
       },
       "reflectance": {
-        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi1/Calib_20260619_Hg_400-499nm_Poly2.txt",
+        "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi2/Calib_20260619_Hg_400-499nm_Poly2.txt",
         "roi_nm": [429.7, 466.0],
         "cavity_temp_hk": "oven_ans_setpoint",
         "cavity_pressure_hk": "p_ans_cavity",

@@ -62,6 +62,28 @@ compared to our 2026 Yeosu data values. The mapping here reflects what the
 **data** actually shows, not necessarily the MATLAB label. Where the two
 disagree the MATLAB label is recorded as a comment for reference.
 
+캠페인별 레이아웃 (2026-09-14~)
+------------------------------
+위 컬럼 표는 **2026 여수 구성**이다. CAESAR는 캐비티가 재구성되므로 캠페인마다 ncols·
+채널 이름·HK 열이 달라진다. 그래서 표는 이제 코드가 아니라 **데이터**로 산다:
+
+* ``CAMPAIGN_LAYOUTS`` — ncols → :class:`CampaignLayout`(채널 지도 + HK 지도). 2026 여수
+  두 구성(6179 cold / 6181 hot)이 기본 등록돼 있다.
+* ``register_campaign_layout(...)`` — 새 구성을 등록. 같은 ncols를 **조용히 덮지 않는다**
+  (다른 캠페인 HK로 파싱하는 사고 방지).
+* ``autoload_campaign_layouts()`` — 프로파일 폴더를 훑어 **아직 모르는 열 수만** 등록.
+  앱 시작(`main.py`)에서 한 번 돈다. 즉 **새 캠페인은 JSON을 폴더에 넣기만 하면 된다** —
+  사용자가 고르거나 경로를 적을 필요가 없고, 라우팅은 raw의 열 수(데이터)가 한다.
+  이미 아는 열 수는 덮지 않는다(기본 등록이 이긴다 — `row.hk` 키가 조용히 바뀌면
+  기존 소비자가 말없이 깨지므로).
+* ``load_campaign_layout(path)`` — **캠페인 프로파일**(``oculus/profiles/*.json``)을
+  읽어 등록(특정 파일을 명시할 때). 캠페인별 컬럼 지도는 그 파일이 이미 갖고 있으므로 새 포맷을 만들지 않는다.
+  단위 환산(°C ÷100, mbar ×P_SCALE)은 **core가 단일 출처**이고, 프로파일이 다른 scale을
+  적어두면 0.1% 초과일 때 경고한다.
+
+즉 **다음 캠페인은 이 파일을 고치지 않는다** — 프로파일 JSON을 하나 얹는다.
+검사: ``python tools/test_raw_layout.py`` (내장 구성 파싱 동일성 + 프로파일 등록).
+
 State flag conventions
 ----------------------
 ::
@@ -265,6 +287,192 @@ ColdHKMap: dict[str, tuple[int, float, str, str]] = {
 
 
 # ──────────────────────────────────────────────────────────────────────────────────
+# 캠페인 레이아웃 레지스트리 — "어느 구성이냐"를 코드가 아니라 **데이터로** 들고 있는다
+# ──────────────────────────────────────────────────────────────────────────────────
+# 아래 두 항목(6179 cold / 6181 hot)은 **2026 여수 구성**이다. CAESAR는 캐비티가
+# 재구성되므로 다음 캠페인엔 ncols·채널이름·HK 열이 달라진다 — 그때 이 파일을 고치는 게
+# 아니라 항목을 **등록**한다(`register_campaign_layout`, 또는 캠페인 프로파일 JSON에서
+# `load_campaign_layout`). 표는 데이터, 파서는 코드.
+#
+# 채널 위치는 **역할 이름**으로 적는다(block_a/primary/secondary). 절대 열은
+# META_COLS·CH_PIXELS에서 유도되므로 SPEC_* 한 곳에만 존재한다(사본 금지).
+
+ROLE_BLOCKS: dict[str, tuple[int, int]] = {
+    "block_a":   SPEC_BLOCK_A,
+    "primary":   SPEC_PRIMARY,
+    "secondary": SPEC_SECONDARY,
+}
+
+# unit → (scale, kind). **단위 환산은 core가 단일 출처다** — 캠페인 프로파일은 "어느 열이
+# 무엇인가"를 말할 뿐, PSI가 몇 Pa인지를 다시 정의하지 않는다(원칙 3).
+UNIT_SCALES: dict[str, tuple[float, str]] = {
+    "degC": (0.01, "temp"),
+    "C":    (0.01, "temp"),
+    "mbar": (P_SCALE, "press"),
+    "raw":  (1.0, "raw"),
+}
+
+
+@dataclass
+class CampaignLayout:
+    """한 raw 구성(= ncols 하나)의 채널·HK 지도."""
+    ncols: int
+    kind: str
+    channels: dict                # 표시이름 → 역할명 또는 (start, end)
+    hk_map: dict                  # 이름 → (절대열, scale, unit, kind)
+    campaign: str = ""
+    source: str = "builtin"
+
+    def spec_blocks(self) -> dict:
+        out = {}
+        for name, role in self.channels.items():
+            out[name] = ROLE_BLOCKS[role] if isinstance(role, str) else tuple(role)
+        return out
+
+
+CAMPAIGN_LAYOUTS: dict[int, CampaignLayout] = {}
+
+
+def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
+                             source="builtin", replace=False) -> CampaignLayout:
+    """raw 구성 하나를 등록한다. 같은 ncols가 이미 있으면 `replace=True`라야 덮는다.
+
+    조용한 덮어쓰기를 막는 이유: 두 캠페인이 우연히 같은 ncols를 쓰면 나중에 등록된 쪽이
+    이기는데, 그러면 **다른 캠페인의 HK 지도로 파싱**하면서 아무 경고도 안 난다.
+    """
+    if ncols in CAMPAIGN_LAYOUTS and not replace:
+        have = CAMPAIGN_LAYOUTS[ncols]
+        raise ValueError(
+            f"ncols={ncols} 레이아웃이 이미 있다({have.kind}, source={have.source}). "
+            f"덮어쓰려면 replace=True — 다른 구성이면 ncols가 같은지부터 확인할 것")
+    # hk_map은 **사본을 만들지 않는다** — 기존 코드가 `layout.hk_map is ColdHKMap`로
+    # 동일성을 본다(tools/test_raw_parser.py). 사본을 쥐어주면 조용히 깨진다.
+    lay = CampaignLayout(ncols=int(ncols), kind=str(kind), channels=dict(channels),
+                         hk_map=hk_map, campaign=str(campaign), source=str(source))
+    for name, role in lay.channels.items():
+        if isinstance(role, str) and role not in ROLE_BLOCKS:
+            raise ValueError(f"채널 '{name}'의 역할 '{role}'을 모른다. "
+                             f"{list(ROLE_BLOCKS)} 중 하나이거나 (start, end)여야 한다")
+    CAMPAIGN_LAYOUTS[lay.ncols] = lay
+    return lay
+
+
+def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayout:
+    """**캠페인 프로파일 JSON**(`oculus/profiles/*.json`)에서 raw 레이아웃을 등록.
+
+    캠페인별 컬럼 지도는 이미 그 파일이 갖고 있다(`match.n_columns`, `channels[].columns`,
+    `hk.start_col`+`fields[].rel`, `flags`). 새 포맷을 만들지 않고 그걸 읽는다 — Augur와
+    Oculus가 **한 파일**을 본다(Oculus 설계 §2-A "역수혈").
+
+    파싱은 `core.profile`(스키마 검증 포함, 그 포맷의 **유일한** 리더)에 맡기고, 여기서는
+    그 결과를 raw_parser의 레이아웃 표로 옮기기만 한다.
+
+    단위 환산은 **core 상수**를 쓴다(UNIT_SCALES). 프로파일이 반올림한 scale을 적어 두면
+    0.1%까지는 무시하고, 그보다 크게 어긋나면 경고한다 — 조용히 다른 물리를 쓰지 않도록.
+    """
+    from core.profile import load_profile   # 지연 임포트(순환 없음: profile은 stdlib만 씀)
+
+    prof = load_profile(path)
+    ncols = prof.match.n_columns if prof.match else None
+    if not ncols:
+        raise ValueError(f"{os.path.basename(path)}: match.n_columns가 없어 "
+                         f"어느 raw 구성인지 알 수 없다")
+
+    warn = []
+    hdr = prof.header
+    # bytepack 수식이 정본이다: (col0<<16)|col1. 이름(hi/lo)은 양쪽이 반대로 부르지만
+    # **열 번호**가 같아야 한다 — 다르면 시각이 통째로 틀어진다.
+    tb = getattr(hdr, "time_bytepack", None)
+    if tb is not None and {tb.hi_col, tb.lo_col} != {COL_TIME_LO, COL_TIME_HI}:
+        warn.append(f"time_bytepack 열 {tb.hi_col}/{tb.lo_col} != core "
+                    f"{COL_TIME_LO}/{COL_TIME_HI}")
+    if getattr(hdr, "exposure_col", COL_EXPOSURE) != COL_EXPOSURE:
+        warn.append(f"exposure_col {hdr.exposure_col} != core {COL_EXPOSURE}")
+    if getattr(hdr, "state_flag_col", COL_FLAG) != COL_FLAG:
+        warn.append(f"state_flag_col {hdr.state_flag_col} != core {COL_FLAG}")
+
+    channels = {}
+    for ch in prof.signal_channels():
+        if ch.columns is None:
+            warn.append(f"채널 '{ch.id}'에 columns가 없다(자동탐지 전용) — 건너뜀")
+            continue
+        block = (int(ch.columns[0]), int(ch.columns[1]) + 1)   # 프로파일은 포함 끝
+        role = next((r for r, b in ROLE_BLOCKS.items() if b == block), block)
+        channels[str(ch.label or ch.id)] = role
+
+    hk_map = {}
+    for f in prof.hk.fields:
+        unit = f.unit or "raw"
+        scale, knd = UNIT_SCALES.get(unit, (1.0, "raw"))
+        if f.offset:
+            # raw_parser의 HK 튜플은 (열, scale, unit, kind) — offset 자리가 없다.
+            # 조용히 버리면 물리값이 틀리므로 아예 안 싣는다.
+            warn.append(f"{f.key}: offset={f.offset} 는 raw_parser HK 표가 표현 못 함 — 제외")
+            continue
+        if f.scale is not None and scale and abs(float(f.scale) - scale) / scale > 1e-3:
+            warn.append(f"{f.key}: 프로파일 scale {f.scale} vs core {scale:.8g} "
+                        f"({unit}) — core 값을 쓴다")
+        hk_map[str(f.key)] = (int(prof.hk.start_col) + int(f.rel), scale, unit, knd)
+
+    for w in warn:
+        print(f"[raw_parser] 캠페인 프로파일 주의 ({os.path.basename(path)}): {w}")
+
+    return register_campaign_layout(
+        ncols, kind or str(prof.profile_id or "campaign"), channels, hk_map,
+        campaign=str(prof.profile_id or ""), source=os.path.basename(path),
+        replace=replace)
+
+
+def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
+    """프로파일 폴더의 캠페인 JSON을 훑어 **아직 등록 안 된 ncols만** 등록한다.
+
+    이게 "다음 캠페인은 JSON만 얹으면 된다"를 실제로 성립시키는 지점이다 — 사용자가
+    프로파일을 고르거나 경로를 적을 필요가 없다. raw 파일의 열 수가 곧 그 구성이므로
+    라우팅은 **데이터가** 한다.
+
+    **이미 등록된 ncols는 건드리지 않는다**(기본 등록 = 2026 여수가 이긴다). 이유:
+    같은 ncols에 프로파일을 덮어씌우면 `row.hk`의 키 이름이 조용히 바뀌어
+    (`cavity_P` → `p_cavity`) 기존 소비자가 말없이 깨진다. 새 구성(새 ncols)만 늘린다.
+
+    한 파일이 깨져 있어도 나머지는 등록한다 — 프로파일 하나 때문에 앱이 안 뜨면 안 된다.
+    반환: 등록된 CampaignLayout 목록.
+    """
+    import glob as _glob
+
+    if profile_dir is None:
+        try:
+            from core.profile import DEFAULT_PROFILE_DIR
+            profile_dir = DEFAULT_PROFILE_DIR
+        except Exception:                        # noqa: BLE001
+            return []
+    out = []
+    for path in sorted(_glob.glob(os.path.join(profile_dir, "*.json"))):
+        if os.path.basename(path).startswith("_"):
+            continue                             # _schema.json 등 메타 파일
+        try:
+            from core.profile import load_profile
+            prof = load_profile(path)
+            ncols = prof.match.n_columns if prof.match else None
+            if not ncols or ncols in CAMPAIGN_LAYOUTS:
+                continue                         # 이미 아는 구성 — 덮지 않는다
+            out.append(load_campaign_layout(path))
+            if verbose:
+                print(f"[raw_parser] 캠페인 레이아웃 등록: {os.path.basename(path)} "
+                      f"(ncols={ncols}, 채널={list(out[-1].channels)})")
+        except Exception as e:                   # noqa: BLE001
+            if verbose:
+                print(f"[raw_parser] 프로파일 건너뜀 ({os.path.basename(path)}): {e}")
+    return out
+
+
+# 2026 여수 구성 — 이 파일 상단 VALUE-INSPECTION 기록에서 나온 값.
+register_campaign_layout(6179, "cold", {"NO2": "primary"}, ColdHKMap,
+                         campaign="2026-yeosu")
+register_campaign_layout(6181, "hot", {"PNs": "primary", "ANs": "secondary"}, HotHKMap,
+                         campaign="2026-yeosu")
+
+
+# ──────────────────────────────────────────────────────────────────────────────────
 # Public dataclasses
 # ──────────────────────────────────────────────────────────────────────────────────
 
@@ -345,21 +553,12 @@ class RawParser:
                 break
         mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=KST)
 
-        if ncols == 6179:
+        lay = CAMPAIGN_LAYOUTS.get(ncols)
+        if lay is not None:
             return FileLayout(
-                path=path, ncols=ncols, kind="cold",
-                hk_map=ColdHKMap,
-                spec_blocks={"NO2": SPEC_PRIMARY},   # Cold's only real channel
-                mtime=mtime,
-            )
-        if ncols == 6181:
-            return FileLayout(
-                path=path, ncols=ncols, kind="hot",
-                hk_map=HotHKMap,
-                spec_blocks={
-                    "PNs": SPEC_PRIMARY,             # Hot "좌측" cavity (was 박사님 "ch1")
-                    "ANs": SPEC_SECONDARY,           # Hot "우측" cavity (was 박사님 "ch2")
-                },
+                path=path, ncols=ncols, kind=lay.kind,
+                hk_map=lay.hk_map,
+                spec_blocks=lay.spec_blocks(),
                 mtime=mtime,
             )
         # 등록 안 된 구성(예: 세 번째 캐비티가 켜진 CAESAR) — HK는 모르지만 스펙트럼

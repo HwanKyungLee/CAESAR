@@ -1,5 +1,5 @@
 {
-  "_comment": "tools/optimize_params.py 등 DOAS 파라미터 최적화 CLI가 쓰는 채널 설정. 새 채널이 생기면(예: CAESAR 한 대가 3캐비티로 재구성) 여기 channels에 항목만 추가하면 된다 — Python 코드 수정 불필요. wavecal_dir/alpha_glob은 실제로 그 채널의 wavecal·알파가 저장된 폴더명과 맞아야 한다.",
+  "_comment": "tools/optimize_params.py 등 DOAS 파라미터 최적화 CLI가 쓰는 채널 설정. 새 채널이 생기면(예: CAESAR 한 대가 3캐비티로 재구성) 여기 channels에 항목만 추가하면 된다 — Python 코드 수정 불필요. wavecal_dir/alpha_glob은 실제로 그 채널의 wavecal·알파가 저장된 폴더명과 맞아야 한다. ⚠ **이 파일은 2026 여수 구성이다.** wavecal_dir(검출기 ROI)은 채널 번호와 같은 번호끼리 짝지으면 안 된다 — 여수는 roi1=PNs(ch2), roi2=ANs(ch1)로 **반대**다(2026-09-14 계기 담당자 확인). 캠페인이 바뀌면 이 매핑부터 다시 확인할 것.",
   "wavecal_root": "C:/Doasis_Work/Output/wv_cal",
   "alpha_root": "C:/Doasis_Work/Output/alpha",
   "alpha_bin": "60s",
@@ -12,12 +12,12 @@
     },
     "ans": {
       "label": "ANs",
-      "wavecal_dir": "roi1",
+      "wavecal_dir": "roi2",
       "alpha_glob": "hot/ch1/*/*_ANs_alpha_trace.dat"
     },
     "pns": {
       "label": "PNs",
-      "wavecal_dir": "roi2",
+      "wavecal_dir": "roi1",
       "alpha_glob": "hot/ch2/*/*_PNs_alpha_trace.dat"
     }
   }

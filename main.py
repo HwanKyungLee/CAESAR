@@ -72,6 +72,17 @@ if __name__ == '__main__':
     _font.setPointSize(max(7, round(9 * _s)))
     app.setFont(_font)
 
+    # ── 캠페인 레이아웃 등록 ──────────────────────────────────────────────────
+    # raw .dat의 컬럼 배치(채널 블록·HK 열)는 캠페인마다 다르다. 기본 등록은 2026 여수
+    # 구성이고, `oculus/profiles/`에 다른 구성의 프로파일 JSON이 있으면 여기서 함께
+    # 등록된다 — **새 캠페인은 코드를 고치지 않고 JSON만 얹으면 된다**(열 수로 자동 라우팅).
+    # 이미 아는 열 수는 덮지 않는다. 실패해도 앱은 그대로 뜬다.
+    try:
+        from core.raw_parser import autoload_campaign_layouts
+        autoload_campaign_layouts()
+    except Exception as _e:   # noqa: BLE001
+        print(f"[main] 캠페인 레이아웃 자동등록 건너뜀: {_e}")
+
     # ── Main window initialization ───────────────────────────────────────────
     # Importing app_window loads matplotlib/scipy (heaviest part of startup);
     # CAESARAnalyzer.__init__ then builds every widget and connects all signals.

@@ -1,14 +1,19 @@
-"""oculus/profile.py — 인스트루먼트 프로파일 로더 (범용 리더의 심장).
+"""core/profile.py — 인스트루먼트/캠페인 프로파일 로더 (범용 리더의 심장).
 
-설계문서 §2-A. `Cold`/`Hot`/`PNs`/`ANs` 같은 채널 명명·레이아웃은 구성마다
+Oculus 설계문서 §2-A. `Cold`/`Hot`/`PNs`/`ANs` 같은 채널 명명·레이아웃은 구성마다
 달라지므로 코드에 박지 않고 `oculus/profiles/*.json` 에서 읽는다. 이 모듈은 그
 JSON을 타입 있는 파이썬 객체로 바꾸고, raw 파일을 프로파일로 라우팅하고, raw 한
 행에서 시각·flag·채널 스펙트럼·HK 물리값을 뽑는 헬퍼를 제공한다.
 
+**2026-09-14: `oculus/profile.py` → 여기로 옮겼다.** 캠페인 프로파일은 이제 Oculus만의
+것이 아니라 Augur의 raw 파싱 레이아웃도 정하기 때문이다(`core/raw_parser.load_campaign_layout`).
+같은 포맷을 두 곳에서 따로 읽으면 반드시 어긋나므로 리더는 **하나**다.
+`oculus.profile`은 하위호환 re-export 껍데기로 남아 있다(기존 임포트 전부 그대로 동작).
+
 로직은 절대 채널 label(문자열)에 의존하지 않는다 — `Channel.id`(안정 식별자)나
 `Flags.role_of()`(의미 역할) 같은 구조만 본다.
 
-    from oculus.profile import ProfileSet
+    from core.profile import ProfileSet
     ps = ProfileSet.load_default()
     prof = ps.route(filename="2026-05-26-001 Hot.dat", n_columns=6181)
     role = prof.flag_role(int(row[prof.header.state_flag_col]))   # 'atmosphere'|'za'|...
@@ -27,7 +32,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional, Sequence
 
-DEFAULT_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
+# 프로파일 JSON은 아직 `oculus/profiles/`에 산다 — PyInstaller spec(`Oculus.spec`)과
+# `tools/bundle_oculus_deps.py`가 그 경로를 참조하므로 파일은 그대로 두고 로더만 옮겼다.
+# ponytail: 나중에 저장소 루트 `profiles/`로 올리려면 그 둘도 같이 고칠 것.
+DEFAULT_PROFILE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "oculus", "profiles")
 SCHEMA_PATH = os.path.join(DEFAULT_PROFILE_DIR, "_schema.json")
 
 # 경보 심각도: HK 밴드 평가 결과

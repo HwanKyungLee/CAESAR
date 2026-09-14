@@ -1,0 +1,222 @@
+"""raw 레이아웃 레지스트리 회귀 검사 — 캠페인별 컬럼 지도를 **데이터로** 다룬다.
+
+지키는 것:
+  1. 2026 여수 내장 구성(6179 cold / 6181 hot)의 파싱 결과가 하드코딩 시절과 같다.
+     (채널 블록·HK 절대열·kind, 그리고 HK 맵 **객체 동일성** — 기존 코드가 `is`로 본다)
+  2. 미등록 ncols는 구조적 폴백으로 간다(HK는 추측하지 않는다 = 빈 맵).
+  3. 같은 ncols 중복 등록은 **조용히 덮지 않는다** — 다른 캠페인의 HK로 파싱하는 사고 방지.
+  4. Oculus 캠페인 프로파일(`oculus/profiles/*.json`)로 레이아웃을 등록할 수 있고,
+     그 결과 채널 블록이 내장 표와 **일치**한다(= 한 파일로 양쪽을 몰 수 있다).
+  5. 단위 환산은 **core가 단일 출처** — 프로파일이 반올림한 scale을 적어놔도 core 값을 쓴다.
+  6. `tools/channel_map.json`의 채널→wavecal 폴더가 캠페인 프로파일과 **일치**한다
+     (같은 매핑이 두 파일에 있으면 어긋난다 — 실제로 2026-09-14에 둘 다 반대로 들어가 있었다).
+  7. **새 캠페인은 JSON만 폴더에 넣으면 잡힌다**(autoload). 아는 ncols는 안 덮는다.
+
+    python tools/test_raw_layout.py
+"""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from core import raw_parser as RP
+
+_FAIL = []
+
+
+def check(name, cond, extra=""):
+    if cond:
+        print("  PASS  %s" % name)
+    else:
+        print("  FAIL  %s  %s" % (name, extra))
+        _FAIL.append(name)
+
+
+def _synth_row(ncols, path, flag=500):
+    """열마다 값이 다른 한 행 — HK 열을 잘못 짚으면 값이 달라져 드러난다."""
+    vals = [str(3000 + i) for i in range(ncols)]
+    vals[RP.COL_TIME_LO] = "1234"
+    vals[RP.COL_TIME_HI] = "5678"
+    vals[RP.COL_EXPOSURE] = "50"
+    vals[RP.COL_TEMP_CCD] = "-1000"
+    vals[RP.COL_FLAG] = str(flag)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\t".join(vals) + "\n")
+    return path
+
+
+def test_builtin_layouts(d):
+    print("[1] 2026 여수 내장 구성")
+    cold = RP.RawParser(_synth_row(6179, os.path.join(d, "cold.dat")))
+    hot = RP.RawParser(_synth_row(6181, os.path.join(d, "hot.dat")))
+
+    check("cold kind", cold.layout.kind == "cold", cold.layout.kind)
+    check("hot kind", hot.layout.kind == "hot", hot.layout.kind)
+    check("cold 채널 = NO2 primary",
+          cold.layout.spec_blocks == {"NO2": RP.SPEC_PRIMARY}, cold.layout.spec_blocks)
+    check("hot 채널 = PNs primary + ANs secondary",
+          hot.layout.spec_blocks == {"PNs": RP.SPEC_PRIMARY, "ANs": RP.SPEC_SECONDARY},
+          hot.layout.spec_blocks)
+    # 기존 코드가 `is`로 본다(tools/test_raw_parser.py) — 레지스트리가 사본을 만들면 깨진다
+    check("cold hk_map is ColdHKMap", cold.layout.hk_map is RP.ColdHKMap)
+    check("hot hk_map is HotHKMap", hot.layout.hk_map is RP.HotHKMap)
+
+    # HK 절대열이 맞는지 값으로 확인 — 합성 행은 col i에 3000+i가 들어있다
+    r = next(hot.iter_rows())
+    check("hot HK 절대열(ANs_oven=6151)",
+          abs(r.hk["ANs_oven"] - (3000 + 6151) * 0.01) < 1e-9, r.hk["ANs_oven"])
+    check("hot HK 압력(P_PNs=6162, P_SCALE)",
+          abs(r.hk["P_PNs"] - (3000 + 6162) * RP.P_SCALE) < 1e-9, r.hk["P_PNs"])
+    rc = next(cold.iter_rows())
+    check("cold HK 절대열(cavity_T=6173)",
+          abs(rc.hk["cavity_T"] - (3000 + 6173) * 0.01) < 1e-9, rc.hk["cavity_T"])
+    check("bytepack 수식((col0<<16)|col1)",
+          rc.bytepack_sec == ((1234 << 16) | 5678) / 100.0, rc.bytepack_sec)
+
+
+def test_unknown_ncols(d):
+    print("[2] 미등록 ncols → 구조적 폴백")
+    p = RP.RawParser(_synth_row(6177, os.path.join(d, "unk.dat")))
+    check("kind에 structural 표시", "structural" in p.layout.kind, p.layout.kind)
+    check("채널은 구조적으로 추론", p.layout.spec_blocks == {"ch1": RP.SPEC_PRIMARY,
+                                                    "ch2": RP.SPEC_SECONDARY},
+          p.layout.spec_blocks)
+    # HK는 추측하지 않는다 — 틀린 HK는 없는 HK보다 위험하다
+    check("HK는 빈 맵", p.layout.hk_map == {})
+    check("행의 hk도 빔", next(p.iter_rows()).hk == {})
+
+
+def test_register_guard():
+    print("[3] 중복 등록 가드")
+    try:
+        RP.register_campaign_layout(6179, "other", {"X": "primary"}, {})
+        check("중복 등록은 예외", False, "예외가 안 났다")
+    except ValueError as e:
+        check("중복 등록은 예외", "replace=True" in str(e), str(e))
+    try:
+        RP.register_campaign_layout(99991, "x", {"X": "nosuchrole"}, {})
+        check("모르는 역할은 예외", False, "예외가 안 났다")
+    except ValueError:
+        check("모르는 역할은 예외", True)
+    finally:
+        RP.CAMPAIGN_LAYOUTS.pop(99991, None)
+
+
+def test_oculus_profile_adapter():
+    print("[4] Oculus 캠페인 프로파일로 등록")
+    saved = dict(RP.CAMPAIGN_LAYOUTS)
+    try:
+        for fn, ncols in (("caesar_cold.example.json", 6179),
+                          ("caesar_hot.example.json", 6181)):
+            path = os.path.join(_ROOT, "oculus", "profiles", fn)
+            if not os.path.exists(path):
+                check("프로파일 존재: %s" % fn, False, path)
+                continue
+            builtin = saved[ncols]
+            lay = RP.load_campaign_layout(path, kind="from-profile", replace=True)
+            check("%s: ncols" % fn, lay.ncols == ncols, lay.ncols)
+            # ★ 핵심 — 프로파일이 정한 채널 블록이 내장 표와 같다(= 한 파일로 양쪽 구동 가능)
+            check("%s: 채널 블록이 내장과 일치" % fn,
+                  lay.spec_blocks() == builtin.spec_blocks(),
+                  (lay.spec_blocks(), builtin.spec_blocks()))
+            check("%s: source에 파일명 기록" % fn, lay.source == fn, lay.source)
+            # HK 절대열 = start_col + rel
+            press = [v for v in lay.hk_map.values() if v[3] == "press"]
+            check("%s: 압력 열이 잡힘" % fn, bool(press), lay.hk_map)
+            # 단위 환산은 core 상수 — 프로파일의 반올림값(0.6895)이 아니다
+            check("%s: 압력 scale = core P_SCALE" % fn,
+                  all(abs(v[1] - RP.P_SCALE) < 1e-12 for v in press),
+                  [v[1] for v in press])
+    finally:
+        RP.CAMPAIGN_LAYOUTS.clear()
+        RP.CAMPAIGN_LAYOUTS.update(saved)
+    check("검사 후 레지스트리 원복", RP.CAMPAIGN_LAYOUTS[6179].source == "builtin",
+          RP.CAMPAIGN_LAYOUTS[6179].source)
+
+
+def test_channel_map_matches_profiles():
+    print("[5] channel_map ↔ 캠페인 프로파일 매핑 대조")
+    from tools import optimize_params as OP
+
+    bad = OP.verify_channel_map_against_profiles()
+    check("현재 두 파일이 일치", bad == [], bad)
+
+    # 일부러 어긋뜨리면 실제로 잡히는지 — 안 잡히면 이 검사는 장식이다
+    swapped = dict(OP.KEY2WLDIR)
+    if "ans" in swapped and "pns" in swapped:
+        swapped["ans"], swapped["pns"] = swapped["pns"], swapped["ans"]
+        caught = OP.verify_channel_map_against_profiles(key2wldir=swapped)
+        check("뒤바꾼 매핑을 잡아낸다", len(caught) == 2, caught)
+    else:
+        check("뒤바꾼 매핑을 잡아낸다", False, "ans/pns 키가 없다")
+
+
+def test_autoload_new_campaign(d):
+    print("[6] 새 캠페인 JSON 자동 등록")
+    import json
+    import shutil
+
+    src = os.path.join(_ROOT, "oculus", "profiles", "caesar_cold.example.json")
+    if not os.path.exists(src):
+        check("원본 프로파일 존재", False, src)
+        return
+    with open(src, encoding="utf-8") as fh:
+        prof = json.load(fh)
+
+    # 캐비티가 하나 더 켜진 가상의 다음 캠페인 — 열 수가 다르므로 새 구성이다
+    new_ncols = 6179 + 2048
+    prof["profile_id"] = "caesar_next_2027demo"
+    prof["match"]["n_columns"] = new_ncols
+    prof["match"]["filename_glob"] = "*Demo*.dat"
+    pdir = os.path.join(d, "profiles")
+    os.makedirs(pdir, exist_ok=True)
+    shutil.copy(os.path.join(_ROOT, "oculus", "profiles", "_schema.json"), pdir)
+    with open(os.path.join(pdir, "caesar_next.json"), "w", encoding="utf-8") as fh:
+        json.dump(prof, fh, ensure_ascii=False)
+
+    saved = dict(RP.CAMPAIGN_LAYOUTS)
+    try:
+        got = RP.autoload_campaign_layouts(pdir, verbose=False)
+        check("새 ncols가 등록됨", [l.ncols for l in got] == [new_ncols],
+              [l.ncols for l in got])
+        check("레지스트리에 들어감", new_ncols in RP.CAMPAIGN_LAYOUTS)
+        check("campaign 라벨 기록", RP.CAMPAIGN_LAYOUTS[new_ncols].campaign
+              == "caesar_next_2027demo", RP.CAMPAIGN_LAYOUTS[new_ncols].campaign)
+        # 그 구성의 raw가 실제로 파싱되는지 — 등록만 되고 안 읽히면 의미 없다
+        pr = RP.RawParser(_synth_row(new_ncols, os.path.join(d, "next.dat")))
+        check("새 구성 raw가 파싱됨", pr.layout.kind == "caesar_next_2027demo",
+              pr.layout.kind)
+        check("새 구성 HK가 읽힘", bool(next(pr.iter_rows()).hk))
+        # 두 번 돌려도 중복 등록으로 터지지 않는다(가드에 걸려 조용히 건너뜀)
+        again = RP.autoload_campaign_layouts(pdir, verbose=False)
+        check("재실행은 무해", again == [], again)
+        # 기본(여수) 구성은 그대로 — 프로파일이 이기지 않는다
+        check("여수 기본 유지", RP.CAMPAIGN_LAYOUTS[6179].source == "builtin",
+              RP.CAMPAIGN_LAYOUTS[6179].source)
+    finally:
+        RP.CAMPAIGN_LAYOUTS.clear()
+        RP.CAMPAIGN_LAYOUTS.update(saved)
+
+
+def main() -> int:
+    d = tempfile.mkdtemp(prefix="raw-layout-")
+    test_builtin_layouts(d)
+    test_unknown_ncols(d)
+    test_register_guard()
+    test_oculus_profile_adapter()
+    test_channel_map_matches_profiles()
+    test_autoload_new_campaign(d)
+    if _FAIL:
+        print("raw layout tests: %d FAIL" % len(_FAIL))
+        return 1
+    print("raw layout self-check OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
