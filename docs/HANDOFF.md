@@ -49,6 +49,53 @@ CSV 파서)로 읽어서 `alpha_trace.dat`(가변 컬럼) 형식에서 tokenizin
 
 ---
 
+## 2026-09-14 세션 — 파이프라인 점검 (커밋 7개, main 머지됨)
+
+무엇을 했는지는 커밋 메시지에 다 있다(`git log b7a107e..058cf34`). 여기엔 **다음 세션이
+바로 집을 수 있는 것**만 적는다.
+
+### 바로 할 수 있는 것
+
+1. **`objective_varpro`의 중복 보간 제거** — 프로파일로 확정된 유일한 실제 병목.
+   `Link`된 종들은 shift/squeeze가 **같은 값**인데 종마다 따로 스플라인 보간한다
+   (콜드 3종 Link면 같은 계산 3번). 같은 (shift, squeeze)의 결과를 캐시하면 줄어든다.
+   실측: d=2 10.7 ms/scan(objective 60회) / d=8 33.6 ms(270회), `evaluate_spline`
+   280→1,120회, `objective_varpro` 자기시간이 전체의 49%.
+   ⚠ **핏 수치 경로다 — 동일성 검증을 반드시 붙일 것**(실제 알파로 전후 스캔별 대조).
+   근거·반증된 가설은 `diagnostics/varpro_speed_2026-09/README.md` "원인 정정(2026-09-14)".
+
+2. **squeeze의 모르는 모드가 조용히 사라진다** — `core/doas_fit.py` setup_fit_parameters의
+   squeeze 사다리는 Limit/Free/Fix/Link만 본다. `Center` 같은 값을 주면 변수가 등록 안 되고
+   나중에 `KeyError: '<gas>_sq'`로 터진다. shift 쪽은 `?모드`로 드러내게 고쳤는데 squeeze는
+   아직. (실제로 당했다)
+
+3. **Cold CHOCHO 결정 검증** — Cold를 shift **자유**로 재실행해 QDOAS와 조건을 맞추면
+   Deming 기울기가 0.72에서 1 쪽으로 움직이는지. 지금 근거(차등공선성 0.003 = 축퇴 아님,
+   ΔCHOCHO↔ΔH2O −0.96, Hot PNs 대조군 1.02)는 `docs/논문_주장구조_2026-09.md`에 있다.
+
+### 사람이 화면에서 확인할 것 (코드는 끝남)
+
+- Result Lab에서 점 클릭 → 잔차 레인이 뜨는지, 재현 실패율이 쓸 만한지
+  (`REPRO_TOL_REL` 1%가 빡빡하면 `core/refit.py` 한 줄)
+- 알파·R·그림이 `output/{campaign}/…`로 떨어지는지
+
+### 새로 생긴 자기검증 (수정 후 돌릴 것)
+
+```
+python -m core.physics        # ppb 환산 단일 출처 + Rayleigh와 같은 상수
+python -m core.refit          # 잔차 재핏 + 거부 5종
+python -m core.agreement      # Deming/BA/블록부트스트랩
+python -m core.error_budget   # 오차 예산(미정량 항이 숨지 않는지)
+python tools/test_raw_layout.py
+```
+
+### 건드리지 않은 것
+
+`oculus/`(conc_monitor·profiles·watcher·state_log·run_oculus)와 `core/profile.py`의
+워킹트리 변경은 **사용자 병렬 작업**이라 커밋에서 제외했다.
+
+---
+
 ## 최신 세션 (2026-08-04~12) 요약
 
 **브랜치: `claude/oculus-realtime-monitoring-pbjudz`** — origin에 push 완료, 다른 컴퓨터에선
