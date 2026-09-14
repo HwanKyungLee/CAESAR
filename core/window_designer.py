@@ -35,8 +35,8 @@ from numpy.polynomial import chebyshev
 from scipy.ndimage import uniform_filter1d
 
 
-def air_number_density(T_C, P_mbar):
-    return 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+# ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
+from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
 
 
 # ──────────────────────────────────────────────────────────────────────────

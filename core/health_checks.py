@@ -90,7 +90,9 @@ def check_rayleigh(wave_nm=447.0, golden=9.6997e-27, tol=0.001):
         from core.physics import RayleighPhysics
     except Exception as e:
         return SKIP, f"core.physics import 불가: {e}", {}
-    N0 = 2.6867811e19
+    # α를 σ로 되돌릴 땐 **같은** 밀도여야 한다 — 사본을 쓰면 이 검사가 상수값에 흔들린다.
+    # (σ는 분자 고유값이라 밀도 상수와 무관해야 하는 게 맞다.)
+    from core.physics import N_LOSCHMIDT as N0
     try:
         sig = RayleighPhysics.get_alpha_rayleigh(
             np.array([float(wave_nm)]), 0.0, 1013.25, "zero_air")[0] / N0

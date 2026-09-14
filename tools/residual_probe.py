@@ -7,6 +7,8 @@
 """
 import sys, os, json
 import numpy as np
+
+from core.physics import air_number_density   # ppb 환산 단일 출처
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -79,7 +81,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar):
         etalon_amp=etal_amp, etalon_freq=ef, etalon_phase=best_ep)
     resid = a - full_model
     rms = float(np.sqrt(np.mean(resid ** 2)))
-    n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+    n_air = air_number_density(T_C, P_mbar)
     ppb = {}
     for gi, nm in enumerate(eng.gas_list):
         sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
@@ -169,7 +171,7 @@ def main():
     resid = a - full_model
     rms = float(np.sqrt(np.mean(resid ** 2)))
 
-    n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+    n_air = air_number_density(T_C, P_mbar)
     ppb = {}
     for gi, nm in enumerate(eng.gas_list):
         sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)

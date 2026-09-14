@@ -6,6 +6,8 @@ campaign-wide 단일 레퍼런스는 드리프트 때문에 실패함이 이미 
 """
 import sys, os, json, glob
 import numpy as np
+
+from core.physics import air_number_density   # ppb 환산 단일 출처
 from scipy.interpolate import interp1d
 from scipy.optimize import lsq_linear
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,7 +57,7 @@ for name in ["Cold", "Hot-PNs", "Hot-ANs"]:
         L=min(len(x) for x in A); A=np.array([x[:L] for x in A]); vp=meta[0][0][:L]
         R0=np.median(A,0)   # ★같은 날 중앙값 = 시간-국소 레퍼런스
         for i,(_,T,P) in enumerate(meta):
-            n_air=2.68678e19*(P/1013.25)*(273.15/(T+273.15))
+            n_air=air_number_density(T, P)
             c0,r0,a0=fit(eng,vp,A[i],poly)
             c1,r1,a1=fit(eng,vp,A[i]-R0,poly)
             raw_rms.append(r0); raw_ac.append(a0); raw_no2.append(c0*mu/sc/n_air*1e9)

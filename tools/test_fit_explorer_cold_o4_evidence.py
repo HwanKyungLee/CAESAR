@@ -41,7 +41,7 @@ def main():
     assert set(result["runtime"]) == {"python", "platform", "numpy", "scipy"}
     assert result["physical_anchor"]["formula"] == "(0.2095 * n_air)^2"
     assert result["physical_anchor"]["air_number_density_formula"] == (
-        "2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))")
+        "N_LOSCHMIDT * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15)); N_LOSCHMIDT = 101325/(1.380649e-23*273.15)*1e-6 = 2.686780111e19 (CODATA 2018)")
     assert result["physical_anchor"]["source"] == (
         "core.fit_physics.air_number_density/theoretical_amount")
     assert result["fit"]["gas_order"] == ["CHOCHO", "H2O", "NO2", "O4"]

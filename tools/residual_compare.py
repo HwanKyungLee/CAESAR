@@ -9,6 +9,8 @@
 """
 import sys, os, json, glob
 import numpy as np
+
+from core.physics import air_number_density   # ppb 환산 단일 출처
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -112,7 +114,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar, px_min, px_max, poly_deg)
     resid = a - full
     rms = float(np.sqrt(np.mean(resid ** 2)))
     sig = float(np.sqrt(np.mean((tot) ** 2)))  # 가스흡수 신호 크기
-    n_air = 2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
+    n_air = air_number_density(T_C, P_mbar)
     no2 = None
     if "NO2" in eng.gas_list:
         gi = eng.gas_list.index("NO2")

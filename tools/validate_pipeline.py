@@ -142,7 +142,9 @@ def c_ref_ils():
 @check("Rayleigh 물리 (King factor)", needs_data=False)
 def c_rayleigh():
     from core.physics import RayleighPhysics
-    N0 = 2.6867811e19
+    # α를 σ로 되돌릴 땐 **같은** 밀도여야 한다 — 사본을 쓰면 이 검사가 상수값에 흔들린다.
+    # (σ는 분자 고유값이라 밀도 상수와 무관해야 하는 게 맞다.)
+    from core.physics import N_LOSCHMIDT as N0
     wave = np.array([447.0])
     sig = RayleighPhysics.get_alpha_rayleigh(wave, 0.0, 1013.25, "zero_air")[0] / N0
     # 골든값: King factor 수정(v→v²,1.09→1.096) 후 Bates/Bodhaine 문헌과 정합 검증된

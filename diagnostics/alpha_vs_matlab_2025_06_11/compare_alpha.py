@@ -56,6 +56,10 @@ DARK_CONST = 1500.0        # for ν B / ν D
 def rayleigh_matlab_ch1(wave_nm, temp_c, press_mbar, gas_type='zero_air'):
     """MATLAB 경험식 (HJ 240429 실측 피팅) — Alpha_CAESAR_Araon_2025_3ch.m line 155."""
     wave_nm = np.asarray(wave_nm, dtype=float)
+    # ★ 이 값은 **일부러 그대로 둔다** — MATLAB이 쓰던 Loschmidt(CODATA 2014)이고,
+    #   이 스크립트의 목적이 "그때 MATLAB 계산의 재현"이기 때문이다.
+    #   Augur 본체는 2026-09-14에 SI 정의 유도값(CODATA 2018, 2.686780111e19)으로
+    #   통일했다(core.physics.N_LOSCHMIDT). 여기서 그걸 따라가면 대조 대상이 바뀐다.
     N0 = 2.6867811e19
     N  = N0 * (press_mbar / 1013.25) * (273.15 / (temp_c + 273.15))
     if gas_type in ('zero_air', 'air'):

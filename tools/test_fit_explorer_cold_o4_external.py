@@ -308,7 +308,7 @@ def main(argv=None):
                                 for name, value in t2_by_policy.items()}}},
         "physical_anchor": {"species": "O4", "formula": "(0.2095 * n_air)^2",
                             "oxygen_mole_fraction": 0.2095,
-                            "air_number_density_formula": "2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))",
+                            "air_number_density_formula": "N_LOSCHMIDT * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15)); N_LOSCHMIDT = 101325/(1.380649e-23*273.15)*1e-6 = 2.686780111e19 (CODATA 2018)",
                             "source": "core.fit_physics.air_number_density/theoretical_amount",
                             "temperature_pressure_source": "each selected alpha export row",
                             "temperature_C": [float(scan[2]) for scan in scans],
