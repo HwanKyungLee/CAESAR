@@ -51,7 +51,7 @@ def fit_window(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
         ref_props, 0.0, [0.0, 1.0], step_limit)
 
-    out = fitter.execute_varpro_fit(vp, a, np.eye(len(a)), active, fixed, linked,
+    out = fitter.execute_varpro_fit(vp, a, np.ones(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
                                     ref_props, T_C, 0.0, False)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out

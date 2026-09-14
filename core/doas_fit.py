@@ -344,6 +344,8 @@ class DoasFitter:
                            override_lam=None, override_robust=None, allow_negative_gas=False,
                            custom_basis=None, return_diagnostics=False):
         """VarPro + NNLS + Tikhonov + Robust(IRLS) 엔진. AnalysisWorker에서 verbatim 이식.
+        W_initial: 픽셀별 가중. 길이 n 벡터(권장) 또는 밀집 n×n 대각행렬(구 호출부 호환)
+          — 밀집으로 주면 대각만 꺼내 쓴다. 결과는 두 형태가 비트동일.
         allow_negative_gas=True면 가스 계수 하한을 0→−∞로 풀어 음수 농도 허용(0근처 비편향).
         custom_basis: (n_pix, k) 외부 선형 베이스(Ring·fixed-pattern 고유벡터 등). None이면
           컬럼 0개라 기존과 바이트동일. 컬럼은 poly 뒤·etalon 앞에 삽입돼 etalon이 마지막
@@ -369,9 +371,14 @@ class DoasFitter:
             for name in self.engine.gas_list
         }
 
-        W_current = W_initial.copy()
+        # W는 항상 대각(픽셀별 가중)이다. 밀집 n×n 행렬로 받으면 대각만 꺼내
+        # 벡터로 쓴다 — `W @ A`(O(n²k))와 `w[:,None]*A`(O(nk))는 대각행렬에선
+        # 수학적으로 동치이고 부동소수점으로도 비트동일(off-diagonal이 정확히 0).
+        # n=775px 기준 그 곱 하나가 objective 호출 비용의 62%였다.
+        w_initial = np.diag(W_initial) if np.ndim(W_initial) == 2 else np.asarray(W_initial, dtype=float)
+        w_current = w_initial.copy()
         max_iters = 10 if use_robust else 1
-        prev_weights = np.diag(W_current).copy()
+        prev_weights = w_current.copy()
         num_gases = len(self.engine.gas_list)
 
         # custom_basis 정규화: None이면 컬럼 0개(=기존 동작). poly 뒤·etalon 앞에 들어간다.
@@ -383,6 +390,8 @@ class DoasFitter:
             pen = np.full(ncols, lam, dtype=float)
             pen[num_gases:num_gases + (poly_order + 1)] = 0.0
             return np.diag(pen)
+
+        y_w_current = optical_depth * w_current
 
         solver_runs = []
         for iteration in range(max_iters):
@@ -412,8 +421,8 @@ class DoasFitter:
                 cols.append(np.sin(fixed_e_f * pixel_idx))
                 cols.append(np.cos(fixed_e_f * pixel_idx))
 
-                A_weighted = W_current @ np.column_stack(cols)
-                y_weighted = W_current @ optical_depth
+                A_weighted = np.column_stack(cols) * w_current[:, None]
+                y_weighted = y_w_current   # theta 불변 — 루프 밖에서 1회 계산
 
                 num_cols = A_weighted.shape[1]
 
@@ -465,8 +474,8 @@ class DoasFitter:
             cols.append(np.cos(fixed_e_f * pixel_idx))
 
             A_final = np.column_stack(cols)
-            A_f_w = W_current @ A_final
-            y_w = W_current @ optical_depth
+            A_f_w = A_final * w_current[:, None]
+            y_w = y_w_current
 
             num_cols_final = A_f_w.shape[1]
 
@@ -486,11 +495,12 @@ class DoasFitter:
                 mad = raw_mad if raw_mad > 0 else np.mean(residuals)
                 sigma_hat = mad / 0.6745
                 k = 4.685 * (sigma_hat + 1e-9)
-                new_weights = np.where(residuals < k, (1 - (residuals / k) ** 2) ** 2, 0.0) * np.diag(W_initial)
+                new_weights = np.where(residuals < k, (1 - (residuals / k) ** 2) ** 2, 0.0) * w_initial
                 if iteration > 0 and np.max(np.abs(new_weights - prev_weights)) < 1e-6:
                     break
                 prev_weights = new_weights.copy()
-                W_current = np.diag(new_weights)
+                w_current = new_weights
+                y_w_current = optical_depth * w_current
             else:
                 break
 

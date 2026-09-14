@@ -73,7 +73,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar):
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(rp, 0.0, [0.0, 1.0], STEP_LIMIT)
     # (구식 etalon 위상 append 제거 — doas_fit가 sin·cos 선형열로 처리, theta는 shift/squeeze만)
     out = fitter.execute_varpro_fit(
-        vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
+        vp_pixel, a, np.ones(len(a)), active, fixed, linked, t0, lb, ub,
         POLY_DEG, ef, vp_center, 1.0, rp, T_C, LAM, ROBUST)
     opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out
     full_model, total_abs, baseline, etal, _ = eng.get_model_components(
@@ -161,7 +161,7 @@ def main():
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(rp, 0.0, [0.0, 1.0], STEP_LIMIT)
     # (구식 etalon 위상 append 제거 — doas_fit가 sin·cos 선형열로 처리, theta는 shift/squeeze만)
     out = fitter.execute_varpro_fit(
-        vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
+        vp_pixel, a, np.ones(len(a)), active, fixed, linked, t0, lb, ub,
         POLY_DEG, ef, vp_center, 1.0, rp, T_C, LAM, ROBUST)
     opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out
 

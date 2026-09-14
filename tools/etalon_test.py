@@ -25,7 +25,7 @@ def fit_floor(eng, fitter, rp, wave, alpha, T, P, pmin, pmax, poly, fmin):
     ef = fitter.detect_etalon_frequency(vp, a, poly, fmin, 0.40)
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(rp, 0.0, [0.0, 1.0], 0.5)
     # (구식 etalon 위상 append 제거 — doas_fit가 sin·cos 선형열로 처리, theta는 shift/squeeze만)
-    out = fitter.execute_varpro_fit(vp, a, np.eye(len(a)), active, fixed, linked,
+    out = fitter.execute_varpro_fit(vp, a, np.ones(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly, ef, c, 1.0, rp, T, 0.0, False)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out
     full, tot, base, etal, _ = eng.get_model_components(

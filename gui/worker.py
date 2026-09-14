@@ -628,8 +628,7 @@ class AnalysisWorker(QThread):
                     
                     try:
                         weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(I_meas))
-                        weights = weights / np.mean(weights)
-                        W = np.diag(weights)
+                        W = weights / np.mean(weights)   # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
 
                         # 5. Core engine call
                         opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = self._execute_varpro_fit(
@@ -929,8 +928,7 @@ class AnalysisWorker(QThread):
                     #  두 선형열로 처리. 위상 append 제거.)
                     try:
                         weights = np.ones_like(intensity_processed)
-                        weights = weights / np.mean(weights)
-                        W = np.diag(weights)
+                        W = weights / np.mean(weights)   # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
                         opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = \
                             self._execute_varpro_fit(
                                 pixel_idx, optical_depth, W, active_vars, fixed_vars, linked_vars,

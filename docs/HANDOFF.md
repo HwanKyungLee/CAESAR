@@ -1,7 +1,56 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-08-14** (이번 세션 — 이전 2026-05-27 노트는 §0 이하 유지)
+> 최종 업데이트: **2026-09-14**. 맨 위가 최신 세션. 그 아래는 시간순이 뒤섞여 있으니
+> (08-14 → 09-14 → 08-04 …) 날짜 제목을 보고 찾을 것.
+
+---
+
+## 2026-09-14 (2차) — VarPro가 LM보다 느렸던 진짜 이유: 밀집 W
+
+**증상**: "VarPro인데 왜 완전비선형/LM보다 느린가". 기존 기록은 원인을 (a) 내부
+`lsq_linear` 호출, 이어서 (b) 설계행렬 재조립으로 지목했는데 **둘 다 측정으로 기각**됐다.
+
+**진짜 원인**: `execute_varpro_fit`가 픽셀 가중 W를 **밀집 n×n 대각행렬**로 받아
+목적함수 호출마다 `W @ A`(O(n²k))를 돌렸다. W는 언제나 대각이라 `A * w[:,None]`(O(nk))와
+동치인데, n=775px 기준 산술량이 약 775배였다. 추가로 `y_weighted = W @ optical_depth`는
+theta와 무관한데도 매 호출 재계산했다.
+
+| 호출당 (Cold 775px, k=10) | ms | 비중 |
+|---|---|---|
+| `W @ A` + `W @ y` | 0.247 | **62%** |
+| 설계행렬 조립(보간+column_stack) | 0.106 | 27% |
+| `lsq_linear` | 0.044 | 11% |
+| (동치인 행스케일 `A*w[:,None]`) | 0.0085 | — |
+
+프로파일에서 `objective_varpro` **자기시간 49%**로 보이던 것의 정체가 이 곱이다 —
+`@`는 C 빌트인이라 별도 함수로 안 잡히고 호출한 함수의 자기시간에 흡수된다.
+**프로파일 해석 시 주의할 함정.**
+
+**수정**: W를 벡터로. `core/doas_fit.py`(대각 추출 1줄 + 행스케일 3곳 + y 가중 호이스팅),
+`gui/worker.py` 2곳은 `np.diag(weights)` 대신 벡터를 넘긴다. 나머지 호출부 7곳
+(`fit_optimizer`·`param_optimizer`·`app_window`·`tools/*`)의 `np.eye(len(a))`도
+`np.ones(len(a))`로 — n² 배열을 스캔마다 만들어 즉시 대각만 꺼내던 낭비. `W_initial`은
+**밀집 행렬도 계속 받는다**(구 호출부·외부 스크립트 호환, 대각만 꺼내 씀).
+
+**검증** — `diagnostics/varpro_speed_2026-09/validate_dense_w_removal.py` 신규.
+수정 전 코드를 `git show <ref>:core/doas_fit.py`로 꺼내 별도 모듈로 임포트하고, **같은
+하네스**로 실캠페인 알파를 양쪽에 돌려 스캔별 대조한다(작업트리를 되돌릴 필요 없음).
+Cold 5/17(벽에 붙는 최악의 날)·6/5 + Hot ROI1/ROI2, warm/cold-start **8개 조건 ×
+700스캔 = 5,600스캔에서 shift·squeeze·농도 max|diff| = 0.000e+00(비트단위 동일)**,
+속도 2.17~2.51배(중앙값 2.36배). 회귀: `tools/test_etalon_collinearity.py`(10 PASS),
+`test_fit_policy.py`(11), `test_pass2_parallel.py`(5), `test_health_checks.py`(13),
+`python -m core.refit` 통과.
+
+**결론이 뒤집힌 것**: "비선형 차원이 커지면 VarPro가 완전비선형보다 느리다"(d=8에서
+1.9배 패배)는 **구현 버그 때문이었다**. 수정 후 d=8에서 21.2 vs 37.7 ms/scan(1.8배 승),
+Cold d=2에서 4.28 vs 10.32(2.4배 승) — 모든 조건에서 VarPro가 빠르다.
+`docs/논문_주장구조_2026-09.md` 1단의 "쓰지 말 것" 항목을 이에 맞게 고쳐뒀다.
+단, 해석적 자코비안(Golub–Pereyra)은 여전히 미구현이라 **"차원축소 덕에 빠르다"는
+아직 주장할 수 없다** — 측정값으로만 쓸 것.
+
+⚠ `diagnostics/` 전체가 `.gitignore`에 있어 위 검증 스크립트는 **커밋되지 않는다**
+(이 폴더의 다른 스크립트들과 동일). 다른 컴퓨터에서 이어받으려면 따로 복사할 것.
 
 ---
 
@@ -56,13 +105,11 @@ CSV 파서)로 읽어서 `alpha_trace.dat`(가변 컬럼) 형식에서 tokenizin
 
 ### 바로 할 수 있는 것
 
-1. **`objective_varpro`의 중복 보간 제거** — 프로파일로 확정된 유일한 실제 병목.
-   `Link`된 종들은 shift/squeeze가 **같은 값**인데 종마다 따로 스플라인 보간한다
-   (콜드 3종 Link면 같은 계산 3번). 같은 (shift, squeeze)의 결과를 캐시하면 줄어든다.
-   실측: d=2 10.7 ms/scan(objective 60회) / d=8 33.6 ms(270회), `evaluate_spline`
-   280→1,120회, `objective_varpro` 자기시간이 전체의 49%.
-   ⚠ **핏 수치 경로다 — 동일성 검증을 반드시 붙일 것**(실제 알파로 전후 스캔별 대조).
-   근거·반증된 가설은 `diagnostics/varpro_speed_2026-09/README.md` "원인 정정(2026-09-14)".
+1. ~~**`objective_varpro`의 중복 보간 제거**~~ — ✅ **더 큰 원인을 먼저 잡았다**
+   (아래 "2026-09-14 (2차)" 참조: 밀집 W 제거, 2.4배). `Link` 중복 보간은 **아직 남아
+   있고** 호출당 약 14%짜리로 여전히 유효한 다음 후보다(`evaluate_spline` d=2 280회 /
+   d=8 1,120회). ⚠ 핏 수치 경로 — `diagnostics/varpro_speed_2026-09/
+   validate_dense_w_removal.py`를 그대로 재사용해 동일성 검증을 붙일 것.
 
 2. **squeeze의 모르는 모드가 조용히 사라진다** — `core/doas_fit.py` setup_fit_parameters의
    squeeze 사다리는 Limit/Free/Fix/Link만 본다. `Center` 같은 값을 주면 변수가 등록 안 되고

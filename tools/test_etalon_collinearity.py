@@ -100,7 +100,7 @@ def main():
     for g in eng.gas_list:
         fixed[f"{g}_sh"] = 0.0
         fixed[f"{g}_sq"] = 1.0
-    args = (px, y, np.eye(n), [], fixed, {}, [], [], [], 4, e_f,
+    args = (px, y, np.ones(n), [], fixed, {}, [], [], [], 4, e_f,
             px[n // 2], 1.0, {}, 25.0, 0.0, False)
     out1 = fitter.execute_varpro_fit(*args)
     _ = fitter.etalon_collinearity(px, e_f, 4, {})

@@ -3507,7 +3507,7 @@ class CAESARAnalyzer(QMainWindow):
         #  처리한 뒤로는 위상이 비선형 파라미터가 아니다. 워커와 동일하게 theta는
         #  shift/squeeze만. 전부 Fix면 theta=[]여도 doas_fit가 선형해 1회로 처리.)
         out = fitter.execute_varpro_fit(
-            vp_pixel, a, np.eye(len(a)), active, fixed, linked, t0, lb, ub,
+            vp_pixel, a, np.ones(len(a)), active, fixed, linked, t0, lb, ub,
             self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
             self.spin_lambda.value(), self.chk_robust.isChecked(),
             allow_negative_gas=self.chk_allow_neg.isChecked())

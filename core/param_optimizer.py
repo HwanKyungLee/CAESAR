@@ -174,7 +174,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                 margin = max(1e-12, np.finfo(float).eps * max(abs(lo), abs(hi), 1.0) * 16)
                 start = initial_values.get(name, t0[k])
                 t0[k] = min(max(float(start), lo + margin), hi - margin)
-    out = fitter.execute_varpro_fit(vp, a_scaled, np.eye(len(a)), active, fixed, linked,
+    out = fitter.execute_varpro_fit(vp, a_scaled, np.ones(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
                                     ref_props, T_C, 0.0, False,
                                     allow_negative_gas=allow_negative_gas,
