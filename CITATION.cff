@@ -1,0 +1,29 @@
+# CITATION.cff — 배포 직전에 채울 것
+#
+# 채워야 할 곳: authors(이름/소속/ORCID), preferred-citation(논문 어셉 후 DOI),
+# version/date-released(공개 릴리스 태그를 찍을 때).
+# 검증: https://citation-file-format.github.io/cff-initializer-javascript/ 에
+# 붙여넣어 문법 확인, 또는 `pip install cffconvert && cffconvert --validate`.
+
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Augur (CAESAR): BBCEAS trace-gas retrieval software"
+type: software
+authors:
+  - family-names: "TODO-성"
+    given-names: "TODO-이름"
+    affiliation: "TODO-소속"
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+repository-code: "https://github.com/HwanKyungLee/CAESAR"
+license: MIT
+version: "0.2.0"
+date-released: "TODO-YYYY-MM-DD"
+# preferred-citation:
+#   type: article
+#   title: "TODO-논문 제목"
+#   authors:
+#     - family-names: "TODO-성"
+#       given-names: "TODO-이름"
+#   journal: "Atmospheric Measurement Techniques"
+#   year: TODO
+#   doi: "TODO-10.xxxx/xxxxxx"
