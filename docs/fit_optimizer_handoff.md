@@ -36,6 +36,29 @@
 - **QC** (K=6·settling skip) = 최적화 대상 아님. 기본 정책.
 - **Tikhonov·Robust·Kalman** = 구조를 가리는 "화장". 기본 OFF. 최적화로 켜지 말 것.
 
+### B-1. 근거 (2026-09-02 확인 — 왜 OFF/미사용인지)
+- **Tikhonov(λ)·Robust(IRLS)**: 실측 근거 — 켜서 핏 돌려보면 목표 가스가 **미량**이라 신호가 작은데,
+  ridge가 계수를 0쪽으로 수축시키거나 robust 재가중이 진짜 신호를 아웃라이어로 오판해 깎아버려
+  **농도가 이상하게 부풀거나 사라짐**. `core/fitset_builder.py:321`(`tikhonov_lambda: 0.0,
+  use_robust: False`)과 GUI `spin_lambda`(기본 0.0000, 툴팁 "0 = Off") 둘 다 기본 꺼짐으로 이 정책을
+  강제. 코드에 기능 자체는 살아있으니(`core/doas_fit.py` `execute_varpro_fit`) "구현 여부"와
+  "실제 사용 여부"를 혼동하지 말 것 — λ·robust 플래그를 세팅 파일/GUI에서 직접 올리지 않는 한
+  항상 plain bound-constrained VARPRO만 돈다.
+- **Ring effect(custom_basis)**: Tikhonov·Robust와 같은 이유로 미사용. 실제 분석 경로
+  (`gui/worker.py`의 `_execute_varpro_fit` 호출)는 `custom_basis`를 넘기지 않아 항상 `None`
+  — `docs/전수조사_2026-07-14.md`(61-69행)에도 "현재 custom_basis=None"으로 명시돼 있음.
+  `core/engine.py`의 `custom_basis` 파라미터는 인프라만 존재하고 프로덕션 핏 경로엔 안 물려 있다
+  (쓰이는 곳은 실험용 `tools/fixedpattern_test.py`뿐). "코드에 훅이 있다"를 "기능이 켜져 있다"로
+  읽지 말 것.
+- **ILS(slit function) convolution**: 매 핏마다 자동 적용되는 게 **아니라**, 레퍼런스 준비 단계에서
+  `gui/app_window.py:3935` `apply_convolution()`(버튼 `btn_apply_ils`)으로 **1회 굽고(bake)** 끝.
+  이후 실제 분석 경로(`core/fitset_builder.py:95`, `gui/app_window.py:3584/5702`,
+  `tools/optimize_params.py`, `tools/t2_reference_check.py`, `tools/design_window.py` 등)는 전부
+  `eng.apply_ils_convolution(0.0)`로 호출하는데, `core/engine.py`의 `apply_ils_convolution`은
+  `fwhm_gaussian<=0.1 and fwhm_lorentzian<=0.1`이면 조기 리턴하므로 이 `(0.0)` 호출은 사실상 no-op
+  ("이미 ILS 적용됨 → skip", `tools/residual_compare.py:93` 주석 참조). 즉 ILS는 매 핏 재적용이
+  아니라 레퍼런스 생성 시점 1회성 액션으로 옮겨진 상태.
+
 ## 2. 목적함수(진실신호) — 무엇으로 좋고 나쁨을 재나
 > **📌 갱신(2026-08-04)**: 이 절의 "모델 내부 신호만" 방침은 **§2-B(신뢰 3계층)로 대체**됐다.
 > T1(자기일관성)만으로는 과적합을 상 준다는 게 O4로 실증됨. 최종 규칙은 **§15-B**를 따를 것.
