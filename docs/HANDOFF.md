@@ -6,6 +6,37 @@
 
 ---
 
+## 2026-09-14 (3차) — 설계행렬 상수열 호이스팅 + "Link 중복 보간" 전제 폐기
+
+**닫은 가설**: "`Link`된 종들이 같은 보간을 3번 한다"는 **틀렸다**. 종마다 레퍼런스
+스펙트럼이 달라 `interpolators[NO2]`와 `interpolators[H2O]`는 애초에 다른 계산이다.
+Link가 공유하는 건 (shift, squeeze) 값뿐 — 캐시할 중복 결과가 없다.
+
+**실제로 있던 낭비 두 가지 (수정함, `core/doas_fit.py`)**:
+- theta에 안 걸리는 열(poly Chebyshev·custom_basis·etalon sin/cos)을 목적함수
+  **호출마다** 다시 만들고 있었다 → 루프 밖에서 `CONST` 한 번만 조립.
+- 창 밖 기체(`gas_active=False`)를 보간한 **뒤에** 0으로 덮었다 → 보간 자체를 건너뜀.
+  (창 밖 기체가 있는 세팅에서 스플라인 평가 1회/호출 절약)
+
+목적함수 본문이 20줄 → 1줄(`np.hstack((_gas_columns(val_dict), CONST)) * w[:,None]`)로
+줄었고 열 순서(gas→poly→custom→sin→cos)는 그대로라 하류 인덱싱·반환값 불변.
+
+**검증**: `validate_dense_w_removal.py --before-ref HEAD`(직전 커밋 대비) — 같은 8개
+조건 × 700스캔에서 **max|diff| = 0.000e+00**, 속도 1.01~1.08배(중앙값 1.04배).
+회귀 스위트 동일하게 통과.
+
+**측정했으나 채택 안 한 것 — B-스플라인 basis 공유**: 종간 knot 벡터가 동일하므로
+(`interp1d(np.arange(n), ...)`, k=3, len(t)=2052 전 종 동일) `BSpline.design_matrix`를
+(shift,squeeze)당 1회 만들고 종별로는 계수 matvec만 하면 설계행렬 조립이
+0.102 → 0.080 ms(1.50배)로 줄고, **결과도 비트동일**임을 확인했다. 그럼에도 안 넣은 이유:
+(a) `interp1d._spline`이라는 **scipy 비공개 속성**에 의존하고, (b) 계수행렬을 매 호출
+쌓으면 이득이 사라져 **엔진 쪽에 캐시 상태**를 둬야 하는데 이는 "DoasFitter는 무상태"
+설계원칙과 충돌하며, (c) Link 없는(각 종이 독립 shift) 경우엔 basis 공유가 성립하지
+않아 이득이 0이다. 전체 핏 기준 기대 이득은 ~1.1배 — 그 대가로는 비싸다.
+**다시 집을 거면 `core/engine.py`에서 레퍼런스 등록 시 공유 basis를 캐시하는 형태로.**
+
+---
+
 ## 2026-09-14 (2차) — VarPro가 LM보다 느렸던 진짜 이유: 밀집 W
 
 **증상**: "VarPro인데 왜 완전비선형/LM보다 느린가". 기존 기록은 원인을 (a) 내부
@@ -105,11 +136,12 @@ CSV 파서)로 읽어서 `alpha_trace.dat`(가변 컬럼) 형식에서 tokenizin
 
 ### 바로 할 수 있는 것
 
-1. ~~**`objective_varpro`의 중복 보간 제거**~~ — ✅ **더 큰 원인을 먼저 잡았다**
-   (아래 "2026-09-14 (2차)" 참조: 밀집 W 제거, 2.4배). `Link` 중복 보간은 **아직 남아
-   있고** 호출당 약 14%짜리로 여전히 유효한 다음 후보다(`evaluate_spline` d=2 280회 /
-   d=8 1,120회). ⚠ 핏 수치 경로 — `diagnostics/varpro_speed_2026-09/
-   validate_dense_w_removal.py`를 그대로 재사용해 동일성 검증을 붙일 것.
+1. ~~**`objective_varpro`의 중복 보간 제거**~~ — ❌ **전제가 틀렸다. 닫는다.**
+   "Link된 종들이 같은 계산을 3번 한다"가 아니다 — 종마다 **레퍼런스 스펙트럼이 달라
+   스플라인도 다르다**(확인: 세 raw_reference 배열이 서로 다름). Link가 공유하는 건
+   (shift, squeeze) **값**뿐이라 캐시할 중복 결과가 없다. 실측도 그렇다: 1종 0.028 ms
+   × 3 ≈ 3종 실측 0.077 ms. 대신 실제로 있던 낭비(상수열 재조립)는 잡았다 —
+   아래 "2026-09-14 (3차)".
 
 2. **squeeze의 모르는 모드가 조용히 사라진다** — `core/doas_fit.py` setup_fit_parameters의
    squeeze 사다리는 Limit/Free/Fix/Link만 본다. `Center` 같은 값을 주면 변수가 등록 안 되고
