@@ -36,6 +36,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
+**개발자/리뷰어**라면 패키지로 설치하면 `core`/`gui`/`oculus`를 어디서든 임포트할 수 있고
+테스트를 한 번에 돌릴 수 있다:
+
+```bash
+pip install -e ".[dev]"
+pytest                       # 저장소의 자체검증 스크립트 43개 전부 (~30초)
+pytest -k raw_parser         # 하나만
+python tools/test_raw_parser.py   # 단독 실행도 그대로 된다
+```
+
 Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없이 GUI만 뜨고,
 크래시 로그는 `logs/crash.log` 에 쌓인다). HITRAN 라인리스트("🌐 Generate from HITRAN"
 버튼, Reference Generator에서 새 단면을 만들 때만 필요)는 처음 쓸 때 인터넷으로 받아
@@ -103,7 +113,8 @@ Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없�
 CAESAR/
 ├── main.py                    ← GUI 진입점 (python main.py)
 ├── AUGUR.png                   ← 스플래시 스크린 이미지
-├── requirements.txt           ← 의존성
+├── requirements.txt           ← 의존성 (핀 버전, 단일 출처 — pyproject가 여기서 읽는다)
+├── pyproject.toml             ← 패키징 + pytest 설정 (pip install -e .)
 ├── Augur_실행.bat             ← Windows 실행 배치
 │
 ├── core/                      ← 공용 연산·IO 모듈 (패키지)
@@ -141,7 +152,11 @@ CAESAR/
 │   ├── reference_generator_dialog.py ← ReferenceGeneratorDialog
 │   └── monitor_widget.py      ← MonitorWidget
 │
-├── tools/                     ← 독립 실행 오프라인 분석 도구
+├── tests/                     ← pytest 진입점 하나 (test_script_suite.py)
+│   └── ...                    저장소 곳곳의 test_*.py를 자동 탐색해 전부 돌린다
+│                              — 테스트 본체는 옮기지 않았다(문서 50여 곳이 경로 참조)
+│
+├── tools/                     ← 독립 실행 오프라인 분석 도구 (+ 자체검증 test_*.py)
 │   ├── reflectance_calc.py    ← 반사율 계산 모듈 (Rayleigh + CEAS, core.physics 기반)
 │   ├── r_batch_calculator.py  ← 배치 R 계산기 (ZA/He flag 파싱, 폴더 단위)
 │   ├── r_trend_monitor.py     ← R 시계열 모니터 / PNG·DAT 저장

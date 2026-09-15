@@ -1,0 +1,6 @@
+# 해시로 고정된 골든 증거 — 줄끝이 바뀌면 sha256이 달라진다.
+# core.autocrlf=true인 Windows 체크아웃에서 LF→CRLF로 변환되면
+# tools/test_fit_explorer_*_evidence.py 의 manifest_sha256 대조가 실패한다
+# (리눅스 CI에서는 통과하므로 그동안 안 보였다). 이 파일들만 변환 금지.
+diagnostics/fit_explorer/*.json   -text
+diagnostics/alpha_pass2_parallel/fixtures/*  -text
