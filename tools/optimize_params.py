@@ -138,19 +138,9 @@ def ref_path(key, filename):
 
 
 def load_wavecal(path):
-    """app_window._load_wavecal_array 복제."""
-    try:
-        try:
-            df = pd.read_csv(path, sep=r"\s+", header=None)
-        except Exception:
-            df = pd.read_csv(path, sep=",", header=None)
-        for i in range(df.shape[1]):
-            col = pd.to_numeric(df.iloc[:, i], errors="coerce").dropna()
-            if len(col) > 10:
-                return col.values.flatten()
-    except Exception:
-        pass
-    return None
+    """wavecal 파일 → 1D nm 배열. 단일 출처는 `DataIO.load_wavecal_array`."""
+    from core.data_io import DataIO
+    return DataIO.load_wavecal_array(path)
 
 
 def build_engine_from_config(cfg):

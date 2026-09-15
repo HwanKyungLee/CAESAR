@@ -469,6 +469,34 @@ class DataIO:
         return DataIO._alpha_layout(filepath)[4]
 
     @staticmethod
+    def load_wavecal_array(path):
+        """wavecal 파일 → 1D nm 배열(첫 번째 수치 컬럼). 실패하면 None.
+
+        파장축은 모든 숫자의 x축이라 파서가 갈리면 안 된다 — 이게 **단일 출처**다.
+        gui(app_window_fitsetup / app_window_save) · core.refit · tools.optimize_params가
+        전부 여기로 위임한다(예전엔 같은 코드가 4벌이었다).
+
+        `comment='#'`이 중요하다: 주석 헤더가 있는 Calib 파일은 헤더 줄의 토큰 수가 달라
+        공백 파싱이 ParserError를 내고, **쉼표 파싱 폴백이 우연히 성공**해서 지금까지 맞는
+        답이 나왔다. 열이 2개가 되는 날 그 운은 끝난다.
+
+        회귀: `tools/test_wavecal_loader.py` — 저장소의 실측 Calib 파일 전부에 대해
+        이 함수와 `np.loadtxt`가 같은 배열을 내는지 본다.
+        """
+        try:
+            try:
+                df = pd.read_csv(path, sep=r'\s+', header=None, comment='#')
+            except Exception:                       # noqa: BLE001
+                df = pd.read_csv(path, sep=',', header=None, comment='#')
+            for i in range(df.shape[1]):
+                col = pd.to_numeric(df.iloc[:, i], errors='coerce').dropna()
+                if len(col) > 10:
+                    return col.values.flatten()
+        except Exception:                           # noqa: BLE001
+            pass
+        return None
+
+    @staticmethod
     def _load_alpha_trace_row(filepath, row_index, pixel_min=0, pixel_max=None):
         """Load one data row from an alpha_trace.dat file (구·신 포맷 호환).
 

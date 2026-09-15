@@ -162,19 +162,9 @@ class FitSetupMixin:
             self.loaded_wl_path = filepath # 🌟 Remember path for saving scenarios
             
         try:
-            try: 
-                df = pd.read_csv(filepath, sep=r'\s+', header=None)
-            except Exception: 
-                df = pd.read_csv(filepath, sep=',', header=None)
-                
-            wl_data = None
-            # Find the first column that contains actual numeric data
-            for i in range(df.shape[1]):
-                col = pd.to_numeric(df.iloc[:, i], errors='coerce').dropna()
-                if len(col) > 10: 
-                    wl_data = col.values.flatten()
-                    break
-                    
+            # 파장축 파서 단일 출처 — DataIO.load_wavecal_array
+            wl_data = DataIO.load_wavecal_array(filepath)
+
             if wl_data is not None:
                 self.wavelengths = wl_data
                 self.engine.set_wavelength_axis(wl_data)  # register immediately so pixel_to_wavelength works before lock_ref

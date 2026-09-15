@@ -48,25 +48,8 @@ _WAVE_MATCH_NM = 0.5
 
 
 def load_wavecal_array(path):
-    """wavecal 파일 → 1D nm 배열. 실패하면 None.
-
-    ponytail: 같은 파서가 `gui/app_window._load_wavecal_array`와
-    `tools/optimize_params.load_wavecal`에도 복제돼 있다(각 파일에 "복제"라고 적혀 있음).
-    core에 있는 이 구현이 단일 출처가 되어야 하고 저 둘은 여기로 위임시키면 된다 —
-    이번 변경 범위 밖이라 4번째 사본을 만들지 않는 선에서 멈춘다.
-    """
-    try:
-        try:
-            df = pd.read_csv(path, sep=r"\s+", header=None)
-        except Exception:                       # noqa: BLE001
-            df = pd.read_csv(path, sep=",", header=None)
-        for i in range(df.shape[1]):
-            col = pd.to_numeric(df.iloc[:, i], errors="coerce").dropna()
-            if len(col) > 10:
-                return col.values.flatten()
-    except Exception:                           # noqa: BLE001
-        pass
-    return None
+    """wavecal 파일 → 1D nm 배열. 단일 출처는 `DataIO.load_wavecal_array`."""
+    return DataIO.load_wavecal_array(path)
 
 
 def read_alpha_row(path, row_idx):

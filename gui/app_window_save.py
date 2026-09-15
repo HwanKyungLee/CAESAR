@@ -516,19 +516,8 @@ class SaveExportMixin:
 
     @staticmethod
     def _load_wavecal_array(path):
-        """wavecal 파일 → 1D nm 배열(load_wavelength_cal과 동일 파싱). 실패 시 None."""
-        try:
-            try:
-                df = pd.read_csv(path, sep=r'\s+', header=None)
-            except Exception:
-                df = pd.read_csv(path, sep=',', header=None)
-            for i in range(df.shape[1]):
-                col = pd.to_numeric(df.iloc[:, i], errors='coerce').dropna()
-                if len(col) > 10:
-                    return col.values.flatten()
-        except Exception:
-            pass
-        return None
+        """wavecal 파일 → 1D nm 배열. 단일 출처는 `DataIO.load_wavecal_array`."""
+        return DataIO.load_wavecal_array(path)
 
     def _build_engine_from_config(self, cfg):
         """채널 config(dict)로 독립 UniversalEngine 생성(자체 wavecal+references+scaling).
