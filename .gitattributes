@@ -4,3 +4,9 @@
 # (리눅스 CI에서는 통과하므로 그동안 안 보였다). 이 파일들만 변환 금지.
 diagnostics/fit_explorer/*.json   -text
 diagnostics/alpha_pass2_parallel/fixtures/*  -text
+
+# 이미 받아둔 체크아웃은 이 파일이 생기기 전에 받은 것이라 CRLF가 남아 있고,
+# 위 두 테스트가 계속 실패한다. 해당 경로만 한 번 다시 받으면 된다:
+#   rm diagnostics/fit_explorer/*.json diagnostics/alpha_pass2_parallel/fixtures/*
+#   git checkout -- diagnostics/fit_explorer diagnostics/alpha_pass2_parallel
+# 새로 clone 하면 처음부터 LF로 받으므로 할 필요 없다.
