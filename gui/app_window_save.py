@@ -49,8 +49,13 @@ class SaveExportMixin:
         try:
             f_min_px = int(self.txt_min.text())
             f_max_px = int(self.txt_max.text())
+            _range_ok = True
         except Exception:
+            # 0,0은 **실제 값이 아니다**. 결과 헤더의 "Fit Range"는 이 파일을
+            # 재현하는 기록이라(원칙 4), 못 읽은 걸 구체적 숫자로 적으면 안 된다.
+            # 계산용으로만 0,0을 쓰고 기록에는 읽지 못했다고 남긴다.
             f_min_px, f_max_px = 0, 0
+            _range_ok = False
             
         wl_str = f"{f_min_px}-{f_max_px}px" # Default fallback
         
@@ -182,7 +187,9 @@ class SaveExportMixin:
                     f"# Generated: {current_time}",
                     f"# Code Version: {_codever()}",
                     f"# Data Period: {span_str}",
-                    f"# Fit Range: Pixel {f_min_px}-{f_max_px} ({wl_str})",
+                    (f"# Fit Range: Pixel {f_min_px}-{f_max_px} ({wl_str})"
+                     if _range_ok else
+                     "# Fit Range: UNREADABLE — UI 핏범위 입력을 읽지 못했다 (0-0은 실제 값이 아님)"),
                     f"# Polynomial Degree: {poly_deg}",
                     f"# Tikhonov Lambda: {lam_val:g}",
                     f"# Robust Fitting (IRLS): {robust_status}",
@@ -529,25 +536,44 @@ class SaveExportMixin:
         from core.engine import UniversalEngine
         eng = UniversalEngine()
         wave = None
+        # 리플레이 엔진이 원본 핏의 엔진과 달라지면, 같은 스캔인데 다른 숫자가
+        # 나오고 사용자는 "핏이 불안정하다"고 오해한다. 달라진 항목을 모아 알린다.
+        _diffs = []
         wlp = resolve_ref_path(cfg.get('wl_path', ''))
         if wlp and os.path.exists(wlp):
             wave = self._load_wavecal_array(wlp)
+            if wave is None:
+                _diffs.append(f"wavecal 읽기 실패({os.path.basename(wlp)})")
+        elif wlp:
+            _diffs.append(f"wavecal 파일 없음({os.path.basename(wlp)})")
         if wave is None:   # 폴백: 현재 로드된 마스터 wavecal
             wl = getattr(self, 'wavelengths', None)
             wave = np.asarray(wl, dtype=float).flatten() if wl is not None else None
+            if wave is not None and wlp:
+                _diffs.append("마스터 wavecal로 대체(파장축이 원본과 다를 수 있음)")
         if wave is not None:
             eng.set_wavelength_axis(wave)
         for ref in cfg.get('refs', []):
             ref_path = resolve_ref_path(ref.get('path', ''))
-            if os.path.exists(ref_path):
-                try:
-                    eng.add_reference(name=ref['name'], filepath=ref_path,
-                                      wave_nm=wave, multiplier=10.0 ** ref.get('mult', 0))
-                except Exception as e:
-                    print(f"[ch engine] ref failed {ref.get('name')}: {e}")
+            if not os.path.exists(ref_path):
+                _diffs.append(f"{ref.get('name')}: 레퍼런스 파일 없음")
+                continue
+            try:
+                eng.add_reference(name=ref['name'], filepath=ref_path,
+                                  wave_nm=wave, multiplier=10.0 ** ref.get('mult', 0))
+            except Exception as e:
+                print(f"[ch engine] ref failed {ref.get('name')}: {e}")
+                _diffs.append(f"{ref.get('name')}: 로드 실패({type(e).__name__})")
         try:
             eng.apply_ils_convolution(0.0)
-        except Exception:
-            pass
+        except Exception as e:
+            _diffs.append(f"ILS 적용 실패({type(e).__name__}) — 단면이 원본과 다름")
+        if _diffs:
+            _msg = ("⚠ 리플레이 엔진이 원본과 다르다 — " + " · ".join(_diffs)
+                    + ". 여기 보이는 핏은 저장된 결과와 같지 않을 수 있다.")
+            print(f"[ch engine] {_msg}")
+            _status = getattr(self, 'status', None)
+            if _status is not None:
+                _status.setText(_msg)
         return eng
 

@@ -304,6 +304,54 @@ def test_analysis_worker_can_report_failure():
           "w.status_msg.connect(" in inspect.getsource(awr))
 
 
+class _FakeStatus:
+    def __init__(self): self.text = None
+    def setText(self, t): self.text = t
+
+
+def test_replay_engine_announces_differences():
+    """리플레이 엔진이 원본과 달라지면 알린다 — 같은 스캔에 다른 숫자가 나오므로."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from gui.app_window_save import SaveExportMixin
+
+    class _Host(SaveExportMixin):
+        wavelengths = None
+        def __init__(self): self.status = _FakeStatus()
+
+    host = _Host()
+    cfg = {"wl_path": "", "refs": [{"name": "NO2", "path": "C:/__nope__/no2.txt",
+                                    "mult": 0}]}
+    host._build_engine_from_config(cfg)
+    msg = host.status.text or ""
+    check("레퍼런스 누락이 화면에 뜬다", "NO2" in msg and "리플레이" in msg, msg)
+    check("원본과 다를 수 있다고 말한다", "같지 않을 수 있다" in msg, msg)
+
+    # 멀쩡한 cfg(레퍼런스 0개)면 아무 말 안 한다 — 경고 남발 방지
+    host2 = _Host()
+    host2._build_engine_from_config({"wl_path": "", "refs": []})
+    check("문제 없으면 조용하다", host2.status.text is None, host2.status.text)
+
+
+def test_r_trend_is_not_overwritten_after_read_failure():
+    """기존 R 트렌드를 못 읽으면 덮어쓰지 않는다(과거 시계열 복원 불가)."""
+    import inspect
+    import gui.r_workers as rw
+    src = inspect.getsource(rw).split(chr(10))
+    i = next(i for i, l in enumerate(src) if "rtm.load_dat(trend_path)" in l)
+    tail = chr(10).join(src[i:i + 12])
+    check("load_dat 실패를 삼키지 않는다", "raise RuntimeError" in tail, tail[:200])
+    check("덮어쓰기 금지 의도가 적혀 있다", "덮어쓰" in tail)
+
+
+def test_header_never_records_a_false_fit_range():
+    """핏범위를 못 읽으면 헤더에 0-0이 아니라 UNREADABLE."""
+    import inspect
+    from gui.app_window_save import SaveExportMixin
+    src = inspect.getsource(SaveExportMixin.save)
+    check("_range_ok 플래그가 있다", "_range_ok" in src)
+    check("못 읽으면 UNREADABLE로 기록", "UNREADABLE" in src)
+
+
 def main():
     for fn in (test_broken_policy_raises, test_valid_policy_unchanged,
                test_validate_fitset_catches_fix,
@@ -315,7 +363,10 @@ def main():
                test_residual_rho_does_not_default_to_zero,
                test_pass2_spool_failure_is_not_zero_rows,
                test_rt_degradation_is_announced,
-               test_analysis_worker_can_report_failure):
+               test_analysis_worker_can_report_failure,
+               test_replay_engine_announces_differences,
+               test_r_trend_is_not_overwritten_after_read_failure,
+               test_header_never_records_a_false_fit_range):
         fn()
     print(f"silent fallback guard: {PASS} PASS · {FAIL} FAIL")
     return 1 if FAIL else 0

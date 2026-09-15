@@ -6,7 +6,53 @@
 
 ---
 
-## 2026-09-15 — 광범위 except 감사 (core 78 + worker.py 30) · 침묵 대체 15곳 제거
+## ★ 다음 세션에 넘김 — 로직·물리식·수치 안정성 감사
+
+except 감사(2026-09-15)는 **"예외를 삼키고 그럴듯한 값으로 갈아치우는 것"** 딱 한 가지
+고장 모드만 봤다. 그건 끝났다. 남은 건 **삼킴 없이도 틀릴 수 있는 것들**이다.
+
+### 이미 커버된 것 (다시 하지 말 것)
+* 침묵 대체 / 조용한 데이터 유실 — 이 문서 아래 섹션. 회귀는 `test_silent_fallback_guard.py`.
+* raw 파싱·flag·시각 — 전수검증 2065파일/7,538,129행(`기초파싱_전수검증_2026-09-15.md`).
+* 외부 알고리즘 대조 — QDOAS 교차검증(`diagnostics/qdoas_crossval_2026-09/README.md`).
+  NO2 r²>0.99, Deming slope 0.96. **VarPro vs LM은 이미 검증됨.**
+* Rayleigh King factor 골든값 · VarPro 자코비안 · Pass2 병렬↔순차 바이트동일 — CI.
+
+### 출발점 (감사하면서 실제로 눈에 걸린 것들, 우선순위순)
+
+1. **`load_wavecal`이 4곳에 복제돼 있다** — `core/refit.py`(자기 docstring이 인정),
+   `tools/optimize_params.py`, `gui/app_window_save.py:_load_wavecal_array`, 그리고
+   r_trend 계열. 단일 출처 원칙(3) 위반이고 **파장축은 모든 숫자의 x축**이다.
+   넷이 미세하게 다르면 경로마다 다른 파장으로 핏한다. 먼저 셋이 같은 답을 내는지
+   대조부터 할 것(같으면 통합, 다르면 그게 버그다).
+2. **`flag=0`이 두 가지 뜻** — ① LabVIEW 헤더행 ② flag 컬럼 없는 파일의 기본값.
+   경로마다 정책이 다르다: `AlphaExportWorker._process_scan`은 건너뛰고,
+   `AnalysisWorker._run`은 **ambient로 피팅**한다(T=25/P=1013.25 기본값).
+   같은 raw가 경로에 따라 다른 결과를 낸다. 보고서 §4-E에 상세.
+3. **스펙트럼 포화(65535) 감지가 없다** — 포화된 픽셀은 흡수를 **과소평가**한다.
+   지금은 아무 경고 없이 핏에 들어간다. 보고서 §(C).
+4. **수치 바닥값이 흩어져 있다** — `1e-30`, `1e-300`, `max(..., 10.0)`,
+   `max(abs(ppb_raw), 1e-30)` 등. 각각은 합리적이지만 **한 번도 같이 검토된 적이 없다.**
+   특히 `window_designer`/`fit_optimizer`의 바닥값은 순위 결정에 직접 들어간다.
+5. **공분산의 lambda** — `execute_varpro_fit`이 공분산을 계산할 때 override가 아니라
+   base `tikhonov_lambda`를 쓴다("원본 동작 보존" 주석). 정규화를 바꿔 핏해놓고 오차는
+   다른 정규화로 계산하는 셈이라, 의도된 건지 확인 필요.
+6. **`estimate_shift`가 전 스캔 실패 시 shift 0** — 중립값이라 이번엔 뒀지만,
+   "정렬 실패"와 "정렬이 0"이 구분되지 않는다.
+7. **`_is_alpha_input` 오판** — 포맷 탐지가 실패하면 알파를 raw로 취급한다.
+   탐지 자체(`data_io._is_alpha_trace_format`)도 예외를 삼키므로 이중 방어가 없다.
+8. **T/P 명목값** — QDOAS 대조가 스캔별 T/P가 없어 명목값(25°C/1013.25)을 썼다.
+   `core/error_budget.py`의 `UNQUANTIFIED` 항이 바로 이런 것들이다 — **그 표를 채우는
+   작업이 곧 이 감사의 성과물**이 된다. 거기서 시작하면 범위가 저절로 잡힌다.
+
+### 권하는 방법
+`error_budget.build()`가 내놓는 `UNQUANTIFIED` 목록을 작업 목록으로 삼아라. 항을 하나씩
+정량화하면서 그 항을 만드는 코드를 읽으면, "감사"가 아니라 **논문 Table을 채우는 일**이
+된다 — 같은 노동으로 두 가지가 나온다.
+
+---
+
+## 2026-09-15 — 광범위 except 감사 (숫자를 만드는 경로 132건) · 침묵 대체 18곳 제거
 
 **다시 훑지 말 것.** core/의 `except Exception`/bare 78건을 AST로 전수 분류했다
 (`gui` 243건 · `oculus` 6건은 손 안 댐 — oculus는 원래 깨끗하다).
@@ -28,7 +74,7 @@
 덤: `raw_parser.autoload_campaign_layouts`의 "프로파일 건너뜀"이 verbose일 때만
 보이던 것을 항상 stderr로. 레이아웃 등록 실패 = HK 열 지도 없이 파싱 = T/P 기본값 대체.
 
-회귀 잠금: `tools/test_silent_fallback_guard.py` **49 PASS**. pytest가 자동 수집한다.
+회귀 잠금: `tools/test_silent_fallback_guard.py` **56 PASS**. pytest가 자동 수집한다.
 
 **안 고친 것과 이유** (다음 세션이 다시 열어보지 않도록)
 
@@ -93,11 +139,35 @@
 규약을 그대로 가져왔다(`app_window_inputs.py:371` 참고). 처음엔 "GUI 배선 판단이
 필요하다"고 미뤘는데, 배선 방법이 저장소에 이미 있어서 판단할 게 없었다.
 
-### 안 본 것
+### 2차 — `r_workers.py` 14 + `app_window_save.py` 16 (숫자/출력 파일을 만지는 나머지)
 
-`gui/`의 나머지 213건, `tools/` 58, `calibration/` 10, `diagnostics/` 9, `oculus/` 6.
-**숫자를 만드는 경로(core + worker.py)는 전부 봤다** — 나머지는 위젯 갱신·포맷 방어·
-오프라인 도구라 등급이 한 단계 아래다.
+| 어디 | 삼키고 뭘 했나 | 왜 위험했나 |
+|---|---|---|
+| `_ChannelRWorker` (r_workers) | 기존 R 트렌드 `load_dat` 실패 → `prior=[]` | 바로 아래 `save_dat(plot_results, trend_path)`가 **새 결과만으로 덮어쓴다**. 과거 R 시계열이 복원 불가하게 소실 — 헌장 1번 정면 위반. 이제 읽기 실패 = 덮어쓰기 금지(예외 → 그 채널만 건너뛰고 로그) |
+| `save()` (app_window_save) | 핏범위 파싱 실패 → `0, 0` | 결과 헤더 `# Fit Range: Pixel 0-0` = **거짓 기록**. 헤더는 재현 기록이다(원칙 4). 이제 `UNREADABLE`로 적는다 |
+| `_build_engine_from_config` | 레퍼런스 누락·ILS 실패·wavecal 폴백을 조용히 | 더블클릭 리플레이 엔진이 **원본 핏과 다른 엔진**이 된다 → 같은 스캔에 다른 숫자 → "핏이 불안정하다"고 오해. 이제 달라진 항목을 모아 상태바에 띄운다 |
+
+**확인했지만 문제 아니었던 것**
+* `r_workers`의 나머지 11건 — 대부분 이미 `finished.emit("ERROR: ...")`·`log.emit`·
+  `failed.emit`로 보고한다(모범 패턴).
+* `done_set = set()`(npz 로드 실패) — 스킵 최적화가 꺼져 **전부 재계산**된다.
+  실패 방향이 보수적이라 그대로 뒀다(시간만 손해).
+* `ui_result_viewer.py`의 export 경로 — `_export_png`는 `QMessageBox.warning`,
+  `_draw_residual`은 `{"ok": False, "reason": ...}`. 둘 다 이미 보고한다. 손댈 것 없음.
+
+**덤 — 죽은 코드**: `gui/r_workers.py`의 `_HeCheckWorker`(33줄)는 저장소 어디서도
+호출하지 않는다. `32d4b0b` 분리 리팩터 때 이미 호출부가 없었다. 지우려면 지워도 된다
+(감사 범위 밖이라 손 안 댐).
+
+### 감사 종료 — 안 본 것과 그 이유
+
+`gui/`의 나머지 183건(`ui_plot_maker/widget.py` 29, `ui_dialogs_calib.py` 19,
+`app_window*.py` 38, 뷰어 표시 경로 등), `tools/` 58, `calibration/` 10,
+`diagnostics/` 9, `oculus/` 6 = **약 266건은 보지 않았다.**
+
+멈춘 기준: **숫자를 만들거나 파일로 내보내는 경로는 전부 봤다.** 나머지는 표시·입력·
+그림이라 틀리면 **화면에서 눈에 보인다** — 조용히 틀리는 부류가 아니다. 여기서 더
+가면 비용 대비 수확이 급격히 떨어진다. 다시 열 거라면 새로 생긴 코드부터.
 
 ---
 

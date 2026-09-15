@@ -300,8 +300,18 @@ class _ChannelRWorker(QThread):
                     if _os.path.exists(trend_path):
                         try:
                             prior = rtm.load_dat(trend_path)
-                        except Exception:
-                            pass
+                        except Exception as _e_prior:
+                            # prior=[] 로 두면 아래 `rtm.save_dat(plot_results, ...)`가
+                            # 기존 파일을 **새 결과만으로 덮어쓴다** — 과거 R 시계열이
+                            # 복원 불가능하게 사라진다(데이터 무결성 헌장 1번 위반).
+                            # 읽기 실패 = 덮어쓰기 금지. 바깥 except가 받아 로그에
+                            # 남기고 이 채널만 건너뛴다(다른 채널은 계속).
+                            raise RuntimeError(
+                                f"기존 R 트렌드를 읽지 못했다 "
+                                f"({_os.path.basename(trend_path)}): "
+                                f"{type(_e_prior).__name__}: {_e_prior} — 덮어쓰지 "
+                                f"않고 이 채널을 건너뛴다. 파일을 확인하거나 옮긴 뒤 "
+                                f"다시 실행할 것") from _e_prior
                     fresh = {r["filename"] for r in results}
                     plot_results = [r for r in prior if r["filename"] not in fresh] + results
                     plot_results.sort(key=lambda r: r["timestamp"].replace(tzinfo=None))
