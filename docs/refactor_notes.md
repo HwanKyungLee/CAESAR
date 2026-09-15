@@ -77,6 +77,10 @@ Mixin 상속이 현실적). 각 Mixin은 self.* 위젯 공유 가정. 중위험(
     (23a9f1d에서 `RTP.verify_npz` 동기 호출로 대체되며 호출부·콜백이 지워졌는데
     클래스만 남음). "원본 바이트 그대로 복사"라 죽은 줄까지 따라온 것 — 이후 삭제.
     같은 이유로 유일한 소비자였던 `rt_precompute.check_new_files`도 같이 삭제.
+  - ⚠️ `_RTAppendWorker`도 같은 커밋(23a9f1d)에서 호출부가 지워졌다 — 증분 머지가
+    Start의 `_ChannelRWorker`(auto-update) 안으로 들어가면서 별도 "증분 추가" 버튼이
+    없어졌다. 역시 삭제. **즉 실제로 살아서 옮겨진 워커는 5종이 아니라 3종**
+    (_RTrendWorker·_RTExportWorker·_ChannelRWorker) + _LiveStream 이다.
 - `_CH_COLORS`(팔레트)는 dialog만 사용 → ui_dialogs_r 잔류.
 - ui_dialogs_r 상단에 `from gui.r_workers import (...)` 재노출 → `ui_dialogs.py`의
   `from .ui_dialogs_r import _RTrendWorker, _ChannelRWorker`·RCalibratorDialog 내부참조 무회귀.

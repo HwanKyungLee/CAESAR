@@ -132,48 +132,6 @@ class _RTExportWorker(QThread):
         self.finished.emit("  |  ".join(done) if done else "no R(t) saved")
 
 
-class _RTAppendWorker(QThread):
-    """α용 R(t) 증분 추가 워커 — 채널별 append_rt(병렬) → 기존 npz에 머지.
-    tasks: list of (label, raw_dir, wave_nm, RTConfig, file_list, out_path)"""
-    log      = pyqtSignal(str)
-    progress = pyqtSignal(int, int, str)
-    finished = pyqtSignal(str)
-
-    def __init__(self, tasks):
-        super().__init__()
-        self.tasks = tasks
-
-    def run(self):
-        import sys as _sys, os as _os, traceback
-        _td = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
-        if _td not in _sys.path:
-            _sys.path.insert(0, _td)
-        try:
-            import rt_precompute as RTP
-        except Exception as e:
-            self.finished.emit(f"ERROR: rt_precompute import failed: {e}")
-            return
-        done = []
-        for label, rdir, wave, cfg, flist, outp in self.tasks:
-            try:
-                self.log.emit(f"[{label}] appending incrementally…")
-                n_new, added = RTP.append_rt(
-                    outp, rdir, wave, cfg, file_list=flist, parallel=True,
-                    progress_cb=lambda d, t, _l=label: self.progress.emit(d, t, _l))
-                if n_new == 0 and added:
-                    self.log.emit(f"[{label}]  {len(added)} files processed but 0 valid knots (no He/ZA?)")
-                elif n_new == 0:
-                    self.log.emit(f"[{label}] no new files — skipped")
-                else:
-                    self.log.emit(f"[{label}]  +{n_new} knots ({len(added)} files) → {_os.path.basename(outp)}")
-                    done.append(f"{label}(+{n_new})")
-            except Exception as e:
-                self.log.emit(f"[{label}]  failed: {e}\n{traceback.format_exc()}")
-        self.finished.emit("  |  ".join(done) if done else "no knots added")
-
-
-
-
 class _ChannelRWorker(QThread):
     """채널별 scan_directory() 호출 — 계산 시작 버튼용.
     channel_cfgs: list of {label, raw_dir, wave_nm, rtcfg, file_list, color, npz_path}

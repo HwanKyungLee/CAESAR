@@ -155,16 +155,38 @@ except 감사(2026-09-15)는 **"예외를 삼키고 그럴듯한 값으로 갈�
 * `ui_result_viewer.py`의 export 경로 — `_export_png`는 `QMessageBox.warning`,
   `_draw_residual`은 `{"ok": False, "reason": ...}`. 둘 다 이미 보고한다. 손댈 것 없음.
 
-**덤 — 죽은 코드 삭제**: `gui/r_workers.py`의 `_HeCheckWorker`(32줄)와 그 유일한
+**덤 — 죽은 코드 삭제**: `gui/r_workers.py`의 `_HeCheckWorker`(32줄)·`_RTAppendWorker`(42줄)와 `_HeCheckWorker`의 유일한
 소비자 `tools/rt_precompute.check_new_files`(23줄). 이력을 따라가 보니 **기능이
 없어진 게 아니라 대체된 것**이었다 — `b7071db`가 "증분 추가 전 He 사전 스캔 →
 확인 다이얼로그" 흐름을 백그라운드 워커로 넣었고, `23a9f1d`(checkpoint 커밋)가
 같은 다이얼로그를 `RTP.verify_npz` **동기 호출**로 바꾸면서 호출부와 콜백만 지우고
 클래스를 남겼다. `32d4b0b` 분리가 "원본 바이트 그대로 복사"라 죽은 줄까지 따라왔다.
 
-> 남는 의문 하나: 워커의 존재 이유가 "메인 스레드 얼음 방지"였는데 대체본은
-> 동기 호출이다. 파일이 많을 때 R Calibrator의 증분 추가 확인 단계에서 GUI가
-> 멈추는지 한 번 볼 것(별건, 감사와 무관).
+**확인 결과 — GUI 멈춤 걱정은 근거 없음(2026-09-15 측정)**
+
+"증분 추가" 버튼 자체가 없다. `23a9f1d`가 `btn_rt_append` + `_append_rt_for_alpha`
++ `_RTAppendWorker` 기동을 통째로 지우고, **증분 머지를 Start의 백그라운드 워커
+(`_ChannelRWorker`, auto-update 기본 ON) 안으로 옮겼다** — 이미 계산한 results를
+재사용하므로 재스캔 0. 즉 무거운 일은 여전히 스레드에서 돈다.
+
+메인 스레드에서 동기로 도는 건 별도 버튼인 **Verify npz**뿐인데, 이건 비싸지 않다.
+워커가 필요했던 이유는 `check_new_files`가 `_file_has_he(f)`로 **새 파일을 전부
+열어봤기** 때문이고, 대체본 `verify_npz`는 파일을 **하나도 열지 않는다**(폴더
+파일명 목록 + npz 1개 로드 + 집합 연산). 실측:
+
+| raw 파일 수 | verify_npz |
+|---|---|
+| 100 | 4.0 ms |
+| 1,000 | 5.1 ms |
+| 5,000 | 18.6 ms |
+
+파일 내용을 안 읽으므로 파일 크기와도 무관하다. 멈추지 않는다.
+
+**같은 커밋에서 나온 형제 고아 `_RTAppendWorker`(42줄)도 삭제.** 호출부 0건.
+남는 것: `rt_precompute.append_rt`(신규 파일 **재계산** 경로)가 이제 호출부 0이다.
+살아 있는 증분 경로는 `merge_results_into_npz`(Start results 재사용). append_rt는
+"raw에서 다시 계산해 증분 머지"라는 **별개 능력**이라 지우지 않고 남겨뒀다 —
+필요 없다고 판단되면 그때 지울 것.
 
 ### 감사 종료 — 안 본 것과 그 이유
 
