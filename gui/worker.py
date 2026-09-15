@@ -4,6 +4,7 @@ import numpy as np
 
 # DataIO gatekeeper call
 from core.data_io import DataIO
+from core.raw_parser import FLAG_HEADER
 
 # Core engine imports
 from scipy.linalg import lstsq as scipy_lstsq
@@ -309,7 +310,9 @@ class AnalysisWorker(QThread):
             elif is_he:
                 if he_inj is None or flag == he_inj:
                     he_i.append(idx)
-            elif flag == 0 or (self.flag_amb and flag in self.flag_amb) or \
+            # FLAG_HEADER(헤더행)도 ambient다 — T/P는 DataIO가 다음 실측행에서
+            # 끌어온다. 본체(_run)와 같은 규칙이어야 프리스캔이 본체와 안 어긋난다.
+            elif flag == FLAG_HEADER or (self.flag_amb and flag in self.flag_amb) or \
                  (not self.flag_amb and not is_za and not is_he):
                 amb_i.append(idx)
             # 그 외(미지 플래그)는 본체에서 skip continue 되므로 어디에도 안 넣음
@@ -450,8 +453,13 @@ class AnalysisWorker(QThread):
                 # Otherwise, anything not in ZA or He is treated as ambient.
                 is_za  = state_flag in self.flag_za
                 is_he  = state_flag in self.flag_he
-                # flag 0 = no flag column in file (plain 1D / alpha files) → always ambient
-                if state_flag == 0:
+                # flag 0 = LabVIEW 헤더행(파일당 1행). 스펙트럼은 실측이지만 HK가
+                # 전부 65535라 T/P가 없다 → `DataIO.load_measurement_with_hk`가
+                # **다음 실측행의 T/P를 끌어와서** 돌려준다(운용자 결정 2026-09-15).
+                # 그래서 여기서 버리지 않고 ambient로 피팅한다. 끌어왔다는 사실은
+                # 아래에서 Status에 남긴다. (비-Araon 1D 파일은 이제 FLAG_AMBIENT로
+                # 오므로 이 가지에 안 온다 — flag 0 은 오직 헤더행이다.)
+                if state_flag == FLAG_HEADER:
                     is_amb = True
                 elif self.flag_amb:
                     is_amb = state_flag in self.flag_amb
@@ -767,13 +775,22 @@ class AnalysisWorker(QThread):
                             status = "Unstable"
 
                         result['Status'] = status
+                        if state_flag == FLAG_HEADER:
+                            # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
+                            # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
+                            # 쓰면 안 되므로 행마다 표시한다.
+                            result['Status'] += " · header row (T/P borrowed from next scan)"
 
                         # Always update last_valid_shift so the step-limit window can
                         # drift even during Unstable periods.  Without this the optimizer
                         # stays locked at the same center and perpetually hits the wall.
                         # The per-scan step_limit in _setup_fit_parameters already
                         # guarantees the shift cannot jump more than step_limit px/scan.
-                        if len(opt_shifts) > 0:
+                        # 단, 헤더행은 제외한다. 이 행의 RMS는 같은 파일 중앙값의
+                        # 2.8~7.6배라(핫 22·콜드 44파일 실측) 여기서 정착한 shift를
+                        # 물려주면 그 파일 첫 실측 스캔들이 오염된 초기값에서 출발한다
+                        # (2026-08-10 NO2 인젝션에서 ±5px 경계까지 끌려간 그 현상).
+                        if len(opt_shifts) > 0 and state_flag != FLAG_HEADER:
                             last_valid_shift = opt_shifts[ 0 ]
 
                         # If OK or already retrying, exit the loop
@@ -1532,7 +1549,12 @@ def _pass2_write_file(fp, rows, ctx):
         f.write(f"# channel={ctx['channel']}  label={ctx['channel_label'] or 'single'}\n")
         f.write(f"# RL_factor={ctx['rl_factor']}  d={ctx['cavity_len']} cm\n")
         f.write(f"# I0_mode={ctx['i0_mode']}  ZA_count={ctx['n_za']}\n")
-        f.write("# T_P_PROVENANCE: measured_raw_housekeeping\n")
+        # flag=0 헤더행은 HK 28열이 전부 65535라 T/P가 없다. 버리지 않고 **다음
+        # 실측행의 T/P를 차용**해 계산한다(운용자 결정 2026-09-15). 이 알파를
+        # 나중에 읽는 사람이 그 사실을 모르면 안 되므로 파일 자체에 남긴다.
+        f.write("# T_P_PROVENANCE: measured_raw_housekeeping"
+                " (flag=0 LabVIEW header row: T/P borrowed from the next measured"
+                " scan — see core/data_io.py load_measurement_with_hk)\n")
         # 이 알파가 **어떤 raw 구성**에서 나왔나(B안 — 선택은 데이터가, 기록은 여기서).
         # ⚠ 알파 생성은 RawParser가 아니라 DataIO의 동적 채널탐지를 쓴다. 그래서 레지스트리
         # 이름은 "그 열 수를 우리가 뭐라 부르는가"의 **참조**일 뿐, 파싱에 쓴 표가 아니다 —
@@ -1845,21 +1867,28 @@ class AlphaExportWorker(QThread):
         # 따라서 분류/스풀/R수집 로직은 한 글자도 이동하지 않는다(무회귀 보장).
         def _process_scan(fp, row_idx, intensity_raw, state_flag, env_t, env_p, gidx):
             nonlocal n_default_tp, _amb_spool_n, amb_count, done_scans
-            # flag=0 은 헤더/파일-시작 마커(raw_parser.FLAG_HEADER)로, 파일당 딱 1행뿐인
-            # 비측정 행이다(스펙트럼이 65535 sentinel로 포화돼 있고 HK도 없음). 예전엔
-            # is_amb 판정에서 무조건 ambient로 잡아 알파 첫 스캔이 이 쓰레기 행이 되고,
-            # 거기서 시작한 Shift가 이후 스캔들을 ±5px 경계까지 끌고 가는 원인이었다
-            # (2026-08-10 NO2 인젝션 재현으로 발견). 측정이 아니므로 세 분류 어디에도
-            # 넣지 않고 건너뛴다.
-            if state_flag == 0:
-                return
+            # flag=0 은 LabVIEW 헤더행(raw_parser.FLAG_HEADER)으로 파일당 딱 1행이다.
+            #
+            # 2026-08-10에는 여기서 **건너뛰었다**. 당시 근거는 "스펙트럼이 65535
+            # sentinel로 포화돼 있다"였는데 **그건 틀렸다** — 여수 실측으로 확인하면
+            # 헤더행 스펙트럼은 바로 다음 실측행과 corr=1.0000, median ratio 0.98~1.005라
+            # 실측행끼리의 편차와 구별되지 않는다. 진짜 없는 건 HK(28열 전부 65535)뿐이고,
+            # 그건 이제 `DataIO.load_measurement_with_hk`가 다음 실측행에서 끌어온다.
+            # 그래서 **버리지 않는다**(운용자 결정 2026-09-15, 무결성 헌장 "지우지 말고 flag").
+            # 끌어왔다는 사실은 알파 파일의 `# T_P_PROVENANCE` 줄에 남는다.
+            # 당시 건너뛰기가 막아준 Shift 오염은 원인 지점(`_run`의 last_valid_shift
+            # 갱신)에서 직접 막았으므로 여기서 버릴 이유가 없어졌다.
+            #
             # HK 미복구 폴백 감지: 실측 P는 raw_count×0.6895라 정확히 1013.25가 될 수
             # 없으므로 env_p==1013.25는 'HK 읽기 실패→기본값' 신호. 가시화용 카운트.
+            # (헤더행은 차용에 성공하면 실측값이 오므로 여기 안 걸린다 — 걸리면
+            #  차용까지 실패한 것이라 그 자체가 봐야 할 신호다.)
             if env_p == 1013.25:
                 n_default_tp += 1
             is_za  = state_flag in self.flag_za
             is_he  = state_flag in self.flag_he
-            is_amb = ((self.flag_amb and state_flag in self.flag_amb) or
+            is_amb = (state_flag == FLAG_HEADER or
+                      (self.flag_amb and state_flag in self.flag_amb) or
                       (not self.flag_amb and not is_za and not is_he))
             # 단순 수집만(R/I0는 Pass1 후 블록평균). 단일스캔 noise 커서 그대로 안 씀.
             if is_he:

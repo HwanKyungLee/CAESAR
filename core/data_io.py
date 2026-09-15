@@ -16,6 +16,8 @@ from .raw_parser import (
     P_VALID_LO as _RP_P_LO,
     P_VALID_HI as _RP_P_HI,
     CAMPAIGN_LAYOUTS as _CAMPAIGN_LAYOUTS,
+    FLAG_HEADER,
+    FLAG_AMBIENT,
 )
 
 
@@ -51,6 +53,10 @@ class DataIO:
     # n-row files.  The cache stores the entire file as a list[np.ndarray] keyed
     # by (filepath, mtime).  Stays in memory only for the most-recently-used file
     # (LRU-1) so a folder of many files doesn't exhaust RAM.
+    # 헤더행 T/P를 끌어올 때 앞쪽으로 몇 행까지 볼지. 헤더행은 파일당 1행이라
+    # 보통 +1 에서 끝난다 — 여유는 재시작으로 헤더가 연달아 찍히는 경우 대비.
+    _HK_BORROW_LOOKAHEAD = 5
+
     _row_cache: dict = {}   # { (path, mtime): [row0_arr, row1_arr, ...] }
     _cached_key: tuple | None = None  # key of the currently cached file
 
@@ -503,7 +509,7 @@ class DataIO:
         헤더 위치로 T_C/P_mbar/alpha 컬럼을 판정(타임스탬프 doy/datetime 컬럼 대응).
         Pads the alpha array to 2048 pixels (zeros outside the exported range)
         so the caller's pixel_min/pixel_max slicing works.
-        Returns (pixel_idx, intensity_raw, state_flag=1, env_t, env_p).
+        Returns (pixel_idx, intensity_raw, state_flag=FLAG_AMBIENT, env_t, env_p).
         """
         first_px, t_idx, p_idx, px_start, _wave = DataIO._alpha_layout(filepath)
         data_rows = []
@@ -543,7 +549,7 @@ class DataIO:
         intensity_raw = full_alpha[p_min:p_max]
         pixel_idx = np.arange(p_min, p_max)
 
-        return pixel_idx, intensity_raw, 1, env_t, env_p
+        return pixel_idx, intensity_raw, FLAG_AMBIENT, env_t, env_p
 
     @staticmethod
     def load_alpha_trace_row_full(filepath, row_index):
@@ -683,7 +689,7 @@ class DataIO:
 
     @staticmethod
     def load_measurement_with_hk(filepath, pixel_min=0, pixel_max=None,
-                                 row_index=0, channel=1):
+                                 row_index=0, channel=1, _borrow_hk=True):
         """
         Extracts spectrum + housekeeping scalars from the Araon Raw .dat format.
 
@@ -723,8 +729,11 @@ class DataIO:
             # 값이 그럴듯한지로 열을 찾지 않기 위한 단일 진입점.
             _lay = _CAMPAIGN_LAYOUTS.get(len(raw_probe))
 
-            # Safe defaults in case housekeeping columns are missing
-            state_flag = 0
+            # Safe defaults in case housekeeping columns are missing.
+            # flag는 Araon 분기에서 raw col4로 덮어쓰고, 비-Araon 1D 분기는
+            # 아래에서 FLAG_AMBIENT로 확정한다 — 여기 0은 두 분기 모두 살아남지
+            # 않는다(살아남으면 FLAG_HEADER와 구별이 안 된다).
+            state_flag = FLAG_HEADER
             env_t = 25.0
             env_p = 1013.25
 
@@ -863,6 +872,13 @@ class DataIO:
                         env_t = float(tv) / 100.0
             else:
                 # ── Regular 1D file (one value per line, e.g. alpha trace) ──
+                # flag 컬럼이 **없는** 파일이다. 예전엔 기본값 0이 그대로 나가서
+                # `flag=0`이 "LabVIEW 헤더행"과 "flag 컬럼 없음" 두 뜻으로 겹쳤고,
+                # 그래서 같은 raw가 경로마다 다르게 처리됐다(_run은 ambient로 피팅,
+                # AlphaExportWorker._process_scan은 skip). 여기서 ambient로 확정해
+                # `flag=0`을 **오직 헤더행**으로 남긴다 — 알파 경로가 이미 하던 것과 동일
+                # (보고서 docs/기초파싱_전수검증_2026-09-15.md §4-E).
+                state_flag = FLAG_AMBIENT
                 # Re-read the whole file to get all rows, not just the target row.
                 df_full = pd.read_csv(filepath, sep=r'\s+', header=None, dtype=str)
                 raw_data = pd.to_numeric(df_full.values.flatten(), errors='coerce')
@@ -881,6 +897,33 @@ class DataIO:
 
             intensity_raw = intensity_clean[p_min:p_max]
             pixel_idx = np.arange(p_min, p_max)
+
+            # ── 헤더행(FLAG_HEADER)의 T/P를 이웃 실측행에서 끌어온다 ────────────
+            # LabVIEW는 파일 첫 행에 flag=0 을 쓰면서 **HK 28열을 전부 65535(값없음)**
+            # 로 남긴다. 그래서 위 로직이 T/P를 못 찾고 기본값 25.0 °C / 1013.25 mbar
+            # 로 떨어지는데, 이건 계기가 잰 값이 아니라 코드가 만든 상수다. 그 상수로
+            # 계산한 n_air 는 실측 대비 0.2 %(콜드) ~ 3.7 %(핫) 어긋나고, 그 행의
+            # α·ppb 가 **아무 표시 없이** 다른 스캔과 같은 표에 섞인다.
+            #
+            # 인접 행의 T/P 실측 변화는 |ΔT| median 0.0000 °C · |ΔP| median 0.0000 mbar
+            # (핫·콜드 각 59행 실측)이라, 약 1~2 초 뒤 행의 값을 쓰면 오차가 사실상 0이다.
+            # 그래서 **버리지 않고 끌어온다**(운용자 결정 2026-09-15, 무결성 헌장).
+            #
+            # 끌어왔다는 사실은 반환값에 따로 안 싣는다 — `state_flag == FLAG_HEADER`
+            # 자체가 그 표식이다(비-Araon 1D 분기가 FLAG_AMBIENT를 돌려주게 바뀐 뒤로
+            # flag=0 은 **오직 헤더행**을 뜻한다). 소비자는 그 조건으로 출처를 적으면 된다.
+            # ponytail: 앞으로만 본다(헤더행은 파일 맨 앞 1행이므로). 파일 끝에도
+            #   HK 결손이 생기면 뒤로도 보게 할 것.
+            if _borrow_hk and state_flag == FLAG_HEADER:
+                for nxt in range(row_index + 1, row_index + 1 + DataIO._HK_BORROW_LOOKAHEAD):
+                    try:
+                        _, _, f2, t2, p2 = DataIO.load_measurement_with_hk(
+                            filepath, 0, 1, row_index=nxt, channel=channel, _borrow_hk=False)
+                    except Exception:               # noqa: BLE001
+                        break
+                    if f2 != FLAG_HEADER:
+                        env_t, env_p = t2, p2
+                        break
 
             return pixel_idx, intensity_raw, state_flag, env_t, env_p
 
