@@ -33,14 +33,33 @@ except Exception:
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG — 네 환경 경로 (없는 파일은 자동 SKIP)
 # ─────────────────────────────────────────────────────────────────────────────
+def _first_existing(*cands):
+    """후보 경로 중 실제로 있는 첫 번째(없으면 첫 후보를 그대로 — 그래야 SKIP 메시지에
+    찾던 경로가 남는다). 한 기계 경로를 박아두면 **다른 기계에선 영영 SKIP**이라
+    검증이 조용히 사라진다 — 실제로 raw 대조·ILS 대조 2건이 그렇게 잠들어 있었다
+    (2026-09-15). 새 기계/캠페인은 여기 후보를 한 줄 추가하면 된다."""
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return cands[0] if cands else ""
+
+
 DROPBOX = r"C:\Users\holle\ATMOS Dropbox\HJ BC\ATMOS\(mission)2026_yeosu\CAESAR Raw"
 OUT     = r"C:\Doasis_Work\Output"
 
-RAW_DAT = os.path.join(DROPBOX, r"CAESAR_Hot\2026-05\2026-05-18-001.dat")
-RAW_MAT = os.path.join(DROPBOX, r"CAESAR_Hot\2026-05\2026-05-18-001.mat")
+# raw .dat/.mat — 기계마다 위치가 다르다(Dropbox 원본 / E: 외장 / 로컬 사본).
+_RAW_DIRS = [os.path.join(DROPBOX, r"CAESAR_Hot\2026-05"),
+             r"E:\Yeosu_2026\CAESAR_Hot\2026-05"]
+RAW_DAT = _first_existing(*[os.path.join(d, "2026-05-18-001.dat") for d in _RAW_DIRS])
+RAW_MAT = _first_existing(*[os.path.join(d, "2026-05-18-001.mat") for d in _RAW_DIRS])
+
 WAVECAL = os.path.join(OUT, r"wv_cal\cold\Calib_20260523_Hg_4line_400-497nm_Poly2.txt")
 ILS_REF = os.path.join(OUT, r"wv_cal\cold\Ref_NO2_Dynamic-ILS-Applied.dat")
-RAW_XS  = r"C:\Doasis_Work\reference_raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt"
+# 원본 단면적은 **저장소 안에 있다** — 기계 경로를 먼저 보면 대부분 기계에서 SKIP 된다.
+RAW_XS  = _first_existing(
+    os.path.join(ROOT, "reference_data", "raw",
+                 "NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt"),
+    r"C:\Doasis_Work\reference_raw\NO2_Vandaele(2002)_294K_384-725nm(vis-dilut5).txt")
 R_NPZ   = os.path.join(OUT, r"R\R_cold.npz")
 # 일별 버킷 구조({config}/{YYMMDD}/{neg}/{QC}) — 2* 패턴이라 _archive/_derived는 안 걸림.
 # config 폴더명은 사용자 실측 콜드 핏창(438.4-475.8nm, §13-B)과 일치하는 걸 고정.
