@@ -59,6 +59,14 @@ jobs:
       - name: Etalon collinearity unit tests
         run: python tools/test_etalon_collinearity.py
 
+      # raw 레이아웃 판정 + HK 열 지도 (합성 raw 행, 데이터 불필요).
+      # 방금 머지된 브랜치가 들고 온 건데 ci.yml에는 안 들어와 있었다.
+      # raw_layout 쪽은 "헤더행에 속아 데이터행을 통째로 버리던" 버그의 회귀 가드다.
+      - name: Raw layout / HK lookup unit tests
+        run: |
+          python tools/test_raw_layout.py
+          python tools/test_hk_lookup.py
+
       # VarPro 선형/자코비안 불변식 (합성 레퍼런스, 데이터 불필요)
       # - make_interp_spline == interp1d 비트동일: scipy 업그레이드로 깨지면
       #   engine의 도함수가 핏의 보간기와 달라져 자코비안이 조용히 틀린다
