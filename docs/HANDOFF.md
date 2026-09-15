@@ -6,6 +6,58 @@
 
 ---
 
+## 2026-09-15 — 광범위 except 감사 (core 78건) · 침묵 대체 7곳 제거
+
+**다시 훑지 말 것.** core/의 `except Exception`/bare 78건을 AST로 전수 분류했다
+(`gui` 243건 · `oculus` 6건은 손 안 댐 — oculus는 원래 깨끗하다).
+판정 기준 하나: **예외를 삼킨 결과가 "숫자" 또는 "데이터 있음/없음"으로 하류에
+나가는가.** 로그·캐시·포맷 탐지처럼 나가지 않는 것은 그대로 뒀다.
+
+고친 것 (`397bf2a` `282e468` `4d1e3b7`)
+
+| 어디 | 삼키고 뭘 넣었나 | 왜 위험했나 |
+|---|---|---|
+| `doas_fit.setup_fit_parameters` ×5 | Center→0±3px, Limit→±3px, Fix→0, sq Limit→±0.01, sq Fix→1.0 | 결과 헤더엔 **선언한** 세팅이 기록 → 기록과 실제가 어긋난 채 런 종료 |
+| `fit_optimizer.fit_window` | 같은 ±3.0 (여섯 번째 사본) | 그 창으로 `shift_at_bound` 판정 → 세팅 기각/채택이 뒤집힘 |
+| `doas_fit.execute_varpro_fit` | 공분산 실패 시 `perr=0` | `<gas>_Error=0`, `MDL=0`, `perr_rel=0`(=최적) — 과적합에 상 주는 형태 |
+| `data_io.read_scans_via_dataio` | 전 행 실패를 `([], [])` | R 트렌드 로그에 "ZA scans=0"으로 찍혀 **계기 문제로 오해** |
+| `data_io.scans_worker_for_parallel` | 실패를 `([], [])` | 위와 같은 혼동. 이제 `(None, None)` |
+| `data_io.extract_raw_file_for_parallel` | 파일 펼치기 실패를 `n=0` | 호출부의 "SKIP(parse)" 경로가 죽어 있었다 |
+| `fit_physics.fitted_amount_health` | 핏 실패 스캔 `continue` | T2 판정이 조용히 줄어든 표본 위에 섬. `n_requested`/`n_failed` 추가 |
+
+덤: `raw_parser.autoload_campaign_layouts`의 "프로파일 건너뜀"이 verbose일 때만
+보이던 것을 항상 stderr로. 레이아웃 등록 실패 = HK 열 지도 없이 파싱 = T/P 기본값 대체.
+
+회귀 잠금: `tools/test_silent_fallback_guard.py` **34 PASS**. pytest가 자동 수집한다.
+
+**안 고친 것과 이유** (다음 세션이 다시 열어보지 않도록)
+
+* `session_log` ×5 — 로그 tee. 로깅이 앱을 죽이면 안 된다. 의도된 best-effort.
+* `alpha_cache` ×2 — 캐시 실패 시 다음 런이 재파싱(docstring에 명시).
+* `data_io` 포맷 탐지 ×8(`is_araon_mega_matrix`·`_is_alpha_trace_format`·
+  `_alpha_layout`·`count_scan_rows`·스캔수 캐시) — 탐지 실패는 "이 포맷 아님"이
+  맞는 의미. 뒤이은 행 로드가 실패하면 `RAW_LOAD_FAIL`로 flag된다.
+* `fit_explorer`·`health_checks`·`engine.add_reference`·`fitset_builder.validate_fitset`
+  — 이미 **모범 패턴**이다. 실패를 값/상태로 반환한다
+  (`{"state": "UNAVAILABLE", "reason": ..., "exception_class": ...}`, `problems.append`,
+  `(False, "Error loading ...")`). 새로 쓰는 코드는 이걸 따라 할 것.
+* `provenance._git` → None (git 없는 환경), `run_meta.layout_from_input` →
+  `{"ncols": n}` (프로바넌스 degrade지만 임포트가 실패할 일이 실무상 없음).
+
+**남은 2순위 2건** (고칠 만하지만 이번 범위 밖 — 판단이 필요하다)
+
+1. `data_io.parse_row_timestamp` — bytepack 실패 시 **파일 mtime으로 폴백**.
+   docstring에 명시된 의도지만, `r_trend_monitor`가 "mtime은 복사 시각이라
+   불확실"하다고 이미 bytepack으로 갈아탄 전력이 있다. 시각은 프로바넌스라
+   조용한 대체가 특히 나쁘다 — 폴백을 없앨지/표시할지는 계기 담당자 판단.
+2. `window_designer.residual_rho` — 전 스캔 lstsq 실패 시 `0.0`(=자기상관 없음)
+   반환. 설계 휴리스틱이라 보고되는 숫자는 아니지만 낙관적 기본값이다.
+
+`gui/` 243건은 손대지 않았다. 대부분 위젯 갱신·포맷 방어라 등급이 다르지만,
+`gui/worker.py`(핏 루프)는 core와 같은 등급이므로 따로 볼 가치가 있다.
+
+---
+
 ## 2026-09-15 — `gui/app_window.py` 분해: 6418 → 1431줄
 
 **메서드가 이사했다. `gui/app_window.py`만 grep하면 이제 못 찾는다.**
