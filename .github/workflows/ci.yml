@@ -70,6 +70,12 @@ jobs:
       - name: Pass2 parallel-vs-sequential byte-exact test
         run: python tools/test_pass2_parallel.py
 
+      # 메인창(CAESARAnalyzer) offscreen 생성 + 분해 앵커.
+      # app_window.py를 믹스인으로 쪼개는 동안 메서드/위젯 유실과 믹스인 이름
+      # 충돌을 잡는다 — 둘 다 임포트 스모크는 통과하고 버튼 누를 때만 터진다.
+      - name: app_window smoke (offscreen)
+        run: python tools/test_app_window_smoke.py
+
       # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
       - name: validate_plotmaker
         run: python tools/validate_plotmaker.py
