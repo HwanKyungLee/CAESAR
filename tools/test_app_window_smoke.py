@@ -14,7 +14,12 @@ GUI 테스트가 0인 상태에서 app_window.py를 쪼개는 건 저장소에�
 추가는 통과시키고 유실만 잡는다(subset). 의도적으로 메서드를 지웠다면 아래 목록에서도
 지워라 — 그게 "이건 정말 없애는 게 맞나"를 한 번 더 보게 만드는 유일한 지점이다.
 """
+import ast
+import builtins
+import glob
+import importlib
 import os
+import symtable
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -90,6 +95,39 @@ INSTANCE_ATTRS = """
 MAIN_TABS = ['Setup', 'Analysis Monitor', 'Result Lab', 'Plot Maker']
 
 
+def _unresolved_globals(path):
+    """모듈 안에서 전역으로 찾는 이름 중 어디에도 안 묶인 것.
+
+    분해하다 임포트를 빠뜨리거나 별칭을 흘리면(실제로 났다: core.paths의
+    campaign_dir as _campaign_dir가 별칭 없이 옮겨갔다) 임포트는 멀쩡히 되고
+    그 메서드를 부르는 순간에만 NameError가 난다. 표면 골든으로는 절대 안 잡힌다.
+    symtable로 함수 스코프마다 '전역 조회' 이름을 뽑아 모듈 전역과 대조한다.
+    메서드 안 지역 임포트는 지역 심볼이라 자동으로 제외된다.
+    """
+    src = open(path, encoding="utf-8").read()
+    bound = {sym.get_name() for sym in symtable.symtable(src, path, "exec").get_symbols()}
+    for node in ast.walk(ast.parse(src)):        # star 임포트가 있으면 그쪽 이름도 인정
+        if isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names):
+            mod = importlib.import_module("gui." + (node.module or ""))
+            bound |= set(dir(mod))
+
+    bad = []
+
+    def walk(tbl, scope):
+        for sym in tbl.get_symbols():
+            name = sym.get_name()
+            if (sym.is_global() and not sym.is_assigned()
+                    and name not in bound and not hasattr(builtins, name)
+                    and not name.startswith("__")):
+                bad.append(f"{scope}: {name}")
+        for child in tbl.get_children():
+            walk(child, f"{scope}.{child.get_name()}")
+
+    for child in symtable.symtable(src, path, "exec").get_children():
+        walk(child, child.get_name())
+    return bad
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     from gui.app_window import CAESARAnalyzer
@@ -120,6 +158,15 @@ def main():
         if len(owners) > 1:
             dupes[name] = owners
     assert not dupes, f"믹스인 이름 충돌 — MRO에서 하나가 조용히 진다: {dupes}"
+
+    # 5. 임포트 유실/별칭 유실 — 메서드를 안 돌려도 정적으로 잡힌다
+    unresolved = {}
+    for path in sorted(glob.glob(os.path.join(os.path.dirname(__file__),
+                                              "..", "gui", "app_window*.py"))):
+        bad = _unresolved_globals(path)
+        if bad:
+            unresolved[os.path.basename(path)] = bad
+    assert not unresolved, f"전역에서 못 찾는 이름 (임포트 유실): {unresolved}"
 
     win.close()
     print(f"OK  widgets={n_widgets}  class_attrs={len(CLASS_ATTRS)}  "
