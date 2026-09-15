@@ -614,7 +614,22 @@ class DoasFitter:
                 break
 
         resid_w = y_w - A_f_w @ c_opt
-        mse = np.mean(resid_w ** 2)
+        # σ̂² 는 **불편추정자 RSS/(n−p)** 다. 예전엔 `np.mean(resid_w**2)` = RSS/n
+        # (최대우도, 편향)이라 `<gas>_Error` 와 `MDL = 3×Error` 가 √(n/(n−p)) 배만큼
+        # **작게** 나왔다 — 여수 ANs 창(n≈667·p≈10) 기준 약 0.8 %. 크기는 작지만
+        # **계통**이고, 오차를 작게 보고하는 쪽이라 방향이 위험하다(실제보다 정밀하다고
+        # 주장하게 되고 MDL도 같이 내려간다). 코드가 Chi2용으로 이미 dof를 계산하면서
+        # 여기서만 안 쓰고 있었다(`gui/worker.py`).
+        #
+        # p = 활성 **비선형**(VarPro로 프로파일된 선형해를 포함해 자유도를 쓴다) +
+        #     **선형 열 전부**(가스·poly·custom_basis·etalon). `A_f_w.shape[1]`로 세면
+        #     custom_basis(Ring·고정패턴)를 켜도 자동으로 맞는다 — worker의 Chi2용
+        #     `n_params` 공식은 custom_basis를 못 세므로 켜는 날 여기와 갈린다.
+        # ⚠ λ>0이면 수축 때문에 **유효** 자유도가 p보다 작다(정확히는 n−trace(H)).
+        #   실사용이 λ=0이라 표준 근사인 p를 쓴다.
+        _n_fit = len(resid_w)
+        _p_fit = len(theta0) + A_f_w.shape[1]
+        mse = float(resid_w @ resid_w) / max(_n_fit - _p_fit, 1)
         try:
             # 공분산은 **핏이 실제로 푼 계**의 정규방정식에서 나와야 한다.
             # 예전엔 세 군데가 핏과 어긋나 있었다(λ=0이라 드러나지 않았을 뿐):
