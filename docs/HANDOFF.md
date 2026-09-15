@@ -28,7 +28,7 @@
 덤: `raw_parser.autoload_campaign_layouts`의 "프로파일 건너뜀"이 verbose일 때만
 보이던 것을 항상 stderr로. 레이아웃 등록 실패 = HK 열 지도 없이 파싱 = T/P 기본값 대체.
 
-회귀 잠금: `tools/test_silent_fallback_guard.py` **34 PASS**. pytest가 자동 수집한다.
+회귀 잠금: `tools/test_silent_fallback_guard.py` **38 PASS**. pytest가 자동 수집한다.
 
 **안 고친 것과 이유** (다음 세션이 다시 열어보지 않도록)
 
@@ -44,14 +44,25 @@
 * `provenance._git` → None (git 없는 환경), `run_meta.layout_from_input` →
   `{"ncols": n}` (프로바넌스 degrade지만 임포트가 실패할 일이 실무상 없음).
 
-**남은 2순위 2건** (고칠 만하지만 이번 범위 밖 — 판단이 필요하다)
+**2순위 2건도 정리함** (계기 담당자 확인 후)
 
-1. `data_io.parse_row_timestamp` — bytepack 실패 시 **파일 mtime으로 폴백**.
-   docstring에 명시된 의도지만, `r_trend_monitor`가 "mtime은 복사 시각이라
-   불확실"하다고 이미 bytepack으로 갈아탄 전력이 있다. 시각은 프로바넌스라
-   조용한 대체가 특히 나쁘다 — 폴백을 없앨지/표시할지는 계기 담당자 판단.
-2. `window_designer.residual_rho` — 전 스캔 lstsq 실패 시 `0.0`(=자기상관 없음)
-   반환. 설계 휴리스틱이라 보고되는 숫자는 아니지만 낙관적 기본값이다.
+1. `data_io.parse_row_timestamp` — **mtime 폴백 제거**. 원래 의도는 "초기에
+   bytepack 디코드가 가끔 이상해서, raw를 재저장만 안 하면 mtime = 측정 완료
+   시각"이라는 차선책이었다(담당자 확인). 그 전제는 파일을 복사·이동하는 순간
+   깨지고, 깨져도 **그럴듯한 시각**이 나와서 아무도 모른다. 그리고 전제였던
+   "디코드가 가끔 이상하다"가 이제 성립하지 않는다 — 전수검증에서 파일명 날짜 vs
+   bytepack **2065/2065 일치**, 행간격 97 cs 전 파일 동일. 원인이던 레이아웃
+   오판도 같은 날 고쳐졌다. 이제 못 읽으면 None + stderr 경고(파일당 1회),
+   Time 칸은 `row NNNN`.
+2. `window_designer.residual_rho` — 전 스캔 lstsq 실패 시 `0.0` → **RuntimeError**.
+   하필 0.0이 이 함수 docstring이 경고하는 바로 그 값이었다("ρ≈0이면 유효자유도
+   보정이 무력화되고 '넓을수록 좋다' 편향이 되살아난다"). 하류
+   `n_eff = n_pix(1-ρ)/(1+ρ)`가 n_pix로 부풀어 F검정 자유도가 커지고, 후보 종이
+   우연한 개선만으로 채택된다. 옆의 `model_adequacy()`는 같은 상황에서
+   `inf`(=모델 불충분)로 **보수적으로** 실패한다 — 그쪽에 맞췄다.
+   일부만 실패하면 몇/몇인지 stderr로 알리고 남은 표본으로 추정한다.
+   (`estimate_shift`의 `continue`는 그대로 뒀다 — 실패 시 shift 0은 중립값이고
+   설계 입력일 뿐이다.)
 
 `gui/` 243건은 손대지 않았다. 대부분 위젯 갱신·포맷 방어라 등급이 다르지만,
 `gui/worker.py`(핏 루프)는 core와 같은 등급이므로 따로 볼 가치가 있다.

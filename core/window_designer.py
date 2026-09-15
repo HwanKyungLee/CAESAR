@@ -30,6 +30,7 @@
 """
 from __future__ import annotations
 
+import sys
 import numpy as np
 from numpy.polynomial import chebyshev
 from scipy.ndimage import uniform_filter1d
@@ -50,16 +51,33 @@ def residual_rho(eng, alphas, species, px_min, px_max, poly_deg, etalon_freq=0.3
     A, _ = design_matrix(eng, species, px_min, px_max, poly_deg, etalon_freq, shift=sh)
     sl = slice(px_min, px_max + 1)
     rs = []
+    n_fail = 0
     for a in np.asarray(alphas, float):
         y = a[sl]
         try:
             c, *_ = np.linalg.lstsq(A, y, rcond=None)
         except Exception:
+            n_fail += 1
             continue
         r = y - A @ c
         rc = r - r.mean()
         rs.append(float(np.dot(rc[:-1], rc[1:]) / (np.dot(rc, rc) + 1e-30)))
-    return float(np.clip(np.median(rs), 0.0, 0.98)) if rs else 0.0
+    if not rs:
+        # 예전엔 0.0을 돌려줬다. 0.0은 이 함수의 docstring이 바로 위에서 경고하는
+        # 값이다 — "ρ≈0이면 유효자유도 보정이 무력화되고 '넓을수록 좋다' 편향이
+        # 되살아난다". 즉 측정 실패의 기본값이 하필 **가장 관대한 값**이었다.
+        # 하류에서 n_eff = n_pix*(1-ρ)/(1+ρ) = n_pix 가 되어 F검정 자유도가
+        # 부풀고, 후보 종이 우연한 개선만으로 채택된다.
+        # 옆의 model_adequacy()는 같은 상황에서 inf(=모델 불충분)를 돌려준다.
+        # 보수적으로 실패하는 게 이 모듈의 규칙이므로 여기서는 멈춘다.
+        raise RuntimeError(
+            f"residual_rho: {n_fail}개 스캔 전부 lstsq 실패 — 자기상관을 잴 수 없다. "
+            f"설계행렬/알파가 성립하는지 확인할 것(0.0으로 계속하면 유효자유도 "
+            f"보정이 조용히 꺼진다)")
+    if n_fail:
+        print(f"[window_designer] residual_rho: {n_fail}/{n_fail + len(rs)} 스캔 "
+              f"lstsq 실패 — 남은 {len(rs)}개로 ρ 추정", file=sys.stderr)
+    return float(np.clip(np.median(rs), 0.0, 0.98))
 
 
 def estimate_noise(alphas, smooth_px=15, local_px=25):

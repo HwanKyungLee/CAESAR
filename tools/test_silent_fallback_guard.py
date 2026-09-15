@@ -206,13 +206,49 @@ def test_optimizer_shares_the_same_parser():
     check("파서 단일 출처", fo.policy_floats is policy_floats)
 
 
+def test_timestamp_has_no_mtime_fallback():
+    """시각을 못 읽으면 None. mtime(=복사하면 조용히 틀리는 값)으로 때우지 않는다."""
+    from core.data_io import DataIO
+    import inspect
+    src = inspect.getsource(DataIO.parse_row_timestamp)
+    check("mtime 폴백 없음", "getmtime" not in src, src[-200:])
+
+    # 날짜 없는 이름 + 읽을 수 없는 파일 → None (예외도, 가짜 시각도 아니다)
+    ts = DataIO.parse_row_timestamp("C:/__augur_no_such_dir__/undated.dat", 0)
+    check("읽을 수 없으면 None", ts is None, ts)
+
+
+def test_residual_rho_does_not_default_to_zero():
+    """ρ를 못 재면 멈춘다. 0.0은 '넓을수록 좋다' 편향을 되살리는 가장 관대한 값이다."""
+    import core.window_designer as wd
+    import inspect
+    src = inspect.getsource(wd.residual_rho)
+    check("0.0 기본값 없음", "else 0.0" not in src)
+
+    eng = vj.make_engine()
+    orig = np.linalg.lstsq
+    np.linalg.lstsq = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("lstsq 실패 주입"))
+    try:
+        wd.residual_rho(eng, [np.zeros(vj.N_PIX)], [eng.gas_list[0]], 100, 300, 3)
+        ok = False
+    except RuntimeError as e:
+        ok = "자기상관" in str(e)
+    except Exception:
+        ok = False
+    finally:
+        np.linalg.lstsq = orig
+    check("전 스캔 실패 → RuntimeError", ok)
+
+
 def main():
     for fn in (test_broken_policy_raises, test_valid_policy_unchanged,
                test_validate_fitset_catches_fix,
                test_covariance_failure_gives_nan_not_zero,
                test_unreadable_file_is_not_no_scans,
                test_health_reports_dropped_scans,
-               test_optimizer_shares_the_same_parser):
+               test_optimizer_shares_the_same_parser,
+               test_timestamp_has_no_mtime_fallback,
+               test_residual_rho_does_not_default_to_zero):
         fn()
     print(f"silent fallback guard: {PASS} PASS · {FAIL} FAIL")
     return 1 if FAIL else 0

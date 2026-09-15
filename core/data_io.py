@@ -879,12 +879,30 @@ class DataIO:
         m = DataIO._DATE_RE.search(os.path.basename(filepath))
         return int(m.group(1)) if m else None
 
+    _TS_WARNED = set()          # 파일당 한 번만 경고(행마다 호출된다)
+
     @staticmethod
     def parse_row_timestamp(filepath, row_index=0):
         """Araon row의 (col0,col1) bytepack → naive datetime (박사님 doy와 동일, 타임존 변환 없음).
 
         연도는 파일명 YYYY-MM-DD 에서 취한다(bytepack은 연초 기준이라 연도 필요).
-        파일명에 날짜가 없거나 실패하면 파일 수정시각으로 폴백.
+        읽지 못하면 **None**. 호출부(worker)는 Time 칸에 "row NNNN"을 적는다.
+
+        2026-09-15 — 파일 수정시각(mtime) 폴백을 없앴다
+        ------------------------------------------------
+        초기에는 bytepack 디코드가 가끔 이상한 시각을 뱉어서, "raw를 다시 저장만
+        안 하면 mtime = 측정 완료 시각"이라는 성질을 차선책으로 썼다. 그 전제는
+        파일을 복사·이동·재저장하는 순간 조용히 깨지고(복사 시각이 찍힌다),
+        깨져도 **그럴듯한 시각**이 나오기 때문에 아무도 모른다 — 시각은
+        프로바넌스라 조용히 틀리면 제일 비싸다.
+
+        그 차선책의 전제였던 "디코드가 가끔 이상하다"는 이제 성립하지 않는다.
+        전수검증(2026-09-15, 2065파일/7,538,129행)에서 파일명 날짜 vs bytepack
+        디코드가 **2065/2065 일치**, 행간격 중앙값 97 cs가 전 파일·파일경계까지
+        동일했다(`docs/기초파싱_전수검증_2026-09-15.md`). 원인이던 레이아웃
+        오판(헤더가 데이터보다 넓을 때 데이터행을 통째로 버리던 건)도 같은 날
+        고쳐졌다. 그래서 이제 폴백이 뜨면 그건 **뉴스**이고, 조용히 mtime으로
+        때우는 대신 시끄럽게 알려야 한다.
         """
         try:
             raw = DataIO._read_row_raw(filepath, row_index)
@@ -892,12 +910,16 @@ class DataIO:
             if len(raw) >= 2 and year:
                 sec = DataIO._bytepack_year_seconds(raw[0], raw[1])
                 return datetime(year, 1, 1) + timedelta(seconds=sec)
-        except Exception:
-            pass
-        try:
-            return datetime.fromtimestamp(os.path.getmtime(filepath))
-        except Exception:
-            return None
+            reason = ("파일명에 YYYY-MM-DD 없음" if not year
+                      else f"행 컬럼 수 부족({len(raw)})")
+        except Exception as e:
+            reason = f"{type(e).__name__}: {e}"
+        if filepath not in DataIO._TS_WARNED:
+            DataIO._TS_WARNED.add(filepath)
+            print(f"[data_io] ⚠ 스캔 시각을 읽지 못했다 — {os.path.basename(filepath)}: "
+                  f"{reason}. mtime 폴백은 2026-09-15에 제거됐다(복사하면 조용히 "
+                  f"틀리므로). Time 칸은 'row NNNN'으로 남는다.", file=sys.stderr)
+        return None
 
     @staticmethod
     def parse_alpha_row_time(filepath, row_index=0):
