@@ -1,0 +1,65 @@
+{
+  "schema": "fit-explorer-batch-v1",
+  "output_root": "results_dryrun",
+  "stage": 1,
+  "date_range": [
+    "2024-02-06",
+    "2024-02-06"
+  ],
+  "mission": "ASIA_AQ_2024-02-06_provisional_input",
+  "allow_negative_gas": true,
+  "channels": [
+    {
+      "label": "asiaaq_ch1",
+      "fitset": "C:\\GHL\\CAESAR\\diagnostics\\asiaaq_operational_2026-09\\fitset\\asiaaq_2024-02-06_ch1_provisional.json",
+      "alpha_glob": "C:\\GHL\\CAESAR\\diagnostics\\asiaaq_operational_2026-09\\alpha\\asiaaq_2024-02-06_ch1_sample.dat",
+      "target_species": "NO2",
+      "fitset_channel_key": "asiaaq_ch1",
+      "candidates": [
+        {
+          "id": "zb_008d0b20546b4e3f",
+          "policy": {
+            "shift": {
+              "mode": "Limit",
+              "lower": -5.0,
+              "upper": 5.0
+            },
+            "squeeze": {
+              "mode": "Fix",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "id": "zb_01ba192d0ce42995",
+          "policy": {
+            "shift": {
+              "mode": "Limit",
+              "lower": -1.0,
+              "upper": 1.0
+            },
+            "squeeze": {
+              "mode": "Limit",
+              "lower": 0.98,
+              "upper": 1.02
+            }
+          }
+        },
+        {
+          "id": "zb_029021e4f57402c6",
+          "policy": {
+            "shift": {
+              "mode": "Fix",
+              "value": -0.5
+            },
+            "squeeze": {
+              "mode": "Limit",
+              "lower": 0.98,
+              "upper": 1.02
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

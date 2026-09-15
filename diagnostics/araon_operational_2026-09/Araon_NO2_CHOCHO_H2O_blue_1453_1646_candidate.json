@@ -1,0 +1,81 @@
+{
+  "version": 2,
+  "active": 1,
+  "channels": {
+    "1": {
+      "wl_path": "C:\\GHL\\LGH\\아라온호 데이터분석\\wavelength\\wv_2025_Araon.txt",
+      "refs": [
+        {
+          "name": "CHOCHO",
+          "path": "C:\\GHL\\LGH\\아라온호 데이터분석\\refrence\\chocho_meas_spectrum_blue_240716.dat",
+          "mult": 0
+        },
+        {
+          "name": "H2O",
+          "path": "C:\\GHL\\LGH\\아라온호 데이터분석\\refrence\\h2o_meas_spectrum_blue_240711.dat",
+          "mult": -12
+        },
+        {
+          "name": "NO2",
+          "path": "C:\\GHL\\LGH\\아라온호 데이터분석\\refrence\\no2_meas_spectrum_blue_240511.dat",
+          "mult": 0
+        }
+      ],
+      "data_label": "araon_ch1",
+      "time_shift_h": 0.0,
+      "gas_temp": 0.0,
+      "f_min": 1453,
+      "f_max": 1646,
+      "fit_start_nm": 444.963646245758,
+      "fit_end_nm": 465.029698252285,
+      "fit_unit": "nm",
+      "poly_deg": 4,
+      "step_limit": 0.5,
+      "ref_props": {
+        "NO2": {
+          "sh_mode": "Limit",
+          "sh_val": "-10.0, 10.0",
+          "sq_mode": "Limit",
+          "sq_val": "-0.02, 0.02",
+          "t_ref": 25.0,
+          "t_coeff": 0.0,
+          "active_bands_nm": ""
+        },
+        "CHOCHO": {
+          "sh_mode": "Link",
+          "sh_val": "NO2",
+          "sq_mode": "Link",
+          "sq_val": "NO2",
+          "t_ref": 25.0,
+          "t_coeff": 0.0,
+          "active_bands_nm": ""
+        },
+        "H2O": {
+          "sh_mode": "Link",
+          "sh_val": "NO2",
+          "sq_mode": "Link",
+          "sq_val": "NO2",
+          "t_ref": 25.0,
+          "t_coeff": 0.0,
+          "active_bands_nm": ""
+        }
+      },
+      "tikhonov_lambda": 0.0,
+      "use_robust": false,
+      "kalman_q": 0.0005,
+      "kalman_r": 0.05,
+      "cavity_d": 51.8,
+      "rl_factor": 1.0,
+      "allow_negative_gas": true,
+      "reference_policy": {
+        "mode": "EXPLICIT_FITSET_ORDER",
+        "excluded_species": [
+          "O4"
+        ],
+        "reason": "Araon supplied blue window 444.96-465.03 nm has no validated O4 anchor; O4 is excluded pending a window-specific identifiable-band check.",
+        "evidence": "inferred from supplied reference set and window; not a T2 claim",
+        "t2_o4_state": "UNAVAILABLE"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "schema":"fit-explorer-batch-v1", "output_root":"closure_widest_stage1_results", "stage":1,
+  "date_range":["2025-06-10","2025-06-12"], "mission":"Araon_2025_blue_NO2_closure_widest", "allow_negative_gas":true,
+  "channels":[{"label":"araon_ch1_widest", "fitset":"C:\\GHL\\CAESAR\\diagnostics\\araon_operational_2026-09\\Araon_NO2_CHOCHO_H2O_blue_1453_1646_candidate.json", "alpha_glob":"C:\\GHL\\LGH\\아라온호 데이터분석\\alpha_trace\\ch1_2025*\\*.dat", "target_species":"NO2", "fitset_channel_key":"1", "exclude_alpha_basenames":["ch1_20250610_000001.dat","ch1_20250610_000002.dat","ch1_20250610_000003.dat"], "candidates":[
+    {"id":"zb_98dbda06f41a3f46","policy":{"shift":{"mode":"Limit","lower":-5.0,"upper":5.0},"squeeze":{"mode":"Limit","lower":0.98,"upper":1.02}}}
+  ]}]
+}

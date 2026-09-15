@@ -51,19 +51,33 @@ cache/
 /build/
 /dist/
 
-# Local investigation artifacts and generated external-data evidence.
-# Keep the reproducible tools and hash-pinned contracts in source control, not
-# raw spectra, rendered figures, or per-run fit caches.
+# 운영 조사(diagnostics/*_2026-*) 폴더 — 원자료·중간산물·그림은 제외하되,
+# **그걸 만든 코드와 세팅은 추적한다**. 논문 Table/Figure를 만든 스크립트가
+# 저장소에 없으면 "재현 가능"이 성립하지 않는다(리뷰 지적 2026-09-15).
+# 원자료(raw/alpha/QDOAS 출력)는 비공개 확정 — 데이터 요청 경로는 각 폴더 README에.
 /Claude outputs/
 /tmp/
-/diagnostics/araon_operational_2026-09/
-/diagnostics/asiaaq_operational_2026-09/
-/diagnostics/doasis_crossval_2026-09/
-/diagnostics/fit_explorer_v2_operational_2026-09/
-/diagnostics/injection_alpha_2026-08/
-/diagnostics/qdoas_crossval_2026-09/
-/diagnostics/seosan_operational_2026-09/
+/diagnostics/araon_operational_2026-09/**
+/diagnostics/asiaaq_operational_2026-09/**
+/diagnostics/doasis_crossval_2026-09/**
+/diagnostics/fit_explorer_v2_operational_2026-09/**
+/diagnostics/injection_alpha_2026-08/**
+/diagnostics/qdoas_crossval_2026-09/**
+/diagnostics/seosan_operational_2026-09/**
 /diagnostics/varpro_speed_2026-09/results_*.json
-/diagnostics/yeosu_acceptance_2026-09/
-/diagnostics/yeosu_profile_2026-09/
-/diagnostics/yeosu_reprovenanced_alpha_2026-09/
+/diagnostics/yeosu_acceptance_2026-09/**
+/diagnostics/yeosu_profile_2026-09/**
+/diagnostics/yeosu_reprovenanced_alpha_2026-09/**
+
+# …단, 폴더 최상위의 코드·문서·외부도구 설정·소형 요약표는 되살린다.
+# (QDOAS 프로젝트 설정 html/xml은 외부 교차검증을 남이 재현하려면 필수)
+!/diagnostics/*/*.py
+!/diagnostics/*/*.md
+!/diagnostics/*/*.html
+!/diagnostics/*/*.xml
+!/diagnostics/*/*_summary.csv
+!/diagnostics/*/Calib_*.txt
+!/diagnostics/*/*_config.json
+!/diagnostics/*/*_manifest.json
+!/diagnostics/*/*_candidate.json
+!/diagnostics/*/*_inventory_*.json

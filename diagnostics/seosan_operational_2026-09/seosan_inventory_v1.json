@@ -1,0 +1,613 @@
+{
+  "root": "E:\\old\\Seosan\\2020Seosan",
+  "files": {
+    "E:\\old\\Seosan\\2020Seosan\\data\\Alpha\\2020-11-23_ave.mat": {
+      "bytes": 512763003,
+      "sha256": "b3906683712efdc9106a90d25cf5213a37086fda1c7a4b25bdf246b2121e3b71"
+    },
+    "E:\\old\\Seosan\\2020Seosan\\data\\He.mat": {
+      "bytes": 7641631,
+      "sha256": "e411ead536f17839a926c3cabf7329b190c302ca5217225494d6f1997937ff85"
+    },
+    "E:\\old\\Seosan\\2020Seosan\\data\\He2.mat": {
+      "bytes": 9666502,
+      "sha256": "a107f019f4b6d4720a0e7b58205bad7b8540baffdd3c57badab27a8e5e08cf8e"
+    },
+    "E:\\old\\DOASIS_Blue\\ref_spectra\\chocho_original.txt": {
+      "bytes": 5248180,
+      "sha256": "efc6af9e9120b5b4661814dfceec5a864ec34578d54094cd9a8ab441021e2535"
+    },
+    "E:\\old\\DOASIS_Blue\\ref_spectra\\H2O_original.txt": {
+      "bytes": 737280,
+      "sha256": "a39e46cb9686fa018fa65378bca8b29f14d50ac7162714804d0329ae918b6455"
+    },
+    "E:\\old\\DOASIS_Blue\\ref_spectra\\no2_original.txt": {
+      "bytes": 9310443,
+      "sha256": "9a5d1550fc939f063dfd8f1d775801ec3a4a71ac86f312bacbe50485a4b82e76"
+    },
+    "E:\\old\\DOASIS_Blue\\ref_spectra\\o4_original.txt": {
+      "bytes": 257,
+      "sha256": "5e9b4c3b5eea2416d10b9f3b4e577f0790272badd19c660809a196dbe0d57f6a"
+    }
+  },
+  "mat": {
+    "2020-11-23_ave.mat": {
+      "alpha_abs1": {
+        "shape": [
+          16736,
+          2048
+        ],
+        "dtype": "float64"
+      },
+      "alpha_abs2": {
+        "shape": [
+          16736,
+          2048
+        ],
+        "dtype": "float64"
+      },
+      "doy": {
+        "shape": [
+          1687
+        ],
+        "dtype": "float64"
+      },
+      "doy_R": {
+        "shape": [
+          3
+        ],
+        "dtype": "float64"
+      },
+      "doy_z": {
+        "shape": [
+          3
+        ],
+        "dtype": "float64"
+      },
+      "flag_avg": {
+        "shape": [
+          16736
+        ],
+        "dtype": "float64"
+      },
+      "rho_avg1": {
+        "shape": [
+          16736
+        ],
+        "dtype": "float64"
+      },
+      "rho_avg2": {
+        "shape": [
+          16736
+        ],
+        "dtype": "float64"
+      },
+      "std_t": {
+        "shape": [
+          16736
+        ],
+        "dtype": "float64"
+      }
+    },
+    "He.mat": {
+      "ch1": {
+        "shape": [
+          1630,
+          2048
+        ],
+        "dtype": "uint16"
+      },
+      "ch2": {
+        "shape": [
+          1630,
+          2048
+        ],
+        "dtype": "uint16"
+      },
+      "doy": {
+        "shape": [
+          1630
+        ],
+        "dtype": "float64"
+      },
+      "exposure": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint16"
+      },
+      "he_st_temp": {
+        "shape": [
+          105
+        ],
+        "dtype": "uint8"
+      },
+      "ihe_st_temp": {
+        "shape": [
+          96
+        ],
+        "dtype": "uint8"
+      },
+      "iza_st_temp": {
+        "shape": [
+          221
+        ],
+        "dtype": "uint16"
+      },
+      "presscell1": {
+        "shape": [
+          1630
+        ],
+        "dtype": "float64"
+      },
+      "presscell1Copy": {
+        "shape": [
+          1689
+        ],
+        "dtype": "uint16"
+      },
+      "presscell1_o": {
+        "shape": [
+          1630
+        ],
+        "dtype": "float64"
+      },
+      "presscell2": {
+        "shape": [
+          1630
+        ],
+        "dtype": "float64"
+      },
+      "presscell2Copy": {
+        "shape": [
+          1689
+        ],
+        "dtype": "float64"
+      },
+      "presscell2_o": {
+        "shape": [
+          1630
+        ],
+        "dtype": "float64"
+      },
+      "presscell_sampling1": {
+        "shape": [
+          2922
+        ],
+        "dtype": "float64"
+      },
+      "presscell_sampling2": {
+        "shape": [
+          2922
+        ],
+        "dtype": "float64"
+      },
+      "ratio_he_sampling1": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "ratio_he_sampling2": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "ratio_za_sampling1": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "ratio_za_sampling2": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "tempccd": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint8"
+      },
+      "tempcell1": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint16"
+      },
+      "tempcell2": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint16"
+      },
+      "templed1": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint16"
+      },
+      "templed2": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint16"
+      },
+      "tempoptbx": {
+        "shape": [
+          1630
+        ],
+        "dtype": "uint16"
+      }
+    },
+    "He2.mat": {
+      "ch1": {
+        "shape": [
+          1958,
+          2048
+        ],
+        "dtype": "uint16"
+      },
+      "ch2": {
+        "shape": [
+          1958,
+          2048
+        ],
+        "dtype": "uint16"
+      },
+      "doy": {
+        "shape": [
+          1958
+        ],
+        "dtype": "float64"
+      },
+      "exposure": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      },
+      "ihe_st_temp": {
+        "shape": [
+          95
+        ],
+        "dtype": "uint16"
+      },
+      "iza_st_temp": {
+        "shape": [
+          323
+        ],
+        "dtype": "uint16"
+      },
+      "presscell1": {
+        "shape": [
+          1958
+        ],
+        "dtype": "float64"
+      },
+      "presscell1Copy": {
+        "shape": [
+          5061
+        ],
+        "dtype": "uint16"
+      },
+      "presscell1_o": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      },
+      "presscell2": {
+        "shape": [
+          1958
+        ],
+        "dtype": "float64"
+      },
+      "presscell2Copy": {
+        "shape": [
+          5061
+        ],
+        "dtype": "float64"
+      },
+      "presscell2_o": {
+        "shape": [
+          1958
+        ],
+        "dtype": "float64"
+      },
+      "presscell_sampling1": {
+        "shape": [
+          2922
+        ],
+        "dtype": "float64"
+      },
+      "presscell_sampling2": {
+        "shape": [
+          2922
+        ],
+        "dtype": "float64"
+      },
+      "ratio_he_sampling1": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "ratio_he_sampling2": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "ratio_za_sampling1": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "ratio_za_sampling2": {
+        "shape": [
+          500
+        ],
+        "dtype": "float64"
+      },
+      "tempccd": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint8"
+      },
+      "tempcell1": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      },
+      "tempcell2": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      },
+      "templed1": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      },
+      "templed2": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      },
+      "tempoptbx": {
+        "shape": [
+          1958
+        ],
+        "dtype": "uint16"
+      }
+    }
+  },
+  "references": {
+    "chocho_original.txt": {
+      "shape": [
+        276138,
+        2
+      ],
+      "first": [
+        [
+          250.031,
+          1.677e-20
+        ],
+        [
+          250.032,
+          1.684e-20
+        ],
+        [
+          250.033,
+          1.693e-20
+        ]
+      ],
+      "last": [
+        [
+          526.166,
+          3.008e-23
+        ],
+        [
+          526.167,
+          -7.665e-23
+        ],
+        [
+          526.168,
+          1.999e-23
+        ]
+      ]
+    },
+    "H2O_original.txt": {
+      "shape": [
+        16384,
+        2
+      ],
+      "first": [
+        [
+          440.01,
+          0.0
+        ],
+        [
+          440.02,
+          0.0
+        ],
+        [
+          440.03,
+          0.0
+        ]
+      ],
+      "last": [
+        [
+          603.82,
+          6.377631e-234
+        ],
+        [
+          603.83,
+          6.378872e-234
+        ],
+        [
+          603.84,
+          6.380114e-234
+        ]
+      ]
+    },
+    "no2_original.txt": {
+      "shape": [
+        404769,
+        2
+      ],
+      "first": [
+        [
+          384.61576,
+          6.15265e-19
+        ],
+        [
+          384.6162,
+          6.18702e-19
+        ],
+        [
+          384.61663,
+          5.04399e-19
+        ]
+      ],
+      "last": [
+        [
+          724.63394,
+          1.84868e-21
+        ],
+        [
+          724.63553,
+          1.28781e-21
+        ],
+        [
+          724.63712,
+          1.41106e-22
+        ]
+      ]
+    },
+    "o4_original.txt": {
+      "error": "ValueError"
+    }
+  },
+  "scenarios": {
+    "newfitscenario_455nm_ch3.fs": {
+      "bytes": 123488,
+      "embedded_paths": [
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t",
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t\u0012"
+      ],
+      "has_shift_squeeze": true,
+      "tokens": [
+        "StartLambda",
+        "MaxLambda",
+        "MinLambda",
+        "FitRange",
+        "PolyOrder",
+        "XC_NO2_cm2"
+      ]
+    },
+    "newfitscenario_440nm_ch1.fs": {
+      "bytes": 123488,
+      "embedded_paths": [
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t",
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t\u0012"
+      ],
+      "has_shift_squeeze": true,
+      "tokens": [
+        "StartLambda",
+        "MaxLambda",
+        "MinLambda",
+        "FitRange",
+        "PolyOrder",
+        "XC_NO2_cm2"
+      ]
+    },
+    "newfitscenario_440nm_ch2.fs": {
+      "bytes": 123675,
+      "embedded_paths": [
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t",
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t\u0012"
+      ],
+      "has_shift_squeeze": true,
+      "tokens": [
+        "StartLambda",
+        "MaxLambda",
+        "MinLambda",
+        "FitRange",
+        "PolyOrder",
+        "XC_NO2_cm2"
+      ]
+    },
+    "newfitscenario_440nm_v1.fs": {
+      "bytes": 123479,
+      "embedded_paths": [
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t",
+        "E:\\DOASIS_Blue\\ref_spectra\\blue\\ch3\\XC_NO2_cm2.txt\t\u0012"
+      ],
+      "has_shift_squeeze": true,
+      "tokens": [
+        "StartLambda",
+        "MaxLambda",
+        "MinLambda",
+        "FitRange",
+        "PolyOrder",
+        "XC_NO2_cm2"
+      ]
+    }
+  },
+  "wavelength_equation": "Wv[nm]=(0.048844+/-0.00023788)xPixel+(404.0361+/-0.090034)",
+  "sample_stats": {
+    "std_t": {
+      "shape": [
+        16736
+      ],
+      "min": 328.0055173611111,
+      "max": 329.0019708333333
+    },
+    "rho_avg1": {
+      "shape": [
+        16736
+      ],
+      "min": 1.729467293005577e+19,
+      "max": 2.626683723572628e+19
+    },
+    "rho_avg2": {
+      "shape": [
+        16736
+      ],
+      "min": 1.7433272681285024e+19,
+      "max": 3.1511077991622287e+19
+    },
+    "alpha_abs1": {
+      "shape": [
+        16736,
+        2048
+      ],
+      "min": -0.032788750134558974,
+      "max": 0.03498034941868626
+    },
+    "alpha_abs2": {
+      "shape": [
+        16736,
+        2048
+      ],
+      "min": -0.008741470534703576,
+      "max": 0.028406936897737906
+    }
+  },
+  "wavelength_nm": {
+    "start": 404.0361,
+    "end": 504.019768,
+    "step": 0.048844
+  }
+}

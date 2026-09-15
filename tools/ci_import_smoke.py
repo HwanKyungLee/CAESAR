@@ -55,6 +55,8 @@ EXCLUDE = {
     "tools/weekly_reports/plot_tof_weekly.py": "주간 리포트 스크립트 — 최상위에서 데이터 로드",
     "tools/weekly_reports/plot_caesar_weekly.py": "주간 리포트 스크립트 — 최상위에서 데이터 로드",
     "tools/explain_ans_correction.py": "일회성 설명용 그림 스크립트 — 최상위에서 데이터 로드",
+    "diagnostics/qdoas_crossval_2026-09/compare_hot_ans_negshift.py":
+        "QDOAS 교차검증 최종판 — __main__ 가드 없이 최상위 실행(원자료 필요, 저장소에 없음)",
     "tools/plot_ans_clean.py": "발표/제출용 그림 스크립트 — 최상위에서 데이터 로드",
 }
 

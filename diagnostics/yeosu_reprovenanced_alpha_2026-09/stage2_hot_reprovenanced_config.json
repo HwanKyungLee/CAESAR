@@ -1,0 +1,36 @@
+{
+  "schema": "fit-explorer-batch-v1",
+  "mission": "Yeosu_hot_reprovenanced_alpha",
+  "stage": 2,
+  "date_range": ["2026-05-26", "2026-06-09"],
+  "allow_negative_gas": true,
+  "output_root": "stage2_results",
+  "channels": [
+    {
+      "label": "ANs",
+      "fitset": "../yeosu_profile_2026-09/yeosu_hot_runtime_fitset.json",
+      "fitset_channel_key": "1",
+      "alpha_glob": "ANs/*/*.dat",
+      "sample_manifest": "stage2_ans_sampling_source.json",
+      "target_species": "NO2",
+      "candidates": [
+        {"id": "zb_bfe42886d564e943", "policy": {"shift": {"mode": "Limit", "lower": -10.0, "upper": 0.5}, "squeeze": {"mode": "Limit", "lower": 0.995, "upper": 1.005}}},
+        {"id": "zb_88d01a5fa3b900f3", "policy": {"shift": {"mode": "Limit", "lower": -3.5, "upper": 1.5}, "squeeze": {"mode": "Limit", "lower": 0.995, "upper": 1.005}}},
+        {"id": "zb_f9b35db6e762a766", "policy": {"shift": {"mode": "Limit", "lower": -5.0, "upper": 5.0}, "squeeze": {"mode": "Limit", "lower": 0.995, "upper": 1.005}}}
+      ]
+    },
+    {
+      "label": "PNs",
+      "fitset": "../yeosu_profile_2026-09/yeosu_hot_runtime_fitset.json",
+      "fitset_channel_key": "2",
+      "alpha_glob": "PNs/*/*.dat",
+      "sample_manifest": "stage2_pns_sampling_source.json",
+      "target_species": "NO2",
+      "candidates": [
+        {"id": "zb_727763bfb53eff60", "policy": {"shift": {"mode": "Limit", "lower": -10.0, "upper": 0.5}, "squeeze": {"mode": "Limit", "lower": 0.995, "upper": 1.005}}},
+        {"id": "zb_fa1c2781afb2dcc1", "policy": {"shift": {"mode": "Limit", "lower": -3.5, "upper": 1.5}, "squeeze": {"mode": "Limit", "lower": 0.995, "upper": 1.005}}},
+        {"id": "zb_aa323d023a3a0257", "policy": {"shift": {"mode": "Limit", "lower": -5.0, "upper": 5.0}, "squeeze": {"mode": "Limit", "lower": 0.995, "upper": 1.005}}}
+      ]
+    }
+  ]
+}

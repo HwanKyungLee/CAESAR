@@ -73,3 +73,11 @@ jobs:
       # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
       - name: validate_plotmaker
         run: python tools/validate_plotmaker.py
+
+      # 논문 통계 모듈 자체검증 (합성 데이터, 데이터 불필요).
+      # 두 모듈은 저장소 안에 호출자가 거의 없어(외부 대조 스크립트 1개뿐) 조용히
+      # 썩기 쉽다 — asserts가 OLS 감쇠 vs Deming 회복, 미정량 항 개수를 고정한다.
+      - name: Agreement / error-budget self-checks
+        run: |
+          python core/agreement.py
+          python core/error_budget.py

@@ -1,0 +1,188 @@
+{
+  "sampling": {
+    "contract": "stage2-date-distributed-rows-v1",
+    "requested_scans": 12,
+    "eligible_rows": 4966,
+    "selected_zero_based_indices": [
+      0,
+      436,
+      873,
+      874,
+      1563,
+      2252,
+      2253,
+      2934,
+      3616,
+      3617,
+      4291,
+      4965
+    ],
+    "date_range": [
+      "2025-06-10",
+      "2025-06-13"
+    ],
+    "expected_channel": "CH1",
+    "channel_source": "alpha_header_label",
+    "minimum_distinct_dates": 4,
+    "eligible_per_date": {
+      "2025-06-10": 874,
+      "2025-06-11": 1379,
+      "2025-06-12": 1364,
+      "2025-06-13": 1349
+    },
+    "selected_per_date": {
+      "2025-06-10": 3,
+      "2025-06-11": 3,
+      "2025-06-12": 3,
+      "2025-06-13": 3
+    },
+    "state_stratification": "NOT_AVAILABLE_NOT_STRATIFIED",
+    "independence_note": "Rows within one file/date are repeated observations, not independent date replicates",
+    "samples": [
+      {
+        "id": "2025-06-10-001_CH1_alpha_trace.dat#sha256=66857c6c1e93#row=0",
+        "file": "2025-06-10-001_CH1_alpha_trace.dat",
+        "sha256": "66857c6c1e93ed5bff2e63eeb2c01315aebd984af9896736f96057ec91c11d4d",
+        "row_index": 0,
+        "date": "2025-06-10",
+        "timestamp": "2025-06-10 07:54:43.492000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-10 07:54:43.492000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-10-009_CH1_alpha_trace.dat#sha256=b5144e644422#row=55",
+        "file": "2025-06-10-009_CH1_alpha_trace.dat",
+        "sha256": "b5144e64442243a4dccc9f9c80dc855bf032f294ff63942d247a689f469fe22b",
+        "row_index": 55,
+        "date": "2025-06-10",
+        "timestamp": "2025-06-10 16:34:00.226000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-10 16:34:00.226000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-10-017_CH1_alpha_trace.dat#sha256=e78279f9a059#row=20",
+        "file": "2025-06-10-017_CH1_alpha_trace.dat",
+        "sha256": "e78279f9a059d442317392a1120060d8039b991b6582313e7e6d17498938a238",
+        "row_index": 20,
+        "date": "2025-06-10",
+        "timestamp": "2025-06-10 23:59:06.063000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-10 23:59:06.063000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-10-017_CH1_alpha_trace.dat#sha256=e78279f9a059#row=21",
+        "file": "2025-06-10-017_CH1_alpha_trace.dat",
+        "sha256": "e78279f9a059d442317392a1120060d8039b991b6582313e7e6d17498938a238",
+        "row_index": 21,
+        "date": "2025-06-11",
+        "timestamp": "2025-06-11 00:00:05.867000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-11 00:00:05.867000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-11-012_CH1_alpha_trace.dat#sha256=69c70859b3ae#row=44",
+        "file": "2025-06-11-012_CH1_alpha_trace.dat",
+        "sha256": "69c70859b3ae6306ef93c06bdb2b3288485bd86071c7a059af6eb66c0ef0f182",
+        "row_index": 44,
+        "date": "2025-06-11",
+        "timestamp": "2025-06-11 12:18:19.390000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-11 12:18:19.390000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-11-024_CH1_alpha_trace.dat#sha256=7838c8fb8222#row=25",
+        "file": "2025-06-11-024_CH1_alpha_trace.dat",
+        "sha256": "7838c8fb8222b0fd3925bb5d6793fff1b4a5b653ebd0f56f03ee96d68bd79479",
+        "row_index": 25,
+        "date": "2025-06-11",
+        "timestamp": "2025-06-11 23:59:27.740000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-11 23:59:27.740000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-11-024_CH1_alpha_trace.dat#sha256=7838c8fb8222#row=26",
+        "file": "2025-06-11-024_CH1_alpha_trace.dat",
+        "sha256": "7838c8fb8222b0fd3925bb5d6793fff1b4a5b653ebd0f56f03ee96d68bd79479",
+        "row_index": 26,
+        "date": "2025-06-12",
+        "timestamp": "2025-06-12 00:00:27.542000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-12 00:00:27.542000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-12-013_CH1_alpha_trace.dat#sha256=c6fa98528424#row=50",
+        "file": "2025-06-12-013_CH1_alpha_trace.dat",
+        "sha256": "c6fa98528424ffbcf9e30941ef459c2e547a24b6b306f2977a3fc8ee412134b3",
+        "row_index": 50,
+        "date": "2025-06-12",
+        "timestamp": "2025-06-12 12:25:26.550000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-12 12:25:26.550000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-12-025_CH1_alpha_trace.dat#sha256=c537202272bb#row=25",
+        "file": "2025-06-12-025_CH1_alpha_trace.dat",
+        "sha256": "c537202272bbe28581682e5f95f4893363b98fb91e4dfaa53d93455c9ca5562f",
+        "row_index": 25,
+        "date": "2025-06-12",
+        "timestamp": "2025-06-12 23:59:09.391000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-12 23:59:09.391000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-12-025_CH1_alpha_trace.dat#sha256=c537202272bb#row=26",
+        "file": "2025-06-12-025_CH1_alpha_trace.dat",
+        "sha256": "c537202272bbe28581682e5f95f4893363b98fb91e4dfaa53d93455c9ca5562f",
+        "row_index": 26,
+        "date": "2025-06-13",
+        "timestamp": "2025-06-13 00:00:09.186000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-13 00:00:09.186000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-13-015_CH1_alpha_trace.dat#sha256=59eb1ff74de2#row=11",
+        "file": "2025-06-13-015_CH1_alpha_trace.dat",
+        "sha256": "59eb1ff74de25405c02449a431ced030fa9bef7c548618625f959e35c7d79789",
+        "row_index": 11,
+        "date": "2025-06-13",
+        "timestamp": "2025-06-13 12:44:12.223000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-13 12:44:12.223000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      },
+      {
+        "id": "2025-06-13-026_CH1_alpha_trace.dat#sha256=b1383dfd3575#row=27",
+        "file": "2025-06-13-026_CH1_alpha_trace.dat",
+        "sha256": "b1383dfd3575940c54bbd226ac15c7dd0b8bb27648621c0c3654556249a2bbc0",
+        "row_index": 27,
+        "date": "2025-06-13",
+        "timestamp": "2025-06-13 23:59:19.794000",
+        "time_source": "alpha_header_datetime",
+        "observation_key": "2025-06-13 23:59:19.794000",
+        "channel": "CH1",
+        "channel_source": "alpha_header_label"
+      }
+    ]
+  }
+}

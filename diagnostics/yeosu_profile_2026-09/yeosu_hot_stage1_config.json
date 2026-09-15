@@ -1,0 +1,10 @@
+{"schema":"fit-explorer-batch-v1","output_root":"stage1_results","stage":1,"date_range":["2026-05-26","2026-06-09"],"mission":"Yeosu_hot_NO2","allow_negative_gas":true,"channels":[
+{"label":"ANs","fitset":"yeosu_hot_runtime_fitset.json","fitset_channel_key":"1","alpha_glob":"C:\\GHL\\2026 yeosu\\Output\\alpha\\60s\\hot\\ch1\\*\\*.dat","target_species":"NO2","candidates":[
+{"id":"zb_b7257a16b912662b","policy":{"shift":{"mode":"Limit","lower":-10.0,"upper":0.5},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}},
+{"id":"zb_8add281af66b84f7","policy":{"shift":{"mode":"Limit","lower":-3.5,"upper":1.5},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}},
+{"id":"zb_1c82c8c2f69f0cd0","policy":{"shift":{"mode":"Limit","lower":-5.0,"upper":5.0},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}}]},
+{"label":"PNs","fitset":"yeosu_hot_runtime_fitset.json","fitset_channel_key":"2","alpha_glob":"C:\\GHL\\2026 yeosu\\Output\\alpha\\60s\\hot\\ch2\\*\\*.dat","target_species":"NO2","candidates":[
+{"id":"zb_7dbb62d7bd4e6246","policy":{"shift":{"mode":"Limit","lower":-10.0,"upper":0.5},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}},
+{"id":"zb_57b7f42ec35c814d","policy":{"shift":{"mode":"Limit","lower":-3.5,"upper":1.5},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}},
+{"id":"zb_6fe299938e1868cb","policy":{"shift":{"mode":"Limit","lower":-5.0,"upper":5.0},"squeeze":{"mode":"Limit","lower":0.9999,"upper":1.0001}}}]}
+]}

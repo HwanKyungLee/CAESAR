@@ -1,0 +1,13 @@
+{
+  "schema":"fit-explorer-batch-v1", "output_root":"closure_squeeze_wide_stage1_results", "stage":1, "date_range":["2025-06-10","2025-06-12"], "mission":"Araon_2025_blue_NO2_closure_wide_squeeze", "allow_negative_gas":true,
+  "channels":[{"label":"araon_ch1_wide_squeeze", "fitset":"C:\\GHL\\CAESAR\\diagnostics\\araon_operational_2026-09\\Araon_NO2_CHOCHO_H2O_blue_1453_1646_candidate.json", "alpha_glob":"C:\\GHL\\LGH\\아라온호 데이터분석\\alpha_trace\\ch1_2025*\\*.dat", "target_species":"NO2", "fitset_channel_key":"1", "exclude_alpha_basenames":["ch1_20250610_000001.dat","ch1_20250610_000002.dat","ch1_20250610_000003.dat"], "candidates":[
+    {"id":"zb_c60e563c1002e60f","policy":{"shift":{"mode":"Fix","value":-5.0},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_de50c77cc8a935cc","policy":{"shift":{"mode":"Fix","value":-2.0},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_5a522a0b0736401e","policy":{"shift":{"mode":"Fix","value":-0.5},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_53775ab8e27aad10","policy":{"shift":{"mode":"Fix","value":0.0},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_d7f630954b56dffc","policy":{"shift":{"mode":"Limit","lower":-1.0,"upper":1.0},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_2a9872a5fff52cf4","policy":{"shift":{"mode":"Limit","lower":-5.0,"upper":5.0},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_d685f5c03a85c33d","policy":{"shift":{"mode":"Limit","lower":-3.5,"upper":1.5},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}},
+    {"id":"zb_af17ab779261a0d4","policy":{"shift":{"mode":"Limit","lower":-10.0,"upper":0.5},"squeeze":{"mode":"Limit","lower":0.995,"upper":1.005}}}
+  ]}]
+}
