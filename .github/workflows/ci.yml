@@ -76,6 +76,15 @@ jobs:
       - name: app_window smoke (offscreen)
         run: python tools/test_app_window_smoke.py
 
+      # 이미 저장소에 있었지만 CI에 등록된 적 없는 위젯 계약 테스트 2개.
+      # 앞엣것은 shift 정책(Free/Limit/Fix/Link/Center) 왕복 계약, 뒤엣것은
+      # Limit->Center 변환 산식이 core/fitset_builder.py와 같은지를 고정한다.
+      # 둘 다 로컬에서만 돌던 것 — "있는데 안 도는 테스트"는 없는 것과 같다.
+      - name: GUI widget contract tests
+        run: |
+          python tools/test_ref_properties_table.py
+          python tools/test_test_fit_dialog.py
+
       # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
       - name: validate_plotmaker
         run: python tools/validate_plotmaker.py
