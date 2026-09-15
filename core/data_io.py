@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -998,10 +999,12 @@ def extract_raw_file_for_parallel(task):
     raw 카운트(정수)는 f32에 무손실 → 순차 결과와 바이트 동일.
     """
     path, pixel_min, pixel_max, channel = task
-    try:
-        n = len(DataIO.expand_to_scan_list(path))
-    except Exception:
-        n = 0
+    # 파일을 못 펼치면 **예외를 올린다**. 예전에는 n=0으로 삼켜서 "행 0개짜리
+    # 정상 파일"로 반환됐고, 호출부(gui/worker.py Pass1)는 이미 예외를 받아
+    # "SKIP(parse) <파일>: <이유>"를 띄우도록 돼 있는데 그 경로가 죽어 있었다.
+    # 행 단위 실패는 아래에서 flags[i]=RAW_LOAD_FAIL로 flag한다(지우지 않는다) —
+    # 파일 단위 실패는 flag를 걸 자리조차 없으므로 조용히 넘어가면 안 된다.
+    n = len(DataIO.expand_to_scan_list(path))
     flags = np.full(n, RAW_LOAD_FAIL, dtype=np.int64)
     Ts = np.full(n, np.nan, dtype=np.float64)
     Ps = np.full(n, np.nan, dtype=np.float64)
@@ -1053,15 +1056,37 @@ def read_scans_via_dataio(fp, channel, min_peak=1000.0):
             za.append(rec)
         elif f == 510:
             he.append(rec)
+
+    # 로드 실패한 행은 위에서 조용히 건너뛰었다. 몇 개였는지는 말해야 한다 —
+    # 안 그러면 "읽었는데 ZA/He 블록이 없다"와 "못 읽었다"가 같은 ([], [])로
+    # 나가고, R 트렌드 로그에는 "ZA scans=0 (no flag=500 rows)"로 찍힌다.
+    # 계기가 교정 블록을 안 넣은 것으로 오해하기 딱 좋은 메시지다.
+    n_fail = int(np.count_nonzero(np.asarray(flags, dtype=np.int64) == RAW_LOAD_FAIL))
+    if n_fail and n_fail == len(flags):
+        raise RuntimeError(
+            f"{os.path.basename(fp)}: {n_fail}행 전부 로드 실패 — 파일을 읽지 "
+            f"못했다('ZA/He 블록 없음'과 다르다)")
+    if n_fail:
+        print(f"[data_io] {os.path.basename(fp)}: {n_fail}/{len(flags)}행 로드 실패"
+              f"(flag={RAW_LOAD_FAIL}) — 남은 행으로 계속한다", file=sys.stderr)
     return za, he
 
 
 def scans_worker_for_parallel(task):
     """병렬 파싱 워커(모듈 최상위 — spawn 자식이 Qt 없이 임포트).
-    task=(fp, channel, min_peak) → (fp, za, he). 순수함수."""
+    task=(fp, channel, min_peak) → (fp, za, he). 순수함수.
+
+    실패하면 `(fp, None, None)`. **([], [])와 구분되어야 한다** — 전자는
+    "못 읽었다", 후자는 "읽었는데 ZA/He 블록이 없다"이고 운영자가 할 일이 다르다.
+    예전에는 둘을 같은 값으로 뭉개서, 파싱이 깨진 파일이 R 트렌드 로그에
+    "ZA scans=0 (no flag=500 rows)"로 찍혔다 — 계기가 교정 블록을 안 넣은 것으로
+    오해하기 딱 좋다. 자식 프로세스라 예외를 올리면 배치 전체가 순차로 되돌아가
+    같은 파일에서 다시 죽으므로, 값으로 신호한다."""
     fp, channel, min_peak = task
     try:
         za, he = read_scans_via_dataio(fp, channel, min_peak)
-    except Exception:
-        za, he = [], []
+    except Exception as e:
+        print(f"[data_io] raw 파싱 실패 {os.path.basename(fp)}: "
+              f"{type(e).__name__}: {e}", file=sys.stderr)
+        return fp, None, None
     return fp, za, he

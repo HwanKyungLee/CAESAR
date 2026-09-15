@@ -28,6 +28,9 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import core.fit_physics as fp                            # noqa: E402
+from core.data_io import (read_scans_via_dataio,          # noqa: E402
+                          scans_worker_for_parallel)
 from core.doas_fit import DoasFitter                      # noqa: E402
 from core.fitset_builder import validate_fitset           # noqa: E402
 from tools import test_varpro_jacobian as vj              # noqa: E402  (합성 엔진 재사용)
@@ -141,10 +144,62 @@ def test_covariance_failure_gives_nan_not_zero():
     check("농도 자체는 그대로 나온다", np.all(np.isfinite(np.asarray(bad[2], dtype=float))))
 
 
+MISSING = "C:/__augur_no_such_dir__/absent.dat"
+
+
+def test_unreadable_file_is_not_no_scans():
+    """'못 읽었다'와 'ZA/He 블록이 없다'는 다른 사건이다."""
+    try:
+        read_scans_via_dataio(MISSING, 1, 1000.0)
+        ok = False
+    except RuntimeError:
+        ok = True
+    except Exception:
+        ok = False
+    check("읽을 수 없는 파일 → RuntimeError", ok)
+
+    _fp, za, he = scans_worker_for_parallel((MISSING, 1, 1000.0))
+    check("병렬 워커는 (None, None)", za is None and he is None, (za, he))
+    check("빈 리스트로 뭉개지 않는다", not (za == [] and he == []), (za, he))
+
+
+def test_health_reports_dropped_scans():
+    """핏이 터져 빠진 스캔 수를 반환 dict가 밝히는가."""
+    eng = vj.make_engine()
+    fitter = DoasFitter(eng)
+    props = vj.ref_props(eng.gas_list)
+    scans = [(None, None, 25.0, 1013.25) for _ in range(5)]
+
+    calls = {"n": 0}
+    real_coeffs = {g: 0.1 for g in eng.gas_list}
+
+    def fake_fit_scan(*a, **k):
+        calls["n"] += 1
+        if calls["n"] % 2 == 0:               # 5개 중 2개(2번째·4번째) 실패
+            raise RuntimeError("핏 실패 주입")
+        return {"coeffs": dict(real_coeffs)}
+
+    orig = fp.fit_scan
+    fp.fit_scan = fake_fit_scan
+    try:
+        out = fp.fitted_amount_health(scans, eng, fitter, props, 0, 100, 3, 0.5,
+                                      allow_negative_gas=True)
+    finally:
+        fp.fit_scan = orig
+
+    check("n_requested = 넣어준 수", out.get("n_requested") == 5, out.get("n_requested"))
+    check("n_failed = 터진 수", out.get("n_failed") == 2, out.get("n_failed"))
+    check("n = 실제 쓰인 수", out.get("n") == 3, out.get("n"))
+    check("표본 손실이 dict에 드러난다",
+          out.get("n") + out.get("n_failed") == out.get("n_requested"), out)
+
+
 def main():
     for fn in (test_broken_policy_raises, test_valid_policy_unchanged,
                test_validate_fitset_catches_fix,
-               test_covariance_failure_gives_nan_not_zero):
+               test_covariance_failure_gives_nan_not_zero,
+               test_unreadable_file_is_not_no_scans,
+               test_health_reports_dropped_scans):
         fn()
     print(f"silent fallback guard: {PASS} PASS · {FAIL} FAIL")
     return 1 if FAIL else 0

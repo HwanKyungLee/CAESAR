@@ -310,8 +310,22 @@ def scan_directory(directory: str, wave_nm, file_list=None,
 
     for fp in files:
         fname = os.path.basename(fp)
-        za, he = (_parsed.get(fp, ([], [])) if _parsed is not None
-                  else _rsd(fp, _dio_ch, 1000.0))
+        # (None, None) = 파싱 실패, ([], []) = 읽었는데 블록이 없음. 둘은 다르다
+        # — 예전엔 실패도 빈 리스트로 와서 아래 "ZA scans=0"으로 찍혔고, 운영자가
+        # 계기가 교정 블록을 안 넣은 것으로 오해하기 좋았다.
+        if _parsed is not None:
+            za, he = _parsed.get(fp, (None, None))
+        else:
+            try:
+                za, he = _rsd(fp, _dio_ch, 1000.0)
+            except Exception as _e:        # 병렬 경로와 같은 신호로 맞춘다
+                print(f"  [{fname}] ❌ raw 파싱 실패: {type(_e).__name__}: {_e}")
+                za = he = None
+        if za is None:
+            print(f"  [{fname}] ❌ 파싱 실패로 제외 — 'ZA scans=0'과는 다르다"
+                  f"(계기가 아니라 파일/파서 문제)")
+            fail += 1
+            continue
 
         # ── 타임스탬프: bytepack 실제 스캔시각(박사님 doy와 동일) → KST 정규화 ──
         # col0(상위)+col1(하위)을 합친 bytepack centisecond. 채널 tz(Cold=UTC/Hot=KST)

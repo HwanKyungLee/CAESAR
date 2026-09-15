@@ -149,6 +149,7 @@ bytepack spacing is reliable (~0.97 s/row) — see ``ParsedRow.bytepack_sec``.
 """
 from __future__ import annotations
 
+import sys
 import os
 import struct
 from dataclasses import dataclass, field
@@ -512,8 +513,13 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
                 print(f"[raw_parser] 캠페인 레이아웃 등록: {os.path.basename(path)} "
                       f"(ncols={ncols}, 채널={list(out[-1].channels)})")
         except Exception as e:                   # noqa: BLE001
-            if verbose:
-                print(f"[raw_parser] 프로파일 건너뜀 ({os.path.basename(path)}): {e}")
+            # verbose와 무관하게 알린다. 캠페인 프로파일이 조용히 등록 안 되면
+            # 그 ncols는 구조적 폴백으로 떨어지고, HK 열 지도가 없는 채로 파싱된다
+            # (= T/P가 기본값으로 대체될 수 있다). 레이아웃은 이 파일이 단일
+            # 출처이므로, 등록 실패는 stderr로라도 반드시 보여야 한다.
+            print(f"[raw_parser] ⚠ 캠페인 프로파일 등록 실패 — 건너뜀 "
+                  f"({os.path.basename(path)}): {type(e).__name__}: {e}",
+                  file=sys.stderr)
     return out
 
 

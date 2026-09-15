@@ -120,12 +120,18 @@ def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg
     series = {g: [] for g in eng.gas_list}
     abs_ratio_s = {g: [] for g in eng.gas_list}   # fitted N / 이론 상한(아는 종만)
     tgt = []
+    n_failed = 0                          # 핏이 터져 표본에서 빠진 스캔 수
     for (wave, alpha, T_C, P_mbar) in scans:
         try:
             r = fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                          px_min, px_max, poly_deg, step_limit, target,
                          allow_negative_gas=allow_negative_gas)
         except Exception:                 # noqa: BLE001
+            # 떨어진 스캔은 **세어서 반환한다**. CV·상관은 살아남은 표본으로만
+            # 계산되는데, 몇 개가 빠졌는지 안 알려주면 T2(물리 건전성) 판정이
+            # 조용히 줄어든 표본 위에 서게 된다 — 과필터링이 부족한 필터링보다
+            # 위험하다는 헌장 1번이 정확히 이 경우다.
+            n_failed += 1
             continue
         for g in eng.gas_list:
             c = r["coeffs"].get(g, np.nan)
@@ -158,7 +164,10 @@ def fitted_amount_health(scans, eng, fitter, ref_props, px_min, px_max, poly_deg
     # 절대량 비율(이론 상한 대비) — 아는 종만. >1이면 물리적으로 불가능한 양.
     abs_ratio = {g: float(np.median(v)) for g, v in abs_ratio_s.items() if v}
     return dict(cv=cv, corr_with_target=corr, target_cv=target_cv,
-                constant_flag=constant_flag, abs_ratio=abs_ratio, n=int(len(tgt)))
+                constant_flag=constant_flag, abs_ratio=abs_ratio,
+                n=int(len(tgt)),                       # 실제로 쓰인 스캔 수
+                n_requested=int(len(scans)),           # 넣어준 스캔 수
+                n_failed=int(n_failed))                # 핏 실패로 빠진 수
 
 
 # ──────────────────────────────────────────────────────────────────────────
