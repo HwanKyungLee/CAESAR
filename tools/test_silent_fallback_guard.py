@@ -278,6 +278,32 @@ def test_rt_degradation_is_announced():
     check("페어 스킵을 알린다", "미달로 제외됨" in src)
 
 
+def test_analysis_worker_can_report_failure():
+    """병렬 핏 실패가 화면까지 간다. 예전엔 print만 하고 finished()를 인자 없이 쐈다."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    from gui.worker import AnalysisWorker
+    QApplication.instance() or QApplication([])
+
+    check("AnalysisWorker에 status_msg 시그널이 있다", hasattr(AnalysisWorker, "status_msg"))
+
+    w = AnalysisWorker(_StubEngine(["NO2"]), [], 0, 10, [0.0], None, 1)
+    got = []
+    w.status_msg.connect(got.append)
+    w.status_msg.emit("테스트 메시지")
+    check("emit → 슬롯 도달", got == ["테스트 메시지"], got)
+
+    import inspect
+    import gui.worker as gw
+    src = inspect.getsource(gw)
+    check("병렬 핏 전체 실패를 알린다", "ERROR: 병렬 핏 실패" in src)
+    check("청크 실패를 알린다", "청크 핏 실패" in src)
+
+    import gui.app_window_run as awr
+    check("app_window_run이 status_msg를 연결한다",
+          "w.status_msg.connect(" in inspect.getsource(awr))
+
+
 def main():
     for fn in (test_broken_policy_raises, test_valid_policy_unchanged,
                test_validate_fitset_catches_fix,
@@ -288,7 +314,8 @@ def main():
                test_timestamp_has_no_mtime_fallback,
                test_residual_rho_does_not_default_to_zero,
                test_pass2_spool_failure_is_not_zero_rows,
-               test_rt_degradation_is_announced):
+               test_rt_degradation_is_announced,
+               test_analysis_worker_can_report_failure):
         fn()
     print(f"silent fallback guard: {PASS} PASS · {FAIL} FAIL")
     return 1 if FAIL else 0

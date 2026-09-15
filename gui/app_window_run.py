@@ -399,6 +399,10 @@ class AnalysisRunMixin:
             w.result_ready.connect(self.update_table)
             w.plot_update.connect(self.monitor.update_spectrum)
             w.trend_update.connect(self.monitor.update_trend)
+            # 실패를 상태바에 — AlphaExportWorker와 같은 규약(app_window_inputs 참고).
+            w.status_msg.connect(
+                lambda m, _ch=ch: (print(f"[Analysis CH{_ch}] {m}"),
+                                   self.status.setText(f"[CH{_ch}] {m}")))
             w.finished.connect(self.analysis_finished)
             w.r_curve_update.connect(self._on_r_curve_update)
             w.scan_count_ready.connect(lambda n, ch=ch: self._on_scan_count_ready(n, ch))

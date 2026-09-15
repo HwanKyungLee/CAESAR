@@ -6,7 +6,7 @@
 
 ---
 
-## 2026-09-15 — 광범위 except 감사 (core 78 + worker.py 30) · 침묵 대체 13곳 제거
+## 2026-09-15 — 광범위 except 감사 (core 78 + worker.py 30) · 침묵 대체 15곳 제거
 
 **다시 훑지 말 것.** core/의 `except Exception`/bare 78건을 AST로 전수 분류했다
 (`gui` 243건 · `oculus` 6건은 손 안 댐 — oculus는 원래 깨끗하다).
@@ -28,7 +28,7 @@
 덤: `raw_parser.autoload_campaign_layouts`의 "프로파일 건너뜀"이 verbose일 때만
 보이던 것을 항상 stderr로. 레이아웃 등록 실패 = HK 열 지도 없이 파싱 = T/P 기본값 대체.
 
-회귀 잠금: `tools/test_silent_fallback_guard.py` **44 PASS**. pytest가 자동 수집한다.
+회귀 잠금: `tools/test_silent_fallback_guard.py` **49 PASS**. pytest가 자동 수집한다.
 
 **안 고친 것과 이유** (다음 세션이 다시 열어보지 않도록)
 
@@ -66,7 +66,7 @@
 
 ### `gui/worker.py` 30건 (추가 감사)
 
-`gui/`에서 **숫자를 만드는 유일한 파일**이라 core와 같은 등급으로 따로 봤다. 4곳 수정.
+`gui/`에서 **숫자를 만드는 유일한 파일**이라 core와 같은 등급으로 따로 봤다. 6곳 수정.
 
 | 어디 | 삼키고 뭘 넣었나 | 왜 위험했나 |
 |---|---|---|
@@ -84,13 +84,14 @@
 * 핏 재시도 루프 — 마지막 시도에서 `raise e`. 삼키지 않는다.
 * `threadpoolctl` 임포트 실패 ×3 — 선택 의존성, `os.environ.setdefault` 폴백.
 
-**남은 2건 — GUI 배선이 필요해 못 고침**
+**나머지 2건도 고침** — `AnalysisWorker`에 `status_msg` 시그널 추가
 
-`AnalysisWorker._run`(병렬 핏 전체 실패)과 `_run_parallel`(청크 실패)은 `print`로만
-남기고 `finished.emit()`을 인자 없이 쏜다. 사용자 화면에는 **결과 0건으로 정상 종료**처럼
-보인다(traceback은 `logs/session_*.log`에 남는다). `AnalysisWorker`에는 `status_msg`
-시그널 자체가 없어서(`AlphaExportWorker`에만 있다) 고치려면 시그널 추가 + app_window
-연결이 필요하다 — except 감사 범위를 넘는 GUI 작업이라 남겨둔다.
+`_run`(병렬 핏 전체 실패)과 `_run_parallel`(청크 실패)이 `print`로만 남기고
+`finished.emit()`을 인자 없이 쏴서, 화면엔 **결과 0건으로 정상 종료**처럼 보였다
+(traceback은 `logs/session_*.log`에만). `AnalysisWorker`에 `status_msg = pyqtSignal(str)`
+를 추가하고 `app_window_run.py`가 상태바에 연결한다 — `AlphaExportWorker`가 이미 쓰던
+규약을 그대로 가져왔다(`app_window_inputs.py:371` 참고). 처음엔 "GUI 배선 판단이
+필요하다"고 미뤘는데, 배선 방법이 저장소에 이미 있어서 판단할 게 없었다.
 
 ### 안 본 것
 

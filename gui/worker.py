@@ -28,12 +28,17 @@ class AnalysisWorker(QThread):
       result_ready(dict, int) → per-file result dict and its row index in the table
       plot_update(...)        → pixel arrays + fit parameters for the monitor graph
       trend_update(dict)      → shift/squeeze/RMS for the trend plots
+      status_msg(str)         → 한 줄 상태/오류 (AlphaExportWorker와 같은 규약)
       finished()              → emitted once all files are processed
     """
     progress = pyqtSignal(int)
     result_ready = pyqtSignal(dict, int)
     plot_update = pyqtSignal(np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict, str)
     trend_update = pyqtSignal(dict)
+    # finished()가 인자를 안 받아서, 실패는 print로만 남고 화면엔 "결과 0건 정상
+    # 종료"로 보였다(2026-09-15 except 감사). AlphaExportWorker에만 있던 규약을
+    # 여기에도 맞춘다 — app_window_run이 상태바에 연결한다.
+    status_msg = pyqtSignal(str)
     finished = pyqtSignal()
     r_curve_update = pyqtSignal(object, object)
     scan_count_ready = pyqtSignal(int)   # emitted once after all files are expanded
@@ -343,6 +348,11 @@ class AnalysisWorker(QThread):
             except Exception as e:
                 import traceback
                 print(f"[ParallelFit] failed: {e}\n{traceback.format_exc()}")
+                # print만 하면 사용자는 "결과 0건으로 정상 종료"로 본다.
+                # 재실행 여부를 사람이 정해야 하므로 반드시 화면에 남긴다.
+                self.status_msg.emit(
+                    f"ERROR: 병렬 핏 실패 — {type(e).__name__}: {e} "
+                    f"(결과 없음. 자세한 내용은 logs/session_*.log)")
                 self.finished.emit()
             return
         try: current_params = [ float(np.atleast_1d(p)[ 0 ]) for p in self.params ]
@@ -1173,6 +1183,9 @@ class AnalysisWorker(QThread):
                                 done[gi] = r
                         except Exception as e:
                             print(f"[ParallelFit] chunk error: {e}")
+                            self.status_msg.emit(
+                                f"⚠ 청크 핏 실패 — {type(e).__name__}: {e} "
+                                f"(해당 스캔들은 결과에서 빠진다)")
                             # 빠진 인덱스를 Skip으로 메워 emit이 막히지 않게(데이터 유실
                             # 대신 명시적 Skip 표시). 결과 dict 모양은 기존 Skip과 동일.
                             for (gi, _fp, _ridx) in fut_body.get(fut, ()):
