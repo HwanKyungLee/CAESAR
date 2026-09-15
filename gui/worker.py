@@ -4,7 +4,7 @@ import numpy as np
 
 # DataIO gatekeeper call
 from core.data_io import DataIO
-from core.raw_parser import FLAG_HEADER
+from core.raw_parser import FLAG_HEADER, SATURATION_ADC_MAX, count_saturated
 
 # Core engine imports
 from scipy.linalg import lstsq as scipy_lstsq
@@ -438,6 +438,13 @@ class AnalysisWorker(QThread):
                               "Rayleigh calculation will be incorrect. Load a wavelength cal file first.")
                     wave_nm = self.engine.pixel_to_wavelength(pixel_idx)
 
+                # ── CCD 포화 검사 (버리지 않고 표시만 — 무결성 헌장) ──────────────
+                # 포화 픽셀은 응답이 휘어 **흡수를 과소평가**한다. 예전엔 아무 경고
+                # 없이 α·피팅으로 들어갔고 인젝션 실험에서 사람이 수동 체크리스트로
+                # 잡았다(보고서 §4-G). ambient 는 실측 0.00 % 지만 He 는 최대 21 %다.
+                _n_sat = count_saturated(intensity_raw)
+                _sat_note = f" · SATURATED {_n_sat}px" if _n_sat else ""
+
                 # Update current environment for PPB calculation
                 self.temperature = env_t
                 self.pressure = env_p
@@ -478,9 +485,15 @@ class AnalysisWorker(QThread):
                         result['Status'] = f"Zero-Air (Flag {state_flag} - I0 Updated)"
                     else:
                         result['Status'] = f"Zero-Air (Flag {state_flag} - i_za Updated, I0 Kept)"
+                    result['Status'] += _sat_note
                     if getattr(self, 'i_he_last', None) is not None:
                         self.update_mirror_reflectivity(wave_nm, env_t, env_p)
                         result['Status'] += " & R-Calibrated"
+                    if _n_sat:
+                        # R 은 이후 모든 ambient 스캔에 곱해진다 — 조용히 넘기면 안 된다.
+                        self.status_msg.emit(
+                            f"⚠ 포화 {_n_sat}px: ZA(flag {state_flag}) "
+                            f"{os.path.basename(file_path)}[{row_idx}] — R/I0 가 틀어질 수 있다")
                     self.result_ready.emit(result, i)
                     continue
 
@@ -493,9 +506,15 @@ class AnalysisWorker(QThread):
                         self.t_he_last = env_t
                         self.p_he_last = env_p
                     result['Status'] = f"Helium (Flag {state_flag} - {'Updated' if (510 not in self.flag_he or state_flag == 510) else 'i_he Kept'})"
+                    result['Status'] += _sat_note
                     if getattr(self, 'i_za_last', None) is not None:
                         self.update_mirror_reflectivity(wave_nm, env_t, env_p)
                         result['Status'] += " & R-Calibrated"
+                    if _n_sat:
+                        # 실측 유병률이 가장 높은 자리다(핫 flag510 21.4 %).
+                        self.status_msg.emit(
+                            f"⚠ 포화 {_n_sat}px: He(flag {state_flag}) "
+                            f"{os.path.basename(file_path)}[{row_idx}] — R 이 틀어질 수 있다")
                     self.result_ready.emit(result, i)
                     continue
 
@@ -774,7 +793,7 @@ class AnalysisWorker(QThread):
                         else:
                             status = "Unstable"
 
-                        result['Status'] = status
+                        result['Status'] = status + _sat_note
                         if state_flag == FLAG_HEADER:
                             # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
                             # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
@@ -1828,6 +1847,10 @@ class AlphaExportWorker(QThread):
         done_scans  = 0
         global_idx  = 0
         n_default_tp = 0   # HK 읽기 실패로 T/P가 기본값(25.0/1013.25)으로 떨어진 스캔 수
+        # CCD 포화 스캔 수 — 역할별로 나눈다. ambient 포화는 그 스캔 하나가 흡수를
+        # 과소평가하고 끝이지만, **ZA/He 포화는 블록평균 → R/I0 → 이후 모든 ambient
+        # 스캔의 α 로 전파된다.** 같은 숫자로 묶으면 그 차이가 안 보인다.
+        n_sat_amb = n_sat_cal = 0
 
         # 행별 실제 시각(연초기준 초) — 박사님 doy와 동일한 bytepack 시각.
         # row_idx×0.97 합성 대신 실측값으로 60s 평균 binning/출력 시간축에 사용.
@@ -1867,6 +1890,7 @@ class AlphaExportWorker(QThread):
         # 따라서 분류/스풀/R수집 로직은 한 글자도 이동하지 않는다(무회귀 보장).
         def _process_scan(fp, row_idx, intensity_raw, state_flag, env_t, env_p, gidx):
             nonlocal n_default_tp, _amb_spool_n, amb_count, done_scans
+            nonlocal n_sat_amb, n_sat_cal
             # flag=0 은 LabVIEW 헤더행(raw_parser.FLAG_HEADER)으로 파일당 딱 1행이다.
             #
             # 2026-08-10에는 여기서 **건너뛰었다**. 당시 근거는 "스펙트럼이 65535
@@ -1887,6 +1911,13 @@ class AlphaExportWorker(QThread):
                 n_default_tp += 1
             is_za  = state_flag in self.flag_za
             is_he  = state_flag in self.flag_he
+            # 포화는 버리지 않고 센다(무결성 헌장). 실측 유병률은 ambient 0.00 %,
+            # He(flag510) 핫 21.4 % — 위험은 ambient 가 아니라 교정 쪽에 있다.
+            if count_saturated(intensity_raw):
+                if is_za or is_he:
+                    n_sat_cal += 1
+                else:
+                    n_sat_amb += 1
             is_amb = (state_flag == FLAG_HEADER or
                       (self.flag_amb and state_flag in self.flag_amb) or
                       (not self.flag_amb and not is_za and not is_he))
@@ -1986,6 +2017,17 @@ class AlphaExportWorker(QThread):
                 f"[WARN] HK not recovered → default T/P (25.0℃/1013.25mbar) used for "
                 f"{n_default_tp}/{global_idx} scans — their alpha may have inaccurate "
                 f"Rayleigh correction (usually bin warmup rows).")
+
+        # 포화 보고 — ZA/He 를 먼저, 더 세게. R/I0 를 거쳐 전 구간으로 번지기 때문이다.
+        if n_sat_cal:
+            self.status_msg.emit(
+                f"[WARN] CCD 포화: ZA/He 교정 스캔 {n_sat_cal}개 — 이 스캔들은 블록평균을"
+                f" 거쳐 R/I0 가 되므로 **이후 ambient α 전체**가 영향받을 수 있다"
+                f" (문턱 {SATURATION_ADC_MAX:.0f} ADC). 해당 구간 R 트렌드를 확인할 것.")
+        if n_sat_amb:
+            self.status_msg.emit(
+                f"[WARN] CCD 포화: ambient 스캔 {n_sat_amb}/{global_idx}개 — 포화 픽셀은"
+                f" 흡수를 과소평가한다 (문턱 {SATURATION_ADC_MAX:.0f} ADC).")
 
         # ── Block-average each ZA / He injection into one clean spectrum ──────
         # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.

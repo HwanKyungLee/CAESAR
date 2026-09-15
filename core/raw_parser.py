@@ -273,6 +273,33 @@ KST = timezone(timedelta(hours=9))
 SENTINEL_RAW = (0.0, 65535.0)
 
 
+# ── 스펙트럼 CCD 포화 ──────────────────────────────────────────────────────────
+# 16-bit ADC 라 만재는 65535 지만, 문턱은 그보다 낮게 둔다 — 만재 직전에 이미
+# 응답이 휘어 흡수를 **과소평가**하기 때문이다. 64000 은 Oculus 프로파일
+# (`oculus/profiles/caesar_*.example.json` 의 `saturation.adc_max`)이 쓰는 값과
+# 같게 맞춘 것이다. 프로파일 쪽은 계기마다 덮어쓸 수 있는 설정이고, 이 상수는
+# 프로파일 체계가 없는 Augur 본 파이프라인의 기본값이다.
+#
+# 실측 유병률(2026-09-16, 여수 표본 24파일×매7행):
+#   ambient(flag=1)  콜드 0.00 % · 핫 0.00 %      <- 대기 측정은 깨끗하다
+#   He(flag 510)     콜드 3.45 % · 핫 **21.43 %**
+#   He(flag 512)                  핫 12.07 %
+#   ZA(flag 502)                  핫  1.96 %
+# ⚠ 포화가 몰리는 He/ZA 는 거울반사도 R 계산 입력이고, R 은 **이후 모든 ambient
+#   스캔의 α 에 곱해진다.** 그래서 한 스캔이 아니라 구간 전체가 틀어진다.
+SATURATION_ADC_MAX = 64000.0
+
+
+def count_saturated(spectrum, adc_max: float = SATURATION_ADC_MAX) -> int:
+    """스펙트럼에서 포화 픽셀 수. 무결성 헌장대로 **버리지 않고 세기만** 한다.
+
+    같은 판정을 Oculus 는 `core.profile.Profile.is_saturated` 로 한다(프로파일별
+    adc_max). 문턱식이 갈리지 않게 기본값을 여기 한 곳에서 관리한다.
+    """
+    a = np.asarray(spectrum, dtype=float)
+    return int(np.count_nonzero(np.isfinite(a) & (a > adc_max)))
+
+
 def _is_sentinel(v: float) -> bool:
     return (not np.isfinite(v)) or (v in SENTINEL_RAW)
 
