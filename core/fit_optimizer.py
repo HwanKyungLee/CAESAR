@@ -26,6 +26,7 @@ from scipy.interpolate import interp1d
 # ──────────────────────────────────────────────────────────────────────────
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
 from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
+from core.doas_fit import policy_floats
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -84,10 +85,13 @@ def fit_window(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
         props = ref_props.get(name, {})
         if props.get("sh_mode") != "Limit":
             continue
-        try:
-            g_lb, g_ub = map(float, props["sh_val"].split(","))
-        except Exception:
-            g_lb, g_ub = -3.0, 3.0
+        # setup_fit_parameters와 **같은 파서**를 쓴다. 예전엔 여기도 실패 시
+        # ±3.0으로 갈아탔는데, 이 값으로 shift_at_bound(=옵티마이저가 세팅을
+        # 기각하는 신호)를 판정하므로 실제와 다른 창에서 "경계에 붙었다"를
+        # 계산하게 된다. 같은 props를 이미 setup_fit_parameters가 통과시켰으므로
+        # 여기서 터지는 일은 사실상 없지만, 기본값으로 덮는 코드를 남겨두면
+        # 언젠가 다시 조용히 갈아탄다.
+        g_lb, g_ub = policy_floats(name, "sh", "Limit", props.get("sh_val"), 2)
         w_lb, w_ub = -step_limit, step_limit
         b_lo, b_hi = max(g_lb, w_lb), min(g_ub, w_ub)
         span = (b_hi - b_lo) or 1.0

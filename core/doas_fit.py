@@ -26,8 +26,10 @@ from numpy.polynomial import chebyshev
 ETALON_CORR_WARN = 0.5
 
 
-def _policy_floats(gas, kind, mode, raw, n):
+def policy_floats(gas, kind, mode, raw, n):
     """shift/squeeze 정책 문자열 -> 실수 n개. 못 읽으면 **조용한 기본값 대신 예외**.
+
+    이 파싱의 단일 출처. core.fit_optimizer도 같은 문자열을 읽으므로 여기로 위임한다.
 
     2026-09-15 이전에는 이 파싱이 실패하면 각 자리에서 하드코딩 기본값으로
     갈아탔다(Center -> 0±3px, Limit -> ±3px, Fix -> 0, sq Limit -> ±0.01,
@@ -285,7 +287,7 @@ class DoasFitter:
                     # Limit은 언제나 0에서 출발해 step_limit씩 걸어 들어가야 하므로, 0에서 먼
                     # 실제 shift(예: 핫 -5.25px)를 쓰려면 범위가 0을 품어야 했고 그만큼 느슨해졌다.
                     # Center는 첫 스캔부터 중심에서 시작하므로 범위를 실측만큼 좁게 줄 수 있다.
-                    c_val, half = _policy_floats(gas, "sh", "Center",
+                    c_val, half = policy_floats(gas, "sh", "Center",
                                                  props.get("sh_val"), 2)
                     half = abs(half)
                     global_lb, global_ub = c_val - half, c_val + half
@@ -294,7 +296,7 @@ class DoasFitter:
                     anchor = (initial_shift_center
                               if global_lb <= initial_shift_center <= global_ub else c_val)
                 else:
-                    global_lb, global_ub = _policy_floats(gas, "sh", "Limit",
+                    global_lb, global_ub = policy_floats(gas, "sh", "Limit",
                                                           props.get("sh_val"), 2)
                     if global_ub < global_lb:
                         global_lb, global_ub = global_ub, global_lb
@@ -325,7 +327,7 @@ class DoasFitter:
                 # because initial_shift_center carries last_valid_shift across scans —
                 # made any non-zero Fix value drift by `val` every scan (e.g. Fix -0.5
                 # ran away to -120). Fix 0 happened to be safe (no accumulation).
-                (val,) = _policy_floats(gas, "sh", "Fix", props.get("sh_val"), 1)
+                (val,) = policy_floats(gas, "sh", "Fix", props.get("sh_val"), 1)
                 fixed_vars[sh_name] = val
             elif props["sh_mode"] == "Link":
                 linked_vars[sh_name] = f"{props['sh_val'].strip()}_sh"
@@ -333,7 +335,7 @@ class DoasFitter:
             sq_name = f"{gas}_sq"
             if props["sq_mode"] == "Limit":
                 active_vars.append(sq_name)
-                v_min, v_max = _policy_floats(gas, "sq", "Limit",
+                v_min, v_max = policy_floats(gas, "sq", "Limit",
                                               props.get("sq_val"), 2)
                 sq_lb = 1.0 + v_min if abs(v_min) < 0.5 else v_min
                 sq_ub = 1.0 + v_max if abs(v_max) < 0.5 else v_max
@@ -344,7 +346,7 @@ class DoasFitter:
                 active_vars.append(sq_name)
                 theta_lb.append(0.1); theta_ub.append(10.0); theta0.append(1.0)
             elif props["sq_mode"] == "Fix":
-                (val,) = _policy_floats(gas, "sq", "Fix", props.get("sq_val"), 1)
+                (val,) = policy_floats(gas, "sq", "Fix", props.get("sq_val"), 1)
                 fixed_vars[sq_name] = 1.0 + val if abs(val) < 0.5 else val
             elif props["sq_mode"] == "Link":
                 linked_vars[sq_name] = f"{props['sq_val'].strip()}_sq"

@@ -194,12 +194,25 @@ def test_health_reports_dropped_scans():
           out.get("n") + out.get("n_failed") == out.get("n_requested"), out)
 
 
+def test_optimizer_shares_the_same_parser():
+    """fit_optimizer도 같은 엄격 파서를 쓴다(±3.0 기본값 복귀 방지)."""
+    import inspect
+    import core.fit_optimizer as fo
+    src = inspect.getsource(fo)
+    check("fit_optimizer가 policy_floats를 쓴다", "policy_floats(" in src)
+    check("±3.0 침묵 기본값이 남아있지 않다",
+          "g_lb, g_ub = -3.0, 3.0" not in src)
+    from core.doas_fit import policy_floats
+    check("파서 단일 출처", fo.policy_floats is policy_floats)
+
+
 def main():
     for fn in (test_broken_policy_raises, test_valid_policy_unchanged,
                test_validate_fitset_catches_fix,
                test_covariance_failure_gives_nan_not_zero,
                test_unreadable_file_is_not_no_scans,
-               test_health_reports_dropped_scans):
+               test_health_reports_dropped_scans,
+               test_optimizer_shares_the_same_parser):
         fn()
     print(f"silent fallback guard: {PASS} PASS · {FAIL} FAIL")
     return 1 if FAIL else 0
