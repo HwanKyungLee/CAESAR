@@ -616,12 +616,25 @@ class DoasFitter:
         resid_w = y_w - A_f_w @ c_opt
         mse = np.mean(resid_w ** 2)
         try:
-            lam = tikhonov_lambda   # 공분산은 override가 아니라 base lambda 사용(원본 동작 보존)
+            # 공분산은 **핏이 실제로 푼 계**의 정규방정식에서 나와야 한다.
+            # 예전엔 세 군데가 핏과 어긋나 있었다(λ=0이라 드러나지 않았을 뿐):
+            #   ① `lam = tikhonov_lambda` 로 되돌려 override_lam 을 버렸다
+            #      → 정규화 A로 핏해놓고 오차는 정규화 B로 계산하는 셈
+            #   ② 증강이 `diag(lam)` 이라 **실효 릿지 파라미터는 λ²**인데
+            #      (`[A; diag(λ)]c≈[y;0]` → `(AᵀA+λ²I)c=Aᵀy`, 수치검증 완료)
+            #      공분산은 `AtWA + λ·I` 로 λ를 썼다
+            #   ③ `_penalty()`는 Chebyshev 배경열을 **일부러 0으로 두는데**
+            #      (표준 DOAS: 배경은 수축시키지 않는다) 공분산은 `λ·eye` 로
+            #      전 열을 균일 수축시켰다
+            # 이제 핏이 쓴 페널티 행렬 P를 그대로 받아 `M = AᵀA + PᵀP` 로 만든다 —
+            # 증강계 `[A; P]` 의 정규방정식과 정의상 동일하다. λ=0이면 P=0이라
+            # 기존과 **바이트동일**. 회귀: `tools/test_covariance_lambda.py`
             AtWA = A_f_w.T @ A_f_w
             n_cols = AtWA.shape[0]
-            M = AtWA + lam * np.eye(n_cols)
+            P = _penalty(n_cols) if lam > 0 else None
+            M = AtWA + (P.T @ P if P is not None else 0.0)
             M_inv = np.linalg.pinv(M)
-            if lam > 1e-9:
+            if P is not None:
                 cov = M_inv @ AtWA @ M_inv * mse
             else:
                 cov = M_inv * mse
