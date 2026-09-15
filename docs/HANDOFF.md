@@ -6,7 +6,7 @@
 
 ---
 
-## 2026-09-15 — 광범위 except 감사 (core 78건) · 침묵 대체 7곳 제거
+## 2026-09-15 — 광범위 except 감사 (core 78 + worker.py 30) · 침묵 대체 13곳 제거
 
 **다시 훑지 말 것.** core/의 `except Exception`/bare 78건을 AST로 전수 분류했다
 (`gui` 243건 · `oculus` 6건은 손 안 댐 — oculus는 원래 깨끗하다).
@@ -28,7 +28,7 @@
 덤: `raw_parser.autoload_campaign_layouts`의 "프로파일 건너뜀"이 verbose일 때만
 보이던 것을 항상 stderr로. 레이아웃 등록 실패 = HK 열 지도 없이 파싱 = T/P 기본값 대체.
 
-회귀 잠금: `tools/test_silent_fallback_guard.py` **38 PASS**. pytest가 자동 수집한다.
+회귀 잠금: `tools/test_silent_fallback_guard.py` **44 PASS**. pytest가 자동 수집한다.
 
 **안 고친 것과 이유** (다음 세션이 다시 열어보지 않도록)
 
@@ -64,8 +64,39 @@
    (`estimate_shift`의 `continue`는 그대로 뒀다 — 실패 시 shift 0은 중립값이고
    설계 입력일 뿐이다.)
 
-`gui/` 243건은 손대지 않았다. 대부분 위젯 갱신·포맷 방어라 등급이 다르지만,
-`gui/worker.py`(핏 루프)는 core와 같은 등급이므로 따로 볼 가치가 있다.
+### `gui/worker.py` 30건 (추가 감사)
+
+`gui/`에서 **숫자를 만드는 유일한 파일**이라 core와 같은 등급으로 따로 봤다. 4곳 수정.
+
+| 어디 | 삼키고 뭘 넣었나 | 왜 위험했나 |
+|---|---|---|
+| `_reread_amb_plain` / `_reread_amb` | Pass2 스풀 재읽기 실패를 `[]` | 호출부가 `(fp, None, 0, **err=None**)` = "정상 처리, 0행"으로 보고 → 알파가 통째로 비어 나가는데 **에러가 없다**. 이제 예외(기존 에러 경로가 받는다) |
+| R(t) `reflectance_calc` 임포트 실패 | `_RC = None` 후 조용히 진행 | 시간가변 R(t) → **단일 R 강등**. 물리적으로 다른 처리인데 결과만 보면 구분 불가. status_msg로 알린다 |
+| R(t) knot 페어 실패 | `continue` | R은 알파 전체의 분모다. 몇 개 knot 위에 세워진 곡선인지 모른 채 진행. 이제 몇/몇인지 알린다 |
+
+**확인했지만 문제 아니었던 것** (다시 열지 말 것)
+
+* `result['RMS'] = 0` (Skip 행) — 숫자 주장처럼 보이지만 `result_io.robust_rms_thresholds`가
+  `isfinite & (a > 0)`로 **0을 명시적으로 제외**한다. QC 단일 출처가 지키는 의도된 센티넬.
+  같은 행에 `Status="Skip: ..."`도 남는다.
+* `_prescan_injection_indices`의 `amb_i.append(idx); continue` — 못 읽은 행을 ambient로
+  분류하지만 본체가 어차피 같은 행을 SKIP 처리한다(주석에 근거 있음).
+* 핏 재시도 루프 — 마지막 시도에서 `raise e`. 삼키지 않는다.
+* `threadpoolctl` 임포트 실패 ×3 — 선택 의존성, `os.environ.setdefault` 폴백.
+
+**남은 2건 — GUI 배선이 필요해 못 고침**
+
+`AnalysisWorker._run`(병렬 핏 전체 실패)과 `_run_parallel`(청크 실패)은 `print`로만
+남기고 `finished.emit()`을 인자 없이 쏜다. 사용자 화면에는 **결과 0건으로 정상 종료**처럼
+보인다(traceback은 `logs/session_*.log`에 남는다). `AnalysisWorker`에는 `status_msg`
+시그널 자체가 없어서(`AlphaExportWorker`에만 있다) 고치려면 시그널 추가 + app_window
+연결이 필요하다 — except 감사 범위를 넘는 GUI 작업이라 남겨둔다.
+
+### 안 본 것
+
+`gui/`의 나머지 213건, `tools/` 58, `calibration/` 10, `diagnostics/` 9, `oculus/` 6.
+**숫자를 만드는 경로(core + worker.py)는 전부 봤다** — 나머지는 위젯 갱신·포맷 방어·
+오프라인 도구라 등급이 한 단계 아래다.
 
 ---
 

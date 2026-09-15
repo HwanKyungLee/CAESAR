@@ -240,6 +240,44 @@ def test_residual_rho_does_not_default_to_zero():
     check("전 스캔 실패 → RuntimeError", ok)
 
 
+def test_pass2_spool_failure_is_not_zero_rows():
+    """Pass 2 스풀을 못 읽으면 예외. 빈 리스트면 '정상 처리, 0행'으로 보고된다."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from gui.worker import _reread_amb_plain
+    entries = [(0, 0.0, 25.0, 1013.25, 0.0, 0)]     # e[5]=seq
+    try:
+        _reread_amb_plain(entries, "C:/__augur_no_such_dir__/amb.spool", 8, 2)
+        ok = False
+    except RuntimeError as e:
+        ok = "스풀" in str(e)
+    except Exception:
+        ok = False
+    check("스풀 재읽기 실패 → RuntimeError", ok)
+    check("빈 entries는 그대로 []", _reread_amb_plain([], "x", 8, 2) == [])
+
+    import inspect
+    import gui.worker as w
+    src = inspect.getsource(w)
+    # 남은 `return []` 2곳은 "입력이 비면 출력도 빈다"는 정상 가드다(2168·2375).
+    # 금지하는 건 **except 직후의** return [] — 실패를 빈 데이터로 바꾸는 것.
+    srclines = src.split(chr(10))
+    bad = [i + 1 for i, l in enumerate(srclines[:-1])
+           if l.strip().startswith("except")
+           and srclines[i + 1].strip() == "return []"]
+    check("except 직후 return []가 없다", not bad, f"line {bad}")
+
+
+def test_rt_degradation_is_announced():
+    """R(t)가 단일 R로 강등되거나 knot 페어가 빠지면 화면에 남는다(소스 계약)."""
+    import inspect
+    import gui.worker as w
+    src = inspect.getsource(w)
+    check("reflectance_calc 임포트 실패를 알린다",
+          "reflectance_calc 임포트 실패" in src)
+    check("페어 스킵을 센다", "_pair_skipped" in src)
+    check("페어 스킵을 알린다", "미달로 제외됨" in src)
+
+
 def main():
     for fn in (test_broken_policy_raises, test_valid_policy_unchanged,
                test_validate_fitset_catches_fix,
@@ -248,7 +286,9 @@ def main():
                test_health_reports_dropped_scans,
                test_optimizer_shares_the_same_parser,
                test_timestamp_has_no_mtime_fallback,
-               test_residual_rho_does_not_default_to_zero):
+               test_residual_rho_does_not_default_to_zero,
+               test_pass2_spool_failure_is_not_zero_rows,
+               test_rt_degradation_is_announced):
         fn()
     print(f"silent fallback guard: {PASS} PASS · {FAIL} FAIL")
     return 1 if FAIL else 0

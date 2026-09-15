@@ -1423,8 +1423,16 @@ def _reread_amb_plain(entries, spool_path, row_bytes, n_pix):
             fh.seek(s0 * row_bytes)
             block = np.frombuffer(fh.read(cnt * row_bytes),
                                   dtype=np.float32).reshape(cnt, n_pix)
-    except Exception:
-        return []
+    except Exception as e:
+        # 빈 리스트가 아니라 예외다. 호출부 _pass2_process_file은 rows가 비면
+        # (fp, None, 0, **err=None**) — 즉 "정상 처리했고 0행"으로 보고한다.
+        # 스풀은 Pass 1이 방금 쓴 내부 임시파일이라, 못 읽는다는 건 디스크/절단
+        # 같은 실제 사고지 "데이터 없음"이 아니다. 알파가 통째로 비어 나가는데
+        # 에러가 없는 상태를 만들면 안 된다. 예외는 그 함수가 이미 붙잡아
+        # (fp, None, 0, "ExcType: ...")로 보고한다.
+        raise RuntimeError(
+            f"ambient 스풀 재읽기 실패 (seq {s0}..{s1}, {cnt}행): "
+            f"{type(e).__name__}: {e}") from e
     fp = entries[0][6] if len(entries[0]) > 6 else None   # 미사용(호환용) — 실제 fp는 호출부가 앎
     out = []
     for e in entries:
@@ -2052,8 +2060,13 @@ class AlphaExportWorker(QThread):
         if (not getattr(self, 'rt_path', None)) and za_spectra and he_spectra and len(za_gidx) >= 2:
             try:
                 from reflectance_calc import ReflectanceCalculator as _RC
-            except Exception:
+            except Exception as _e_rc:
+                # 조용히 넘어가면 시간가변 R(t)가 **단일 R**로 강등된 채 알파가
+                # 만들어진다. 물리적으로 다른 처리인데 결과만 보면 구분이 안 된다.
                 _RC = None
+                self.status_msg.emit(
+                    f"[R(t)] ⚠ reflectance_calc 임포트 실패 ({type(_e_rc).__name__}: "
+                    f"{_e_rc}) — ZA 블록별 R(t) 생략, 단일 R(best_omr_d)로 진행")
             if _RC is not None:
                 _za_key, _za_sec_ok = resolve_time_axis(za_gidx, za_sec)
                 _he_key, _he_sec_ok = resolve_time_axis(he_gidx, he_sec)
@@ -2067,6 +2080,7 @@ class AlphaExportWorker(QThread):
                 if _roi_lo > _roi_hi:
                     _roi_lo, _roi_hi = _roi_hi, _roi_lo
                 _knots = []
+                _pair_skipped = 0        # 품질 미달로 빠진 ZA/He 페어 수
                 for _i in range(len(za_gidx)):
                     _j = int(np.argmin(np.abs(_he_key - _za_key[_i])))   # 최근접 He 블록
                     _rc1 = _RC(cavity_len=self.cavity_len, rl_factor=self.rl_factor)
@@ -2077,9 +2091,17 @@ class AlphaExportWorker(QThread):
                             wave_nm, min_valid_fraction=0.30,
                             roi_min=_roi_lo, roi_max=_roi_hi)
                     except Exception:
-                        continue   # 품질 미달 페어 skip (전환스캔·dropout 등)
+                        # 품질 미달 페어 skip (전환스캔·dropout 등). 조용히 빠지면
+                        # R(t)가 몇 개의 knot 위에 세워졌는지 알 수 없다 — R은
+                        # 알파 전체의 분모라 표본이 줄면 곡선이 달라진다.
+                        _pair_skipped += 1
+                        continue
                     _od = np.maximum(np.asarray(_od, dtype=float), 1e-12)
                     _knots.append((float(_za_key[_i]), _od))
+                if _pair_skipped:
+                    self.status_msg.emit(
+                        f"[R(t)] ZA/He 페어 {_pair_skipped}/{len(za_gidx)}개가 품질 "
+                        f"미달로 제외됨 — knot {len(_knots)}개로 R(t) 구성")
                 if len(_knots) >= 2:
                     _knots.sort(key=lambda k: k[0])
                     _kg = np.array([k[0] for k in _knots], dtype=float)
@@ -2152,8 +2174,12 @@ class AlphaExportWorker(QThread):
                     fh.seek(s0 * _row_bytes)
                     block = np.frombuffer(fh.read(cnt * _row_bytes),
                                           dtype=np.float32).reshape(cnt, n_pix)
-            except Exception:
-                return []
+            except Exception as e:
+                # 병렬 쪽 _reread_amb_plain과 같은 이유로 예외. 여기선 run()이
+                # 받아서 finished.emit("ERROR: ...")로 GUI에 띄운다.
+                raise RuntimeError(
+                    f"ambient 스풀 재읽기 실패 ({os.path.basename(fp)}, "
+                    f"seq {s0}..{s1}): {type(e).__name__}: {e}") from e
             out = []
             for e in ents:
                 inten = np.asarray(block[e[5] - s0], dtype=float)
