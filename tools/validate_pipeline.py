@@ -156,6 +156,76 @@ def c_rayleigh():
     return "FAIL", f"σ_ZA {sig:.4e} vs 골든 {GOLDEN:.4e} ({rel*100:.2f}% 차 — King factor 회귀?)"
 
 
+# ── 4-B. He Rayleigh: 굴절률 문헌 대조 + King factor 부재 확인 ──────────────
+@check("He Rayleigh (Cuthbertson 굴절률 · King=1)", needs_data=False)
+def c_rayleigh_he():
+    """ZA만 골든값이 있고 He는 없었다(2026-09-15 추가). R 계산은 ZA와 He를 **둘 다**
+    쓰므로 He σ가 틀어지면 R이, 따라서 모든 농도가 통째로 치우친다.
+
+    여기서 Cuthbertson 계수를 **다시 적는 것은 의도된 사본**이다 — 골든 검사는
+    구현과 독립이어야 회귀를 잡는다. 원칙 3(단일 출처)은 제품 코드 얘기지
+    참조 구현을 든 검사에는 적용하지 않는다. **이걸 '중복'이라고 지우지 말 것.**
+
+    두 층으로 본다 (fault injection 4종으로 실제로 잡히는지 확인함):
+      · (1) 굴절률 문헌 대조 = **참조 자체가 맞는지**. 여기 적힌 Cuthbertson 계수가
+            He 의 알려진 굴절률(n-1 ~ 3.48e-5 @STP)을 재현하는지 본다.
+            physics.py 를 안 보므로 physics.py 의 계수 변경은 여기서 안 잡힌다.
+      · (2)~(4) 참조 σ 와 실제 σ 대조 = **구현이 참조를 따르는지**.
+            physics.py 의 계수 변경·King factor 주입·수식 구조 파손은 전부 여기서 잡힌다.
+            비율이 곧 진단이다(1.096 = King, ~1 엇나감 = 계수, 자릿수 = 구조).
+    """
+    from core.physics import RayleighPhysics
+    from core.physics import N_LOSCHMIDT as N0
+
+    # (1) 굴절률 — **외부 진실(T3)**. He 는 STP 에서 n-1 ≈ 3.48e-5 (n = 1.000035).
+    #     Cuthbertson & Cuthbertson (1936) Sellmeier 를 참조로 다시 적는다.
+    v589 = 1e7 / 589.3                      # Na D line, 문헌값이 정의된 파장
+    n_m1 = (2283.0 + 1.8102e13 / (1.5342e10 - v589 ** 2)) * 1e-8
+    LIT = 3.48e-5
+    d_n = abs(n_m1 - LIT) / LIT
+    if d_n > 0.01:
+        return "FAIL", (f"He 굴절률 n-1 @589.3nm = {n_m1:.4e} vs 문헌 {LIT:.3e} "
+                        f"({d_n*100:.2f}% 차 — Cuthbertson 계수 회귀?)")
+
+    # (2) 참조 σ: He 는 **단원자라 구형대칭 → 편광해소 없음 → King factor = 1**.
+    #     (N₂ 1.034·O₂ 1.096 같은 보정을 He 에 넣으면 안 된다.)
+    wl = 447.0
+    v = 1e7 / wl
+    n = 1.0 + (2283.0 + 1.8102e13 / (1.5342e10 - v ** 2)) * 1e-8
+    sig_ref = (24 * np.pi ** 3 * v ** 4 / N0 ** 2) * ((n ** 2 - 1) / (n ** 2 + 2)) ** 2
+
+    sig = RayleighPhysics.get_alpha_rayleigh(np.array([wl]), 0.0, 1013.25, "helium")[0] / N0
+    d_ref = abs(sig - sig_ref) / sig_ref
+    if d_ref > 1e-9:
+        # 비율이 진단이다: 1.096이면 King factor 주입, 1에 가까운 엇나간 값이면
+        # Sellmeier 계수 변경, 자릿수가 다르면 수식 구조(ν⁴·N₀·상수) 파손.
+        r = sig / sig_ref
+        if abs(r - 1.096) < 5e-3:
+            why = "He 에 공기 King factor(1.096)가 들어갔다 — He 는 단원자라 F_k=1 이어야 한다"
+        elif 0.5 < r < 2.0:
+            why = "Cuthbertson 계수(A/B/C)가 바뀌었거나 King factor 가 들어갔다"
+        else:
+            why = "자릿수가 다르다 — σ 수식 구조(24π³ν⁴/N₀²) 파손 의심"
+        return "FAIL", (f"σ_He {sig:.5e} != 참조식(F_k=1) {sig_ref:.5e} "
+                        f"(비 {r:.4f} — {why})")
+
+    # (3) 골든값 회귀 — 2026-09-15 확정. 허용 0.1% (ZA 검사와 같은 빡빡함).
+    GOLDEN_HE = 1.4079e-28
+    rel = abs(sig - GOLDEN_HE) / GOLDEN_HE
+    if rel > 0.001:
+        return "FAIL", f"σ_He @447nm {sig:.4e} vs 골든 {GOLDEN_HE:.4e} ({rel*100:.2f}% 차)"
+
+    # (4) 물리적 크기 — He 는 공기보다 약 70배 덜 산란한다(굴절률비² × King).
+    #     자릿수가 틀어지면 R 이 통째로 어긋나므로 느슨하게라도 잡아둔다.
+    sig_za = RayleighPhysics.get_alpha_rayleigh(
+        np.array([wl]), 0.0, 1013.25, "zero_air")[0] / N0
+    ratio = sig_za / sig
+    if not (60.0 < ratio < 80.0):
+        return "FAIL", f"σ_ZA/σ_He = {ratio:.1f} (물리적 기대 ~69) — 한쪽 gas 분기가 깨졌나?"
+
+    return "PASS", (f"n-1@589nm={n_m1:.3e} (문헌 {d_n*100:.2f}% 이내) · "
+                    f"σ_He@447nm={sig:.4e} · King=1 확인 · σ_ZA/σ_He={ratio:.1f}")
+
 # ── 5. R 값: 물리적 범위인가 ─────────────────────────────────────────────────
 @check("R 값 (R·Leff 물리성)")
 def c_rvalue():
