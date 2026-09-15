@@ -443,29 +443,6 @@ def _file_has_he(path):
     return False
 
 
-def check_new_files(npz_path, raw_dir, file_list=None):
-    """증분 추가 전 사전 검사: 새 파일 목록 + 각 파일의 He 플래그 존재 여부.
-
-    반환: (new_files, he_map)
-      new_files : 아직 처리되지 않은 파일 경로 목록 (이름순)
-      he_map    : {basename: bool} — True=He 있음, False=없음
-    processed 목록은 npz의 processed_files_json에서 읽는다. npz가 없으면 전체가 신규."""
-    done_set = set()
-    if os.path.exists(npz_path):
-        try:
-            z = np.load(npz_path, allow_pickle=False)
-            if "processed_files_json" in z:
-                done_set = set(json.loads(str(z["processed_files_json"])))
-        except Exception:
-            pass
-
-    all_files = _RT._resolve_files(raw_dir, file_list)
-    new_files = [f for f in all_files if os.path.basename(f) not in done_set]
-
-    he_map = {os.path.basename(f): _file_has_he(f) for f in new_files}
-    return new_files, he_map
-
-
 def append_rt(npz_path, raw_dir, wave_nm, config: RTConfig, file_list=None,
               parallel=True, verbose=False, progress_cb=None):
     """기존 npz에 새 파일만 추가 계산해 머지 저장.

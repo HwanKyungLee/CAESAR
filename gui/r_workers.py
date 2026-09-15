@@ -335,38 +335,6 @@ class _ChannelRWorker(QThread):
         self.finished.emit(self.out_dir)
 
 
-class _HeCheckWorker(QThread):
-    """증분 추가 전 He 플래그 사전 스캔 — 메인 스레드 얼음 방지.
-    tasks: list of (label, raw_dir, wave_nm, RTConfig, file_list, out_path)"""
-    finished = pyqtSignal(object)   # list of (label, raw_dir, wave, rtcfg, flist, out_path, new_files, he_map)
-    progress = pyqtSignal(str)      # 채널 이름
-
-    def __init__(self, tasks):
-        super().__init__()
-        self.tasks = tasks
-
-    def run(self):
-        import sys as _sys, os as _os
-        _td = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
-        if _td not in _sys.path:
-            _sys.path.insert(0, _td)
-        try:
-            import rt_precompute as RTP
-        except Exception as e:
-            self.finished.emit([])
-            return
-
-        results = []
-        for label, raw_dir, wave, rtcfg, flist, out_path in self.tasks:
-            self.progress.emit(label)
-            try:
-                new_files, he_map = RTP.check_new_files(out_path, raw_dir, flist)
-            except Exception:
-                new_files, he_map = [], {}
-            results.append((label, raw_dir, wave, rtcfg, flist, out_path, new_files, he_map))
-        self.finished.emit(results)
-
-
 class DayAuditWorker(QThread):
     """백그라운드 측정일 감사 (core.day_audit).
 
