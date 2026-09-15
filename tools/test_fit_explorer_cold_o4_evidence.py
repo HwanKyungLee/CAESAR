@@ -40,8 +40,14 @@ def main():
         assert np.isclose(np.corrcoef(o4, no2)[0, 1], observed["corr_with_target"])
     assert set(result["runtime"]) == {"python", "platform", "numpy", "scipy"}
     assert result["physical_anchor"]["formula"] == "(0.2095 * n_air)^2"
+    # 이 파일은 status=HISTORICAL_INVALIDATED_FOR_NUMERIC_USE인 **동결된 기록**이다.
+    # b7a107e(n_air 단일 출처 통일)가 이 assert의 기대문자열만 현재 공식으로 갈아끼우고
+    # 동결 산출물은 그대로 뒀다 — 그래서 그때부터 이 테스트는 계속 빨간불이었다(CI 미등록이라
+    # 아무도 못 봄). 고칠 쪽은 테스트다: 기록물의 공식 문자열은 "그때 무엇으로 계산했는가"를
+    # 남기는 프로버넌스라 소급해 바꾸면 안 된다(데이터 무결성 헌장). 현재 공식은 같은
+    # 계열의 **현행** 리포트를 만드는 test_fit_explorer_cold_o4_external.py가 검증한다.
     assert result["physical_anchor"]["air_number_density_formula"] == (
-        "N_LOSCHMIDT * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15)); N_LOSCHMIDT = 101325/(1.380649e-23*273.15)*1e-6 = 2.686780111e19 (CODATA 2018)")
+        "2.68678e19 * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))")
     assert result["physical_anchor"]["source"] == (
         "core.fit_physics.air_number_density/theoretical_amount")
     assert result["fit"]["gas_order"] == ["CHOCHO", "H2O", "NO2", "O4"]

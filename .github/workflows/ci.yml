@@ -40,6 +40,13 @@ jobs:
       - name: Install pinned dependencies
         run: pip install -r requirements.txt
 
+      # 패키지로 설치까지 되는지 확인 — pyproject.toml이 깨지면 여기서 빨간불.
+      # (리뷰어/외부 사용자는 `pip install -e .` 한 줄로 core/gui/oculus를 임포트한다)
+      - name: Install package (editable)
+        run: |
+          pip install -e . --no-deps
+          pip install pytest
+
       # 전 모듈 임포트 스모크 — core/gui/tools/diagnostics/calibration 의 모든 .py
       - name: Import smoke test
         run: python tools/ci_import_smoke.py
@@ -48,59 +55,17 @@ jobs:
       - name: validate_pipeline --no-data
         run: python tools/validate_pipeline.py --no-data
 
-      # Oculus 인스트루먼트 프로파일 로더 단위테스트 (합성 raw 행)
-      - name: Oculus profile unit tests
-        run: python oculus/test_profile.py
-
-      # 합성 데이터 단위테스트 (계단 가드 · etalon 공선성 진단)
-      - name: Step guard unit tests
-        run: python tools/test_step_guard.py
-
-      - name: Etalon collinearity unit tests
-        run: python tools/test_etalon_collinearity.py
-
-      # raw 레이아웃 판정 + HK 열 지도 (합성 raw 행, 데이터 불필요).
-      # 방금 머지된 브랜치가 들고 온 건데 ci.yml에는 안 들어와 있었다.
-      # raw_layout 쪽은 "헤더행에 속아 데이터행을 통째로 버리던" 버그의 회귀 가드다.
-      - name: Raw layout / HK lookup unit tests
-        run: |
-          python tools/test_raw_layout.py
-          python tools/test_hk_lookup.py
-
-      # VarPro 선형/자코비안 불변식 (합성 레퍼런스, 데이터 불필요)
-      # - make_interp_spline == interp1d 비트동일: scipy 업그레이드로 깨지면
-      #   engine의 도함수가 핏의 보간기와 달라져 자코비안이 조용히 틀린다
-      # - 해석적(Golub-Pereyra) 자코비안 == 유한차분
-      - name: VarPro jacobian unit tests
-        run: python tools/test_varpro_jacobian.py
-
-      # Pass2(alpha) 병렬 vs 순차 byte-exact 회귀 — 커밋된 작은 실데이터 fixture 사용
-      - name: Pass2 parallel-vs-sequential byte-exact test
-        run: python tools/test_pass2_parallel.py
-
-      # 메인창(CAESARAnalyzer) offscreen 생성 + 분해 앵커.
-      # app_window.py를 믹스인으로 쪼개는 동안 메서드/위젯 유실과 믹스인 이름
-      # 충돌을 잡는다 — 둘 다 임포트 스모크는 통과하고 버튼 누를 때만 터진다.
-      - name: app_window smoke (offscreen)
-        run: python tools/test_app_window_smoke.py
-
-      # 이미 저장소에 있었지만 CI에 등록된 적 없는 위젯 계약 테스트 2개.
-      # 앞엣것은 shift 정책(Free/Limit/Fix/Link/Center) 왕복 계약, 뒤엣것은
-      # Limit->Center 변환 산식이 core/fitset_builder.py와 같은지를 고정한다.
-      # 둘 다 로컬에서만 돌던 것 — "있는데 안 도는 테스트"는 없는 것과 같다.
-      - name: GUI widget contract tests
-        run: |
-          python tools/test_ref_properties_table.py
-          python tools/test_test_fit_dialog.py
+      # 저장소의 `test_*.py` **전부** + core 자체검증 모듈 (44개, ~30초).
+      # 여기에 스크립트를 한 줄씩 등록하던 방식을 2026-09-15에 접었다. 그 방식의
+      # 실패 모드는 "등록을 잊는 것"이고, 실제로 42개 중 10개만 등록돼 있었으며
+      # 등록 안 된 것 중 2개가 깨진 채로 방치돼 있었다(n_air 단일출처 통일 때
+      # 동결 산출물과 어긋난 것 1건, Windows CRLF로 sha256이 깨진 것 1건).
+      # 이제 tests/test_script_suite.py가 자동 탐색한다 — 새 테스트를 추가할 때
+      # 이 파일은 안 건드려도 된다. 각 테스트가 무엇을 지키는지는 그 테스트의
+      # docstring에, 제외 2건과 사유는 test_script_suite.py에 있다.
+      - name: Test suite (pytest)
+        run: pytest
 
       # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
       - name: validate_plotmaker
         run: python tools/validate_plotmaker.py
-
-      # 논문 통계 모듈 자체검증 (합성 데이터, 데이터 불필요).
-      # 두 모듈은 저장소 안에 호출자가 거의 없어(외부 대조 스크립트 1개뿐) 조용히
-      # 썩기 쉽다 — asserts가 OLS 감쇠 vs Deming 회복, 미정량 항 개수를 고정한다.
-      - name: Agreement / error-budget self-checks
-        run: |
-          python core/agreement.py
-          python core/error_budget.py

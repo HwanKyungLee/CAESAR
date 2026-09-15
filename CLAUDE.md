@@ -44,10 +44,14 @@
 ## 회귀 검증 (코드 수정 후 반드시)
 
 ```
+pytest                                        # 저장소의 test_*.py 전부 (~30초, 데이터 불필요)
 python tools/validate_pipeline.py --no-data   # 데이터 없이(CI와 동일)
 python tools/ci_import_smoke.py               # 전 모듈 임포트 스모크
 python tools/validate_plotmaker.py            # 시각화 수정 시
 ```
+
+새 자체검증을 만들면 `tools/`나 `oculus/`에 `test_*.py`로 두면 된다 —
+`tests/test_script_suite.py`가 자동으로 주워서 CI에서 돌린다. CI 파일은 안 건드려도 된다.
 
 ## 메모리 스코프 주의
 
