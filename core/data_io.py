@@ -14,6 +14,7 @@ from .raw_parser import (
     P_SCALE as _RP_P_SCALE,
     P_VALID_LO as _RP_P_LO,
     P_VALID_HI as _RP_P_HI,
+    CAMPAIGN_LAYOUTS as _CAMPAIGN_LAYOUTS,
 )
 
 
@@ -237,6 +238,14 @@ class DataIO:
     # replaced by the raw_parser maps because DataIO's hk_start is computed
     # from the active-channel count, so changing the offset scheme here could
     # shift cold-file HK reads — out of scope for a constants-only merge.
+    # 같은 경고를 스캔마다 찍으면(초당 1행) 로그가 묻힌다 — 문구당 한 번만.
+    _warned: set = set()
+
+    @staticmethod
+    def _warn_once(msg: str) -> None:
+        if msg not in DataIO._warned:
+            DataIO._warned.add(msg)
+            print(f"[data_io][WARN] {msg}")
     _HK_REL = {
         'cold_p':   11,   # Cold inlet pressure raw count → ×0.6895 = mbar
         'hot_p':    13,   # Hot CH1(PNs) pressure raw count → ×0.6895 = mbar (abs 6162)
@@ -681,6 +690,9 @@ class DataIO:
             # Read the target row directly — avoids pandas column-count enforcement
             # which breaks on Araon files that mix 6177-col and 6181-col rows.
             raw_probe = DataIO._read_row_raw(filepath, row_index)
+            # 이 행의 raw 구성 — **열 수가 곧 구성**이다(6181 hot / 6179·6174 cold).
+            # 값이 그럴듯한지로 열을 찾지 않기 위한 단일 진입점.
+            _lay = _CAMPAIGN_LAYOUTS.get(len(raw_probe))
 
             # Safe defaults in case housekeeping columns are missing
             state_flag = 0
@@ -694,95 +706,132 @@ class DataIO:
             # multi-MB file per row → O(n²) hang. Spectrum/P/T live well before
             # 4101, and missing tail HK is already guarded as NaN in _hk().
             if len(raw_probe) >= DataIO._META_COLS + DataIO._CH_PIXELS:
-                # ── Araon Mega-Matrix format ─────────────────────────────────
-                # Dynamic channel slice: CH1=2053:4101, CH2=4101:6149, CH3=6149:8197
-                # n_slots: 컬럼수 기반(구조적) — HK는 모든 슬롯 뒤 고정 위치라 신호유무와
-                # 무관하다. (구버전은 신호기반 감지를 써서 Cold[ch2 노이즈]가 n=1로 잡혀
-                # HK를 4101에서 읽어 T/P가 쓰레기였음 → 슬롯기반으로 교정.)
+                # ── Araon Mega-Matrix ─────────────────────────────────────────
+                # raw 포맷은 **3채널 전제**다(계기 담당자 확인 2026-09-15):
+                #   meta 0-4 · 슬롯A 5-2052 · 슬롯B 2053-4100 · 슬롯C 4101-6148 · HK 6149-
+                # META_COLS(2053) = 5 + 1×2048 이라 **슬롯A를 meta에 흡수**한 셈이고,
+                # 그래서 아래 n_slots 는 "남은 슬롯 수"(2026 여수 = 2)다. hk 시작이
+                # META_COLS + n_slots×CH = 5 + 3×CH = 6149 로 맞아떨어지는 이유.
+                # ⚠ 슬롯A는 이 정수 `channel` 로 주소가 없다 — 켜는 구성이 생기면
+                #   레이아웃에 block_a 채널을 등록해야 한다(보고서 §4-J).
                 n_slots = max(1, (len(raw_probe) - DataIO._META_COLS) // DataIO._CH_PIXELS)
-                ch = max(1, min(channel, n_slots))   # clamp to available channels
+                nch = len(_lay.channels) if _lay is not None else n_slots
+                if channel > max(nch, 1):
+                    # 예전엔 조용히 clamp 해서 **다른 채널 데이터가 경고 없이** 돌아왔다
+                    # (실측: 핫에서 channel=3 이 channel=2 와 같은 배열). 구조적으로
+                    # 존재하는 슬롯이면 그대로 주되, 침묵하지는 않는다.
+                    DataIO._warn_once(
+                        f"channel={channel} 요청: 이 구성({len(raw_probe)}열)의 등록 채널은 "
+                        f"{nch}개다. 슬롯 {min(channel, n_slots)} 를 대신 읽는다 — "
+                        f"채널 번호를 확인할 것")
+                ch = max(1, min(channel, n_slots))   # 구조적으로 있는 슬롯까지만
                 col_start = DataIO._META_COLS + (ch - 1) * DataIO._CH_PIXELS
                 col_end   = col_start + DataIO._CH_PIXELS
                 intensity_full = raw_probe[col_start:col_end]
 
                 state_flag = int(raw_probe[4])   # Measurement state flag (col 4)
 
-                # ── HK reading — relative offsets from the HK block start ────
-                # HK block begins immediately after all spectrum slots:
-                #   hk_start = META_COLS + n_slots × CH_PIXELS
-                hk = DataIO._META_COLS + n_slots * DataIO._CH_PIXELS
+                # ── HK — **열 번호는 레지스트리가 안다. 값으로 찾지 않는다.** ──────
+                # 예전엔 "6160을 읽어 800~1200 mbar 면 cold, 아니면 6162를 읽어…" 식으로
+                # **값이 그럴듯한지로 어느 열이 압력인지를 판별**했다. 그 창을 벗어나는
+                # 환경(고지대·항공)에서는 압력 열을 못 찾고 T·P 가 **조용히** 기본값
+                # (1013.25 / 25.0)으로 떨어졌다 — 5.5 km 면 n_air 가 2배 틀리고 ppb 가
+                # 절반으로 나온다. 온도도 `0 < T < 100 °C` 게이트라 0.00 °C·영하·가열셀에서
+                # 같은 식으로 탈락했다.
+                # raw 구성은 **열 수 하나로 결정**되므로(6181 hot / 6179·6174 cold)
+                # 레지스트리에서 지도를 받아 박힌 열을 읽는다. 값 탐색 0회.
+                # 범위(_P_LO~_P_HI)는 이제 **판별이 아니라 경보**로만 쓴다.
+                if _lay is not None and _lay.hk_map:
+                    def _get(*names):
+                        """이름 후보를 순서대로 — 없으면 kind 로 아무거나(미지 캠페인 대비)."""
+                        for nm in names:
+                            ent = _lay.hk_map.get(nm)
+                            if ent is None:
+                                continue
+                            c = ent[0]
+                            if 0 <= c < len(raw_probe):
+                                v = raw_probe[c]
+                                if np.isfinite(v) and v not in (0, 65535):
+                                    return float(v) * ent[1]
+                        return np.nan
 
-                # HK-block truncation guard: an interrupted LabVIEW write can drop
-                # the *leading* few HK columns, shifting every HK reading left
-                # while leaving the spectrum (before `hk`) and the HK *tail*
-                # intact (observed on cold 2026-06-11-020: 6174 cols vs 6179, with
-                # the tail values still aligned). If this row is a little shorter
-                # than the standard cold/hot width we infer how many leading HK
-                # cols were lost and shift reads left to match. Bounded to a few
-                # cols so genuinely short / 1-channel rows aren't touched; the
-                # pressure-plausibility scan below independently validates the
-                # result (a wrong shift simply fails the 800–1200 mbar gate and
-                # falls back to the default, i.e. no worse than before).
-                hk_shift = 0
-                _std = next((s for s in (6179, 6181) if s >= len(raw_probe)), None)
-                if _std is not None and 0 < (_std - len(raw_probe)) <= 64:
-                    hk_shift = _std - len(raw_probe)
+                    def _any_of_kind(kind):
+                        for nm, ent in _lay.hk_map.items():
+                            if ent[3] != kind:
+                                continue
+                            c = ent[0]
+                            if 0 <= c < len(raw_probe):
+                                v = raw_probe[c]
+                                if np.isfinite(v) and v not in (0, 65535):
+                                    return float(v) * ent[1]
+                        return np.nan
 
-                def _hk(rel):
-                    c = hk + rel - hk_shift
-                    v = raw_probe[c] if 0 <= c < len(raw_probe) else np.nan
-                    return v if (np.isfinite(v) and v not in (0, 65535)) else np.nan
+                    # 채널별 선호 이름 → 공통 이름 → 같은 kind 아무거나.
+                    # 'Cold'/'Hot' 같은 구성 이름으로 분기하지 않는다(Oculus 설계 §0-A.6).
+                    if ch >= 2:
+                        pv = _get('P_ANs', 'P_PNs', 'cavity_P', 'p_cavity')
+                        tv = _get('tempcell2', 'tempcell1', 'cavity_T', 't_cavity')
+                    else:
+                        pv = _get('P_PNs', 'cavity_P', 'p_cavity')
+                        tv = _get('tempcell1', 'tempcell2', 'cavity_T', 't_cavity')
+                    if not np.isfinite(pv):
+                        pv = _any_of_kind('press')
+                    if not np.isfinite(tv):
+                        # 최후: 셀히터 **설정값**(~75 °C). 실측 가스온도보다 45 K 높아
+                        # ppb 를 ~15 % 과대평가하므로 정말 마지막이다.
+                        tv = _get('cavity_gas_T')
+                    if not np.isfinite(tv):
+                        tv = _any_of_kind('temp')
 
-                raw_p_count = np.nan
-                _t_rel = DataIO._HK_REL['cold_cav_t']   # default: cold cavity T
-                _is_hot = False
-                for p_rel, t_rel, is_hot in (
-                    (DataIO._HK_REL['cold_p'], DataIO._HK_REL['cold_cav_t'], False),
-                    (DataIO._HK_REL['hot_p'],  DataIO._HK_REL['hot_cav_t'],  True),
-                ):
-                    pv = _hk(p_rel)
                     if np.isfinite(pv):
-                        pm = float(pv) * DataIO._P_SCALE
-                        if DataIO._P_LO <= pm <= DataIO._P_HI:
-                            raw_p_count = pv
-                            _t_rel = t_rel
-                            _is_hot = is_hot
-                            break
+                        env_p = float(pv)
+                        if not (DataIO._P_LO <= env_p <= DataIO._P_HI):
+                            # **버리지 않는다** — 고지대·항공이면 정상값이다(무결성 헌장).
+                            DataIO._warn_once(
+                                f"압력 {env_p:.1f} mbar 가 지상 기대범위"
+                                f"({DataIO._P_LO:.0f}~{DataIO._P_HI:.0f})를 벗어난다 — "
+                                f"고지대/항공이면 정상, 아니면 HK 열을 확인할 것")
+                    if np.isfinite(tv):
+                        env_t = float(tv)
+                else:
+                    # ── 미등록 구성 폴백(레거시) ──────────────────────────────
+                    # 등록된 레이아웃이 없으면 열 지도를 모른다. 여수 raw 2065개는 전부
+                    # 등록 구성(6174/6179/6181)이라 이 경로를 타지 않는다. 새 구성은
+                    # 레이아웃을 등록하거나 프로파일 JSON 을 얹는 것이 정답이고, 이
+                    # 값-탐색은 그때까지의 임시 버팀목이다(그래서 여기만 남겨둔다).
+                    hk = DataIO._META_COLS + n_slots * DataIO._CH_PIXELS
+                    hk_shift = 0
+                    _std = next((s for s in (6179, 6181) if s >= len(raw_probe)), None)
+                    if _std is not None and 0 < (_std - len(raw_probe)) <= 64:
+                        hk_shift = _std - len(raw_probe)
 
-                if np.isfinite(raw_p_count):
-                    env_p = float(raw_p_count) * DataIO._P_SCALE
-                # Hot: 채널별 실측 가스온도(tempcell)를 우선 사용.
-                # 폴백 순서 = 자기 채널 tempcell → **다른 채널 tempcell** → hot_cav_t.
-                #
-                # hot_cav_t 는 셀히터 **설정값**(~75°C)이라 실제 가스온도(~30°C)보다
-                # 45 K 높다. n_air ∝ 1/T 이므로 이걸 쓰면 ppb 가 ~15 % **과대**평가된다
-                # (이전 주석의 "과소평가"는 부호가 반대였다).
-                # 실측 2026-08-03: CH2 의 tempcell2 센서가 5/27 까지 고장이라
-                # 2026-05-18 11:43 ~ 05-27 09:44 의 CH2 스캔 12,700개(전체 17 %)가
-                # 75 °C 로 폴백 → 그 구간 CH2 농도가 +15.3 % 치우쳤다.
-                # 다른 채널의 tempcell 로 대신하면 채널간 실측 편차(CH1−CH2 ≈ 3.6 K)
-                # 만큼 ~1 % 만 치우친다 — 설정값 폴백보다 한 자릿수 낫다.
-                # ⚠️ 이 수정은 새로 생성하는 알파부터 적용된다. 기존 알파/핏은
-                #    재생성해야 반영된다.
-                if _is_hot:
-                    _own, _other = (('tempcell1', 'tempcell2') if ch == 1
-                                    else ('tempcell2', 'tempcell1'))
-                    for _name in (_own, _other):
-                        _rel = DataIO._HK_REL[_name]
-                        _tc = _hk(_rel)
-                        if np.isfinite(_tc) and 0.0 < float(_tc) / 100.0 < 100.0:
-                            _t_rel = _rel
-                            break
-                    # CH2(ANs)는 전용 압력 컬럼(hot_p_ans, abs 6164) 사용
-                    if ch == 2:
-                        pv2 = _hk(DataIO._HK_REL['hot_p_ans'])
-                        if np.isfinite(pv2):
-                            pm2 = float(pv2) * DataIO._P_SCALE
-                            if DataIO._P_LO <= pm2 <= DataIO._P_HI:
-                                env_p = pm2
-                tv = _hk(_t_rel)
-                if np.isfinite(tv):
-                    env_t = float(tv) / 100.0
+                    def _hk(rel):
+                        c = hk + rel - hk_shift
+                        v = raw_probe[c] if 0 <= c < len(raw_probe) else np.nan
+                        return v if (np.isfinite(v) and v not in (0, 65535)) else np.nan
+
+                    _t_rel = DataIO._HK_REL['cold_cav_t']
+                    for p_rel, t_rel, is_hot in (
+                        (DataIO._HK_REL['cold_p'], DataIO._HK_REL['cold_cav_t'], False),
+                        (DataIO._HK_REL['hot_p'],  DataIO._HK_REL['hot_cav_t'],  True),
+                    ):
+                        pv = _hk(p_rel)
+                        if np.isfinite(pv):
+                            pm = float(pv) * DataIO._P_SCALE
+                            if DataIO._P_LO <= pm <= DataIO._P_HI:
+                                env_p = pm
+                                _t_rel = t_rel
+                                if is_hot:
+                                    for _name in (('tempcell1', 'tempcell2') if ch == 1
+                                                  else ('tempcell2', 'tempcell1')):
+                                        _tc = _hk(DataIO._HK_REL[_name])
+                                        if np.isfinite(_tc) and 0.0 < float(_tc) / 100.0 < 100.0:
+                                            _t_rel = DataIO._HK_REL[_name]
+                                            break
+                                break
+                    tv = _hk(_t_rel)
+                    if np.isfinite(tv):
+                        env_t = float(tv) / 100.0
             else:
                 # ── Regular 1D file (one value per line, e.g. alpha trace) ──
                 # Re-read the whole file to get all rows, not just the target row.
