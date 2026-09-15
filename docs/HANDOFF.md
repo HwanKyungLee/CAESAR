@@ -6,6 +6,51 @@
 
 ---
 
+## 2026-09-15 — `gui/app_window.py` 분해: 6418 → 1431줄
+
+**메서드가 이사했다. `gui/app_window.py`만 grep하면 이제 못 찾는다.**
+클래스에 있던 §1~§14 목차 주석을 이음매로 써서 §3~§14를 믹스인 9개로 뺐다.
+`CAESARAnalyzer`는 그대로고 호출부도 그대로다(전부 `self.xxx()`). 목차 주석에
+이사 간 파일이 적혀 있으니 거기서 찾을 것.
+
+| 파일 | § | 내용 |
+|---|---|---|
+| `app_window.py` | §1 §2 | `init_ui` + Setup 탭 (남은 것) |
+| `app_window_cavity.py` | §3 | Cavity 탭 + FWHM/ILS 검증 |
+| `app_window_inputs.py` | §4~§6 | 입력 → 알파 생성 → I0/R 진단 |
+| `app_window_fitsetup.py` | §7~§9 | 다이얼로그 런처 · Test Fit · 핏범위/레퍼런스 |
+| `app_window_dataload.py` | §10 | 데이터 로드 + 채널 분배 |
+| `app_window_run.py` | §11 | 분석 실행 / 워커 / autosave / closeEvent |
+| `app_window_results.py` | §12 | 결과 테이블 / QC / fast 렌더 |
+| `app_window_save.py` | §13 | 결과 저장 + 결과뷰어 연동 |
+| `app_window_channels.py` | §14 | 채널 탭 + 시나리오 config |
+| `app_window_policy.py` | — | `_scenario_gas_policy` 등. §11·§14가 같이 써서 순환 임포트를 막으려 뺌 |
+
+**순수 이동이다** — 옮긴 4987줄이 분해 전(`0025020`)의 연속 부분문자열임을 확인했다.
+동작이 바뀐 곳은 없다. 로직 개선은 손대지 않았다.
+
+### 이어서 작업할 사람이 알아야 할 것
+
+- **앵커: `tools/test_app_window_smoke.py`** (CI 등록됨). 메인창을 offscreen으로
+  띄우고 ①분해 직전 표면(클래스 속성 160 + 위젯 152 + 탭 이름) ②믹스인 이름 충돌
+  ③`symtable`로 미해결 전역(임포트 유실)을 본다. 믹스인을 더 만들거나 메서드를
+  옮길 거면 이게 가드다. 의도적으로 메서드를 지웠다면 골든 목록에서도 지워야 한다.
+- ③번은 실제로 버그를 잡아서 생겼다. `campaign_dir as _campaign_dir`의 **별칭이
+  이동 중에 흘렀는데** 모듈은 멀쩡히 임포트되고 창도 뜨고 import smoke도 통과했다 —
+  autosave가 도는 순간에만 NameError였다. 표면 골든으로는 원리상 안 잡힌다.
+- `gui.app_window`가 `_scenario_gas_policy`/`_channel_worker_gas_policy`를 참조 0인
+  채로 임포트하고 있다. **재수출이다** — `tools/test_test_fit_dialog.py`가 거기서
+  가져간다. 미사용 임포트로 보고 지우지 말 것(`noqa`와 주석 붙여둠).
+- **§1 `init_ui`(777줄)는 일부러 안 뺐다.** 전 탭의 위젯을 만들고 믹스인 아홉 개
+  전부에 `connect`하는 허브라, 떼면 파일만 하나 늘고 읽기는 더 어려워진다. 쪼갠다면
+  "탭별 build 메서드를 각 믹스인으로 넘기는" 구조 변경이고 그건 순수 이동이 아니다.
+- 덤으로, 저장소에 있으면서 CI에 등록된 적 없던 `tools/test_ref_properties_table.py`
+  (shift 정책 왕복)와 `tools/test_test_fit_dialog.py`(Limit→Center 산식이
+  `core/fitset_builder.py`와 같은지)를 ci.yml에 넣었다. 있는데 안 도는 테스트는
+  없는 것과 같다.
+
+---
+
 ## 2026-09-15 — 해석적 자코비안(Golub–Pereyra). "차원축소 덕"이 드디어 실증됨
 
 비선형 탐색이 scipy 기본 **2점 유한차분** 자코비안을 쓰고 있었다. 실측(실제 프리셋 d=2,
