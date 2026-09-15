@@ -74,6 +74,7 @@ class Watcher:
         self.cursor = cursor
         self.file_glob = file_glob
         self._profile_cache: dict = {}   # {path: Profile|False(=매치실패, 재시도 방지)}
+        self._warned_dupes: set = set()  # 중복 파일명 경고를 한 번만(폴링 1초 주기)
 
     def _route(self, path: str, n_columns: int) -> Optional[Profile]:
         """성공만 캐시한다. LabVIEW가 파일 첫 행에 쓰는 flag=0 헤더행은 데이터행보다
@@ -114,11 +115,37 @@ class Watcher:
         text = chunk.decode("utf-8", errors="replace")
         return text.split("\n")[:-1]   # split 끝의 빈 문자열(마지막 \n 뒤) 제거
 
+    def _warn_duplicate_basenames(self, paths: list) -> None:
+        """같은 파일명이 감시 트리에 두 번 이상 있으면 **한 번만** 경고한다.
+
+        `**` 재귀 glob이라 감시폴더 밑에 사본 폴더가 있으면 같은 스캔을 두 번
+        수집한다 — 실측: `CAESAR_Cold/2026-06/KRISS_10ppm - 복사본/` 이
+        `KRISS_10ppm/` 의 사본이라 2026-06-02-009/010/011 이 두 번 들어온다
+        (liveness·추세 지표가 그만큼 부풀고, 파일 간 시각 연속성에 가짜 역행이 생긴다).
+
+        **지우거나 건너뛰지 않는다**(무결성 헌장: 지우지 말고 flag). 어느 쪽이
+        진짜인지는 코드가 알 수 없고, 과필터링이 부족한 필터링보다 위험하다.
+        운용자가 사본 폴더를 치우거나 watch_dir 을 좁히면 경고가 사라진다.
+        폴링이 1초 주기라 **경고한 파일명은 기억해 두고 다시 찍지 않는다.**"""
+        seen: dict = {}
+        for p in paths:
+            seen.setdefault(os.path.basename(p), []).append(p)
+        for name, group in seen.items():
+            if len(group) > 1 and name not in self._warned_dupes:
+                self._warned_dupes.add(name)
+                print(f"[oculus][WARN] 같은 파일명이 {len(group)}곳에 있다 — "
+                      f"같은 스캔을 중복 수집한다: {name}")
+                for p in group:
+                    print(f"[oculus][WARN]     {p}")
+
+
     def poll(self) -> list:
         """한 tick: 감시폴더의 모든 파일에서 새 행을 모아 RowEvent 리스트로 반환."""
         events: list = []
         pattern = os.path.join(self.watch_dir, "**", self.file_glob)
-        for path in sorted(glob.glob(pattern, recursive=True)):
+        paths = sorted(glob.glob(pattern, recursive=True))
+        self._warn_duplicate_basenames(paths)
+        for path in paths:
             for line in self._read_new_lines(path):
                 row = _parse_row(line)
                 if row is None:

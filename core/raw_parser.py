@@ -267,11 +267,22 @@ def _is_sentinel(v: float) -> bool:
 # ──────────────────────────────────────────────────────────────────────────────────
 
 # kind: "temp" → ÷100 = °C, "press" → ×0.6895 = mbar, "raw" → use as-is
+# ⚠ 전수조사(2026-09-15, 핫 1314개 × 5행 = 6570행) — 아래 세 열은
+# **한 번도 실측값이 없다**(항상 0 또는 65535):
+#     templed4(6152) · tempcell3(6176) · **tempsptrm(6177)**
+# 반면 **미지도인 col 6180은 1314개 중 1239개 파일에서 median 29.74 °C**의
+# 실신호를 낸다(콜드의 tempsptrm=6174가 26.98 °C인 것과 같은 계열로 보임).
+# → 핫 분광기 온도는 6177이 아니라 **6180일 가능성이 높다.** 다만 어느 센서가
+#   어느 열인지는 **하드웨어 사실**이라 계기 담당자 확인 전에는 바꾸지 않는다
+#   (추측으로 재배치하면 ‘조용히 틀린 HK’가 되는데, 이 모듈은 그걸 가장 경계한다).
+#   현재 소비자는 없다(data_io._HK_REL 최대 rel=26) — 즉각적 피해는 없다.
+#   참고: campaigns/yeosu_2026/hot_cavity_t/scripts/02_backcast_all.py 는 핫 col 6174를
+#   'T_spt'라 부르는데 여긴 같은 열을 'tempcell1'이라 한다 — 이름 충돌도 같이 정리할 것.
 HotHKMap: dict[str, tuple[int, float, str, str]] = {
     "templed1":       (6149, 0.01,      "C",    "temp"),   # MATLAB:templed1
     "templed2":       (6150, 0.01,      "C",    "temp"),   # MATLAB:templed2
     "ANs_oven":       (6151, 0.01,      "C",    "temp"),   # MATLAB:templed3 (actually ANs oven ~300C)
-    "templed4":       (6152, 0.01,      "C",    "temp"),
+    "templed4":       (6152, 0.01,      "C",    "temp"),  # 전수 sentinel
     "temppreh":       (6153, 0.01,      "C",    "temp"),   # MATLAB:temppreh ~38C
     "PNs_oven":       (6154, 0.01,      "C",    "temp"),   # MATLAB:tempcellh (actually PNs oven ~180C)
     "cavity_gas_T":   (6155, 0.01,      "C",    "temp"),   # MATLAB:tempoptbx (actually cell heater ~75C — gas T setpoint)
@@ -279,8 +290,8 @@ HotHKMap: dict[str, tuple[int, float, str, str]] = {
     "P_ANs":          (6164, P_SCALE,   "mbar", "press"),  # ANs cavity inlet
     "tempcell1":      (6174, 0.01,      "C",    "temp"),   # cavity T sensor 1 (always working)
     "tempcell2":      (6175, 0.01,      "C",    "temp"),   # cavity T sensor 2 (broken until 5/27 10:56)
-    "tempcell3":      (6176, 0.01,      "C",    "temp"),   # cavity T sensor 3
-    "tempsptrm":      (6177, 0.01,      "C",    "temp"),   # spectrometer housing T
+    "tempcell3":      (6176, 0.01,      "C",    "temp"),   # cavity T sensor 3  # 전수 sentinel
+    "tempsptrm":      (6177, 0.01,      "C",    "temp"),   # spectrometer housing T  # ⚠ 전수 sentinel — 위 주석 참고(6180 의심)
 }
 
 ColdHKMap: dict[str, tuple[int, float, str, str]] = {
@@ -288,6 +299,29 @@ ColdHKMap: dict[str, tuple[int, float, str, str]] = {
     "cavity_T":       (6173, 0.01,      "C",    "temp"),   # Cold cavity wall T
     "tempsptrm":      (6174, 0.01,      "C",    "temp"),   # spectrometer T
 }
+
+
+# ── 2026-06-11 ~ 06-15 콜드 구성 (ncols 6174) ─────────────────────────────────
+# 이 5일치는 **다른 캐비티 빌드가 아니다** — 스펙트럼 블록은 그대로고 HK 블록의
+# **선두 5열만** 통째로 빠졌다. 그래서 새 표를 손으로 쓰지 않고 ColdHKMap을 옮긴다
+# (열 번호를 두 번 적으면 그 순간 사본이 생기고 한쪽만 고쳐지는 사고가 난다 — 원칙 3).
+#
+# 근거(전수조사 2026-09-15, E:/Yeosu_2026/CAESAR_Cold 748개 중 97개):
+#   6174행을 +5 이동하면 6179행과 열이 정확히 겹친다 —
+#   cavity_P 1466↔1462 · cavity_T 3012↔2948 · 꼬리 2889/2809↔2891/2800.
+#   구간은 2026-06-11-020 ~ 06-15-026 연속이고 양쪽 경계가 DAQ 재시작 직후다.
+# 주의: 보정 없이 명목 절대열로 읽으면 cavity_T가 33.93°C(진값 29.16°C)로 나온다 —
+#   **둘 다 말이 되는 온도라 범위검사로 안 걸린다.**
+COLD_6174_LEAD_LOSS = 5
+
+
+def _shift_hk_map(hk_map: dict, delta: int) -> dict:
+    """HK 지도를 delta 열만큼 옮긴 새 지도. 스케일·단위·kind는 그대로."""
+    return {n: (c + delta, sc, u, k) for n, (c, sc, u, k) in hk_map.items()}
+
+
+Cold6174HKMap: dict[str, tuple[int, float, str, str]] = _shift_hk_map(
+    ColdHKMap, -COLD_6174_LEAD_LOSS)
 
 
 # ──────────────────────────────────────────────────────────────────────────────────
@@ -474,6 +508,9 @@ register_campaign_layout(6179, "cold", {"NO2": "primary"}, ColdHKMap,
                          campaign="2026-yeosu")
 register_campaign_layout(6181, "hot", {"PNs": "primary", "ANs": "secondary"}, HotHKMap,
                          campaign="2026-yeosu")
+
+register_campaign_layout(6174, "cold", {"NO2": "primary"}, Cold6174HKMap,
+                         campaign="2026-yeosu")   # 6/11~6/15 HK 선두 5열 결손 구성
 
 
 # ──────────────────────────────────────────────────────────────────────────────────

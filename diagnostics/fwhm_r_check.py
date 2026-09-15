@@ -27,6 +27,7 @@ from pathlib import Path
 # Rayleigh physics → 공용 모듈에서 가져옴 (중복 제거)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.physics import RayleighPhysics
+from core.raw_parser import P_SCALE
 
 
 # =============================================================================
@@ -253,7 +254,7 @@ def run_hot():
 
     he_ch1, za_ch1 = [], []
     he_ch2, za_ch2 = [], []
-    P_SCALE = 0.01 * 6894.73326 / 100.0   # counts → mbar
+    # P_SCALE은 core/raw_parser.py가 단일 출처 — 사본을 두지 않는다(원칙 3).
 
     for mf in mat_files:
         try:
