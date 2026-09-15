@@ -26,6 +26,34 @@ from numpy.polynomial import chebyshev
 ETALON_CORR_WARN = 0.5
 
 
+def _policy_floats(gas, kind, mode, raw, n):
+    """shift/squeeze 정책 문자열 -> 실수 n개. 못 읽으면 **조용한 기본값 대신 예외**.
+
+    2026-09-15 이전에는 이 파싱이 실패하면 각 자리에서 하드코딩 기본값으로
+    갈아탔다(Center -> 0±3px, Limit -> ±3px, Fix -> 0, sq Limit -> ±0.01,
+    sq Fix -> 1.0). 결과 파일 헤더에는 **선언한 세팅**이 그대로 기록되므로,
+    오타 하나면 "기록된 세팅"과 "실제로 돈 세팅"이 달라진 채 밤샘 런이 끝난다.
+    재현성 원칙(결과 헤더 = 그 결과를 만든 세팅)과 정면으로 어긋나므로, 숫자가
+    나오기 전인 셋업 단계에서 멈춘다.
+
+    같은 검사가 이미 `core.fitset_builder.validate_fitset()`에 있다 — 거기는
+    FitSet을 내보내기 전에 거르는 문지기이고, 여기는 그걸 안 거친 경로(수동
+    ref_properties 등)를 위한 마지막 방어선이다.
+    """
+    try:
+        vals = [float(x) for x in str(raw).split(",")]
+    except (TypeError, ValueError):
+        vals = None
+    if vals is None or len(vals) != n:
+        raise ValueError(
+            f"{gas}: {kind}_mode={mode} 인데 {kind}_val을 읽을 수 없다 "
+            f"({kind}_val={raw!r}, 기대: 콤마로 구분된 실수 {n}개). "
+            f"FitSet/레퍼런스 설정을 고칠 것 — 예전에는 여기서 조용히 기본값으로 "
+            f"갈아타서 '기록된 세팅'과 '실제 세팅'이 어긋났다."
+        )
+    return vals
+
+
 class DoasFitter:
     def __init__(self, engine):
         self.engine = engine
@@ -257,21 +285,17 @@ class DoasFitter:
                     # Limit은 언제나 0에서 출발해 step_limit씩 걸어 들어가야 하므로, 0에서 먼
                     # 실제 shift(예: 핫 -5.25px)를 쓰려면 범위가 0을 품어야 했고 그만큼 느슨해졌다.
                     # Center는 첫 스캔부터 중심에서 시작하므로 범위를 실측만큼 좁게 줄 수 있다.
-                    try:
-                        c_val, half = map(float, props["sh_val"].split(','))
-                        half = abs(half)
-                    except Exception:
-                        c_val, half = 0.0, 3.0
+                    c_val, half = _policy_floats(gas, "sh", "Center",
+                                                 props.get("sh_val"), 2)
+                    half = abs(half)
                     global_lb, global_ub = c_val - half, c_val + half
                     # 스캔간 연속성은 유지: 이전 shift가 이미 창 안이면 그걸 중심으로 이어가고,
                     # 창 밖(첫 스캔의 0 등)이면 선언된 중심에서 시작한다.
                     anchor = (initial_shift_center
                               if global_lb <= initial_shift_center <= global_ub else c_val)
                 else:
-                    try:
-                        global_lb, global_ub = map(float, props["sh_val"].split(','))
-                    except Exception:
-                        global_lb, global_ub = -3.0, 3.0
+                    global_lb, global_ub = _policy_floats(gas, "sh", "Limit",
+                                                          props.get("sh_val"), 2)
                     if global_ub < global_lb:
                         global_lb, global_ub = global_ub, global_lb
                     anchor = initial_shift_center
@@ -301,10 +325,7 @@ class DoasFitter:
                 # because initial_shift_center carries last_valid_shift across scans —
                 # made any non-zero Fix value drift by `val` every scan (e.g. Fix -0.5
                 # ran away to -120). Fix 0 happened to be safe (no accumulation).
-                try:
-                    val = float(props["sh_val"])
-                except Exception:
-                    val = 0.0
+                (val,) = _policy_floats(gas, "sh", "Fix", props.get("sh_val"), 1)
                 fixed_vars[sh_name] = val
             elif props["sh_mode"] == "Link":
                 linked_vars[sh_name] = f"{props['sh_val'].strip()}_sh"
@@ -312,10 +333,8 @@ class DoasFitter:
             sq_name = f"{gas}_sq"
             if props["sq_mode"] == "Limit":
                 active_vars.append(sq_name)
-                try:
-                    v_min, v_max = map(float, props["sq_val"].split(','))
-                except Exception:
-                    v_min, v_max = -0.01, 0.01
+                v_min, v_max = _policy_floats(gas, "sq", "Limit",
+                                              props.get("sq_val"), 2)
                 sq_lb = 1.0 + v_min if abs(v_min) < 0.5 else v_min
                 sq_ub = 1.0 + v_max if abs(v_max) < 0.5 else v_max
                 theta_lb.append(sq_lb); theta_ub.append(sq_ub)
@@ -325,10 +344,7 @@ class DoasFitter:
                 active_vars.append(sq_name)
                 theta_lb.append(0.1); theta_ub.append(10.0); theta0.append(1.0)
             elif props["sq_mode"] == "Fix":
-                try:
-                    val = float(props["sq_val"])
-                except Exception:
-                    val = 1.0
+                (val,) = _policy_floats(gas, "sq", "Fix", props.get("sq_val"), 1)
                 fixed_vars[sq_name] = 1.0 + val if abs(val) < 0.5 else val
             elif props["sq_mode"] == "Link":
                 linked_vars[sq_name] = f"{props['sq_val'].strip()}_sq"
@@ -609,7 +625,12 @@ class DoasFitter:
                 cov = M_inv * mse
             perr_lin = np.sqrt(np.maximum(np.diag(cov), 0.0))
         except Exception:
-            perr_lin = np.zeros_like(c_opt)
+            # 0이 아니라 NaN이다. perr는 결과 파일의 <gas>_Error 이자
+            # MDL = 3*Error 의 재료이고, fit_optimizer의 1순위 순위축
+            # perr_rel(=perr/|coeff|)이기도 하다. 0으로 채우면 "오차 0, 검출한계 0,
+            # 최적 세팅"이라는 **가장 방어 불가능한 주장**이 조용히 파일에 박힌다.
+            # NaN은 '모른다'이고, 하류(fit_optimizer)가 이미 쓰는 센티넬이다.
+            perr_lin = np.full_like(c_opt, np.nan)
 
         c_gas = c_opt[0:num_gases].copy()
         c_perr = perr_lin[0:num_gases].copy()

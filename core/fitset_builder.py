@@ -383,6 +383,13 @@ def validate_fitset(cfg, target="NO2"):
             # 첫 스캔(center=0)에서 교집합이 비면 핏이 죽는다
             if not (lo <= step and hi >= -step):
                 problems.append(f"{g}: sh_val [{lo},{hi}]이 시작점 0±{step}과 교집합 없음 → 핏 불가")
+        elif pr.get("sh_mode") == "Fix":
+            # 2026-09-15 추가: Fix는 검사에서 빠져 있었다. doas_fit이 예전에는
+            # 파싱 실패를 0.0으로 조용히 갈아탔으므로(지금은 예외) 여기서도 잡는다.
+            try:
+                float(str(pr["sh_val"]))
+            except Exception:
+                problems.append(f"{g}: sh_val(Fix) 파싱 불가 '{pr.get('sh_val')}'")
         if pr.get("sq_mode") == "Limit":
             try:
                 lo, hi = map(float, str(pr["sq_val"]).split(","))
@@ -390,6 +397,11 @@ def validate_fitset(cfg, target="NO2"):
                     problems.append(f"{g}: sq_val 상하한 역전")
             except Exception:
                 problems.append(f"{g}: sq_val 파싱 불가")
+        elif pr.get("sq_mode") == "Fix":
+            try:
+                float(str(pr["sq_val"]))
+            except Exception:
+                problems.append(f"{g}: sq_val(Fix) 파싱 불가 '{pr.get('sq_val')}'")
     try:
         if int(cfg["f_max"]) - int(cfg["f_min"]) < 50:
             problems.append("핏창이 너무 좁음(<50px)")
