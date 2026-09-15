@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import argparse
 from dataclasses import dataclass
 
@@ -34,6 +35,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+
+# QC 문턱식은 core/result_io.py 가 단일 출처 — 여기서 다시 구현하지 않는다(원칙 3).
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from core.result_io import robust_rms_thresholds  # noqa: E402
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 
@@ -94,7 +101,8 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
       · 항상 Skip/QC-* 행 제외
       · ok_only=True  → Status!=OK(예: Unstable) 행 제외
       · qc_k>0        → RMS robust 임계 초과 행 제외  thr=10^(median(log10 RMS)+K·MAD)
-                        (GUI _apply_auto_qc 와 동일. cold 은 K=4 쓰지 말 것 — 과제거)"""
+                        (core.result_io.robust_rms_thresholds 호출 = GUI _apply_auto_qc와 **같은 함수**.
+                         cold 은 K=4 쓰지 말 것 — 과제거)"""
     df = pd.read_csv(path, sep="\t", comment="#", engine="python")
     df.columns = [c.strip() for c in df.columns]
     df.index = pd.to_datetime(df["Time"], errors="coerce")
@@ -110,12 +118,11 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
             df[g] = pd.to_numeric(df[g], errors="coerce")
     if qc_k > 0 and "RMS" in df.columns:
         rms = pd.to_numeric(df["RMS"], errors="coerce").to_numpy(float)
-        fin = np.isfinite(rms) & (rms > 0)
-        if fin.sum() >= 5:
-            la = np.log10(rms[fin]); med = np.median(la); mad = np.median(np.abs(la - med))
-            if mad > 0:
-                thr = 10 ** (med + qc_k * mad)
-                df = df.loc[~(np.isfinite(rms) & (rms > thr))]
+        # core 단일 출처. channels=None = 이 리포트 전체를 한 그룹으로(파일이 이미 채널별).
+        # 표본부족(<5)이나 MAD=0이면 core가 +inf 를 줘서 아무도 안 걸러진다 —
+        # 사본 시절의 "그냥 건너뜀"과 동일(무작위 21,000건 대조로 동치 확인).
+        thr = robust_rms_thresholds(rms, K=qc_k).get(0, float("inf"))
+        df = df.loc[~(np.isfinite(rms) & (rms > thr))]
     return df
 
 

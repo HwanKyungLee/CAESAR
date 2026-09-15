@@ -11,6 +11,8 @@ import os
 from datetime import datetime
 from typing import Optional
 
+from core.provenance import code_version
+
 
 class StateLog:
     """append(status, msg, **fields) 한 줄 = 시각+상태 JSON 한 개.
@@ -24,8 +26,12 @@ class StateLog:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
     def append(self, status: str, msg: str, **fields) -> None:
+        # 매 줄에 코드 해시를 박는다 — Augur 확정분석과 사후 대조할 때 "이 숫자가 어느
+        # 코드에서 나왔나"가 줄 단위로 확정돼야 한다(현장 PC의 Oculus가 랩 Augur보다
+        # 뒤처질 수 있다: tools/bundle_oculus_deps.py USB 배포). code_version()은
+        # lru_cache라 프로세스당 git 호출 1회.
         rec = {"ts": datetime.now().isoformat(timespec="seconds"),
-               "status": status, "msg": msg, **fields}
+               "status": status, "msg": msg, "code": code_version(), **fields}
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 

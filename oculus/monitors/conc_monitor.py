@@ -135,8 +135,8 @@ class ConcMonitor:
 
     def _classify(self, result: dict):
         conc, rms_sig = result["conc"], result["rms_sig"]
-        metrics = {"conc_ppb": conc, "rms_sig": rms_sig, "perr_rel": result["perr_rel"],
-                   "conc_all_ppb": result["conc_all"]}
+        metrics = {"conc_ppb": conc, "rms_sig": rms_sig, "rms": result["rms"],
+                   "perr_rel": result["perr_rel"], "conc_all_ppb": result["conc_all"]}
         if not np.isfinite(conc):
             return P1, f"{self.cfg.target} 핏 실패(농도 NaN)", metrics
 
@@ -151,6 +151,9 @@ class ConcMonitor:
             worst = worse(worst, P1)
         if c.rms_sig_alarm is not None and rms_sig > c.rms_sig_alarm:
             issues.append(f"핏 신뢰 낮음 rms/sig={rms_sig*100:.1f}%")
+            worst = worse(worst, P1)
+        if c.rms_alarm is not None and result["rms"] > c.rms_alarm:
+            issues.append(f"핏 잔차 큼 rms={result['rms']:.2e}")
             worst = worse(worst, P1)
         if (c.spike_ppb is not None and self._history
                 and np.isfinite(self._history[-1])
