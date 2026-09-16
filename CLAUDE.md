@@ -1,8 +1,9 @@
 # CLAUDE.md — Augur / CAESAR 저장소 가이드
 
-> 이 파일이 있는 위치가 저장소 루트다 (`C:\Doasis_Work\CAESAR\CAESAR`).
-> **바깥에 이름이 같은 `CAESAR` 폴더가 하나 더 있다** — 그건 이 저장소를 담는 부모 폴더일 뿐,
-> git 저장소가 아니다. `git status`가 이상하면 `pwd`부터 확인.
+> **이 파일이 있는 위치가 저장소 루트다.** 체크아웃 경로는 PC마다 다르다
+> (`C:\GHL\CAESAR`, `C:\Doasis_Work\CAESAR\CAESAR`, …). 후자에는 **이름이 같은 `CAESAR`
+> 폴더가 바깥에 하나 더 있다** — 그건 저장소를 담는 부모 폴더일 뿐 git 저장소가 아니다.
+> `git status`가 이상하면 `pwd`부터 확인.
 
 ## 뭘 만드는 저장소인가
 
@@ -23,6 +24,7 @@
 | 그 외 Augur GUI/코어 일반 작업 | [`docs/HANDOFF.md`](docs/HANDOFF.md)(최신 세션 노트) + `README.md`의 폴더구조·임포트구조 |
 | ANs/ANs 퇴화·NIER 제출 관련 | [`docs/ANs_분석_핸드오프_2026-07-23.md`](docs/ANs_분석_핸드오프_2026-07-23.md) |
 | NO2 인젝션 실험(g 축퇴·핫채널 30% 결손 해결) | [`docs/NO2_인젝션_실험_핸드오프_2026-08.md`](docs/NO2_인젝션_실험_핸드오프_2026-08.md) 전체 |
+| 수치·오차·QC 감사 관련(공분산, σ̂², n_eff, 포화, flag=0) | [`docs/감사_교차검증_2026-09-16.md`](docs/감사_교차검증_2026-09-16.md) — 항목마다 재현 명령·확신 수준·**정정 목록**이 있다 |
 
 ## 절대 어기면 안 되는 원칙 (요약, 근거는 위 문서에)
 
@@ -34,12 +36,15 @@
    QC 문턱식은 `core/result_io.py` 한 곳에만 — 사본을 만들지 말 것.
 4. **재현성**: 결과 파일 헤더에 git 해시 + 세팅 전체가 자동 기록되어야 함. 자동 처리는 사람 승인 없이 적용 금지.
 
-## 지금 상태 (파악 시점 2026-08-04, 이후 바뀔 수 있음 — `git log`/`git status`로 재확인할 것)
+## 지금 상태 (파악 시점 2026-09-17, 이후 바뀔 수 있음 — `git log`/`git status`로 재확인할 것)
 
-- 최근 작업 브랜치: `claude/oculus-realtime-monitoring-pbjudz`.
-- **주의**: 이 브랜치에 커밋 안 된 변경(core/data_io.py 등)과, ANs/NIER 제출 관련으로 보이는 untracked
-  파일들(`tools/build_nier_submission.py`, `scenarios/AutoFitSet_*.json` 등)이 섞여 있었다.
-  Oculus 작업을 새로 시작하기 전에 이게 정리됐는지 `git status`로 먼저 확인할 것.
+- 작업 브랜치 `main`, 작업트리 clean. (2026-08-04에 경고돼 있던 미커밋 변경·untracked 뒤섞임은 해소됐다.)
+- 최근 두 주는 **수치 감사**였다: 파장축 파서 단일 출처화, `flag=0` 헤더행 T/P 차용,
+  CCD 포화 감지, 공분산 λ 불일치, σ̂² 분모 `RSS/n` → `RSS/(n-p)`. 무엇이 **출력을 바꿨고**
+  무엇이 안 바꿨는지는 `docs/감사_교차검증_2026-09-16.md` §1 표에 한눈에 있다.
+- 남은 감사 항목은 `docs/HANDOFF.md`의 "출발점" 절 4·6·7·8번
+  (수치 바닥값 산재 / `estimate_shift` 실패=0 / `_is_alpha_input` 오판 / T/P 명목값 → 오차예산).
+- `git stash list`에 오래된 stash 2개가 남아 있다(`varpro-dense-w-removal` 시절). 쓸 게 없으면 버려도 된다.
 
 ## 회귀 검증 (코드 수정 후 반드시)
 
@@ -55,6 +60,14 @@ python tools/validate_plotmaker.py            # 시각화 수정 시
 
 ## 메모리 스코프 주의
 
-`.claude` 프로젝트 메모리는 **`claude`를 실행한 정확한 디렉터리**에 묶인다. 이 저장소 관련 축적 기억은
-바깥 `C:\Doasis_Work\CAESAR`에서 실행했을 때 쌓인 것들이다 — 안쪽(`CAESAR\CAESAR`, 여기)이나 다른
-경로에서 실행하면 그 기억들이 안 보인다. **`C:\Doasis_Work\CAESAR`에서 `claude`를 켤 것.**
+`.claude` 프로젝트 메모리는 **`claude`를 실행한 정확한 디렉터리**에 묶인다. 체크아웃이 여러 개라
+기억도 갈라져 있다 (2026-09-17 기준):
+
+| 실행 디렉터리 | 쌓인 기억 |
+|---|---|
+| `C:\Doasis_Work\CAESAR` | **53개** — 2026-06~08 축적분(알파 병렬화, ANs 에폭, R 캘리브 등) |
+| `C:\GHL\CAESAR` | 4개 — 최근분(계기 sentinel 규약, HK 열 배치) |
+
+**어느 쪽에서 켜든 반대쪽 기억은 안 보인다.** 옛 맥락이 필요하면 그쪽 `MEMORY.md`를 직접 읽으면 된다
+(`C:\Users\<user>\.claude\projects\C--Doasis-Work-CAESAR\memory\`).
+어차피 저장소 지식의 본체는 `docs/`에 있다 — 기억은 보조다.
