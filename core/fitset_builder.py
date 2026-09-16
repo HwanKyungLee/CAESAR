@@ -24,6 +24,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+import warnings
 
 import numpy as np
 
@@ -120,7 +121,24 @@ def select_references(eng, alphas, candidates, wave, T_C, P_mbar,
     rho = WD.residual_rho(eng, alphas, [target], px_min, px_max, poly_deg)
     n_pix = px_max - px_min + 1
     # AR(1) 유효표본수 — 잔차가 상관되어 있으면 실제 정보량은 픽셀 수보다 적다.
-    n_eff = max(n_pix * (1.0 - rho) / (1.0 + rho), 10.0)
+    #
+    # 바닥 10.0 에 대하여(2026-09-16 실측): **한 번도 걸린 적이 없다.**
+    # 여수 3채널 × 창·poly 549조합에서 n_eff 최소가 161(ANs)이고, 바닥에 닿으려면
+    # ρ ≥ 0.941(좁은 창 331px) ~ 0.985(넓은 창 1352px) 가 필요한데 실측 ρ 최대는
+    # 0.652 다(저장된 optimizer 로그 764건의 실제 핏 잔차 ac1 도 max 0.814). 그래서 **바닥 자체는 손대지 않는다** — 도달하지 않는
+    # 값을 고치는 건 이득 없이 회귀 위험만 산다.
+    #
+    # 다만 조용하면 안 된다. 바닥이 걸린다는 건 잔차가 사실상 한 덩어리라는 뜻이고,
+    # 그때 F검정 분모 자유도가 **관대한 쪽으로** 부풀어 후보 종이 우연한 개선만으로
+    # 채택된다(원칙 2의 과적합 함정). 미래 캠페인에서 ρ가 올라가면 소리가 나야 한다.
+    _n_eff_raw = n_pix * (1.0 - rho) / (1.0 + rho)
+    n_eff = max(_n_eff_raw, 10.0)
+    if _n_eff_raw < 10.0:
+        warnings.warn(
+            f"n_eff 바닥 발동: rho={rho:.3f}, n_pix={n_pix} → n_eff_raw={_n_eff_raw:.2f} < 10. "
+            f"F검정 자유도가 관대한 쪽으로 부풀어 레퍼런스가 과채택될 수 있다 — "
+            f"실측(2026-09-16)에서는 rho 최대 0.65라 도달한 적 없는 경로다. 잔차를 확인할 것.",
+            RuntimeWarning, stacklevel=2)
 
     def _rss(species):
         sh = WD.estimate_shift(eng, alphas, species, px_min, px_max, poly_deg)

@@ -45,8 +45,21 @@ def residual_rho(eng, alphas, species, px_min, px_max, poly_deg, etalon_freq=0.3
     """**설계행렬이 설명하지 못한 잔차**의 lag-1 자기상관 ρ.
 
     ⚠️고역통과한 알파의 상관을 쓰면 정의상 백색(ρ≈0)이라 유효자유도 보정이 무력화되고
-    '넓을수록 좋다' 편향이 되살아난다. 실제 핏 잔차는 강하게 상관(|ac1|~1)되어 있으므로,
-    선형 사영(비선형 최적화 없음 — 여전히 사전계산)으로 얻은 잔차에서 ρ를 재야 한다."""
+    '넓을수록 좋다' 편향이 되살아난다. 그래서 선형 사영(비선형 최적화 없음 — 여전히
+    사전계산)으로 얻은 잔차에서 ρ를 재야 한다.
+
+    ⚠️ **실측(2026-09-16)** — 예전 주석은 "실제 핏 잔차는 강하게 상관(|ac1|~1)"이라고
+    적고 있었으나 **그 근거가 없고 측정과 다르다.** 두 갈래로 독립 확인했다:
+
+      · 이 함수 자체 (여수 알파 8스캔 × 창·poly 183조합, 채널별)
+          cold  ρ median 0.075 (max 0.456)
+          ANs   ρ median 0.441 (max 0.640)
+          PNs   ρ median 0.392 (max 0.652)
+      · 저장된 optimizer 로그 764건의 **실제 핏 잔차** ac1
+          median 0.093 · max 0.814 · |ac1|>0.9 인 것 **0 %**
+
+    즉 보정은 여전히 의미 있지만(핫 ρ≈0.44 → n_eff ≈ 0.39n) "|ac1|~1" 은 과장이다.
+    이 숫자를 전제로 뭔가를 재설계하지 말 것."""
     sh = estimate_shift(eng, alphas, species, px_min, px_max, poly_deg, etalon_freq)
     A, _ = design_matrix(eng, species, px_min, px_max, poly_deg, etalon_freq, shift=sh)
     sl = slice(px_min, px_max + 1)
