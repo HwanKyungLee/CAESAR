@@ -447,6 +447,27 @@ class DoasFitter:
 
         y_w_current = optical_depth * w_current
 
+        # ── 설계행렬 열 정규화 (수치 조건화 전용, 결과 파일에 안 나감) ──────────
+        # 열 스케일이 20자리 차이난다: 가스 열은 흡수단면적이라 ~1e-19, Chebyshev
+        # 다항식 열과 etalon sin/cos 열은 ~1. Chebyshev는 **다항식 열끼리의** 조건수만
+        # 개선하지 가스 열과의 스케일 차는 그대로다. cond(A) ≈ 2e19 > 1/eps ≈ 1e16 이라
+        # 해의 유효 자릿수를 신뢰할 수 없다(`lstsq(rcond=None)` 경로였다면 가스 열이
+        # 특이값 절단으로 통째로 사라진다 — 독립 검증에서 회수 SCD 1.1e-19 = 사실상 0).
+        #
+        # 각 열을 제 2-노름으로 나눠 풀고 계수를 되돌린다. 열공간이 그대로라
+        # **잔차·투영·GP 자코비안은 정확히 불변**이고 조건수만 내려간다:
+        #   A' = A S⁻¹,  c' = S c        → A'c' = A c            (잔차 동일)
+        #   D' = D S⁻¹                   → P⊥D'c' = P⊥D c        (자코비안 1항 동일)
+        #   A'⁺ᵀ D'ᵀ r = A⁺ᵀ S·S⁻¹ Dᵀ r = A⁺ᵀ Dᵀ r              (자코비안 2항 동일)
+        # S가 θ에 따라 변해도 위 항등식은 유지된다(양쪽에서 상쇄).
+        # Tikhonov 페널티 행도 **같은 S로** 나눈다 — 증강행렬 [A;P]를 통째로 정규화하니
+        # λ의 의미가 안 바뀐다(운영은 λ=0이라 무영향이지만 코드는 맞게 둔다).
+        def _col_scale(M):
+            """열별 2-노름. 0이거나 비유한이면 1 — 그 열은 스케일이 의미 없다
+            (창 밖 기체 = 영벡터. keep_mask로 이미 빠지거나 계수가 0으로 덮인다)."""
+            s = np.sqrt(np.einsum('ij,ij->j', M, M))
+            return np.where(np.isfinite(s) & (s > 0), s, 1.0)
+
         # theta에 안 걸리는 열(poly·custom_basis·etalon sin/cos)은 상수다. 목적함수
         # 호출마다 다시 만들 이유가 없어 여기서 한 번만 조립한다. 열 순서는 종전과
         # 동일(gas → poly → custom → sin → cos)이라 하류 인덱싱·반환값이 불변.
@@ -536,12 +557,15 @@ class DoasFitter:
                 val_dict = _theta_to_vals(theta)
                 A_aug, y_aug = _augment(val_dict)
                 A_keep = A_aug[:, keep_mask]
-                Q, R = np.linalg.qr(A_keep)
-                c_keep = solve_triangular(R, Q.T @ y_aug, lower=False)
+                s = _col_scale(A_keep)
+                Q, R = np.linalg.qr(A_keep / s)
+                c_scaled = solve_triangular(R, Q.T @ y_aug, lower=False)
+                c_keep = c_scaled / s              # c = c'/s (열 정규화 되돌리기)
                 c = np.zeros(A_aug.shape[1])
                 c[keep_mask] = c_keep
                 st = {"theta": np.array(theta, dtype=float), "val_dict": val_dict,
-                      "Q": Q, "R": R, "c": c, "resid": y_aug - A_keep @ c_keep}
+                      "Q": Q, "R": R, "s": s, "c": c,
+                      "resid": y_aug - (A_keep / s) @ c_scaled}
                 jac_state.clear(); jac_state.update(st)
                 return st
 
@@ -554,8 +578,11 @@ class DoasFitter:
                 num_cols = A_aug.shape[1]
                 lb_inner = [gas_lb] * num_gases + [-np.inf] * (num_cols - num_gases)
                 ub_inner = [np.inf] * num_cols
-                res_temp = lsq_linear(A_aug, y_aug, bounds=(lb_inner, ub_inner))
-                return y_aug - A_aug @ res_temp.x
+                # 하한 0은 정규화에 불변이다(s_j > 0이라 c_j ≥ 0 ⟺ s_j·c_j ≥ 0).
+                s = _col_scale(A_aug)
+                A_s = A_aug / s
+                res_temp = lsq_linear(A_s, y_aug, bounds=(lb_inner, ub_inner))
+                return y_aug - A_s @ res_temp.x
 
             def jacobian_varpro(theta):
                 """Golub–Pereyra 완전 자코비안 (Kaufman 근사가 아님 — 2항 모두):
@@ -570,6 +597,7 @@ class DoasFitter:
                 만든 A·Q·R·c를 재활용하고, 어긋나면 다시 푼다(결과는 같고 느릴 뿐)."""
                 st = jac_state if (jac_state and np.array_equal(jac_state["theta"], theta))                      else _solve_qr(theta)
                 Q, R, c, val_dict, resid = st["Q"], st["R"], st["c"], st["val_dict"], st["resid"]
+                s = st["s"]                 # Q·R은 **정규화된** A의 것이다
                 D = _gas_dcolumns(val_dict)
                 n_pix = len(pixel_idx)
                 n_pen = Q.shape[0] - n_pix          # Tikhonov 증강 행 수(없으면 0)
@@ -584,8 +612,9 @@ class DoasFitter:
                         g[keep_pos[gi]] = dcol @ r_top
                     if n_pen:
                         v = np.concatenate((v, np.zeros(n_pen)))
-                    term1 = v - Q @ (Q.T @ v)
-                    term2 = Q @ solve_triangular(R, g, trans='T', lower=False)
+                    term1 = v - Q @ (Q.T @ v)          # P⊥는 열 정규화에 불변
+                    # 2항은 정규화된 계에서 g'_j = (D_j/s_j)ᵀr = g_j/s_j 이다.
+                    term2 = Q @ solve_triangular(R, g / s, trans='T', lower=False)
                     J[:, k] = -(term1 + term2)
                 return J
 
@@ -631,8 +660,10 @@ class DoasFitter:
                 A_aug, y_aug = A_f_w, y_w
 
             lb_final = [gas_lb] * num_gases + [-np.inf] * (num_cols_final - num_gases)
-            res_lin_final = lsq_linear(A_aug, y_aug, bounds=(lb_final, [np.inf] * num_cols_final))
-            c_opt = res_lin_final.x
+            s_fin = _col_scale(A_aug)
+            res_lin_final = lsq_linear(A_aug / s_fin, y_aug,
+                                       bounds=(lb_final, [np.inf] * num_cols_final))
+            c_opt = res_lin_final.x / s_fin
 
             if use_robust and iteration < max_iters - 1:
                 residuals = np.abs(optical_depth - A_final @ c_opt)
@@ -680,15 +711,21 @@ class DoasFitter:
             # 이제 핏이 쓴 페널티 행렬 P를 그대로 받아 `M = AᵀA + PᵀP` 로 만든다 —
             # 증강계 `[A; P]` 의 정규방정식과 정의상 동일하다. λ=0이면 P=0이라
             # 기존과 **바이트동일**. 회귀: `tools/test_covariance_lambda.py`
-            AtWA = A_f_w.T @ A_f_w
+            # 공분산도 **핏과 같은 정규화된 계**에서 만들고 되돌린다. 안 그러면
+            # 핏은 조건수 1e2에서 풀고 오차는 1e19에서 계산하는 셈이 된다.
+            #   Cov = S⁻¹ Cov' S⁻¹   ⟺   Cov[i,j] = Cov'[i,j] / (s_i·s_j)
+            # s는 최종 선형해가 실제로 쓴 `s_fin`(증강행렬 [A;P] 기준)을 그대로 쓴다.
+            A_s = A_f_w / s_fin
+            AtWA = A_s.T @ A_s
             n_cols = AtWA.shape[0]
-            P = _penalty(n_cols) if lam > 0 else None
+            P = (_penalty(n_cols) / s_fin) if lam > 0 else None
             M = AtWA + (P.T @ P if P is not None else 0.0)
             M_inv = np.linalg.pinv(M)
             if P is not None:
                 cov = M_inv @ AtWA @ M_inv * mse
             else:
                 cov = M_inv * mse
+            cov = cov / np.outer(s_fin, s_fin)      # 원래 계수 단위로 복원
             perr_lin = np.sqrt(np.maximum(np.diag(cov), 0.0))
         except Exception:
             # 0이 아니라 NaN이다. perr는 결과 파일의 <gas>_Error 이자
@@ -733,8 +770,22 @@ class DoasFitter:
                        # 허용범위 대비 최종 shift를 사후 판정하고, 이쪽은 solver가 실제로
                        # 받은 상자와 그 상자를 만든 두 원본 경계를 본다.
                        "theta_bound_state": bound_state,
-                       "theta_bound_hits": bound_hits}
+                       "theta_bound_hits": bound_hits,
+                       # 열 정규화 전/후 조건수. SVD라 비싸서 진단 요청 시에만 잰다.
+                       # 정규화 후가 1/eps(≈1e16)보다 한참 아래여야 해의 자릿수를
+                       # 신뢰할 수 있다. 스케일 벡터 자체는 내부 구현이라 안 내보낸다.
+                       "cond_raw": _safe_cond(A_f_w[:, keep_mask]),
+                       "cond_normalized": _safe_cond(
+                           (A_f_w / s_fin)[:, keep_mask])}
         return result, diagnostics
+
+
+def _safe_cond(M):
+    """cond(M). 못 구하면 NaN — 진단값이 핏을 죽이면 안 된다."""
+    try:
+        return float(np.linalg.cond(M))
+    except Exception:
+        return float("nan")
 
 
 def classify_theta_bounds(theta, theta_lb, theta_ub, bounds_meta,
