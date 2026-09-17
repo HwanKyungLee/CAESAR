@@ -26,7 +26,7 @@ from scipy.interpolate import interp1d
 # ──────────────────────────────────────────────────────────────────────────
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
 from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
-from core.doas_fit import policy_floats
+from core.doas_fit import alpha_fit_scale, policy_floats
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -48,14 +48,26 @@ def fit_window(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                              fill_value="extrapolate")(wl), float)
     center = vp[len(vp) // 2]
 
-    ef = fitter.detect_etalon_frequency(vp, a, poly_deg, 0.02, 0.40)
+    # 운영 워커·param_optimizer와 **같은 정규화**. 없으면 least_squares가 θ0에서
+    # nfev=1로 끝나 shift/squeeze가 고정된 채 창/차수를 비교하게 된다 —
+    # 이 함수의 `shift_at_bound` 게이트까지 같이 무의미해진다.
+    # 근거는 `core.doas_fit.alpha_fit_scale` 주석.
+    scale = alpha_fit_scale(a)
+    a_scaled = a * scale
+
+    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40)
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
         ref_props, 0.0, [0.0, 1.0], step_limit)
 
-    out = fitter.execute_varpro_fit(vp, a, np.ones(len(a)), active, fixed, linked,
+    out = fitter.execute_varpro_fit(vp, a_scaled, np.ones(len(a)), active, fixed, linked,
                                     t0, lb, ub, poly_deg, ef, center, 1.0,
                                     ref_props, T_C, 0.0, False)
     opt_sh, opt_sq, gco, poly_c, eamp, ep, perr = out
+    # 선형 결과는 전부 원래 단위로 되돌린다(비선형 shift/squeeze는 스케일 무관).
+    gco = np.asarray(gco, float) / scale
+    poly_c = np.asarray(poly_c, float) / scale
+    eamp = float(eamp) / scale
+    perr = np.asarray(perr, float) / scale
 
     full, tot, base, etal, _ = eng.get_model_components(
         vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp, etalon_freq=ef,

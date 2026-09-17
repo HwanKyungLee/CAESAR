@@ -43,6 +43,7 @@ def _require_bool(value):
 
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
 from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
+from core.doas_fit import alpha_fit_scale   # 알파 정규화 단일 출처
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -111,12 +112,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     # scale before VARPRO, then unscale every linear result.  Keep the offline
     # explorer on that exact path so least_squares does not terminate at theta0
     # merely because the unscaled residual is already below its absolute tests.
-    avg_raw = float(np.mean(a))
-    with np.errstate(over="ignore"):
-        scale_factor = (float(np.power(10.0, -np.floor(np.log10(abs(avg_raw)))))
-                        if abs(avg_raw) < 1e-4 and avg_raw != 0 else 1.0)
-    if not np.isfinite(scale_factor) or scale_factor <= 0:
-        raise ValueError("alpha normalization factor must be finite and positive")
+    scale_factor = alpha_fit_scale(a)          # 단일 출처: core.doas_fit
     a_scaled = a * scale_factor
     if not np.all(np.isfinite(a_scaled)):
         raise ValueError("alpha normalization overflow")

@@ -792,6 +792,29 @@ class DoasFitter:
         return result, diagnostics
 
 
+def alpha_fit_scale(alpha):
+    """알파를 VarPro에 넣기 전에 곱할 배수. 선형 결과는 전부 이걸로 되돌려야 한다.
+
+    **왜 필요한가 — 이걸 빼먹으면 비선형 탐색이 통째로 안 돈다.**
+    알파는 ~1e-7 cm⁻¹라 잔차·gradient가 1e-15 수준인데, `least_squares`의
+    gtol/ftol/xtol(기본 1e-8)은 **절대** 문턱이다. θ0에서 이미 만족돼 nfev=1로
+    끝나고, shift/squeeze가 한 발짝도 안 움직인 채 status가 CONVERGED로 나온다
+    (실측 2026-06-14 PNs로 확인: 스케일 없이 shift +0.0000/nfev=1,
+     스케일 1e7로 shift −0.5000/nfev=5).
+
+    `gui/worker.py`와 `core/param_optimizer.py`가 각자 갖고 있던 같은 식을
+    여기로 모은다 — 갈라지면 한쪽만 조용히 안 돌게 된다.
+    """
+    avg = float(np.mean(np.asarray(alpha, dtype=float)))
+    if not (abs(avg) < 1e-4 and avg != 0):
+        return 1.0
+    with np.errstate(over="ignore"):
+        s = float(np.power(10.0, -np.floor(np.log10(abs(avg)))))
+    if not np.isfinite(s) or s <= 0:
+        raise ValueError("alpha normalization factor must be finite and positive")
+    return s
+
+
 def _safe_cond(M):
     """cond(M). 못 구하면 NaN — 진단값이 핏을 죽이면 안 된다."""
     try:
