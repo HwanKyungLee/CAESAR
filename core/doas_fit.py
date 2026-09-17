@@ -745,6 +745,50 @@ class DoasFitter:
             # NaN은 '모른다'이고, 하류(fit_optimizer)가 이미 쓰는 센티넬이다.
             perr_lin = np.full_like(c_opt, np.nan)
 
+        # ── θ 불확도를 포함한 결합 공분산 (A8-2) ─────────────────────────────
+        # 위 `cov`는 shift/squeeze를 최적값에 **고정한** 설계행렬에서 나온다.
+        # 즉 조건부 Cov(c | θ=θ̂)다. VarPro는 θ와 c를 분리해 풀지만 **불확도는
+        # 분리되지 않는다** — shift가 흔들리면 농도도 같이 흔들린다.
+        #
+        # 결합 야코비안 J = [∂r/∂c | ∂r/∂θ] = [A_w | V],  V_k = Σ_i (∂A_i/∂θ_k)·c_i
+        # 로 전체 공분산을 만들고 가스 블록만 취한다
+        # (O'Leary & Rust 2013, Comput. Optim. Appl. 54, 579–593 의 신뢰구간 절).
+        # Schur 보수라 결합 ≥ 조건부가 수학적으로 보장된다.
+        # ⚠ 여기 V는 **c 고정** 미분이다. `jacobian_varpro`의 GP 야코비안(c를
+        #   프로파일아웃한 것)과 다르다 — 그걸 쓰면 c 블록이 두 번 세어진다.
+        #
+        # 기존 perr는 **덮어쓰지 않는다**. 새 값으로 따로 내보내 두 값을 비교해야
+        # "결합항을 넣으면 오차가 X% 증가한다"를 논문에 쓸 수 있다.
+        perr_joint = np.full(num_gases, np.nan)
+        try:
+            if (_ref_deriv and len(active_vars)
+                    and all(n in _ref_deriv for n in self.engine.gas_list)):
+                D_opt = _gas_dcolumns(val_dict_opt)
+                V = np.zeros((len(pixel_idx), len(active_vars)))
+                for k, var in enumerate(active_vars):
+                    for gi, is_sq in jac_targets[var]:
+                        dcol = (D_opt[:, gi] * dpx_dsq if is_sq else D_opt[:, gi]) * w_current
+                        V[:, k] += dcol * c_opt[gi]
+                J = np.hstack((A_f_w[:, keep_mask], V))
+                sJ = _col_scale(J)
+                Js = J / sJ
+                JtJ = Js.T @ Js
+                if lam > 0:
+                    Pk = _penalty(num_cols_final)[np.ix_(keep_mask, keep_mask)]
+                    Pj = np.zeros((Pk.shape[0], JtJ.shape[0]))
+                    Pj[:, :Pk.shape[1]] = Pk
+                    Pj = Pj / sJ
+                    Mj_inv = np.linalg.pinv(JtJ + Pj.T @ Pj)
+                    cov_j = Mj_inv @ JtJ @ Mj_inv * mse
+                else:
+                    cov_j = np.linalg.pinv(JtJ) * mse
+                cov_j = cov_j / np.outer(sJ, sJ)
+                dj = np.sqrt(np.maximum(np.diag(cov_j), 0.0))
+                for gi, name in enumerate(self.engine.gas_list):
+                    perr_joint[gi] = dj[keep_pos[gi]] if gas_active[name] else 0.0
+        except Exception:
+            perr_joint = np.full(num_gases, np.nan)   # 모르면 NaN (0 아님)
+
         c_gas = c_opt[0:num_gases].copy()
         c_perr = perr_lin[0:num_gases].copy()
         for i, name in enumerate(self.engine.gas_list):
@@ -784,6 +828,9 @@ class DoasFitter:
                        # 열 정규화 전/후 조건수. SVD라 비싸서 진단 요청 시에만 잰다.
                        # 정규화 후가 1/eps(≈1e16)보다 한참 아래여야 해의 자릿수를
                        # 신뢰할 수 있다. 스케일 벡터 자체는 내부 구현이라 안 내보낸다.
+                       # 기체 계수 단위. 조건부(반환 튜플의 c_perr)와 **나란히** 쓰라고
+                       # 따로 낸다 — 기존 열을 덮지 않는다.
+                       "perr_joint": perr_joint.tolist(),
                        "dof": int(_dof),
                        "underdetermined": bool(_dof <= 0),
                        "cond_raw": _safe_cond(A_f_w[:, keep_mask]),

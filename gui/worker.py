@@ -266,7 +266,22 @@ class AnalysisWorker(QThread):
         # 호출 직후 같은 스캔 안에서만 읽는다.
         self._last_solver_termination = diag["solver_termination"]
         self._last_underdetermined = bool(diag.get("underdetermined"))
+        self._last_perr_joint = diag.get("perr_joint")
         return result
+
+    def _joint_error_ppb(self, gi, nm, scale_factor, is_linear_mode, n_air):
+        """A8-2 결합 오차를 ppb로. 조건부 `<gas>_Error`와 **같은 환산**을 쓴다.
+        못 구했으면 NaN — 0으로 채우면 '오차 없음'이라는 거짓 주장이 된다."""
+        pj = getattr(self, '_last_perr_joint', None)
+        if not pj or gi >= len(pj):
+            return float('nan')
+        v = float(pj[gi])
+        if not np.isfinite(v):
+            return float('nan')
+        scale_div = self.engine.scaling_factors[nm]
+        mult_i = self.engine.multipliers.get(nm, 1.0)
+        real = (v / scale_factor if is_linear_mode else v) / scale_div * mult_i
+        return (real / n_air) * 1e9
 
     def _solver_status_note(self):
         """마지막 핏의 종료 상태를 Status 열에 붙일 조각. 정상 수렴이면 빈 문자열.
@@ -782,6 +797,10 @@ class AnalysisWorker(QThread):
                             result[f"{nm}_Error"]       = ppb_err
                             result[f"{nm}_TotalError"]  = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
                             result[f"{nm}_MDL"]         = 3.0 * ppb_err
+                            # A8-2: shift/squeeze 불확도까지 결합한 오차. 기존 열은
+                            # 그대로 두고 **나란히** 낸다 — 두 값의 비가 논문 재료다.
+                            result[f"{nm}_ErrorJoint"]  = self._joint_error_ppb(
+                                gi, nm, scale_factor, is_linear_mode, n_air)
                             result[f"{nm}_Shift"]       = opt_shifts[gi]
                             result[f"{nm}_Squeeze"]     = opt_squeezes[gi]
 
@@ -1053,6 +1072,8 @@ class AnalysisWorker(QThread):
                             result[f"{nm}_Error"] = ppb_err
                             result[f"{nm}_TotalError"] = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
                             result[f"{nm}_MDL"] = 3.0 * ppb_err
+                            result[f"{nm}_ErrorJoint"] = self._joint_error_ppb(
+                                gj, nm, scale_factor, True, n_air)
                             result[f"{nm}_Shift"] = opt_shifts[gj]
                             result[f"{nm}_Squeeze"] = opt_squeezes[gj]
 
