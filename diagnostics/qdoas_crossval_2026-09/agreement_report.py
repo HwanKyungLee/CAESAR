@@ -109,7 +109,12 @@ def run():
             print(f"\n[{name}] 로드 실패: {e}")
             continue
 
-        ok = m["Status"].astype(str).str.strip() == "OK"
+        # Status 는 자유형식이다 — 품질 라벨 뒤에 **직교하는** 노트가 붙는다
+        # (`OK · AT_BOUND(NO2_sq)`, `OK · MISFIT` …). 정확 일치로 거르면 노트가
+        # 붙었다는 이유만으로 멀쩡한 OK 행이 빠져 "Status==OK 서브셋"이라는 이 표의
+        # 라벨 자체가 거짓이 된다. 라벨만 본다(하류 전부 동일 규약 — 주간플롯·
+        # settle_average·QC 가 전부 startswith).
+        ok = m["Status"].astype(str).str.strip().str.startswith("OK")
         print(f"\n{'=' * 96}\n{name}   병합 {len(m):,}행  (Status==OK {int(ok.sum()):,}행"
               f" = {100 * ok.mean():.1f}%)   QDOAS 레이아웃 {ncol}열\n{'=' * 96}")
 

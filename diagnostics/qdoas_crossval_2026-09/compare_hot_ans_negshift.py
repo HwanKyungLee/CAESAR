@@ -76,7 +76,7 @@ merged = pd.merge(
 print(f'타임스탬프 매칭: {len(merged)}건 ({100*len(merged)/len(q):.1f}% of QDOAS, {100*len(merged)/len(a):.1f}% of Augur)')
 
 results = []
-for qc_label, sub in [('전체(QC 무관)', merged), ('Augur Status==OK만', merged[merged['Status'] == 'OK'])]:
+for qc_label, sub in [('전체(QC 무관)', merged), ('Augur Status==OK만', merged[merged['Status'].astype(str).str.startswith('OK')])]:
     for g in GASES:
         qv = sub[f'alpha_qdoas_{g}'].to_numpy()
         av = sub[f'realconc_augur_{g}'].to_numpy()
@@ -92,7 +92,7 @@ for qc_label, sub in [('전체(QC 무관)', merged), ('Augur Status==OK만', mer
                              rms_resid_over_std=rms_resid / aug_std if aug_std else np.nan))
         print(f'  [{qc_label:16s}] {g:6s} n={len(qv):6d}  r={r:+.4f}  r2={r**2:.4f}  slope={slope:.3f}')
 
-ok = merged[merged['Status'] == 'OK']
+ok = merged[merged['Status'].astype(str).str.startswith('OK')]
 sh = ok['Shift_CHOCHO'].dropna().to_numpy()
 lo, hi = -0.024, 0.483
 tol = 0.005

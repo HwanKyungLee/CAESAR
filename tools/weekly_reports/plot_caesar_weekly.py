@@ -111,7 +111,11 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
         st = df["Status"].astype(str)
         drop = st.str.startswith("QC") | st.str.startswith("Skip")
         if ok_only:
-            drop |= ~st.eq("OK")
+            # Status 는 자유형식이다 — 품질 라벨 뒤에 직교하는 노트가 붙는다
+            # (`OK · AT_BOUND`, `OK · MISFIT` …). 정확 일치로 비교하면 노트가
+            # 붙었다는 이유만으로 멀쩡한 행을 버린다(실측 autosave 23,583 행 중
+            # 2,135 행 = 9.1 %). 라벨만 본다.
+            drop |= ~st.str.startswith("OK")
         df = df.loc[~drop]
     for g in ("NO2", "CHOCHO", "H2O"):
         if g in df.columns:

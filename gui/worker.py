@@ -18,6 +18,14 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from core.physics import RayleighPhysics, KalmanTracker, air_number_density
 
 
+# chi2 = Σ(residual²/σ_pix²)/dof 의 "브로드 미스핏" 문턱.
+# 이론 산포는 √(2/dof) 라 3σ ≈ 1.17 이지만 그 값으로 자르면 5.1 % 가 걸리면서
+# 그 행들 잔차 중앙값이 전체 중앙의 1.1 배뿐이다 — 통계적으로만 유의하고 물리적으로는
+# 멀쩡하다(CLAUDE.md §2: 통계 단독 심판 금지). 1.5 에서 1.6 % 가 걸리고 그 행들은
+# 잔차 3.8 배다. 실측 autosave 19,502 행 기준.
+MISFIT_CHI2 = 1.5
+
+
 class AnalysisWorker(QThread):
     """
     Background thread that iterates over all measurement files and fits each one.
@@ -265,6 +273,11 @@ class AnalysisWorker(QThread):
         # 종료 상태는 반환 튜플이 아니라 여기 놔둔다 — 호출부 7개 언팩을 건드리지 않으려고.
         # 호출 직후 같은 스캔 안에서만 읽는다.
         self._last_solver_termination = diag["solver_termination"]
+        # 어느 파라미터가 경계에 붙었는지. diag 에 이미 들어 있는데 여태 버리고 있었다 —
+        # 그래서 `AT_BOUND` 만 보고는 shift 문제인지 squeeze 문제인지 알 수 없었고,
+        # 실측 부록 A-1 이 "1085건 전부 squeeze" 를 밝히는 데 별도 조사를 해야 했다.
+        self._last_bound_hits = diag.get("theta_bound_hits") or []
+        self._last_active_vars = list(active_vars or [])
         self._last_underdetermined = bool(diag.get("underdetermined"))
         self._last_perr_joint = diag.get("perr_joint")
         return result
@@ -283,15 +296,44 @@ class AnalysisWorker(QThread):
         real = (v / scale_factor if is_linear_mode else v) / scale_div * mult_i
         return (real / n_air) * 1e9
 
-    def _solver_status_note(self):
+    def _bound_param_names(self):
+        """경계에 붙은 파라미터 이름들(예: NO2_sq). theta 인덱스 → active_vars 이름."""
+        names, seen = [], set()
+        av = getattr(self, '_last_active_vars', None) or []
+        for h in (getattr(self, '_last_bound_hits', None) or []):
+            i = h.get("index")
+            nm = av[i] if isinstance(i, int) and 0 <= i < len(av) else None
+            if nm and nm not in seen:
+                seen.add(nm); names.append(nm)
+        return names
+
+    def _solver_status_note(self, result=None):
         """마지막 핏의 종료 상태를 Status 열에 붙일 조각. 정상 수렴이면 빈 문자열.
 
         STEP_LIMITED = 보폭 제한(step_limit) 경계에 붙은 채 끝났다 = 이 스캔의 shift는
         옵티마이저가 고른 값이 아니라 **걸을 수 있는 최대치**다. 버리지 않는다(헌장) —
-        표시만 해서 하류가 셀 수 있게 한다."""
+        표시만 해서 하류가 셀 수 있게 한다.
+
+        경계 상태에는 **어느 파라미터가 걸렸는지**를 괄호로 붙인다. `AT_BOUND` 하나로는
+        허용범위를 넓혀야 할 대상이 sh 인지 sq 인지 알 수 없다.
+
+        MISFIT = chi2 > MISFIT_CHI2. OK/Unstable(상대잔차)과 **직교하는 축**이다 —
+        저쪽 분모는 mean|신호| 라 농도에 끌려가지만 이쪽 분모는 그 스캔 자신의
+        픽셀간 노이즈라 농도에 안 흔들린다. 라벨은 그대로 두고 노트만 더한다."""
         t = getattr(self, '_last_solver_termination', None) or {}
         st = t.get("status")
-        note = f" · {st}" if st in ("STEP_LIMITED", "AT_BOUND", "MAX_NFEV", "FAILED") else ""
+        note = ""
+        if st in ("STEP_LIMITED", "AT_BOUND"):
+            nm = self._bound_param_names()
+            note = f" · {st}({','.join(nm)})" if nm else f" · {st}"
+        elif st in ("MAX_NFEV", "FAILED"):
+            note = f" · {st}"
+        if isinstance(result, dict):
+            try:
+                if float(result.get('Chi2', 0.0)) > MISFIT_CHI2:
+                    note += " · MISFIT"
+            except (TypeError, ValueError):
+                pass
         if getattr(self, '_last_underdetermined', False):
             # n−p ≤ 0. 오차가 NaN인 것뿐 아니라 **농도 자체가** 신뢰 불가다 —
             # "오차 열만 비어 있는 정상 값"으로 읽히면 안 된다.
@@ -885,7 +927,7 @@ class AnalysisWorker(QThread):
                         else:
                             status = "Unstable"
 
-                        result['Status'] = status + _sat_note + self._solver_status_note()
+                        result['Status'] = status + _sat_note + self._solver_status_note(result)
                         if state_flag == FLAG_HEADER:
                             # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
                             # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
@@ -944,7 +986,12 @@ class AnalysisWorker(QThread):
                             result[_nm] = float('nan')
                             if f"{_nm}_Smooth" in result:
                                 result[f"{_nm}_Smooth"] = float('nan')
-                        result['Status'] = f"QC-Excluded ({_qc_reason})"
+                        # 노트는 살려둔다 — 배제 사유(_qc_reason)는 "얼마나 나빴나"만
+                        # 말하고, 노트는 "왜 나빴나"를 말한다. AT_BOUND(NO2_sq)가 붙은
+                        # 배제행은 날씨가 아니라 **허용범위 세팅**이 원인이라는 뜻이라,
+                        # 정작 그 정보가 가장 필요한 행에서 지워지고 있었다.
+                        result['Status'] = (f"QC-Excluded ({_qc_reason})"
+                                            + self._solver_status_note(result))
 
                 # 7. Send to UI
                 # 렌더 상한 가드: 해석적 자코비안 이후 핏은 ~2.5 ms/scan인데
@@ -1155,7 +1202,7 @@ class AnalysisWorker(QThread):
                             if attempt == 1: status = "Recovered"
                         else:
                             status = "Unstable"
-                        result['Status'] = status + self._solver_status_note()
+                        result['Status'] = status + self._solver_status_note(result)
                         if len(opt_shifts) > 0:
                             last_valid_shift = opt_shifts[0]
                         if status in ["OK", "Recovered"] or attempt == max_retries - 1:
@@ -1182,7 +1229,12 @@ class AnalysisWorker(QThread):
                     if _qc_reason:
                         for _nm in self.engine.gas_list:
                             result[_nm] = float('nan')
-                        result['Status'] = f"QC-Excluded ({_qc_reason})"
+                        # 노트는 살려둔다 — 배제 사유(_qc_reason)는 "얼마나 나빴나"만
+                        # 말하고, 노트는 "왜 나빴나"를 말한다. AT_BOUND(NO2_sq)가 붙은
+                        # 배제행은 날씨가 아니라 **허용범위 세팅**이 원인이라는 뜻이라,
+                        # 정작 그 정보가 가장 필요한 행에서 지워지고 있었다.
+                        result['Status'] = (f"QC-Excluded ({_qc_reason})"
+                                            + self._solver_status_note(result))
 
                 # Only body scans are returned to the parent.  It is the sole
                 # writer, so child processes never contend for the dump file.

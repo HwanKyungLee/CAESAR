@@ -125,7 +125,7 @@ def compare_channel(name, qdoas_path, augur_path, K):
           f'(QDOAS의 {100*len(merged)/max(len(q),1):.1f}%, Augur의 {100*len(merged)/max(len(a),1):.1f}%)')
 
     results = []
-    for qc_label, sub in [('전체(QC 무관)', merged), ('Augur Status==OK만', merged[merged['Status'] == 'OK'])]:
+    for qc_label, sub in [('전체(QC 무관)', merged), ('Augur Status==OK만', merged[merged['Status'].astype(str).str.startswith('OK')])]:
         for g in GASES:
             qv = sub[f'alpha_qdoas_{g}'].to_numpy()          # = SCD_qdoas/K, 이론상 real_conc(cm^-3)와 동일
             av = sub[f'realconc_augur_{g}'].to_numpy()        # = ppb_augur * n_air_nominal/1e9 (cm^-3 근사)
@@ -150,7 +150,7 @@ def compare_channel(name, qdoas_path, augur_path, K):
 
     # 산점도 (Status==OK 서브셋 기준). 이제 x/y 둘 다 같은 물리량(cm^-3, 명목 n_air 가정)이라
     # y=x 기준선이 의미를 가진다(회귀직선과 함께 표시).
-    ok = merged[merged['Status'] == 'OK']
+    ok = merged[merged['Status'].astype(str).str.startswith('OK')]
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     for ax, g in zip(axes, GASES):
         qv = ok[f'alpha_qdoas_{g}'].to_numpy()          # SCD/K, cm^-3 상당
