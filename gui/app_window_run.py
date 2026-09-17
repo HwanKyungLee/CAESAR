@@ -181,7 +181,9 @@ class AnalysisRunMixin:
             interval = -1     # no live per-scan spectrum overlay; results fill in as chunks arrive
             delay_ms = 0
         else:                 # Step
-            delay_ms = 200     # 200ms/scan so each fit can be inspected live
+            # 스캔당 지연 = 사람이 한 핏씩 들여다보는 속도(스핀박스). 0이면 지연 없음.
+            # 그래프 폭주 방지는 worker 쪽 20fps emit 상한이 따로 한다.
+            delay_ms = self.spin_step_delay.value() if hasattr(self, 'spin_step_delay') else 200
             
         # [ BBCEAS Data Preparation ]
         sliced_i0   = None

@@ -659,9 +659,28 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.cb_display_mode.setToolTip(
             "Fast: parallel multi-core fitting; results fill in as they arrive "
             "(no live per-scan spectrum view). Recommended.\n"
-            "Step: sequential, 200ms/scan delay — inspect each fit one at a time.")
+            "Step: sequential — inspect each fit one at a time (pace = the delay box).")
         self.cb_display_mode.setFixedWidth(int(120 * self._s))
         layout_perf.addWidget(self.cb_display_mode)
+
+        # Step 모드 스캔당 지연. 예전엔 200ms 하드코딩이었고, 그 값의 진짜 이유는
+        # "그리는 쪽이 핏을 못 따라간다"는 백프레셔였다. 이제 emit 자체에 20fps
+        # 상한이 걸려 있어(worker._run) 렌더 보호는 거기서 한다 — 여기 값은 순수하게
+        # '사람이 한 핏씩 보는 속도'다. 0 = 지연 없음(핏 속도 그대로).
+        self.spin_step_delay = QSpinBox()
+        self.spin_step_delay.setRange(0, 2000)
+        self.spin_step_delay.setValue(200)
+        self.spin_step_delay.setSingleStep(50)
+        self.spin_step_delay.setSuffix(" ms")
+        self.spin_step_delay.setMaximumWidth(int(80 * self._s))
+        self.spin_step_delay.setToolTip(
+            "Step mode only: delay per scan, so you can watch each fit.
+"
+            "0 = no delay (runs at fit speed ~2.5ms/scan; plots are capped at 20fps anyway).")
+        self.spin_step_delay.setEnabled(self.cb_display_mode.currentText().startswith("Step"))
+        self.cb_display_mode.currentTextChanged.connect(
+            lambda t: self.spin_step_delay.setEnabled(t.startswith("Step")))
+        layout_perf.addWidget(self.spin_step_delay)
 
         layout_perf.addSpacing(8)
         self.chk_auto_save = QCheckBox("Auto-save")
