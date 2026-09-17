@@ -237,23 +237,45 @@ class AnalysisWorker(QThread):
             self.etalon_freq_min, self.etalon_freq_max)
 
     def _setup_fit_parameters(self, initial_shift_center, current_params):
-        return self._doasfitter().setup_fit_parameters(
+        # 7번째 반환값(bounds_meta)은 **다음 `_execute_varpro_fit` 호출이** 종료 판정에
+        # 쓴다. 두 호출부(순차·병렬 청크) 모두 setup 직후 execute를 부르는 한 스캔 단위
+        # 순차 코드라, 반환 튜플 모양을 바꾸는 대신 여기에 잠깐 놔둔다. 병렬화는
+        # ProcessPoolExecutor(=청크마다 별도 프로세스·별도 워커 인스턴스)라 공유되지 않는다.
+        (active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub,
+         self._last_bounds_meta) = self._doasfitter().setup_fit_parameters(
             self.ref_properties, initial_shift_center, current_params,
-            getattr(self, 'step_limit', 0.5))
+            getattr(self, 'step_limit', 0.5), return_bounds=True)
+        return active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub
 
     def _execute_varpro_fit(self, pixel_idx, optical_depth, W_initial, active_vars, fixed_vars,
                             linked_vars, theta0, theta_lb, theta_ub, poly_order, fixed_e_f,
                             absolute_center, fit_sign, override_lam=None, override_robust=None):
         if not isinstance(self.allow_negative_gas, bool):
             raise TypeError("AnalysisWorker requires boolean allow_negative_gas before fitting")
-        return self._doasfitter().execute_varpro_fit(
+        result, diag = self._doasfitter().execute_varpro_fit(
             pixel_idx, optical_depth, W_initial, active_vars, fixed_vars, linked_vars,
             theta0, theta_lb, theta_ub, poly_order, fixed_e_f, absolute_center, fit_sign,
             self.ref_properties, self.temperature,
             getattr(self, 'tikhonov_lambda', 0.0),
             getattr(self, 'use_robust_fitting', False),
             override_lam, override_robust,
-            allow_negative_gas=self.allow_negative_gas)
+            allow_negative_gas=self.allow_negative_gas,
+            return_diagnostics=True,
+            bounds_meta=getattr(self, '_last_bounds_meta', None))
+        # 종료 상태는 반환 튜플이 아니라 여기 놔둔다 — 호출부 7개 언팩을 건드리지 않으려고.
+        # 호출 직후 같은 스캔 안에서만 읽는다.
+        self._last_solver_termination = diag["solver_termination"]
+        return result
+
+    def _solver_status_note(self):
+        """마지막 핏의 종료 상태를 Status 열에 붙일 조각. 정상 수렴이면 빈 문자열.
+
+        STEP_LIMITED = 보폭 제한(step_limit) 경계에 붙은 채 끝났다 = 이 스캔의 shift는
+        옵티마이저가 고른 값이 아니라 **걸을 수 있는 최대치**다. 버리지 않는다(헌장) —
+        표시만 해서 하류가 셀 수 있게 한다."""
+        t = getattr(self, '_last_solver_termination', None) or {}
+        st = t.get("status")
+        return f" · {st}" if st in ("STEP_LIMITED", "AT_BOUND", "MAX_NFEV", "FAILED") else ""
     
     # ==========================================
     # 🌟 Main Orchestrator
@@ -793,7 +815,7 @@ class AnalysisWorker(QThread):
                         else:
                             status = "Unstable"
 
-                        result['Status'] = status + _sat_note
+                        result['Status'] = status + _sat_note + self._solver_status_note()
                         if state_flag == FLAG_HEADER:
                             # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
                             # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
@@ -1047,7 +1069,7 @@ class AnalysisWorker(QThread):
                             if attempt == 1: status = "Recovered"
                         else:
                             status = "Unstable"
-                        result['Status'] = status
+                        result['Status'] = status + self._solver_status_note()
                         if len(opt_shifts) > 0:
                             last_valid_shift = opt_shifts[0]
                         if status in ["OK", "Recovered"] or attempt == max_retries - 1:

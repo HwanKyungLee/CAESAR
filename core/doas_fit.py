@@ -25,6 +25,13 @@ from numpy.polynomial import chebyshev
 # 않는다 — 검증≠필터.
 ETALON_CORR_WARN = 0.5
 
+# 비선형 파라미터가 상자 경계에 "붙었다"고 볼 상대 허용오차(상자 폭 대비).
+# **절대** 허용오차를 쓰면 안 된다 — shift는 px(폭 ~1), squeeze는 무차원(폭 ~0.02)이라
+# 같은 절대값이 한쪽에선 무시할 양이고 다른 쪽에선 상자 전체다.
+# 0.02는 `core.fit_optimizer.fit_window`의 shift_at_bound가 이미 쓰던 값이다 —
+# 두 곳이 다른 문턱을 쓰면 같은 핏을 한쪽은 "경계"라 하고 한쪽은 아니라 한다.
+BOUND_REL_TOL = 0.02
+
 
 def policy_floats(gas, kind, mode, raw, n):
     """shift/squeeze 정책 문자열 -> 실수 n개. 못 읽으면 **조용한 기본값 대신 예외**.
@@ -269,11 +276,26 @@ class DoasFitter:
 
     # ──────────────────────────────────────────────────────────────────
     def setup_fit_parameters(self, ref_properties, initial_shift_center,
-                             current_params, step_limit, initial_values=None):
-        """least_squares용 비선형 파라미터 리스트(shift/squeeze 모드별) 구성."""
+                             current_params, step_limit, initial_values=None,
+                             return_bounds=False):
+        """least_squares용 비선형 파라미터 리스트(shift/squeeze 모드별) 구성.
+
+        `return_bounds=True`면 7번째 원소로 `bounds_meta`를 덧붙인다 —
+        **교집합 상자(theta_lb/theta_ub)만으로는 종료 판정을 할 수 없기 때문**이다.
+        상자는 `max(global, window)`·`min(global, window)`라 경계에 붙은 핏이
+        "허용범위 끝"(AT_BOUND, 세팅 문제)인지 "보폭 제한"(STEP_LIMITED, 한 스캔에
+        걸을 수 있는 거리 문제)인지 구별되지 않는다. 그 두 원본 경계를 같이 넘긴다.
+        기본값 False라 기존 6-튜플 호출부는 그대로 돈다."""
         initial_values = initial_values or {}
         active_vars, fixed_vars, linked_vars = [], {}, {}
         theta0, theta_lb, theta_ub = [], [], []
+        # active_vars와 같은 순서·같은 길이. window_* 는 step_limit 창이 실제로
+        # 걸리는 파라미터에만 유한값이고 나머지(squeeze·Free)는 ±inf = "제한 없음".
+        b_glb, b_gub, b_wlb, b_wub = [], [], [], []
+
+        def _rec(glb, gub, wlb=-np.inf, wub=np.inf):
+            b_glb.append(float(glb)); b_gub.append(float(gub))
+            b_wlb.append(float(wlb)); b_wub.append(float(wub))
 
         for gas in self.engine.gas_list:
             props = ref_properties.get(gas, {"sh_mode": "Limit", "sh_val": "-0.5, 0.5",
@@ -315,11 +337,13 @@ class DoasFitter:
                     if sh_lb >= sh_ub:                              # 여전히 퇴화면 미세폭 부여
                         sh_lb, sh_ub = near - 1e-4, near + 1e-4
                 theta_lb.append(sh_lb); theta_ub.append(sh_ub)
+                _rec(global_lb, global_ub, window_lb, window_ub)
                 start = initial_values.get(sh_name, current_params[0])
                 theta0.append(max(sh_lb + 1e-5, min(sh_ub - 1e-5, start)))
             elif props["sh_mode"] == "Free":
                 active_vars.append(sh_name)
                 theta_lb.append(-np.inf); theta_ub.append(np.inf)
+                _rec(-np.inf, np.inf)
                 theta0.append(initial_values.get(sh_name, initial_shift_center))
             elif props["sh_mode"] == "Fix":
                 # Fix = hold the shift at the ABSOLUTE value (same units as the Limit
@@ -340,18 +364,26 @@ class DoasFitter:
                 sq_lb = 1.0 + v_min if abs(v_min) < 0.5 else v_min
                 sq_ub = 1.0 + v_max if abs(v_max) < 0.5 else v_max
                 theta_lb.append(sq_lb); theta_ub.append(sq_ub)
+                # squeeze에는 step_limit 창이 없다(보폭 제한은 shift 전용) → window ±inf.
+                _rec(sq_lb, sq_ub)
                 start = initial_values.get(sq_name, 1.0)
                 theta0.append(max(sq_lb + 1e-5, min(sq_ub - 1e-5, start)))
             elif props["sq_mode"] == "Free":
                 active_vars.append(sq_name)
                 theta_lb.append(0.1); theta_ub.append(10.0); theta0.append(1.0)
+                _rec(0.1, 10.0)
             elif props["sq_mode"] == "Fix":
                 (val,) = policy_floats(gas, "sq", "Fix", props.get("sq_val"), 1)
                 fixed_vars[sq_name] = 1.0 + val if abs(val) < 0.5 else val
             elif props["sq_mode"] == "Link":
                 linked_vars[sq_name] = f"{props['sq_val'].strip()}_sq"
 
-        return active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub
+        if not return_bounds:
+            return active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub
+        bounds_meta = {"global_lb": b_glb, "global_ub": b_gub,
+                       "window_lb": b_wlb, "window_ub": b_wub}
+        return (active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub,
+                bounds_meta)
 
     # ──────────────────────────────────────────────────────────────────
     def execute_varpro_fit(self, pixel_idx, optical_depth, W_initial,
@@ -360,14 +392,18 @@ class DoasFitter:
                            absolute_center, fit_sign, ref_properties, temperature,
                            tikhonov_lambda, use_robust,
                            override_lam=None, override_robust=None, allow_negative_gas=False,
-                           custom_basis=None, return_diagnostics=False):
+                           custom_basis=None, return_diagnostics=False,
+                           bounds_meta=None):
         """VarPro + NNLS + Tikhonov + Robust(IRLS) 엔진. AnalysisWorker에서 verbatim 이식.
         W_initial: 픽셀별 가중. 길이 n 벡터(권장) 또는 밀집 n×n 대각행렬(구 호출부 호환)
           — 밀집으로 주면 대각만 꺼내 쓴다. 결과는 두 형태가 비트동일.
         allow_negative_gas=True면 가스 계수 하한을 0→−∞로 풀어 음수 농도 허용(0근처 비편향).
         custom_basis: (n_pix, k) 외부 선형 베이스(Ring·fixed-pattern 고유벡터 등). None이면
           컬럼 0개라 기존과 바이트동일. 컬럼은 poly 뒤·etalon 앞에 삽입돼 etalon이 마지막
-          열로 유지되므로 반환 인덱싱이 보존되고 gas 계수(c_opt[0:num_gases])도 불변."""
+          열로 유지되므로 반환 인덱싱이 보존되고 gas 계수(c_opt[0:num_gases])도 불변.
+        bounds_meta: `setup_fit_parameters(..., return_bounds=True)`의 7번째 반환값.
+          주면 종료 상태가 CONVERGED/AT_BOUND/STEP_LIMITED로 갈린다(진단에만 나타남).
+          None이면 기존대로 CONVERGED/MAX_NFEV/FAILED만."""
         gas_lb = -np.inf if allow_negative_gas else 0.0
         x_min, x_max = pixel_idx[0], pixel_idx[-1]
         x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
@@ -686,21 +722,86 @@ class DoasFitter:
         # IRLS matrix and therefore is deliberately not reused.
         objective_initial, objective_final = _endpoint_objectives(
             objective_varpro, theta0, theta_opt)
-        termination = _aggregate_solver_termination(solver_runs)
+        bound_state, bound_hits = classify_theta_bounds(
+            theta_opt, theta_lb, theta_ub, bounds_meta)
+        termination = _aggregate_solver_termination(solver_runs, bound_state)
         diagnostics = {"objective_initial": float(objective_initial),
                        "objective_final": float(objective_final),
                        "objective_convention": "sum_squared_weighted_varpro_residual",
-                       "solver_termination": termination}
+                       "solver_termination": termination,
+                       # `boundary_hits`(fit_explorer)와 **다른 것**이다. 저쪽은 정책
+                       # 허용범위 대비 최종 shift를 사후 판정하고, 이쪽은 solver가 실제로
+                       # 받은 상자와 그 상자를 만든 두 원본 경계를 본다.
+                       "theta_bound_state": bound_state,
+                       "theta_bound_hits": bound_hits}
         return result, diagnostics
 
 
-def _aggregate_solver_termination(solver_runs):
-    """Conservatively aggregate scipy statuses across IRLS solves."""
+def classify_theta_bounds(theta, theta_lb, theta_ub, bounds_meta,
+                          rtol=BOUND_REL_TOL):
+    """비선형 파라미터가 상자 경계에 붙었는지, 붙었으면 **어느 경계**인지.
+
+    왜 필요한가 — `setup_fit_parameters`는 두 경계의 **교집합**을 상자로 준다:
+    허용범위 `[global_lb, global_ub]`(사용자 세팅)과 보폭 창 `anchor ± step_limit`.
+    `least_squares`는 그 상자 **안에서** 수렴하므로, 최적점이 상자 밖이면 경계에
+    붙은 채 성공 코드(1~4)를 돌려준다. 그래서 **보폭 제한 때문에 못 움직인 핏이
+    'CONVERGED'로 보고된다.**
+
+    `res.optimality`로는 못 잡는다 — scipy가 쓰는 건 **투영** gradient라 경계에서는
+    진짜 gradient가 0이 아니어도 0이 된다. 경계 근접을 직접 재는 수밖에 없다.
+
+    판정:
+      상자 안에서 멈춤            → CONVERGED
+      global 경계에 붙음          → AT_BOUND     (허용범위 세팅이 최적점을 못 담음)
+      window 경계에만 붙음        → STEP_LIMITED (한 스캔 보폭이 모자람)
+    둘 다 걸리면 AT_BOUND가 이긴다 — 보폭을 풀어도 허용범위가 막으므로.
+
+    허용오차는 **상자 폭 대비 상대값**(`BOUND_REL_TOL`)이다. 이유는 그 상수 주석 참고.
+    """
+    hits = []
+    if bounds_meta is None or len(theta) == 0:
+        return "CONVERGED", hits
+    glb = bounds_meta["global_lb"]; gub = bounds_meta["global_ub"]
+    wlb = bounds_meta["window_lb"]; wub = bounds_meta["window_ub"]
+    for k, x in enumerate(np.asarray(theta, dtype=float)):
+        lb, ub = float(theta_lb[k]), float(theta_ub[k])
+        if not (np.isfinite(lb) and np.isfinite(ub)):
+            continue                       # Free 모드 — 경계가 없다
+        span = ub - lb
+        tol = rtol * (span if span > 0 else max(abs(x), 1.0))
+        if x - lb <= tol:
+            side, active = "lower", lb
+            g_edge, w_edge = float(glb[k]), float(wlb[k])
+        elif ub - x <= tol:
+            side, active = "upper", ub
+            g_edge, w_edge = float(gub[k]), float(wub[k])
+        else:
+            continue
+        # 상자 경계는 정의상 두 원본 중 하나와 **같은 값**이다(교집합이 비어 재구성된
+        # 경우만 예외이고, 그건 보폭이 만든 상자다). 어느 쪽에서 왔는지로 원인을 가른다.
+        eq = 1e-9 * max(1.0, abs(active))
+        source = ("global" if np.isfinite(g_edge) and abs(active - g_edge) <= eq
+                  else "window")
+        hits.append({"index": int(k), "side": side, "value": float(x),
+                     "bound": float(active), "source": source})
+    if not hits:
+        return "CONVERGED", hits
+    return ("AT_BOUND" if any(h["source"] == "global" for h in hits)
+            else "STEP_LIMITED"), hits
+
+
+def _aggregate_solver_termination(solver_runs, bound_state=None):
+    """Conservatively aggregate scipy statuses across IRLS solves.
+
+    `bound_state`(`classify_theta_bounds`의 첫 반환값)는 scipy가 '성공'이라고 한
+    핏만 덮어쓴다. 우선순위: FAILED > MAX_NFEV > STEP_LIMITED > AT_BOUND > CONVERGED.
+    경계 상태는 **표시일 뿐** — 그 행을 버리지 않는다(무결성 헌장)."""
     if not solver_runs:
         return {"status": "TERMINATED", "success": True, "nfev": 0}
     codes = [run["status"] for run in solver_runs]
     status = ("FAILED" if any(code < 0 for code in codes)
               else "MAX_NFEV" if any(code == 0 for code in codes)
+              else bound_state if bound_state in ("STEP_LIMITED", "AT_BOUND")
               else "CONVERGED")
     return {"status": status,
             "success": all(run["success"] for run in solver_runs),
