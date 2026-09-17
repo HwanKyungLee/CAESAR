@@ -1,89 +1,119 @@
-"""tools/za_gas_sigma.py 자체검증 — **순수 함수만** 건다.
+"""tools/za_gas_sigma.py 자체검증 — 순수 함수의 계약.
 
-의도적으로 sigma 값 자체는 테스트하지 않는다. 그 값은 아직 생산 핏을 재현하지
-못한다(za_gas_sigma.py 상단 "재현 상태" 참고). 재현 안 된 숫자에 테스트를 걸면
-틀린 값을 고정하는 셈이라 더 나쁘다.
+여기 걸린 것들은 전부 **실제로 틀렸다가 고친 자리**다:
 
-여기서 거는 것은 **설정을 손으로 짐작하지 않는다**는 계약이다. 실측으로, 창·차수를
-잘못 짚으면 NO2 가 생산 대비 49배, CHOCHO 5300배까지 틀렸다. 그래서 설정은 반드시
-생산 결과 헤더에서 읽어야 하고, 그 파서가 깨지면 즉시 알아야 한다.
+  1. 스케일을 '평균의 비'로 잡았더니 파일마다 값이 튀고 부호까지 뒤집혔다. 원인은
+     alpha = s*q + c 의 c(Rayleigh 차)가 q 와 무관한 **덧셈** 항이라는 것. 기울기
+     회귀로 바꿔야 c 가 절편으로 빠진다. -> test_offset_does_not_bias_slope
+  2. 설정을 손으로 짐작했더니 창·차수가 어긋나 NO2 가 생산 대비 49배, CHOCHO
+     5300배 틀렸다. fitset 이 단일 출처여야 하고, 없는 채널이면 기본값을 지어내지
+     말고 죽어야 한다. -> test_missing_channel_raises
+  3. 생산 대조를 전체 기간 중앙값으로 했다가 "재현 실패"로 오판했다. 같은 파일·같은
+     행 번호로 짝지어야 한다. -> test_production_rows_are_keyed_by_row_index
+
+sigma 값 자체는 안 건다 — 실측 데이터가 있어야 나오는 값이고, 값을 테스트에 박으면
+캠페인이 바뀔 때 의미 없이 깨진다.
 """
+import json
 import os
 import sys
+import tempfile
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from tools.za_gas_sigma import parse_settings, production_medians, make_ref_props
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PNS = os.path.join(ROOT, "diagnostics", "qdoas_crossval_2026-09", "augur_fit", "pns_merge.dat")
+from tools.za_gas_sigma import load_fitset, matched_bins, fit_scale, load_production
 
 
-def _hdr(tmp, lines):
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write("".join(l + "\n" for l in lines))
-    return tmp
+def _tmp(name, text):
+    p = os.path.join(tempfile.mkdtemp(), name)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return p
 
 
-def test_parses_window_poly_shift_squeeze(tmp_path=None):
-    import tempfile
-    p = os.path.join(tempfile.mkdtemp(), "r.dat")
-    _hdr(p, ["# Channel 2 (PNs) settings: 444-471nm_Poly3_ShLink  gas_temp=0.0C",
-             "# Reference Constraints: Sh[-0.5], Sq[0.0]",
-             "Time\tNO2", "2026-05-18 00:00:00\t1.0"])
-    s = parse_settings(p, "(PNs)")
-    assert s["nm"] == (444.0, 471.0), s
-    assert s["poly"] == 3, s
-    assert s["sh"] == -0.5 and s["sq"] == 0.0, s
+def test_fitset_is_the_single_source():
+    p = _tmp("fs.json", json.dumps({"channels": {"2": {
+        "data_label": "PNs", "fit_start_nm": 444.1, "fit_end_nm": 470.6, "poly_deg": 3}}}))
+    cfg = load_fitset(p, 2)
+    assert cfg["fit_start_nm"] == 444.1 and cfg["poly_deg"] == 3
+    assert load_fitset(p, "2")["data_label"] == "PNs"      # int/str 둘 다
 
 
-def test_picks_the_right_channel_block():
-    """헤더에 여러 채널이 있으면 지정한 채널 것만 집어야 한다."""
-    import tempfile
-    p = os.path.join(tempfile.mkdtemp(), "r.dat")
-    _hdr(p, ["# Channel 1 (ANs) settings: 430-460nm_Poly2_ShLink",
-             "# Channel 2 (PNs) settings: 444-471nm_Poly3_ShLink",
-             "Time\tNO2", "2026-05-18 00:00:00\t1.0"])
-    assert parse_settings(p, "(ANs)")["nm"] == (430.0, 460.0)
-    assert parse_settings(p, "(PNs)")["poly"] == 3
-
-
-def test_missing_settings_returns_empty_not_guess():
-    """못 찾으면 **빈 dict**여야 한다 — 기본값을 지어내면 조용히 틀린 창으로 핏한다."""
-    import tempfile
-    p = os.path.join(tempfile.mkdtemp(), "r.dat")
-    _hdr(p, ["# nothing useful here", "Time\tNO2", "2026-05-18 00:00:00\t1.0"])
-    assert parse_settings(p, "(PNs)") == {}
-
-
-def test_real_production_header_is_readable():
-    """저장소에 있는 실제 생산 결과로도 돌아야 한다(형식이 바뀌면 여기서 잡힌다)."""
-    if not os.path.exists(PNS):
+def test_missing_channel_raises():
+    """없는 채널에 기본값을 지어내면 조용히 틀린 창으로 핏한다 — 죽는 게 맞다."""
+    p = _tmp("fs.json", json.dumps({"channels": {"2": {"poly_deg": 3}}}))
+    try:
+        load_fitset(p, 9)
+    except KeyError:
         return
-    s = parse_settings(PNS, "(PNs)")
-    assert s.get("nm") == (444.0, 471.0), s
-    assert s.get("poly") == 3 and s.get("sh") == -0.5, s
-    med = production_medians(PNS, ["NO2", "CHOCHO"])
-    assert 0.1 < med["NO2"] < 100.0, med
-    assert med["CHOCHO"] > 0.0, med
+    raise AssertionError("없는 채널인데 예외가 안 났다")
 
 
-def test_ref_props_fixes_shift_and_links_the_rest():
-    rp = make_ref_props(-0.5, 0.0)
-    assert rp["NO2"]["sh_mode"] == "Fix" and float(rp["NO2"]["sh_val"]) == -0.5
-    assert rp["NO2"]["sq_mode"] == "Fix" and float(rp["NO2"]["sq_val"]) == 0.0
-    for g in ("CHOCHO", "H2O"):
-        assert rp[g]["sh_mode"] == "Link" and rp[g]["sh_val"] == "NO2"
-    # 인자가 없으면 모듈 기본으로 돌아가되, 링크 구조는 유지된다.
-    assert make_ref_props(None, None)["CHOCHO"]["sh_mode"] == "Link"
+def test_fit_scale_recovers_a_known_slope():
+    rng = np.random.default_rng(0)
+    npx, nb = 40, 200
+    s_true = np.linspace(1e-6, 2e-6, npx)
+    Q = rng.normal(0.0, 1e-2, (nb, npx))
+    Y = Q * s_true
+    got = fit_scale([(Q, Y)])
+    assert np.allclose(got, s_true, rtol=1e-6), np.max(np.abs(got / s_true - 1))
 
 
-def test_ref_props_are_independent_objects():
-    """한 기체의 props 를 바꿔도 다른 기체가 따라 바뀌면 안 된다(dict 공유 사고)."""
-    rp = make_ref_props(-0.5, 0.0)
-    rp["CHOCHO"]["t_coeff"] = 1.234
-    assert rp["H2O"]["t_coeff"] == 0.0, rp["H2O"]
+def test_offset_does_not_bias_slope():
+    """Rayleigh 차(덧셈 항)가 기울기에 새면 안 된다 — 이게 원래 버그였다."""
+    rng = np.random.default_rng(1)
+    npx, nb = 30, 300
+    s_true = np.full(npx, 1.5e-6)
+    Q = rng.normal(0.0, 1e-2, (nb, npx))
+    c = np.linspace(-5e-8, 5e-8, npx)          # q 와 무관한 파장별 상수
+    got = fit_scale([(Q, Q * s_true + c)])
+    assert np.allclose(got, s_true, rtol=1e-6), np.max(np.abs(got / s_true - 1))
+
+
+def test_pooling_blocks_beats_one_block():
+    """블록 하나는 q 분산이 작아 기울기가 흔들린다 — 모으면 좋아져야 한다."""
+    rng = np.random.default_rng(2)
+    npx, s_true = 20, np.full(20, 1e-6)
+    blocks = []
+    for _ in range(12):
+        Q = rng.normal(0.0, 2e-3, (25, npx))
+        blocks.append((Q, Q * s_true + rng.normal(0.0, 2e-9, (25, npx))))
+    one = float(np.max(np.abs(fit_scale(blocks[:1]) / s_true - 1)))
+    pooled = float(np.max(np.abs(fit_scale(blocks) / s_true - 1)))
+    assert pooled < one, (pooled, one)
+
+
+def test_matched_bins_pairs_the_right_raw_rows():
+    """알파 한 행 = raw 의 한 60초 빈. 빈 경계를 틀리면 스케일이 통째로 어긋난다."""
+    nb = 10                                   # matched_bins 는 8빈 미만이면 None
+    ri = np.arange(nb) * 3
+    A = np.array([[float(k), float(k)] for k in range(nb)])
+    amb_idx = list(range(nb * 3))
+    q = np.array([[float(i), float(i)] for i in range(nb * 3)])
+    Q, Y = matched_bins(A, ri, q, amb_idx)
+    assert Q.shape == (nb, 2) and Y.shape == (nb, 2)
+    # 빈 k = raw 행 3k..3k+2 의 평균 = 3k+1
+    assert np.allclose(Q[:, 0], np.arange(nb) * 3 + 1), Q[:, 0]
+
+
+def test_matched_bins_returns_none_when_too_few():
+    ri = np.array([0, 3])
+    A = np.array([[1.0], [2.0]])
+    assert matched_bins(A, ri, np.array([[0.0], [1.0], [2.0], [3.0]]), [0, 1, 2, 3]) is None
+
+
+def test_production_rows_are_keyed_by_row_index():
+    """생산 File 열이 `<trace>.dat [0000]` 이라 스캔별로 정확히 짝지어진다."""
+    txt = ("# header\n"
+           "File\tNO2\n"
+           "a_PNs_alpha_trace.dat [0000]\t1.5\n"
+           "a_PNs_alpha_trace.dat [0002]\t2.5\n"
+           "b_PNs_alpha_trace.dat [0000]\t9.9\n")
+    rows = load_production(_tmp("r.dat", txt), "a_PNs")
+    assert sorted(rows) == [0, 2], sorted(rows)
+    assert rows[2]["NO2"] == "2.5"
+    assert load_production(_tmp("r.dat", txt), "zzz") == {}
 
 
 if __name__ == "__main__":

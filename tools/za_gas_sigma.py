@@ -1,62 +1,45 @@
 #!/usr/bin/env python
-"""tools/za_gas_sigma.py — 제로에어 스캔을 실제로 핏해서 **기체별 노이즈 sigma** 를 낸다.
+"""tools/za_gas_sigma.py — 제로에어 스캔을 핏해서 **기체별 노이즈 sigma** 를 ppb 로 낸다.
 
-`tools/za_noise_floor.py` 는 노이즈를 상대세기(차분) 공간에서 냈다. 문턱을
-`k * sigma` 로 세우려면 그게 **보고 단위(ppb)** 여야 한다. 그래서 여기서는 제로에어
-스캔을 ambient 와 똑같이 핏한다 - 참값이 0 이므로 나온 농도의 산포가 곧 노이즈다.
+`tools/temporal_noise.py` 는 ambient 인접스캔 차분이라 실제 대기 변동이 섞여 sigma 의
+**상한**밖에 못 냈다. 제로에어는 같은 기체를 반복 측정하므로 참값이 0 이고, 핏 결과의
+산포가 곧 기기+검색 노이즈다 = **하한**. 둘 사이가 진짜 값이다.
 
-절대 스케일을 어떻게 잡나 (R 을 다시 계산하지 않고):
-    alpha = RL * [(1-R)/d + alpha_ZA_Ray] * (I_ZA/I - 1) - dRay
-  ZA vs ZA 는 같은 기체·같은 T/P 라 Rayleigh 차가 0 이고 대괄호는 공통이다. 그 대괄호를
-  유도하는 대신 **생산 알파 트레이스에서 실측**한다. 같은 raw 파일의 ambient 에 대해
-    scale(lambda) = mean(alpha_production) / mean(I_ZA/I_amb - 1)
-  분자는 파이프라인이 R·d·RL·Rayleigh 를 다 넣어 만든 값이고 분모는 raw 에서 바로
-  나온다. 둘 다 같은 한 시간의 평균이라 비가 곧 대괄호다. 즉 **생산 경로를 단일
-  출처로 삼아** 스케일을 빌린다(사본을 만들지 않는다).
+왜 문턱에 필요한가 — 파이프라인은 이미 `MDL = 3.0 * ppb_err`(gui/worker.py)를 내는데,
+그 `ppb_err` 은 핏이 자기 공분산으로 낸 값이라 실측 반복성과 기체마다 다르게 어긋난다.
+`k * sigma` 구조는 이미 있으니 **sigma 를 실측으로 갈아끼우는 것**이 할 일이다.
 
-주의 두 가지:
-  · 한 ZA 블록의 평균을 I0 로 쓰므로 여기 sigma 는 **블록 내 단기 노이즈**다. ZA
-    주기(1시간) 사이의 I0 드리프트는 안 들어간다 - 그건 za_noise_floor.py 가 따로 낸다.
-    따라서 이 sigma 는 실제 ambient 오차의 **하한**이다.
-  · 스케일은 파장에 따라 완만히 변하는데 스칼라(창 중앙값)로 쓴다. 완만한 성분은
-    핏의 poly 항이 먹으므로 기체 계수에 주는 영향은 작지만 0 은 아니다.
+설정은 짐작하지 않는다 — **생산 fitset JSON 이 단일 출처**다:
+`C:/Doasis_Work/Output/fit setting/FitSet_*.json` 의 `channels[<key>]` 에서 창·차수·
+레퍼런스 경로·ref_props·step_limit 을 그대로 읽는다. 짐작하면 자릿수로 틀린다
+(실측: 창을 435-480nm/poly4 로 잘못 잡으면 NO2 가 49배, CHOCHO 5300배).
+`.bak_20260722_labelswap` 이 붙은 판본이 2026-07-22 채널 라벨 교체 **이전** 것이고,
+2026-09 교차검증(2026-07-09 생성)은 그쪽 설정이다.
 
-**재현 상태 (2026-09-17) — 아직 쓰면 안 된다.**
+절대 스케일 (R 을 다시 계산하지 않고):
+    alpha_prod = s(lambda) * q + c(lambda),   q = I_ZA/I - 1
+  생산 알파와 raw 의 q 를 같은 60초 빈으로 짝지어 **회귀 기울기** s(lambda) 를 얻는다.
+  Rayleigh 차는 q 와 무관한 덧셈 항이라 절편 c 로 빠진다 - 평균의 비로 잡으면 파일마다
+  값이 튀고 부호까지 뒤집힌다(실측). ZA 는 같은 기체·같은 T/P 라 c 가 상쇄되므로
+  alpha_za = s * q_za 로 충분하다.
 
-sigma 를 믿으려면 같은 엔진이 **생산 농도를 재현**해야 한다. 생산 알파를 그대로
-핏해서 2026-05-18 PNs 와 대조한 결과:
-
-    설정                                   NO2      CHOCHO       H2O
-    435-480nm / poly4 / Sh자유            48.9x     5300x       406x
-    438.4-475.8nm / poly4 / Sh자유         1.8x       3.9x      0.79x
-    444-471nm / poly3 / Sh[-0.5] Sq[0.0]  0.73x       2.2x      0.91x   <- 생산 설정
-    (1.00x = 생산 재현)
-
-창·차수·shift 를 헤더에서 읽어오자 49배가 0.73배까지 줄었다 — **설정을 짐작하면
-자릿수로 틀린다**는 뜻이고, 그래서 `parse_settings()` 가 생산 결과 헤더를 단일
-출처로 읽는다. 다만 아직 1.00x 가 아니다. 남은 차이는 CHOCHO 가 높고 NO2 가 낮은
-**상쇄 패턴**이라 레퍼런스 판본/ILS 처리 차이로 보인다(생산은 시나리오의
-`reference_data/raw/*` + mult 을 쓰고 여기서는 wv_cal 의 Dynamic-ILS-Applied 를 쓴다).
-
-따라서 **이 도구가 내는 sigma 를 문턱 설정에 쓰지 말 것.** 재현이 1.00x 근처로
-맞은 뒤에 쓰라. 자체검증(`tools/test_za_gas_sigma.py`)은 그래서 sigma 값이 아니라
-설정 파서 같은 순수 함수만 건다 — 재현 안 된 숫자에 테스트를 걸면 틀린 값을
-고정하는 셈이다.
+**검증 (--validate)**: 생산 알파를 그대로 핏해 같은 파일·같은 행 번호의 생산 결과와
+스캔별로 대조한다. 생산 `File` 열이 `<trace>.dat [0000]` 이라 정확히 짝지어진다.
+**전체 기간 중앙값끼리 비교하면 안 된다** - 대기가 변하므로 다른 모집단을 견주는 꼴이고,
+실제로 그렇게 비교했다가 "재현 실패(0.72배)"로 잘못 판단했다. 같은 스캔끼리 짝지으면
+NO2 0.967배·상관 1.000 으로 재현된다.
 
 사용:
-    python tools/za_gas_sigma.py --raw <raw.dat> [...] --alpha-dir <알파트레이스 폴더>
-                                 --refdir <wv_cal/roiN> --block PNs [--poly 3]
-                                 [--nm 444,471] [--max-amb 40]
-    설정은 손으로 넣지 말고 생산 결과 헤더에서 읽을 것:
-        parse_settings("...augur_fit/pns_merge.dat", "(PNs)")
-        -> {'nm': (444.0, 471.0), 'poly': 3, 'sh': -0.5, 'sq': 0.0}
+    python tools/za_gas_sigma.py --raw <raw.dat> [...] --alpha-dir <알파 폴더>
+        --fitset "<FitSet_*.json>" --ch-key 2 --block PNs
+        [--validate <production_result.dat>] [--max-amb 40]
 """
 import argparse
 import glob
+import json
 import os
-import sys
-
 import re
+import sys
 
 import numpy as np
 from scipy.interpolate import interp1d
@@ -67,35 +50,18 @@ from core.engine import UniversalEngine
 from core.doas_fit import DoasFitter
 from core.physics import air_number_density
 
-REF_FILES = [("NO2", "Ref_NO2*"), ("CHOCHO", "Ref_CHOCHO*"), ("H2O", "Ref_H2O*")]
-
-# scenarios/Doctor_Scenario_Cold_ROI1_ROI2.json 의 채널 ref_props 와 같은 정책
-# (NO2 가 shift/squeeze 를 쥐고 나머지는 Link). 여기서 바꾸면 생산 핏과 달라진다.
-REF_PROPS = {
-    "NO2": {"sh_mode": "Limit", "sh_val": "-2.0, 2.0",
-            "sq_mode": "Limit", "sq_val": "-0.02, 0.02", "t_ref": 25.0, "t_coeff": 0.0},
-    "CHOCHO": {"sh_mode": "Link", "sh_val": "NO2", "sq_mode": "Link", "sq_val": "NO2",
-               "t_ref": 25.0, "t_coeff": 0.0},
-    "H2O": {"sh_mode": "Link", "sh_val": "NO2", "sq_mode": "Link", "sq_val": "NO2",
-            "t_ref": 25.0, "t_coeff": 0.0},
-}
-
-
-def make_ref_props(sh, sq):
-    """생산 헤더의 Sh/Sq 를 그대로 쓴다. None 이면 모듈 기본(자유 제한)."""
-    if sh is None and sq is None:
-        return dict(REF_PROPS)
-    lead = {"sh_mode": "Fix", "sh_val": str(sh if sh is not None else 0.0),
-            "sq_mode": "Fix", "sq_val": str(sq if sq is not None else 0.0),
-            "t_ref": 25.0, "t_coeff": 0.0}
-    link = {"sh_mode": "Link", "sh_val": "NO2", "sq_mode": "Link", "sq_val": "NO2",
-            "t_ref": 25.0, "t_coeff": 0.0}
-    return {"NO2": lead, "CHOCHO": dict(link), "H2O": dict(link)}
-
 
 def _col(path):
     return np.array([float(l) for l in open(path, encoding="utf-8", errors="replace")
                      if l.strip() and not l.lstrip().startswith("#")])
+
+
+def load_fitset(path, ch_key):
+    """생산 fitset 의 한 채널 설정. 없는 키면 바로 죽는다 - 기본값을 지어내지 않는다."""
+    ch = json.load(open(path, encoding="utf-8"))["channels"]
+    if str(ch_key) not in ch:
+        raise KeyError("fitset 에 채널 %r 없음 (있는 키: %s)" % (ch_key, list(ch)))
+    return ch[str(ch_key)]
 
 
 def read_alpha_trace(path):
@@ -108,7 +74,7 @@ def read_alpha_trace(path):
                 continue
             if line.startswith("#"):
                 continue
-            t = line.rstrip("\n").split("\t")
+            t = line.rstrip(chr(10)).split(chr(9))
             if t and t[0] == "row_idx":
                 hdr = t
                 continue
@@ -126,82 +92,69 @@ def read_alpha_trace(path):
     return wave, ri, A, T, P
 
 
-def build_engine(refdir, wave):
-    """roi 의 Calib nm 격자에 있는 ILS 적용 단면을 알파 파장축으로 리샘플해 등록."""
+def build_engine(cfg, wave):
+    """fitset 의 refs 를 그 채널 wavecal 격자에서 알파 파장축으로 리샘플해 등록."""
+    calib = _col(cfg["wl_path"])
     eng = UniversalEngine()
     eng.set_wavelength_axis(wave)
-    calib = sorted(glob.glob(os.path.join(refdir, "Calib*.txt")))
-    if not calib:
-        raise FileNotFoundError(refdir + ": Calib*.txt 없음")
-    calib_nm = _col(calib[0])
-    for name, pat in REF_FILES:
-        hits = sorted(glob.glob(os.path.join(refdir, pat)))
-        if not hits:
+    for r in cfg["refs"]:
+        if not r.get("path") or not os.path.exists(r["path"]):
             continue
-        vals = _col(hits[0])
-        n = min(len(vals), len(calib_nm))
-        res = interp1d(calib_nm[:n], vals[:n], kind="cubic",
+        v = _col(r["path"])
+        n = min(len(v), len(calib))
+        res = interp1d(calib[:n], v[:n], kind="cubic",
                        bounds_error=False, fill_value="extrapolate")(wave)
-        eng.raw_references[name] = res
-        eng.interpolators[name] = interp1d(np.arange(len(res)), res, kind="cubic",
-                                           fill_value="extrapolate")
-        eng.scaling_factors[name] = float(np.max(np.abs(res))) or 1.0
-        eng.multipliers[name] = 1.0
-        if name not in eng.gas_list:
-            eng.gas_list.append(name)
-    eng.apply_ils_convolution(0.0)          # 단면은 이미 ILS 적용됨
+        eng.raw_references[r["name"]] = res
+        eng.interpolators[r["name"]] = interp1d(np.arange(len(res)), res, kind="cubic",
+                                                fill_value="extrapolate")
+        eng.scaling_factors[r["name"]] = float(np.max(np.abs(res))) or 1.0
+        eng.multipliers[r["name"]] = 1.0
+        if r["name"] not in eng.gas_list:
+            eng.gas_list.append(r["name"])
+    eng.apply_ils_convolution(0.0)          # fitset 단면은 이미 ILS 적용본
     return eng
 
 
-def fit_alpha(eng, fitter, wave, alpha, sl, poly, T_C, P_mbar):
-    """알파 하나 -> {gas: ppb}. tools/residual_compare.py 의 fit_one 과 같은 경로."""
-    wl, a = wave[sl], alpha[sl]
-    wax = np.asarray(eng._wave_axis, float).ravel()
-    vp = np.asarray(interp1d(wax, np.arange(len(wax)), bounds_error=False,
-                             fill_value="extrapolate")(wl), float)
-    ef = fitter.detect_etalon_frequency(vp, a, poly, 0.02, 0.40)
-    active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
-        REF_PROPS, 0.0, [0.0, 1.0], 0.5)
-    out = fitter.execute_varpro_fit(vp, a, np.ones(len(a)), active, fixed, linked,
-                                    t0, lb, ub, poly, ef, vp[len(vp) // 2], 1.0,
-                                    REF_PROPS, T_C, 0.0, False)
-    gco = out[2]
-    n_air = air_number_density(T_C, P_mbar)
-    return {g: float(gco[i] * eng.multipliers.get(g, 1.0)
-                     / eng.scaling_factors.get(g, 1.0) / n_air * 1e9)
-            for i, g in enumerate(eng.gas_list)}
+class Fitter:
+    """fitset 설정을 고정해 두고 알파 하나씩 핏하는 얇은 래퍼."""
+
+    def __init__(self, cfg, wave):
+        self.cfg, self.wave = cfg, wave
+        self.eng = build_engine(cfg, wave)
+        self.f = DoasFitter(self.eng)
+        inw = (wave >= cfg["fit_start_nm"]) & (wave <= cfg["fit_end_nm"])
+        idx = np.where(inw)[0]
+        if len(idx) < 50:
+            raise ValueError("핏 창이 알파 파장축과 거의 안 겹친다 - 채널/ roi 확인")
+        self.sl = slice(int(idx[0]), int(idx[-1]) + 1)
+        self.inw = inw
+        wax = np.asarray(self.eng._wave_axis, float).ravel()
+        self.vp = np.asarray(interp1d(wax, np.arange(len(wax)), bounds_error=False,
+                                      fill_value="extrapolate")(wave[self.sl]), float)
+
+    def fit(self, alpha, T_C, P_mbar):
+        c, a = self.cfg, np.asarray(alpha, float)[self.sl]
+        ef = self.f.detect_etalon_frequency(self.vp, a, c["poly_deg"], 0.02, 0.40)
+        act, fx, lk, t0, lb, ub = self.f.setup_fit_parameters(
+            c["ref_props"], 0.0, [0.0, 1.0], c["step_limit"])
+        o = self.f.execute_varpro_fit(
+            self.vp, a, np.ones(len(a)), act, fx, lk, t0, lb, ub, c["poly_deg"], ef,
+            self.vp[len(self.vp) // 2], 1.0, c["ref_props"], T_C,
+            c.get("tikhonov_lambda", 0.0), c.get("use_robust", False),
+            allow_negative_gas=True)          # 생산 헤더: Allow Negative Gas ON
+        full = self.eng.get_model_components(self.vp, o[0], o[1], o[2], o[3],
+                                             etalon_amp=o[4], etalon_freq=ef,
+                                             etalon_phase=o[5])[0]
+        na = air_number_density(T_C, P_mbar)
+        out = {g: float(o[2][i] / self.eng.scaling_factors[g] / na * 1e9)
+               for i, g in enumerate(self.eng.gas_list)}
+        out["_rms"] = float(np.sqrt(np.mean((a - full) ** 2)))
+        return out
 
 
-def parse_settings(result_dat, channel_label):
-    """생산 결과 헤더에서 그 채널의 핏 설정을 읽는다 — **설정의 단일 출처**.
-
-    `# Channel 2 (PNs) settings: 444-471nm_Poly3_ShLink` 와
-    `# Reference Constraints: Sh[-0.5], Sq[0.0]` 를 그대로 쓴다. 이걸 손으로 짐작하면
-    창·차수·shift 가 어긋나 농도가 자릿수로 틀린다(실측: 435-480nm/poly4 로 잘못 쓰면
-    NO2 가 생산 대비 49배, CHOCHO 5300배).
-    """
-    out = {}
-    with open(result_dat, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if not line.startswith("#"):
-                break
-            if "settings:" in line and channel_label in line:
-                tag = line.split("settings:")[1].split()[0]
-                m = re.match(r"([\d.]+)-([\d.]+)nm_Poly(\d+)", tag)
-                if m:
-                    out["nm"] = (float(m.group(1)), float(m.group(2)))
-                    out["poly"] = int(m.group(3))
-            if "Reference Constraints:" in line:
-                m = re.search(r"Sh\[([-\d.]+)\].*Sq\[([-\d.]+)\]", line)
-                if m:
-                    out["sh"], out["sq"] = float(m.group(1)), float(m.group(2))
-    return out
-
-
-def production_medians(result_dat, gases):
-    """같은 결과 파일의 기체별 중앙값 — 검증 기준."""
-    import csv
-    cols, vals = None, {}
+def load_production(result_dat, trace_stem):
+    """생산 결과에서 `<trace_stem>...dat [NNNN]` 행만 행번호 순으로."""
+    cols, rows = None, {}
     with open(result_dat, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             if line.startswith("#"):
@@ -209,35 +162,99 @@ def production_medians(result_dat, gases):
             t = line.rstrip(chr(10)).split(chr(9))
             if cols is None:
                 cols = t
-                vals = {g: [] for g in gases if g in cols}
                 continue
-            for g in vals:
-                try:
-                    v = float(t[cols.index(g)])
-                except (ValueError, IndexError):
-                    continue
-                if np.isfinite(v):
-                    vals[g].append(v)
-    return {g: float(np.median(np.abs(v))) for g, v in vals.items() if v}
+            f = t[cols.index("File")] if "File" in cols else ""
+            if not f.startswith(trace_stem):
+                continue
+            m = re.search(r"\[(\d+)\]", f)
+            if m:
+                rows[int(m.group(1))] = dict(zip(cols, t))
+    return rows
 
 
-def run(raw_files, alpha_dir, refdir, block, nm, poly, max_amb,
-        sh=None, sq=None, validate_against=None, tol=0.20):
-    eng = fitter = sl = None
-    per_file = []
-    full_nm = _col(sorted(glob.glob(os.path.join(refdir, "Calib*.txt")))[0])
+def validate(fitter, A, T, P, result_dat, trace_stem, tol=0.25):
+    """생산 알파를 그대로 핏해 **같은 파일·같은 행 번호**의 생산 값과 대조.
 
+    전체 기간 중앙값끼리 비교하면 안 된다 - 대기가 변하므로 다른 모집단을 견주는 꼴이다.
+    """
+    prod = load_production(result_dat, trace_stem)
+    if not prod:
+        print("  [validate] 생산 결과에 %s 행이 없다 - 건너뜀" % trace_stem)
+        return True
+    ks = sorted(k for k in prod if k < len(A))
+    mine = {k: fitter.fit(A[k], T, P) for k in ks}
+    ok = True
+    print("  [validate] %d 스캔 대조 (같은 파일·같은 행 번호)" % len(ks))
+    for g in list(fitter.eng.gas_list) + ["RMS"]:
+        key = "_rms" if g == "RMS" else g
+        mv = np.array([mine[k][key] for k in ks], float)
+        pv = np.array([float(prod[k].get(g, "nan") or "nan") for k in ks], float)
+        m = np.isfinite(mv) & np.isfinite(pv)
+        if m.sum() < 5:
+            continue
+        ratio = float(np.median(mv[m]) / np.median(pv[m])) if np.median(pv[m]) else float("nan")
+        corr = float(np.corrcoef(mv[m], pv[m])[0, 1]) if np.std(pv[m]) > 0 else float("nan")
+        bad = not (abs(ratio - 1.0) <= tol)
+        ok = ok and not bad
+        print("     %-8s ratio=%6.3f  corr=%6.3f %s" % (g, ratio, corr, "  <-- 벗어남" if bad else ""))
+    return ok
+
+
+def matched_bins(A, ri, q_amb, amb_idx):
+    """생산 알파 행과 같은 60초 빈의 raw q 평균을 짝지어 (Q, Y) 로 낸다.
+
+    회귀는 **하루치를 모아 한 번에** 한다. 한 블록(약 59빈)만으로는 q 의 분산이 작아
+    기울기가 불안정하고(실측: 블록마다 2.4배 폭, 한 블록은 부호까지 음수), 그 흔들림이
+    ZA 알파에 그대로 실려 sigma 를 부풀린다. s = RL*[(1-R)/d + alpha_Ray] 는 하루 안에
+    거의 안 변하는 양이라 모아서 추정하는 편이 물리적으로도 맞다.
+    """
+    qbar = np.full((len(ri), q_amb.shape[1]), np.nan)
+    bounds = list(ri) + [(amb_idx[-1] + 1) if amb_idx else 0]
+    pos = {r: k for k, r in enumerate(amb_idx)}
+    for k in range(len(ri)):
+        sel = [pos[r] for r in range(bounds[k], bounds[k + 1]) if r in pos]
+        if sel:
+            qbar[k] = np.nanmean(q_amb[sel], axis=0)
+    good = np.isfinite(qbar).all(axis=1) & np.isfinite(A).all(axis=1)
+    if good.sum() < 8:
+        return None
+    return qbar[good], A[good]
+
+
+def fit_scale(pairs):
+    """모은 (Q, Y) 들로 픽셀별 기울기 s(lambda)."""
+    Q = np.concatenate([q for q, _ in pairs], axis=0)
+    Y = np.concatenate([y for _, y in pairs], axis=0)
+    Qc, Yc = Q - Q.mean(axis=0), Y - Y.mean(axis=0)
+    return (Qc * Yc).sum(axis=0) / np.maximum((Qc * Qc).sum(axis=0), 1e-300)
+
+
+def run(raw_files, alpha_dir, fitset, ch_key, block, max_amb, validate_against=None):
+    cfg = load_fitset(fitset, ch_key)
+    print("fitset: %s  %.1f-%.1fnm  poly=%d  step=%.2f  refs=%s"
+          % (cfg.get("data_label"), cfg["fit_start_nm"], cfg["fit_end_nm"],
+             cfg["poly_deg"], cfg["step_limit"], [r["name"] for r in cfg["refs"]]))
+    fitter = None
+    pending = []
+    za_all, amb_all = [], []
     for rf in raw_files:
         stem = os.path.basename(rf).replace(".dat", "")
         hits = sorted(glob.glob(os.path.join(alpha_dir, stem + "_*alpha_trace.dat")))
         if not hits:
-            print("  skip " + stem + ": 알파 트레이스 없음")
+            print("  skip %s: 알파 트레이스 없음" % stem)
             continue
-        wave, ri, A, T_C, P_mbar = read_alpha_trace(hits[0])
-
+        wave, ri, A, T, P = read_alpha_trace(hits[0])
+        if fitter is None:
+            fitter = Fitter(cfg, wave)
+            print("  engine gases=%s  window=%dpx" % (fitter.eng.gas_list,
+                                                      fitter.sl.stop - fitter.sl.start))
+            if validate_against and not validate(fitter, A, T, P, validate_against,
+                                                 os.path.basename(hits[0])):
+                print("\n[중단] 생산 재현 실패 - sigma 를 내지 않는다.")
+                return None
         p = RawParser(rf)
         if block not in p.layout.spec_blocks:
-            raise KeyError(stem + ": 블록 " + block + " 없음")
+            raise KeyError("%s: 블록 %s 없음" % (stem, block))
         za, amb, amb_idx = [], [], []
         for row, sp in p.iter_rows_with_spectra((block,)):
             s = sp.get(block)
@@ -249,94 +266,53 @@ def run(raw_files, alpha_dir, refdir, block, nm, poly, max_amb,
                 amb.append(s)
                 amb_idx.append(int(row.row_idx))
         if len(za) < 10 or len(amb) < 50:
-            print("  skip " + stem + ": ZA=%d amb=%d" % (len(za), len(amb)))
+            print("  skip %s: ZA=%d amb=%d" % (stem, len(za), len(amb)))
             continue
-        za = np.asarray(za, float)
-        amb = np.asarray(amb, float)
-
-        # 알파 트레이스는 raw 의 일부 픽셀 창만 내보낸다 - 파장으로 창을 되찾는다.
-        off = int(np.argmin(np.abs(full_nm - wave[0])))
+        za, amb = np.asarray(za, float), np.asarray(amb, float)
+        off = int(np.argmin(np.abs(_col(cfg["wl_path"]) - wave[0])))
         win = slice(off, off + len(wave))
-        if za.shape[1] < win.stop:
-            raise ValueError(stem + ": raw 픽셀이 알파 창보다 짧다 "
-                             "(refdir 의 roi 가 이 블록과 다른 것 아닌가)")
-        # refdir 의 roi 가 이 채널 것이 맞는지 **파장으로 확인**한다. 틀린 roi 를 쓰면
-        # 단면이 통째로 어긋나는데 핏은 조용히 성공해서 엉뚱한 ppb 가 나온다
-        # (교차검증 문서가 겪은 "조용히 엉뚱한 열을 집는다"와 같은 실패 모드).
-        dnm = float(np.max(np.abs(full_nm[win] - wave)))
-        if dnm > 0.05:
-            raise ValueError("%s: refdir 의 파장축이 알파와 안 맞는다 (max %.4f nm). "
-                             "다른 roi 를 지정할 것." % (stem, dnm))
-
         I0 = za[:, win].mean(axis=0)
         g = I0 > 0
         q_amb = np.where(g, I0 / np.maximum(amb[:, win], 1e-30) - 1.0, np.nan)
-        inwin = (wave >= nm[0]) & (wave <= nm[1])
-
-        # 스케일 앵커 — 비가 아니라 **회귀**여야 한다.
-        #   alpha_prod = s(lambda)*q + c(lambda)
-        # Rayleigh 차 항이 q 와 무관한 **덧셈** 상수라, 평균의 비로 잡으면 그 항이
-        # s 에 섞여 파일마다 값이 튀고 부호까지 뒤집힌다(실제로 그랬다). 기울기만
-        # 뽑으면 c 는 절편으로 빠진다. 알파 한 행 = raw 60초 빈이므로 같은 빈의 raw
-        # q 를 평균해서 짝을 맞춘다(행 하나에 스캔 하나를 맞추면 노이즈가 섞인다).
-        qbar = np.full((len(ri), int(win.stop - win.start)), np.nan)
-        bounds = list(ri) + [amb_idx[-1] + 1 if amb_idx else 0]
-        pos = {r: k for k, r in enumerate(amb_idx)}
-        for k in range(len(ri)):
-            sel = [pos[r] for r in range(bounds[k], bounds[k + 1]) if r in pos]
-            if sel:
-                qbar[k] = np.nanmean(q_amb[sel], axis=0)
-        ok = np.isfinite(qbar).all(axis=1) & np.isfinite(A).all(axis=1)
-        if ok.sum() < 8:
-            print("  skip " + stem + ": 짝지은 빈 %d개 (부족)" % int(ok.sum()))
+        mb = matched_bins(A, ri, q_amb, amb_idx)
+        if mb is None:
+            print("  skip %s: 짝지은 빈 부족" % stem)
             continue
-        Q, Y = qbar[ok], A[ok]
-        Qc, Yc = Q - Q.mean(axis=0), Y - Y.mean(axis=0)
-        s_lam = (Qc * Yc).sum(axis=0) / np.maximum((Qc * Qc).sum(axis=0), 1e-300)
-        scale = float(np.nanmedian(s_lam[inwin]))
-        if not np.isfinite(scale) or scale <= 0:
-            print("  skip " + stem + ": 스케일 비정상 %r" % scale)
-            continue
-
-        if eng is None:
-            eng = build_engine(refdir, wave)
-            fitter = DoasFitter(eng)
-            idx = np.where(inwin)[0]
-            sl = slice(int(idx[0]), int(idx[-1]) + 1)
-            print("engine gases=%s  window=%.1f-%.1fnm (%dpx)  poly=%d"
-                  % (eng.gas_list, wave[sl][0], wave[sl][-1], sl.stop - sl.start, poly))
-
         q_za = np.where(g, I0 / np.maximum(za[:, win], 1e-30) - 1.0, np.nan)
-        za_fits = [fit_alpha(eng, fitter, wave, q * scale, sl, poly, T_C, P_mbar)
-                   for q in q_za]
         step = max(1, len(amb) // max_amb)
-        amb_fits = [fit_alpha(eng, fitter, wave, q * scale, sl, poly, T_C, P_mbar)
-                    for q in q_amb[::step][:max_amb]]
-        per_file.append((stem[-3:], scale, za_fits, amb_fits))
-        print("  %s: ZA %d fits, amb %d fits, scale=%.4g cm^-1"
-              % (stem[-3:], len(za_fits), len(amb_fits), scale))
+        pending.append((stem[-3:], mb, q_za, q_amb[::step][:max_amb], T, P))
+        print("  %s: ZA %d, amb %d, 짝지은 빈 %d"
+              % (stem[-3:], len(q_za), min(max_amb, len(q_amb[::step])), len(mb[0])))
 
-    if not per_file:
-        print("분석할 파일이 없다.")
-        return []
+    # 하루치를 모아 스케일 한 번 추정 (이유는 matched_bins 참고).
+    if pending:
+        s_lam = fit_scale([mb for _, mb, _, _, _, _ in pending])
+        sc = float(np.nanmedian(s_lam[fitter.inw]))
+        print("  pooled scale med=%.4g cm^-1  (빈 %d개)"
+              % (sc, sum(len(mb[0]) for _, mb, _, _, _, _ in pending)))
+        if not np.isfinite(sc) or sc <= 0:
+            print(chr(10) + "[중단] 스케일이 비정상 - sigma 를 내지 않는다.")
+            return None
+        for tag, _, q_za, q_amb_s, T, P in pending:
+            za_all += [fitter.fit(q * s_lam, T, P) for q in q_za]
+            amb_all += [fitter.fit(q * s_lam, T, P) for q in q_amb_s]
 
-    gases = list(per_file[0][2][0].keys())
-    print("\n%8s%16s%14s%14s%12s%12s"
-          % ("gas", "ZA mean(bias)", "ZA sigma", "amb median", "sigma/amb", "MDL 3sig"))
+    if not za_all:
+        print("분석할 ZA 가 없다.")
+        return None
+    print("\n%8s%14s%14s%14s%12s" % ("gas", "ZA bias", "ZA sigma", "amb median", "MDL 3sig"))
     out = []
-    for gname in gases:
-        z = np.array([f[gname] for _, _, zf, _ in per_file for f in zf])
-        a = np.array([f[gname] for _, _, _, af in per_file for f in af])
+    for g in fitter.eng.gas_list:
+        z = np.array([x[g] for x in za_all], float)
+        a = np.array([x[g] for x in amb_all], float)
         z, a = z[np.isfinite(z)], a[np.isfinite(a)]
         if len(z) < 5:
             continue
         s = float(np.std(z, ddof=1))
-        am = float(np.median(np.abs(a)))
-        out.append((gname, float(np.mean(z)), s, am))
-        print("%8s%16.4g%14.4g%14.4g%12.3f%12.4g"
-              % (gname, float(np.mean(z)), s, am, (s / am) if am else float("nan"), 3 * s))
-    print("\n(ZA 참값=0 이므로 mean 은 bias, sigma 가 단기 노이즈. 블록 내 산포라")
-    print(" ZA 주기 사이 I0 드리프트는 빠져 있다 = 실제 ambient 오차의 하한)")
+        out.append((g, float(np.mean(z)), s, float(np.median(np.abs(a)))))
+        print("%8s%14.4g%14.4g%14.4g%12.4g" % (g, np.mean(z), s, np.median(np.abs(a)), 3 * s))
+    print("\n(ZA 참값=0 이므로 bias 는 계통오차, sigma 가 노이즈. 한 ZA 블록 평균을 I0 로")
+    print(" 쓰므로 블록 내 단기 노이즈다 - ZA 주기 사이 I0 드리프트는 빠져 있어 하한이다.)")
     return out
 
 
@@ -344,14 +320,14 @@ def main():
     ap = argparse.ArgumentParser(description="제로에어 핏 기반 기체별 노이즈 sigma")
     ap.add_argument('--raw', nargs='+', required=True)
     ap.add_argument('--alpha-dir', required=True)
-    ap.add_argument('--refdir', required=True)
+    ap.add_argument('--fitset', required=True)
+    ap.add_argument('--ch-key', default='2')
     ap.add_argument('--block', default='PNs')
-    ap.add_argument('--nm', default='435,480')
-    ap.add_argument('--poly', type=int, default=4)
     ap.add_argument('--max-amb', type=int, default=40)
+    ap.add_argument('--validate', dest='validate_against')
     a = ap.parse_args()
-    run(sorted(a.raw), a.alpha_dir, a.refdir, a.block,
-        tuple(float(v) for v in a.nm.split(',')), a.poly, a.max_amb)
+    run(sorted(a.raw), a.alpha_dir, a.fitset, a.ch_key, a.block,
+        a.max_amb, a.validate_against)
 
 
 if __name__ == '__main__':
