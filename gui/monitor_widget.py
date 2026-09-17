@@ -50,7 +50,8 @@ class MonitorWidget(QWidget):
         _chbar = QHBoxLayout()
         _chbar.addWidget(QLabel("Show channel:"))
         self.cb_fit_channel = QComboBox()
-        self.cb_fit_channel.addItems(["CH1", "CH2", "CH3"])
+        for _c in (1, 2, 3):
+            self.cb_fit_channel.addItem(f"CH{_c}", _c)
         self.cb_fit_channel.setFixedWidth(80)
         self.cb_fit_channel.currentIndexChanged.connect(self._on_view_channel_changed)
         _chbar.addWidget(self.cb_fit_channel)
@@ -342,9 +343,31 @@ class MonitorWidget(QWidget):
     # ---------------------------------------------------------
     # Real-Time Rendering Methods
     # ---------------------------------------------------------
+    def set_available_channels(self, channels):
+        """RUN 시작 시 실제 데이터가 있는 채널만 콤보에 남긴다.
+
+        예전엔 CH1/2/3 고정이었다. CH2(ANs)만 돌리면 콤보는 CH1에 머물고
+        update_spectrum이 채널 불일치로 그냥 return해서 Components/Fit View 두 탭이
+        **아무 말 없이 백지**가 됐다(Trend/Conc는 채널 필터가 없어 정상으로 보였다).
+        선택할 수 없는 채널을 없애 그 상태 자체를 만들 수 없게 한다.
+        """
+        chans = sorted({int(c) for c in channels}) or [1]
+        cur = [self.cb_fit_channel.itemData(i) for i in range(self.cb_fit_channel.count())]
+        if cur == chans:
+            return
+        self.cb_fit_channel.blockSignals(True)
+        self.cb_fit_channel.clear()
+        for c in chans:
+            self.cb_fit_channel.addItem(f"CH{c}", c)
+        self.cb_fit_channel.setCurrentIndex(0)
+        self.cb_fit_channel.blockSignals(False)
+        self._view_channel = chans[0]
+        self.cb_fit_channel.setEnabled(len(chans) > 1)
+
     def _on_view_channel_changed(self, idx):
         """채널 콤보 변경 → 새로 선택된 채널의 마지막 스캔을 즉시 다시 렌더."""
-        self._view_channel = idx + 1
+        _ch = self.cb_fit_channel.itemData(idx)
+        self._view_channel = int(_ch) if _ch is not None else idx + 1
         data = self._latest_by_channel.get(self._view_channel)
         if data:
             self.update_spectrum(*data)

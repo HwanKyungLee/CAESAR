@@ -273,6 +273,9 @@ class AnalysisRunMixin:
             "calibration": self._calibration_state(),
         }
         ch_list = sorted(self._alpha_groups)        # 데이터 있는 채널만(early 블록에서 구성)
+        # 모니터의 Components/Fit View 채널 콤보를 실제 데이터 있는 채널로 한정.
+        # (안 하면 CH1 고정 선택 → CH2만 돌릴 때 두 탭이 조용히 백지)
+        self.monitor.set_available_channels(ch_list)
         per_channel = len(ch_list) > 1
         self._workers_total = len(ch_list)
         self._scan_counts = {}
