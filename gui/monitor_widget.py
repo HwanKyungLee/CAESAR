@@ -65,10 +65,6 @@ class MonitorWidget(QWidget):
         self.init_tab_conc_pg()
         self.init_tab_trend_pg()
         self.init_tab_viewer_pg()
-        # Components 탭은 '앞에 있을 때만' 갱신된다(update_spectrum). 실행 중에
-        # 탭을 옮겨오면 다음 emit(= N스캔 뒤)까지 빈 화면이라 고장으로 보였다.
-        # 탭을 열 때 마지막 스캔으로 한 번 그린다.
-        self.tabs.currentChanged.connect(self._on_tab_changed)
 
     # Shared toolbar factory
     def _create_reset_toolbar(self, target_glw=None, target_pw=None):
@@ -349,24 +345,6 @@ class MonitorWidget(QWidget):
         if data:
             self.update_spectrum(*data)
 
-    def _on_tab_changed(self, idx):
-        """탭 전환 시 마지막 스캔으로 한 번 그린다 — 안 보이는 탭은 갱신을 건너뛰므로."""
-        if not self.latest_fit_data:
-            return
-        if idx == 0:
-            self.update_components(*self.latest_fit_data[:5])
-        elif idx == 1:
-            self._draw_fit_view(*self.latest_fit_data)
-
-    def _draw_fit_view(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
-        x_plot, x_label = self.get_x_axis(pixel_idx)
-        self.p_meas.setLabel('bottom', x_label)
-        self.p_resid.setLabel('bottom', x_label)
-        self.p_meas.setTitle(title)
-        self.curve_meas.setData(x_plot, intensity_raw)
-        self.curve_fit.setData(x_plot, intensity_fit)
-        self.curve_resid.setData(x_plot, intensity_raw - intensity_fit)
-
     def update_spectrum(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
         # 채널 필터: 어느 채널 스캔이든 최신본은 보관하되, 선택 채널만 화면에 렌더
         ch = int(fit_params.get('channel', 1)) if isinstance(fit_params, dict) else 1
@@ -375,15 +353,17 @@ class MonitorWidget(QWidget):
             return
         self.latest_fit_data = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
 
-        # 안 보이는 탭은 그리지 않는다. Components는 원래 그랬고 Fit View는 Trend/Conc를
-        # 보고 있어도 매 스캔 setData를 돌리고 있었다(순수 낭비). 탭을 다시 열면
-        # _on_tab_changed가 마지막 스캔으로 채운다.
-        _tab = self.tabs.currentIndex()
-        if _tab == 0:
+        if self.tabs.currentIndex() == 0:
             self.update_components(pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params)
-        elif _tab == 1:
-            self._draw_fit_view(pixel_idx, intensity_raw, intensity_fit,
-                                intensity_poly, fit_params, title)
+            
+        x_plot, x_label = self.get_x_axis(pixel_idx)
+        self.p_meas.setLabel('bottom', x_label)
+        self.p_resid.setLabel('bottom', x_label)
+        self.p_meas.setTitle(title)
+        
+        self.curve_meas.setData(x_plot, intensity_raw)
+        self.curve_fit.setData(x_plot, intensity_fit)
+        self.curve_resid.setData(x_plot, intensity_raw - intensity_fit)
 
     def update_components(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params):
         """

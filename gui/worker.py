@@ -947,22 +947,8 @@ class AnalysisWorker(QThread):
                         result['Status'] = f"QC-Excluded ({_qc_reason})"
 
                 # 7. Send to UI
-                # 렌더 상한 가드: 해석적 자코비안 이후 핏은 ~2.5 ms/scan인데
-                # Components 탭 리드로우는 ~13-18 ms/frame(스캐터 심볼)이다. 즉 **그리는
-                # 쪽이 5배 느리다**. update_interval(N스캔마다)만으로는 N=1일 때 초당 ~400건이
-                # 큐에 쌓여 GUI가 밀린다(큐드 시그널에는 백프레셔가 없다). 그래서 벽시계로
-                # 상한을 건다 — 20 fps를 넘겨 emit하지 않고 초과분은 버린다.
-                # 마지막 스캔은 이 가드를 무시하고 항상 그린다.
-                _PLOT_MIN_DT = 0.05
-                _is_last = (i == len(expanded_scans) - 1)
                 should_update = (self.update_interval > 0) and (i % self.update_interval == 0)
-                if should_update and not _is_last:
-                    _now = time.monotonic()
-                    if _now - getattr(self, '_last_plot_emit', 0.0) < _PLOT_MIN_DT:
-                        should_update = False
-                    else:
-                        self._last_plot_emit = _now
-                if should_update or _is_last:
+                if should_update or i == total_files - 1:
                     plot_signal = intensity_raw if is_linear_mode else optical_depth
                     diff_data = plot_signal - poly_val_orig - etalon_part_orig
                     diff_fit = fit_sign * abs_val_orig
