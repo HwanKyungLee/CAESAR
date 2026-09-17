@@ -674,8 +674,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.spin_step_delay.setSuffix(" ms")
         self.spin_step_delay.setMaximumWidth(int(80 * self._s))
         self.spin_step_delay.setToolTip(
-            "Step mode only: delay per scan, so you can watch each fit.
-"
+            "Step mode only: delay per scan, so you can watch each fit.\n"
             "0 = no delay (runs at fit speed ~2.5ms/scan; plots are capped at 20fps anyway).")
         self.spin_step_delay.setEnabled(self.cb_display_mode.currentText().startswith("Step"))
         self.cb_display_mode.currentTextChanged.connect(
