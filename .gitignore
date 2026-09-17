@@ -85,3 +85,9 @@ cache/
 !/diagnostics/*/*_manifest.json
 !/diagnostics/*/*_candidate.json
 !/diagnostics/*/*_inventory_*.json
+
+# 빌드 시점 커밋 스탬프 (tools/stamp_build_version.py 가 생성 — 빌드 산출물)
+core/_build_version.py
+
+# 로컬 가상환경 (env/.gitignore 에 의존하지 않도록 여기에도 둔다 — git status 속도)
+env/

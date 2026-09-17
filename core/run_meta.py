@@ -22,6 +22,8 @@ import os
 import re
 from datetime import datetime
 
+from core.provenance import is_reproducible as _reproducible
+
 try:                                  # 패키지로 임포트된 평소 경로
     from core.paths import resolve_ref_path
 except ImportError:                   # `python core/run_meta.py` 직접 실행(자기검증)
@@ -123,6 +125,10 @@ def build_meta(cfg: dict, *, channel, qc: dict, calibration: dict,
         "layout": dict(layout) if layout else None,
         "provenance": {
             "commit": code_version,
+            # 이 커밋으로 checkout해서 결과를 재현할 수 있다고 **주장 가능한가**.
+            # commit이 'nogit'/'-dirty'/'-unknown'이면 False다. 조용히 넘기면
+            # 재현 가능한 파일과 아닌 파일이 섞여 나중에 구별이 안 된다.
+            "reproducible": bool(_reproducible(code_version)),
             "augur": app_version,
             "scenario": scenario,
             # "live" = 저장 시점 UI에서 온 전량. "legacy-header" = `.dat` 헤더에서 복원해
