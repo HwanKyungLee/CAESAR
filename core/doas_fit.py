@@ -291,11 +291,12 @@ class DoasFitter:
         theta0, theta_lb, theta_ub = [], [], []
         # active_vars와 같은 순서·같은 길이. window_* 는 step_limit 창이 실제로
         # 걸리는 파라미터에만 유한값이고 나머지(squeeze·Free)는 ±inf = "제한 없음".
-        b_glb, b_gub, b_wlb, b_wub = [], [], [], []
+        b_glb, b_gub, b_wlb, b_wub, b_degen = [], [], [], [], []
 
-        def _rec(glb, gub, wlb=-np.inf, wub=np.inf):
+        def _rec(glb, gub, wlb=-np.inf, wub=np.inf, degen=False):
             b_glb.append(float(glb)); b_gub.append(float(gub))
             b_wlb.append(float(wlb)); b_wub.append(float(wub))
+            b_degen.append(bool(degen))
 
         for gas in self.engine.gas_list:
             props = ref_properties.get(gas, {"sh_mode": "Limit", "sh_val": "-0.5, 0.5",
@@ -325,6 +326,7 @@ class DoasFitter:
                     anchor = initial_shift_center
                 window_lb, window_ub = anchor - step_limit, anchor + step_limit
                 sh_lb, sh_ub = max(global_lb, window_lb), min(global_ub, window_ub)
+                degenerate = sh_lb >= sh_ub
                 if sh_lb >= sh_ub:
                     # 교집합이 비었다 = 허용범위가 현재 중심에서 step_limit 밖(예: sh_val
                     # "-9,-1.5"인데 중심 0·step 0.5 → [-0.5,-1.5]). 예전엔 여기서 least_squares가
@@ -337,7 +339,7 @@ class DoasFitter:
                     if sh_lb >= sh_ub:                              # 여전히 퇴화면 미세폭 부여
                         sh_lb, sh_ub = near - 1e-4, near + 1e-4
                 theta_lb.append(sh_lb); theta_ub.append(sh_ub)
-                _rec(global_lb, global_ub, window_lb, window_ub)
+                _rec(global_lb, global_ub, window_lb, window_ub, degenerate)
                 start = initial_values.get(sh_name, current_params[0])
                 theta0.append(max(sh_lb + 1e-5, min(sh_ub - 1e-5, start)))
             elif props["sh_mode"] == "Free":
@@ -381,7 +383,8 @@ class DoasFitter:
         if not return_bounds:
             return active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub
         bounds_meta = {"global_lb": b_glb, "global_ub": b_gub,
-                       "window_lb": b_wlb, "window_ub": b_wub}
+                       "window_lb": b_wlb, "window_ub": b_wub,
+                       "degenerate": b_degen}
         return (active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub,
                 bounds_meta)
 
@@ -814,10 +817,27 @@ def classify_theta_bounds(theta, theta_lb, theta_ub, bounds_meta,
         return "CONVERGED", hits
     glb = bounds_meta["global_lb"]; gub = bounds_meta["global_ub"]
     wlb = bounds_meta["window_lb"]; wub = bounds_meta["window_ub"]
+    degen = bounds_meta.get("degenerate") or [False] * len(glb)
     for k, x in enumerate(np.asarray(theta, dtype=float)):
         lb, ub = float(theta_lb[k]), float(theta_ub[k])
         if not (np.isfinite(lb) and np.isfinite(ub)):
             continue                       # Free 모드 — 경계가 없다
+        if degen[k]:
+            # 교집합이 비어 `setup_fit_parameters`가 폭 2e-4짜리 상자를 만들어 준
+            # 경우다. 해가 그 상자 **한가운데** 앉아도 최적화가 일어난 게 아니라
+            # 사실상 고정이다 — 위치로 판정하면 CONVERGED가 나와버린다(실측
+            # 2026-06-14 PNs를 sh_val "-9,-1.5"·step 0.5로 돌리면 shift가 매 스캔
+            # 정확히 -1.5). 폭이 0이면 무조건 경계에 걸린 것으로 센다.
+            lower = abs(x - lb) <= abs(ub - x)
+            edge = lb if lower else ub
+            e_g = float(glb[k]) if lower else float(gub[k])
+            eq = 1e-9 * max(1.0, abs(edge))
+            hits.append({"index": int(k), "side": "lower" if lower else "upper",
+                         "value": float(x), "bound": float(edge),
+                         "source": ("global" if np.isfinite(e_g)
+                                    and abs(edge - e_g) <= eq else "window"),
+                         "degenerate": True})
+            continue
         span = ub - lb
         tol = rtol * (span if span > 0 else max(abs(x), 1.0))
         if x - lb <= tol:

@@ -137,12 +137,25 @@ def test_tolerance_is_relative():
           classify_theta_bounds([0.0], [-1.0], [1.0], None) == ("CONVERGED", []))
 
 
+def test_degenerate_box_is_not_converged():
+    print("[6] 교집합이 빈 경우(폭 2e-4 상자)는 CONVERGED가 아니다")
+    # sh_val "-9,-1.5" + anchor 0 + step 0.5 → 창 [-0.5,0.5]와 허용범위가 안 겹친다.
+    # setup_fit_parameters가 near=-1.5 둘레에 ±1e-4 상자를 준다. 해는 그 한가운데
+    # 앉지만 최적화가 일어난 게 아니라 사실상 고정이다.
+    d = fit_with(step_limit=0.5, sh_val="-9.0, -1.5")
+    st = d["solver_termination"]["status"]
+    hits = d["theta_bound_hits"]
+    check("CONVERGED 아님", st != "CONVERGED", f"status={st} hits={hits}")
+    check("degenerate 표시", any(h.get("degenerate") for h in hits), str(hits))
+
+
 def main():
     for t in (test_large_step_limit_is_not_step_limited,
               test_small_step_limit_is_step_limited,
               test_global_bound_wins_over_window,
               test_priority_order,
-              test_tolerance_is_relative):
+              test_tolerance_is_relative,
+              test_degenerate_box_is_not_converged):
         t()
     print(f"\nstep-limited termination tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
