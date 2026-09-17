@@ -56,7 +56,12 @@ def run_once(files, wave_nm, output_dir, use_parallel):
         file_list=files, pixel_min=0, pixel_max=2048, wave_nm=wave_nm,
         flag_za={500}, flag_he={510}, flag_amb={1},
         rl_factor=0.9764, cavity_len=100.0, output_dir=output_dir,
-        channel=1, avg_sec=60.0, channel_label='ci')
+        channel=1, avg_sec=60.0, channel_label='ci',
+        # 이 테스트는 '순차 vs 병렬 동일성'만 본다. 기본 purge_settle_sec=60 이면
+        # fixture 001(교정 뒤 ambient 17행뿐)이 통째로 제외돼 출력 파일이 1개가 되고,
+        # 그러면 병렬 분기(len(amb_index)>1) 자체가 안 돈다 → 여기선 0으로 끈다.
+        # 퍼지 세틀링 자체의 회귀는 tools/test_purge_settle.py 가 본다.
+        purge_settle_sec=0.0)
     w.use_parallel = use_parallel
     w._run_inner()
     return output_dir

@@ -1775,6 +1775,8 @@ def _pass2_write_file(fp, rows, ctx):
         # parser= 를 같이 적어 그 구분이 나중에도 남게 한다.
         f.write(f"# raw_layout: ncols={_ncols} campaign={_lay_name} parser=DataIO-dynamic\n")
         f.write(f"# ambient_avg_sec={ctx['avg_sec']:.0f}  (alpha after {ctx['avg_sec']:.0f}s time-average of ambient)\n")
+        f.write(f"# purge_settle_sec={ctx['purge_settle_sec']:.0f}  (ambient within this "
+                f"many sec after a ZA/He block excluded — cavity still holding purge gas)\n")
         dark = ctx['dark']
         dark_note = f"mean={dark.mean():.1f}×{ctx['dark_scale_factor']:g}" if dark is not None else "None"
         f.write(f"# dark_correction={dark_note}\n")
@@ -1885,6 +1887,9 @@ class AlphaExportWorker(QThread):
                  r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
                  r_cal_omr_max=1e-5,    # block-mean omr_d 상한 — 이보다 크면 reject
                  avg_sec=60.0,          # ambient 시간평균 창(초). 박사님 avgsec=60. 0이면 스캔별(평균 안 함)
+                 purge_settle_sec=60.0, # 교정(ZA/He) 블록 끝 이후 이 초 동안의 ambient 는 제외
+                                        # — 캐비티 퍼지가스 잔류. 0이면 제외 안 함(옛 동작).
+                                        # 기본 60 은 여수 실측 플러시 곡선(§ _process_scan 주석).
                  channel_label="",      # 채널 라벨(PNs/ANs/Cold 등) — 출력 파일명·헤더에 사용
                  std_t_bins=None,       # 박사님 형식: (N,2) [st_sec, end_sec] 연초기준 초 — 주면 이 그리드에 binning
                  drnam_date="",         # 박사님 형식 폴더/파일명용 YYYYMMDD
@@ -1915,6 +1920,7 @@ class AlphaExportWorker(QThread):
         self.r_cal_valid_min = float(r_cal_valid_min)
         self.r_cal_omr_max   = float(r_cal_omr_max)
         self.avg_sec         = float(avg_sec)
+        self.purge_settle_sec = float(purge_settle_sec)
         self.channel_label   = str(channel_label)
         self.std_t_bins      = np.asarray(std_t_bins, dtype=float) if std_t_bins is not None else None
         self.drnam_date      = str(drnam_date)
@@ -2046,6 +2052,8 @@ class AlphaExportWorker(QThread):
         # 과소평가하고 끝이지만, **ZA/He 포화는 블록평균 → R/I0 → 이후 모든 ambient
         # 스캔의 α 로 전파된다.** 같은 숫자로 묶으면 그 차이가 안 보인다.
         n_sat_amb = n_sat_cal = 0
+        n_purge_skipped = 0   # 교정 직후 퍼지 세틀링으로 제외한 ambient 스캔 수
+        _last_cal = {}        # fp → (sec, gidx) 그 파일에서 마지막으로 본 교정계열 행
 
         # 행별 실제 시각(연초기준 초) — 박사님 doy와 동일한 bytepack 시각.
         # row_idx×0.97 합성 대신 실측값으로 60s 평균 binning/출력 시간축에 사용.
@@ -2057,6 +2065,19 @@ class AlphaExportWorker(QThread):
                 _sec_cache[fp] = arr if arr is not None else np.array([])
                 arr = _sec_cache[fp]
             return float(arr[ridx]) if (arr.size and ridx < arr.size) else np.nan
+
+        def _sec_since_cal(fp, ridx, gidx):
+            """직전 교정 블록 끝 이후 경과 초. 그 파일에 아직 교정이 없으면 None
+            (= 세틀링 제외 안 함). 파일 경계를 넘겨 추적하지 않는 건 의도다 —
+            실측 구조상 교정은 항상 파일 시작 ~30행 뒤라 세틀링이 경계를 안 넘는다."""
+            ent = _last_cal.get(fp)
+            if ent is None:
+                return None
+            sec0, g0 = ent
+            sec = _row_sec(fp, ridx)
+            if np.isfinite(sec) and np.isfinite(sec0):
+                return sec - sec0
+            return (gidx - g0) * 0.97    # 실측 시각 없을 때 폴백(_avg_ambient와 동일 상수)
 
         # 연초기준 초(sec) → 사람이 읽는 'MM-DD HH:MM' 문자열. STEP GUARD 로그가
         # I0(t)/self R(t) 둘 다 실시각 축을 쓰게 되면서 공유(연도 조회는 1회만).
@@ -2085,7 +2106,7 @@ class AlphaExportWorker(QThread):
         # 따라서 분류/스풀/R수집 로직은 한 글자도 이동하지 않는다(무회귀 보장).
         def _process_scan(fp, row_idx, intensity_raw, state_flag, env_t, env_p, gidx):
             nonlocal n_default_tp, _amb_spool_n, amb_count, done_scans
-            nonlocal n_sat_amb, n_sat_cal
+            nonlocal n_sat_amb, n_sat_cal, n_purge_skipped
             # flag=0 은 LabVIEW 헤더행(raw_parser.FLAG_HEADER)으로 파일당 딱 1행이다.
             #
             # 2026-08-10에는 여기서 **건너뛰었다**. 당시 근거는 "스펙트럼이 65535
@@ -2116,6 +2137,10 @@ class AlphaExportWorker(QThread):
             is_amb = (state_flag == FLAG_HEADER or
                       (self.flag_amb and state_flag in self.flag_amb) or
                       (not self.flag_amb and not is_za and not is_he))
+            # 교정계열(ZA/He + 502/512 wait, 503/513 end) 마지막 행 = 퍼지 세틀링 기준점.
+            # ZA-inject 가 아니라 **교정 블록의 끝**이어야 한다 — 밸브는 그때 돌아간다.
+            if not is_amb:
+                _last_cal[fp] = (_row_sec(fp, row_idx), gidx)
             # 단순 수집만(R/I0는 Pass1 후 블록평균). 단일스캔 noise 커서 그대로 안 씀.
             if is_he:
                 he_gidx.append(gidx); he_sec.append(_row_sec(fp, row_idx))
@@ -2126,6 +2151,19 @@ class AlphaExportWorker(QThread):
                 za_spectra.append(intensity_raw.copy())
                 za_t_list.append(env_t); za_p_list.append(env_p)
             elif is_amb:
+                # ── 퍼지 세틀링: 교정 직후 ambient 는 아직 캐비티에 ZA/He 가 남아 있다 ──
+                # 밸브가 돌아가 flag 이 1 로 바뀌어도 셀은 즉시 안 비워진다. 여수 실측
+                # (2026-06-12 콜드 12파일, ZA-end 기준 상대농도 중앙값):
+                #   0–10s 0.21 · 20–30s 0.52 · 40–50s 0.79 · 60s~ 평탄
+                # 이걸 넣고 60s 평균하면 시간당 딱 한 점이 H2O 24 % · NO2 32 % 로 찍힌다
+                # (콜드 [0001], 핫 [0002] — 전체의 ~1.7 %). 502/512(wait, "셀이 아직
+                # 차는 중")를 이미 버리는 것과 같은 이유로 **되돌아오는 쪽도** 버린다.
+                # 버리는 건 세팅값 `purge_settle_sec` 이 헤더에 남는 재현 가능한 구간뿐이고,
+                # raw 는 그대로다(무결성 헌장: 원본 복원 가능).
+                _dt = _sec_since_cal(fp, row_idx, gidx)
+                if _dt is not None and _dt < self.purge_settle_sec:
+                    n_purge_skipped += 1
+                    return
                 _amb_spool.write(np.ascontiguousarray(intensity_raw, dtype=np.float32).tobytes())
                 amb_index.setdefault(fp, []).append(
                     (row_idx, gidx, _row_sec(fp, row_idx), env_t, env_p, _amb_spool_n))
@@ -2206,6 +2244,12 @@ class AlphaExportWorker(QThread):
             _cleanup_spool()
             self.finished.emit("ERROR: aborted")
             return
+
+        if n_purge_skipped:
+            self.status_msg.emit(
+                f"[purge settle] 교정 직후 {self.purge_settle_sec:.0f}초 ambient "
+                f"{n_purge_skipped}/{global_idx} 스캔 제외 — 캐비티에 ZA/He 가 남아 있어"
+                f" 농도가 1/4로 찍히던 구간이다 (raw 는 그대로, 헤더에 기록됨).")
 
         if n_default_tp:
             self.status_msg.emit(
@@ -2772,6 +2816,7 @@ class AlphaExportWorker(QThread):
             'omr_pchip': omr_pchip_obj, 'omr_axis_is_sec': _omr_axis_is_sec,
             'best_omr_d': best_omr_d, 'rl_factor': self.rl_factor,
             'avg_sec': avg_sec,
+            'purge_settle_sec': self.purge_settle_sec,
             'amb_spool_path': _amb_spool_path, 'row_bytes': _row_bytes, 'n_pix': n_pix,
             'base_dir': base_dir, 'channel_subdir': self.channel_subdir,
             'out_root': self.output_dir, 'campaign': self.campaign,

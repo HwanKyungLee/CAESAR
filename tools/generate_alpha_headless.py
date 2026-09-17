@@ -26,6 +26,9 @@ def main() -> None:
     p.add_argument("--pixel-max", type=int, default=2048,
                    help="exclusive; use the actual fit/R-cal ROI, not detector edges")
     p.add_argument("--avg-sec", type=float, default=60.0)
+    p.add_argument("--purge-settle-sec", type=float, default=60.0,
+                   help="drop ambient scans within N sec after a ZA/He block "
+                        "(cavity still holding purge gas); 0 keeps them")
     p.add_argument("--rl-factor", type=float, default=1.0)
     p.add_argument("--cavity-cm", type=float, default=51.8)
     p.add_argument("--rt-path", type=Path,
@@ -42,7 +45,8 @@ def main() -> None:
         flag_za=[500], flag_he=[510], flag_amb=[1],
         rl_factor=args.rl_factor, cavity_len=args.cavity_cm,
         output_dir=str(args.output), channel=args.channel,
-        avg_sec=args.avg_sec, channel_label=args.label,
+        avg_sec=args.avg_sec, purge_settle_sec=args.purge_settle_sec,
+        channel_label=args.label,
         rt_path=str(args.rt_path) if args.rt_path else None,
     )
     messages: list[str] = []

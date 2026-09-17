@@ -66,6 +66,20 @@ class AlphaGeneratorDialog(QDialog):
         self._spin_avg.setFixedWidth(90)
         self._spin_avg.setToolTip("Time-average ambient over this many seconds before α (default 60s). 0 = no averaging.")
         opt.addWidget(self._spin_avg)
+        # 교정 직후 퍼지 세틀링(초) — 밸브가 ambient 로 돌아와도 캐비티엔 ZA/He 가
+        # 남아 있다. 플러시 시간은 유량·셀부피에 달려 계기/채널마다 다르니 손잡이로 둔다
+        # (여수 콜드 실측 ~60s). 0 = 옛 동작(제외 안 함).
+        opt.addWidget(QLabel("  Purge settle (s):"))
+        self._spin_purge = QDoubleSpinBox()
+        self._spin_purge.setRange(0.0, 600.0)
+        self._spin_purge.setDecimals(0)
+        self._spin_purge.setSingleStep(10.0)
+        self._spin_purge.setValue(60.0)
+        self._spin_purge.setFixedWidth(90)
+        self._spin_purge.setToolTip(
+            "Drop ambient scans within this many seconds after a ZA/He block "
+            "(cavity still holding purge gas — Yeosu cold measured ~60s). 0 = keep them.")
+        opt.addWidget(self._spin_purge)
         # 생성 px범위 — 알파 파일에는 이 구간만 저장됨(밖 픽셀은 파일에 없어
         # 나중에 더 넓게 피팅하려면 재생성 필요). 핏 윈도우보다 넉넉하게 두면
         # 이후 핏범위 실험을 알파 재생성 없이 할 수 있다.
@@ -360,6 +374,7 @@ class AlphaGeneratorDialog(QDialog):
             file_list=self._raw_files,
             out_dir=self._out_dir,
             avg_sec=self._spin_avg.value(),
+            purge_settle_sec=self._spin_purge.value(),
             status_cb=self._on_status,
             done_cb=self._on_done,
             drnam_mat=drnam_mat,

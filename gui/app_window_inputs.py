@@ -118,6 +118,7 @@ class InputsAlphaMixin:
     # §5  알파 생성 (export + generator)
     # ══════════════════════════════════════════════════════════════════════
     def export_alpha_files(self, file_list=None, out_dir=None, avg_sec=None,
+                           purge_settle_sec=None,
                            status_cb=None, done_cb=None, drnam_mat=None, ch_tab_map=None,
                            progress_cb=None, channels=None, gen_px_range=None, rt_map=None):
         """BBCEAS alpha만 계산해 저장(피팅 없음). Hot 2채널이면 채널별로 각각.
@@ -193,6 +194,8 @@ class InputsAlphaMixin:
         self._alpha_file_list  = flist
         self._alpha_out_dir    = out_dir
         self._alpha_avgsec     = float(avg_sec) if avg_sec is not None else 60.0
+        # 교정 직후 퍼지 세틀링(초) — 캐비티 잔류가스. 기본 60 은 여수 콜드 실측.
+        self._alpha_purge_settle = float(purge_settle_sec) if purge_settle_sec is not None else 60.0
         self._alpha_rt_map     = dict(rt_map or {})   # {raw채널 -> R(t) npz 경로} 채널별
         self._alpha_dark       = getattr(self, 'dark_data', None)
         self._alpha_done_msgs  = []
@@ -353,6 +356,7 @@ class InputsAlphaMixin:
             stray_light_fraction = self.spin_stray_light.value(),
             channel       = cfg['channel'],
             avg_sec       = self._alpha_avgsec,
+            purge_settle_sec = self._alpha_purge_settle,
             channel_label = cfg['label'],
             std_t_bins    = getattr(self, '_alpha_drnam_bins', None),
             drnam_date    = getattr(self, '_alpha_drnam_date', ''),
