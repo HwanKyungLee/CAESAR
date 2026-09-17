@@ -585,7 +585,23 @@ class AnalysisWorker(QThread):
                         continue
 
                     avg_raw = np.mean(intensity_raw)
-                    is_linear_mode = (abs(avg_raw) < 1.0)
+                    # X5: 입력이 알파(광학두께)인지 raw 카운트인지. 예전엔 |평균| < 1.0
+                    # 이라는 **크기 휴리스틱 하나로만** 정했고, 그건 두 방향으로 틀린다:
+                    #   ① 아주 어두운 raw 스캔(평균 < 1 카운트)을 알파로 오판
+                    #      → R 곡선 없이 그대로 핏돼 농도가 조용히 틀린다
+                    #   ② multiplier가 붙어 평균 > 1인 알파를 raw로 오판
+                    # 이제 권위는 **파일 형식**(`DataIO._is_alpha_trace_format`)이고,
+                    # 형식으로 못 가리는 파일에서만 휴리스틱으로 떨어진다. 어느 쪽이
+                    # 정했는지는 결과에 남긴다 — 조용한 판단을 남기지 않는다.
+                    # `self.input_is_alpha`(True/False)로 명시 지정도 가능하다.
+                    _override = getattr(self, 'input_is_alpha', None)
+                    if _override is not None:
+                        is_linear_mode, _mode_src = bool(_override), 'explicit'
+                    elif self._is_alpha_input(file_path):
+                        is_linear_mode, _mode_src = True, 'alpha-trace-format'
+                    else:
+                        is_linear_mode, _mode_src = (abs(avg_raw) < 1.0), 'magnitude-heuristic'
+                    result['InputMode'] = ('alpha' if is_linear_mode else 'raw') + f" ({_mode_src})"
 
                     # If the raw counts are very small (e.g., 1e-6), multiply up to ~1
                     # to avoid numerical underflow in the optimizer
@@ -607,6 +623,7 @@ class AnalysisWorker(QThread):
                                 self.progress.emit(i+1)
                                 continue
                     
+                    masked_px = None        # X1: I ≤ 0 픽셀 마스크(raw 경로에서만 생긴다)
                     if is_linear_mode:
                         optical_depth = intensity_processed
                         fit_sign = 1.0
@@ -614,8 +631,12 @@ class AnalysisWorker(QThread):
                         # [ BBCEAS Native Physics Engine ]
                         # Dark current subtraction: remove thermally-generated CCD counts
                         # that are present in every frame regardless of light level.
-                        # Formula: α = [(1-R)/d] · [(I₀ - dark) - (I - dark)] / (I - dark)
-                        #            = [(1-R)/d] · [(I₀ - I) / (I - dark)]
+                        # ⚠ 여기는 **암전류/오프셋/미광 차감까지만** 한다.
+                        #   α 식 자체는 아래 `optical_depth = ...` 줄이 정본이다
+                        #   (Rayleigh 항과 RL이 들어간다). 예전 주석은
+                        #     α = [(1-R)/d]·(I₀-I)/(I-dark)
+                        #   라고 적어 **Zero Air 레일리 항이 빠진 옛 식**을 보여줬다 —
+                        #   코드가 맞고 주석이 틀렸던 것이라 주석을 걷어냈다.
                         I_meas = intensity_processed.copy()
                         if self.dark_array is not None:
                             I_meas -= self.dark_scale_factor * self.dark_array * scale_factor
@@ -625,7 +646,14 @@ class AnalysisWorker(QThread):
                             eps = self.stray_light_fraction
                             I_meas = (I_meas - eps * np.mean(I_meas)) / (1.0 - eps)
 
-                        I_meas[I_meas <= 0] = 1e-9
+                        # X1: I ≤ 0 은 물리적으로 불가능하다(암전류/오프셋 과차감,
+                        # 미광 보정 과다, 결손 픽셀). 예전엔 1e-9로 **클램프**했는데
+                        # 그러면 α=(I₀−I)/I 가 ~1e9로 폭발한 값이 **유한한 실측값인
+                        # 척** 핏에 들어간다. 이제 값은 그대로 두되(수치 안정용) 그
+                        # 픽셀의 **가중을 0으로** 만들어 핏에서 뺀다 = 마스킹.
+                        # 버리는 게 아니라 해당 픽셀만 제외하고 개수를 결과에 남긴다.
+                        masked_px = (I_meas <= 0)
+                        I_meas[masked_px] = 1e-9
 
                         # Temporal I0: pick the interpolated I0 for this file index,
                         # otherwise fall back to the fixed i0_array.
@@ -643,6 +671,7 @@ class AnalysisWorker(QThread):
                             if self.stray_light_fraction > 1e-9:
                                 eps = self.stray_light_fraction
                                 I_0 = (I_0 - eps * np.mean(I_0)) / (1.0 - eps)
+                            masked_px = masked_px | (I_0 <= 0)   # I₀ 쪽도 같은 이유
                             I_0[I_0 <= 0] = 1e-9
 
                             # BBCEAS optical depth formula (CAESAR Araon 2025 / MATLAB-equivalent):
@@ -708,7 +737,23 @@ class AnalysisWorker(QThread):
                     
                     try:
                         weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(I_meas))
-                        W = weights / np.mean(weights)   # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
+                        # X1 마스킹: I ≤ 0 이었던 픽셀은 가중 0 → 설계행렬·잔차에서 완전히 빠진다.
+                        _mask = masked_px
+                        _n_masked = 0
+                        if _mask is not None and np.any(_mask):
+                            weights = weights * (~_mask)
+                            _n_masked = int(np.count_nonzero(_mask))
+                        result['MaskedPixels'] = _n_masked
+                        _w_mean = float(np.mean(weights))
+                        if _w_mean <= 0:
+                            raise ValueError(f"fit window fully masked ({_n_masked}px I<=0)")
+                        W = weights / _w_mean            # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
+                        if _n_masked > 0.05 * len(weights):
+                            # 핏창의 5%를 넘으면 그 스캔의 농도는 남은 픽셀만으로 나온 것이다.
+                            self.status_msg.emit(
+                                f"⚠ I≤0 마스킹 {_n_masked}/{len(weights)}px "
+                                f"({100.0 * _n_masked / len(weights):.1f}%) — "
+                                f"{os.path.basename(file_path)}[{row_idx}]")
 
                         # 5. Core engine call
                         opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = self._execute_varpro_fit(

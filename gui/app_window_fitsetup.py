@@ -180,6 +180,17 @@ class FitSetupMixin:
                     self.lbl_wavecal.setText(_el)
                     self.lbl_wavecal.setStyleSheet("color: #1565C0; font-weight: bold; padding: 2px;")
                     self.lbl_wavecal.setToolTip(f"Wavecal for this channel:\n{filepath}")
+                # X3: Calib 헤더에 ILS FWHM이 있으면 채운다. 예전엔 웨이브캘
+                # **다이얼로그를 그 세션에 직접 돌린 경우에만** 채워져, 파일을
+                # 불러오기만 한 런은 run_meta에 `ils_fwhm_nm: 0.0`이 박혔다.
+                # 0.0은 "모른다"가 아니라 "폭이 0"으로 읽힌다.
+                # 사용자가 이미 값을 넣었으면 덮지 않는다.
+                if hasattr(self, 'spin_fwhm_nm') and self.spin_fwhm_nm.value() <= 0:
+                    _fw = DataIO.wavecal_fwhm_nm(filepath)
+                    if _fw:
+                        self.spin_fwhm_nm.blockSignals(True)
+                        self.spin_fwhm_nm.setValue(_fw)
+                        self.spin_fwhm_nm.blockSignals(False)
                 # Recompute px from nm spinbox with the new dispersion
                 if hasattr(self, 'spin_fwhm_nm') and self.spin_fwhm_nm.value() > 0:
                     self._update_fwhm_px_from_nm(self.spin_fwhm_nm.value())

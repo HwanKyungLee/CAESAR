@@ -503,6 +503,31 @@ class DataIO:
         return None
 
     @staticmethod
+    def wavecal_fwhm_nm(path):
+        """Calib 파일 헤더에서 ILS FWHM(nm)을 읽는다. 없으면 None.
+
+        헤더 예: `# Info: Average FWHM: 0.683 nm (calculated from 4 peaks)`
+
+        왜 여기 있나 — 이 값은 `run_meta`의 `calibration.ils_fwhm_nm`으로 결과
+        파일에 박히는데, 예전엔 **웨이브캘 다이얼로그를 그 세션에 직접 돌린 경우에만**
+        채워졌다. 파일을 불러오기만 하면 0.0이 기록됐고, 0.0은 "ILS 폭을 모른다"가
+        아니라 "폭이 0이다"로 읽힌다. 파일이 값을 들고 있으니 파일에서 읽는다.
+        """
+        try:
+            with open(path, encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if not line.lstrip().startswith('#'):
+                        break                      # 헤더 끝 — 더 볼 필요 없다
+                    m = re.search(r'FWHM\s*[:=]\s*([0-9]*\.?[0-9]+)\s*nm', line,
+                                  re.IGNORECASE)
+                    if m:
+                        v = float(m.group(1))
+                        return v if v > 0 else None
+        except Exception:                           # noqa: BLE001
+            pass
+        return None
+
+    @staticmethod
     def _load_alpha_trace_row(filepath, row_index, pixel_min=0, pixel_max=None):
         """Load one data row from an alpha_trace.dat file (구·신 포맷 호환).
 
