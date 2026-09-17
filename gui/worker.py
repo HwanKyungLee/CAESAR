@@ -265,6 +265,7 @@ class AnalysisWorker(QThread):
         # 종료 상태는 반환 튜플이 아니라 여기 놔둔다 — 호출부 7개 언팩을 건드리지 않으려고.
         # 호출 직후 같은 스캔 안에서만 읽는다.
         self._last_solver_termination = diag["solver_termination"]
+        self._last_underdetermined = bool(diag.get("underdetermined"))
         return result
 
     def _solver_status_note(self):
@@ -275,7 +276,12 @@ class AnalysisWorker(QThread):
         표시만 해서 하류가 셀 수 있게 한다."""
         t = getattr(self, '_last_solver_termination', None) or {}
         st = t.get("status")
-        return f" · {st}" if st in ("STEP_LIMITED", "AT_BOUND", "MAX_NFEV", "FAILED") else ""
+        note = f" · {st}" if st in ("STEP_LIMITED", "AT_BOUND", "MAX_NFEV", "FAILED") else ""
+        if getattr(self, '_last_underdetermined', False):
+            # n−p ≤ 0. 오차가 NaN인 것뿐 아니라 **농도 자체가** 신뢰 불가다 —
+            # "오차 열만 비어 있는 정상 값"으로 읽히면 안 된다.
+            note += " · UNDERDETERMINED"
+        return note
     
     # ==========================================
     # 🌟 Main Orchestrator

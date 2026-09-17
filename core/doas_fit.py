@@ -699,7 +699,14 @@ class DoasFitter:
         #   실사용이 λ=0이라 표준 근사인 p를 쓴다.
         _n_fit = len(resid_w)
         _p_fit = len(theta0) + A_f_w.shape[1]
-        mse = float(resid_w @ resid_w) / max(_n_fit - _p_fit, 1)
+        _dof = _n_fit - _p_fit
+        # n−p ≤ 0 이면 σ̂²는 **큰 게 아니라 정의되지 않는다**. 예전 `max(n−p, 1)`은
+        # 분모를 1로 바꿔 유한한 숫자를 냈는데, 그건 "오차가 이만큼"이라는 주장이라
+        # 과소결정 상태가 **작은 오차**로 읽힌다. 이 파일이 예외 경로에서 0 대신 NaN을
+        # 쓰는 이유와 같다 — NaN은 '모른다'이고 하류가 이미 쓰는 센티넬이다.
+        # ⚠ 이때는 오차뿐 아니라 **농도 자체도** 신뢰할 수 없다. 진단의
+        # `underdetermined`로 올려 Status에 표시한다(버리지는 않는다 — 헌장).
+        mse = (float(resid_w @ resid_w) / _dof) if _dof > 0 else float("nan")
         try:
             # 공분산은 **핏이 실제로 푼 계**의 정규방정식에서 나와야 한다.
             # 예전엔 세 군데가 핏과 어긋나 있었다(λ=0이라 드러나지 않았을 뿐):
@@ -777,6 +784,8 @@ class DoasFitter:
                        # 열 정규화 전/후 조건수. SVD라 비싸서 진단 요청 시에만 잰다.
                        # 정규화 후가 1/eps(≈1e16)보다 한참 아래여야 해의 자릿수를
                        # 신뢰할 수 있다. 스케일 벡터 자체는 내부 구현이라 안 내보낸다.
+                       "dof": int(_dof),
+                       "underdetermined": bool(_dof <= 0),
                        "cond_raw": _safe_cond(A_f_w[:, keep_mask]),
                        "cond_normalized": _safe_cond(
                            (A_f_w / s_fin)[:, keep_mask])}
