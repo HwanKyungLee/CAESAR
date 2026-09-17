@@ -31,6 +31,8 @@ def main() -> None:
                         "(cavity still holding purge gas); 0 keeps them")
     p.add_argument("--rl-factor", type=float, default=1.0)
     p.add_argument("--cavity-cm", type=float, default=51.8)
+    p.add_argument("--campaign", default="",
+                   help="output sub-root: {output}/{campaign}/{date}/alpha/ (default: 'default')")
     p.add_argument("--rt-path", type=Path,
                    help="optional production R(t) npz when this raw file has no He scan")
     args = p.parse_args()
@@ -48,6 +50,7 @@ def main() -> None:
         avg_sec=args.avg_sec, purge_settle_sec=args.purge_settle_sec,
         channel_label=args.label,
         rt_path=str(args.rt_path) if args.rt_path else None,
+        campaign=args.campaign,
     )
     messages: list[str] = []
     worker.status_msg.connect(lambda message: messages.append(str(message)))

@@ -61,6 +61,9 @@ def code_version() -> str:
             out = subprocess.run(
                 ["git", *args], cwd=_REPO_DIR,
                 capture_output=True, text=True, timeout=10,
+                # pythonw(GUI)에서 git.exe가 자기 콘솔창을 띄운다. 알파 저장은
+                # 워커 프로세스마다 이걸 부르므로 검은 창이 수십 번 깜빡인다.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             return out.stdout.strip() if out.returncode == 0 else None
         except Exception:
