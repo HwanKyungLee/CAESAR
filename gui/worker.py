@@ -344,11 +344,44 @@ class AnalysisWorker(QThread):
     # 🌟 Main Orchestrator
     # ==========================================
 
+    @staticmethod
+    def _group_za_blocks(za_list):
+        """연속 인덱스의 ZA 스캔들을 **한 블록으로 평균**해 (중앙 index, 평균 i0)로 낸다.
+
+        왜 평균하는가 — ZA 스캔 하나를 그대로 I0로 쓰면 그 스캔의 노이즈가 통째로
+        알파에 실린다. 실측(Yeosu 2026-05-18, Hot PNs, 435~480nm, poly4)에서
+        단일 ZA 스캔의 차분 노이즈는 **7.1e-3**인데, 시간 보간이 고치려는 I0 드리프트는
+        **3.8e-3**이다 — 고치려는 것보다 큰 노이즈를 넣는 셈이다.
+
+        블록 leave-one-out 비교(참값 = 그 블록의 ZA 평균, 13블록 중앙값):
+            OFF(직전 블록평균)        3.8e-3
+            보간(블록평균)            2.3e-3   ← 39% 개선
+            보간(단일 스캔)           4.8e-3   ← OFF보다 나쁨
+        측정 도구는 `tools/za_noise_floor.py`.
+        """
+        blocks, cur = [], []
+
+        def _flush():
+            if cur:
+                idxs = [i for i, _ in cur]
+                blocks.append((int(idxs[len(idxs) // 2]),
+                               np.mean(np.asarray([a for _, a in cur], dtype=float), axis=0)))
+
+        for idx, i0 in za_list:
+            if cur and idx != cur[-1][0] + 1:
+                _flush()
+                cur = []
+            cur.append((idx, i0))
+        _flush()
+        return blocks
+
     def _prescan_za_scans(self):
         """
         Phase-0 pre-scan: reads every file quickly to collect ZA calibration scans.
         Returns a list of (file_index, i0_spectrum) sorted by index, used for
         temporal I0 interpolation during the main fitting loop.
+
+        연속 ZA 스캔은 `_group_za_blocks`로 **블록평균 한 점**이 된다 — 이유는 그쪽 참고.
         """
         za_list = []
         for idx, entry in enumerate(self.file_list):
@@ -360,8 +393,10 @@ class AnalysisWorker(QThread):
                     za_list.append((idx, i0))
             except Exception:
                 pass
-        print(f"[Temporal I0] Pre-scan complete: {len(za_list)} ZA scans found.")
-        return za_list
+        blocks = self._group_za_blocks(za_list)
+        print(f"[Temporal I0] Pre-scan complete: {len(za_list)} ZA scans "
+              f"-> {len(blocks)} averaged blocks.")
+        return blocks
 
     def _prescan_injection_indices(self, expanded_scans):
         """청크+워밍업 병렬화용(터보 모드). 스펙트럼 처리·핏 없이 **플래그만** 빠르게
