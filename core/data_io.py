@@ -1004,7 +1004,10 @@ class DataIO:
             raw = DataIO._read_row_raw(filepath, row_index)
             year = DataIO._file_year(filepath)
             if len(raw) >= 2 and year:
-                sec = DataIO._bytepack_year_seconds(raw[0], raw[1])
+                # `all_row_seconds`와 같은 시계여야 한다 — 알파 경로와 raw 직접
+                # 피팅 경로가 같은 파일에 다른 시각을 매기면 안 된다(핫 5/29).
+                sec = (DataIO._bytepack_year_seconds(raw[0], raw[1])
+                       + DataIO.clock_epoch_offset_sec(filepath))
                 return datetime(year, 1, 1) + timedelta(seconds=sec)
             reason = ("파일명에 YYYY-MM-DD 없음" if not year
                       else f"행 컬럼 수 부족({len(raw)})")
@@ -1071,16 +1074,72 @@ class DataIO:
 
     @staticmethod
     def parse_row_doy(filepath, row_index=0):
-        """행의 day-of-year(소수, 1-based) — 박사님 doy 와 동일. 실패 시 None."""
+        """행의 day-of-year(소수, 1-based) — 박사님 doy 와 동일. 실패 시 None.
+
+        `all_row_seconds`와 같은 시계(핫 5/29 epoch 보정 적용)."""
         try:
             raw = DataIO._read_row_raw(filepath, row_index)
-            return DataIO._bytepack_year_seconds(raw[0], raw[1]) / 86400.0 + 1.0
+            sec = (DataIO._bytepack_year_seconds(raw[0], raw[1])
+                   + DataIO.clock_epoch_offset_sec(filepath))
+            return sec / 86400.0 + 1.0
         except Exception:
             return None
 
+    # ── 핫 PC 2026-05-29 UTC-toggle 시계 사건 ────────────────────────────────
+    # hot PC 는 2026-05-18 배치부터 2026-05-29 09:29 KST 재부팅 **전까지** bytepack 에
+    # UTC 변환을 걸지 않았다 — 그 구간의 기록값은 사실상 이미 KST 다. 나머지 캠페인
+    # (정상 = UTC)과 같은 축에 놓으려면 그 구간만 −9h 해서 UTC 로 되돌린다.
+    # **+9h 를 뒤 구간에 더하면 안 된다** — 하류(migrate_kst_plus9 등)가 전 구간에
+    # 다시 +9h 를 걸므로 이중보정된다. 내부 축의 규약은 언제나 '기록 UTC'다.
+    #
+    #   경계: 2026-05-29-010 (마지막 구컨벤션, 기록 09:37:01)
+    #       → 2026-05-29-011 (첫 신컨벤션,  기록 01:06:57)
+    #     보정 후 00:37:01 → 01:06:57 로 **전진**(재시작 공백 29m56s).
+    #
+    #   · 콜드 PC 는 이 문제가 없다 — 31일 전수감사에서 오프셋이 처음부터 끝까지 정상.
+    #     그래서 핫/콜드를 갈라야 하는데, 파일명은 두 계기가 똑같아서(YYYY-MM-DD-NNN)
+    #     **경로가 아니라 데이터 열수로 가른다**: 핫 데이터행 6181 / 콜드 6179.
+    #     열수가 둘 중 어느 쪽도 아니면(예: 콜드 6174 결손 구간) 보정하지 않는다.
+    #   · ±65s 잔차는 상수인지 드리프트인지 **원리상 미해결**이라(외부 앵커가 7/13
+    #     한 점뿐) 보정하지 않는다 — 데이터 무결성 원칙: 근거 약한 보정보다 원값+flag.
+    #
+    # 근거: docs/기초파싱_전수검증_2026-09-15.md §3(−8.50 h 경계 실측),
+    #       docs/NO2_인젝션_실험_핸드오프_2026-08.md(하류에서 발견된 경위),
+    #       필드로그 5/29 "CAESAR-Hot Program restart 09:29 (KST)".
+    HOT_NCOLS = 6181                              # 핫 데이터행 열수(콜드 6179)
+    HOT_UTC_TOGGLE_STEM = "2026-05-29-011"        # 이 파일**부터** UTC 변환 ON
+    HOT_DEPLOY_STEM = "2026-05-18-001"            # 핫 배치 첫 파일(하한)
+    HOT_PRE_TOGGLE_SHIFT_SEC = -32400.0           # 구컨벤션(KST 기록) → UTC
+
+    @staticmethod
+    def clock_epoch_offset_sec(filepath, rows=None, ncols=None):
+        """이 파일의 bytepack 시각에 더해야 할 초. 해당 없으면 0.0.
+
+        파일명 스템(`YYYY-MM-DD-NNN`)은 고정폭이라 사전순 비교가 곧 시간순이다.
+        `ncols`(데이터행 폭)를 이미 알면 넘겨라 — 없으면 파일을 펼쳐서 센다(비쌈).
+        날짜 범위를 먼저 보므로 대다수 파일은 아무것도 읽지 않고 0.0으로 끝난다."""
+        try:
+            stem = os.path.splitext(os.path.basename(filepath))[0]
+            if not (DataIO.HOT_DEPLOY_STEM <= stem < DataIO.HOT_UTC_TOGGLE_STEM):
+                return 0.0
+            if ncols is None:
+                if rows is None:
+                    rows = DataIO._load_file_to_cache(filepath)
+                # 헤더행(6177)은 핫·콜드가 같으므로 데이터행 폭으로 판별한다.
+                ncols = max((len(r) for r in rows[:10]), default=0)
+            if int(ncols) != DataIO.HOT_NCOLS:
+                return 0.0
+            return DataIO.HOT_PRE_TOGGLE_SHIFT_SEC
+        except Exception:
+            return 0.0
+
     @staticmethod
     def all_row_seconds(filepath):
-        """파일 전 행의 연초기준 초 배열(벡터화). 60s 평균/시간축용. 실패 시 None."""
+        """파일 전 행의 연초기준 초 배열(벡터화). 60s 평균/시간축용. 실패 시 None.
+
+        `clock_epoch_offset_sec`(핫 5/29 UTC-toggle)을 적용해 캠페인 전체가 **UTC
+        한 축** 위에 오도록 한다 — 안 하면 5/29 경계에서 시간축이 8.5h 역행해
+        I₀/R(t) PCHIP이 `x must be strictly increasing`으로 죽는다."""
         try:
             rows = DataIO._load_file_to_cache(filepath)
             import numpy as _np
@@ -1088,6 +1147,9 @@ class DataIO:
             for i, r in enumerate(rows):
                 if len(r) >= 2:
                     out[i] = DataIO._bytepack_year_seconds(r[0], r[1])
+            off = DataIO.clock_epoch_offset_sec(filepath, rows=rows)
+            if off:
+                out += off
             return out
         except Exception:
             return None

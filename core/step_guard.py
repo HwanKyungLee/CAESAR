@@ -33,7 +33,7 @@ ADAPT_PCTL = 95.0       # 자기 변동성 백분위
 PERSIST_K = 5           # 지속성 판단 창(앞뒤 knot 수)
 
 
-def resolve_time_axis(idx_values, sec_values):
+def resolve_time_axis(idx_values, sec_values, warn=None):
     """PCHIP 보간축으로 스캔 인덱스 대신 실측 절대시각(초)을 쓸 수 있는지 결정한다.
 
     배경: I₀(t)/R(t) 보간은 원래 global scan index(카운터) 위에서 이뤄졌다 — 정상
@@ -45,12 +45,29 @@ def resolve_time_axis(idx_values, sec_values):
     아니면(HK 파싱 실패 등 드문 경우) 기존 인덱스 축으로 안전하게 폴백한다 — 두 축을
     섞으면 PCHIP이 단조성을 잃으므로 항상 한쪽만 전부 쓴다.
 
+    `warn`: 시각축을 거부할 때 사유를 받을 콜백(예: status_msg.emit). 없으면 침묵.
+
     반환: (x_axis: ndarray, is_real_time: bool)."""
     sec = np.asarray(sec_values, dtype=float)
     idx = np.asarray(idx_values, dtype=float)
-    if sec.size >= 2 and sec.size == idx.size and np.isfinite(sec).all():
-        return sec, True
-    return idx, False
+    if not (sec.size >= 2 and sec.size == idx.size and np.isfinite(sec).all()):
+        return idx, False
+    # 단조성까지 봐야 한다 — 이 축은 곧장 PchipInterpolator 로 들어가고 scipy 는
+    # strictly increasing 을 요구한다. 계기 재시작 시계규약 변경(핫 5/29)이나
+    # 중복 타임스탬프(2026-05-28-009 row 1719~1721)가 있으면 여기서 걸리는데,
+    # 안 보고 넘기면 런 **전체**가 `x must be strictly increasing` 으로 죽는다.
+    # 폴백(인덱스축)은 이 함수의 원래 설계지만 **조용히** 하면 안 된다 —
+    # 시각이 깨졌다는 건 알아야 할 데이터 사실이다.
+    bad = np.flatnonzero(np.diff(sec) <= 0)
+    if bad.size:
+        if warn is not None:
+            i = int(bad[0])
+            warn(f"[time] ⚠ 시각축이 단조증가가 아니다 — knot {i}→{i+1}: "
+                 f"{sec[i]:.2f} → {sec[i + 1]:.2f} s "
+                 f"({'중복' if sec[i + 1] == sec[i] else f'{sec[i] - sec[i+1]:.1f}s 역행'}), "
+                 f"위반 {bad.size}건 → 스캔 인덱스축으로 폴백")
+        return idx, False
+    return sec, True
 
 
 def knot_scalar_metric(omr_d, wave_nm=None, fit_window_nm=None):

@@ -1768,7 +1768,13 @@ def _pass2_write_file(fp, rows, ctx):
         f.write(f"# Calibration: {ctx['rt_calib_note'] or ctx['calib_info_per_file'].get(fp, 'unknown')}\n")
         wv_str = '\t'.join(f"{w:.4f}" for w in ctx['wave_nm'])
         f.write(f"# wavelength_nm:\t{wv_str}\n")
+        # 시각 규약을 파일이 스스로 말하게 한다 — 보정이 걸렸는지 결과만 보고
+        # 알 수 없으면, 언젠가 보정본과 원본을 섞어 쓰게 된다(2026-07-09 산물이
+        # 그렇게 9h 어긋난 채 NIER 제출까지 갔다).
+        _clk = DataIO.clock_epoch_offset_sec(fp)
         f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
+        f.write("# clock_epoch=%s  (hot 2026-05-29 UTC-toggle; 축 규약은 기록 UTC)\n"
+                % ("pre_fix %+.0fh" % (_clk / 3600.0) if _clk else "none +0h"))
         f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
                 '\t'.join(f"px{ctx['pix_min']+j}" for j in range(ctx['n_pix'])) + "\n")
         for rid, rep_sec, T, P, alpha, n_avg in rows:
@@ -2374,8 +2380,10 @@ class AlphaExportWorker(QThread):
                     f"[R(t)] ⚠ reflectance_calc 임포트 실패 ({type(_e_rc).__name__}: "
                     f"{_e_rc}) — ZA 블록별 R(t) 생략, 단일 R(best_omr_d)로 진행")
             if _RC is not None:
-                _za_key, _za_sec_ok = resolve_time_axis(za_gidx, za_sec)
-                _he_key, _he_sec_ok = resolve_time_axis(he_gidx, he_sec)
+                _za_key, _za_sec_ok = resolve_time_axis(
+                    za_gidx, za_sec, warn=self.status_msg.emit)
+                _he_key, _he_sec_ok = resolve_time_axis(
+                    he_gidx, he_sec, warn=self.status_msg.emit)
                 _pair_use_sec = _za_sec_ok and _he_sec_ok
                 if not _pair_use_sec:   # 두 축이 안 맞으면 인덱스로 통일(무회귀)
                     _za_key = np.asarray(za_gidx, dtype=float)
@@ -2512,7 +2520,8 @@ class AlphaExportWorker(QThread):
             # 실측 절대시각(초)이 전부 유효하면 그걸 보간축으로 — 파일 유실·장비정지로
             # 스캔카운트와 실제 경과시간이 어긋나는 구간에서도 물리적으로 옳은 위치에
             # 보간한다. HK 파싱 실패 등으로 결측이 있으면 기존 스캔 인덱스로 폴백(무회귀).
-            za_x, _i0_axis_is_sec = resolve_time_axis(za_gidx, za_sec)
+            za_x, _i0_axis_is_sec = resolve_time_axis(
+                za_gidx, za_sec, warn=self.status_msg.emit)
             za_arr = np.array(za_spectra,  dtype=float)   # (N_za, N_pix)
             za_t   = np.array(za_t_list,   dtype=float)
             za_p   = np.array(za_p_list,   dtype=float)

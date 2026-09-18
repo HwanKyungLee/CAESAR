@@ -84,13 +84,30 @@ def preset(name):
 
 
 def _file_first_sec(path):
-    """파일 첫 행의 raw bytepack 연초기준 초(알파 rep_sec와 동일 시계). 실패 시 NaN."""
+    """파일 첫 행의 raw bytepack 연초기준 초(알파 rep_sec와 동일 시계). 실패 시 NaN.
+
+    "동일 시계"는 계약이다 — 알파가 `DataIO.all_row_seconds`로 보정한 축 위에서
+    R(t)를 질의하므로, knot 시각도 **같은 보정**을 받아야 한다. 안 그러면 핫
+    pre-toggle 구간(2026-05-18~05-29)이 9시간 어긋난 R을 집어간다.
+    핫/콜드는 데이터행 폭(6181/6179)으로 갈리는데 첫 줄은 헤더(6177)라 둘이 같다
+    → 앞 몇 줄의 최대 폭을 쓴다."""
     try:
+        sec, ncols, seen = float("nan"), 0, 0
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
-                if line.strip():
-                    p = line.split("\t", 3)
-                    return float(DataIO._bytepack_year_seconds(float(p[0]), float(p[1])))
+                if not line.strip():
+                    continue
+                toks = line.split("\t")
+                ncols = max(ncols, len(toks))
+                if sec != sec:      # 첫 유효행의 시각만 쓴다
+                    sec = float(DataIO._bytepack_year_seconds(
+                        float(toks[0]), float(toks[1])))
+                seen += 1
+                if ncols >= DataIO.HOT_NCOLS or seen >= 5:
+                    break           # 헤더 + 데이터행 몇 줄이면 폭이 판별된다
+        if sec == sec:
+            sec += DataIO.clock_epoch_offset_sec(path, ncols=ncols)
+        return sec
     except Exception:
         pass
     return float("nan")
