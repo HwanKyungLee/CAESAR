@@ -5,6 +5,7 @@ import numpy as np
 # DataIO gatekeeper call
 from core.data_io import DataIO
 from core.raw_parser import FLAG_HEADER, SATURATION_ADC_MAX, count_saturated
+from core.parallel import max_workers
 
 # Core engine imports
 from scipy.linalg import lstsq as scipy_lstsq
@@ -1334,12 +1335,12 @@ class AnalysisWorker(QThread):
         _, _, etalon = self._fit_alpha_range(scans[:1], body_start=0,
                                              init_shift=0.0, etalon_freq=None)
 
-        # Use about half the logical cores by default: full saturation pins the CPU
-        # at ~100% and starves the GUI process (lag / 'Not Responding'), even with
-        # BLAS threads capped. Half keeps the machine usable while still ~Nx faster.
-        # Override via self.fit_nproc (set from the UI) if the user wants more/less.
+        # 워커 수는 GUI `CPU cores` 스핀이 정한다(core.parallel 단일 출처, 기본 전 코어).
+        # 예전 기본은 절반+8개 상한이었다 — 근거(풀가동이면 GUI 프로세스가 굶어
+        # 'Not Responding')는 여전히 유효하니, 체감이 나쁘면 스핀을 내리면 된다.
+        # self.fit_nproc 은 그 예산을 활성 채널 수로 나눈 몫(app_window_run).
         _cpu = os.cpu_count() or 4
-        nproc = int(getattr(self, 'fit_nproc', 0) or max(2, min(8, _cpu // 2)))
+        nproc = int(getattr(self, 'fit_nproc', 0) or max_workers())
         nproc = max(1, min(nproc, _cpu))
         warmup = 40
         # Cap chunk size so each chunk finishes in a bounded time even for a whole
@@ -2165,8 +2166,8 @@ class AlphaExportWorker(QThread):
                     _rpf[_fp] = []; _files.append(_fp)
                 _rpf[_fp].append(_ri)
             _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _files]
-            # 전체 코어의 절반만(과부하 방지). R calc 병렬파싱과 동일 정책.
-            _nproc = max(1, (os.cpu_count() or 4) // 2)
+            # 워커 수 = GUI `CPU cores` 스핀(core.parallel). R calc 병렬파싱과 동일 출처.
+            _nproc = max_workers()
             _win = max(2, _nproc * 2)
             self.status_msg.emit(
                 f"Pass 1 (parallel {_nproc} cores): parsing {len(_files)} files…")
@@ -2827,7 +2828,7 @@ class AlphaExportWorker(QThread):
         _use_par2 = getattr(self, 'use_parallel', True) and len(amb_index) > 1
         _pass2_ok = False
         if _use_par2:
-            _nproc2 = max(1, (os.cpu_count() or 4) // 2)
+            _nproc2 = max_workers()
             _win2 = _nproc2 * 2
             self.status_msg.emit(f"Pass 2 (parallel {_nproc2} cores): processing {len(amb_index)} files…")
             try:

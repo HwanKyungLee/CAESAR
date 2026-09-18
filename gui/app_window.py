@@ -17,6 +17,7 @@ from PyQt6.QtGui import QShortcut, QKeySequence
 
 from core.engine import UniversalEngine
 from core.data_io import DataIO
+from core.parallel import set_max_workers
 from core.paths import DEFAULT_CAMPAIGN
 from core.__version__ import __version__
 from .ui_dialogs import *
@@ -685,6 +686,30 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.cb_display_mode.currentTextChanged.connect(
             lambda t: self.spin_step_delay.setEnabled(t.startswith("Step")))
         layout_perf.addWidget(self.spin_step_delay)
+
+        # 병렬 프로세스 수 — 알파 Pass1/2·Fast 핏·R(t) 파싱이 모두 이 값을 본다
+        # (core.parallel 단일 출처, 환경변수로 전달). 예전엔 호출부마다 '코어 절반'이
+        # 하드코딩돼 있었고, 이 스핀이 그 자리를 대신한다. 기본 = 전 논리코어.
+        layout_perf.addWidget(QLabel("CPU:"))
+        _cpu_max = os.cpu_count() or 4
+        self.spin_cores = QSpinBox()
+        self.spin_cores.setRange(1, _cpu_max)
+        self.spin_cores.setSuffix(f"/{_cpu_max}")
+        self.spin_cores.setValue(
+            self._qsettings.value("cpu_workers", _cpu_max, type=int))
+        self.spin_cores.setMaximumWidth(int(75 * self._s))
+        self.spin_cores.setToolTip(
+            "Worker processes for every parallel step: alpha generation (Pass 1 parsing\n"
+            "and Pass 2 alpha), Fast fitting, and R(t) computation.\n"
+            f"Default {_cpu_max} = all logical cores (fastest). Full load can starve\n"
+            "the GUI process, so if the window feels stuck, drop it to about half.\n"
+            "Multi-channel fitting splits this budget across the active channels.\n"
+            "Remembered between sessions.")
+        set_max_workers(self.spin_cores.value())
+        self.spin_cores.valueChanged.connect(
+            lambda n: (set_max_workers(n),
+                       self._qsettings.setValue("cpu_workers", n)))
+        layout_perf.addWidget(self.spin_cores)
 
         layout_perf.addSpacing(8)
         self.chk_auto_save = QCheckBox("Auto-save")

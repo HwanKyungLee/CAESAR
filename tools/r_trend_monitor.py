@@ -287,9 +287,10 @@ def scan_directory(directory: str, wave_nm, file_list=None,
     _parsed = None
     if parallel and len(files) > 1:
         import concurrent.futures as _cf
-        # 전체 코어의 절반만 사용(과부하 방지). 노트북 12코어→6, 데스크톱 등 코어가
-        # 더 많으면 자동으로 더 쓴다. 최소 1.
-        _nproc = max(1, (os.cpu_count() or 4) // 2)
+        # 워커 수 = core.parallel 단일 출처(기본 전 코어, GUI `CPU cores` 스핀이
+        # 환경변수로 전달 — 이 도구는 GUI 안에서 인프로세스로도 불린다).
+        from core.parallel import max_workers as _mw
+        _nproc = _mw()
         try:
             _parsed = {}
             _ndone = 0

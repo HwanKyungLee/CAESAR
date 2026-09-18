@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QDialog, QMessageBox, QVBoxLayout
 from core import run_meta
 from core.__version__ import __version__
 from core.data_io import DataIO
+from core.parallel import max_workers
 from core.paths import (DEFAULT_CAMPAIGN, DEFAULT_OUTPUT_DIR,
                         campaign_dir as _campaign_dir, special_dir as _special_dir)
 from .app_window_policy import _channel_worker_gas_policy
@@ -388,12 +389,10 @@ class AnalysisRunMixin:
             # Step mode → existing sequential loop (with delay for live inspection).
             w.parallel = _fast_mode
             # Channels run as concurrent workers, each with its OWN process pool.
-            # Total process budget = ~half the machine's logical cores (adapts per PC,
-            # leaving the other half for the GUI/OS). That budget is split across the
-            # active channels so adding channels never multiplies the load
-            # (e.g. without this, 3ch × 6 = 18 procs on 12 cores → ~100% + lag).
-            import os as _os
-            _budget = max(2, (_os.cpu_count() or 4) // 2)
+            # 총 예산 = GUI `CPU cores` 스핀(기본 전 코어) → 활성 채널 수로 나눈다.
+            # 나누는 이유는 그대로다: 안 나누면 채널 수만큼 곱해진다
+            # (3ch × 6 = 18 procs on 12 cores → ~100% + lag).
+            _budget = max_workers()
             w.fit_nproc = max(1, _budget // max(1, len(self._alpha_groups)))
 
             # Connect signals
