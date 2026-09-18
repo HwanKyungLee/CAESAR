@@ -109,6 +109,23 @@ def test_real_boundary_moves_forward():
     print(f"  실측 경계 OK: gap {gap:.1f}s (재시작 공백)")
 
 
+def test_header_row_width_silently_disables_the_shift():
+    """★함정: 파일 **첫 줄**(LabVIEW 헤더행 6177)의 폭을 넘기면 보정이 조용히 꺼진다.
+
+    핫 raw 는 헤더 6177 / 데이터행 6181 로 폭이 다르다(실측 2026-05-18-001 앞 6줄
+    = [6177, 6181x5]). 호출부가 "첫 줄 폭"을 ncols 로 넘기면 HOT_NCOLS 와 안 맞아
+    0.0 이 나오고 **틀렸다는 신호 없이** 9h 가 안 붙는다. 실제로
+    `gui.worker._pass2_write_file` 이 첫 줄만 보고 있었다(2026-09-19 수정).
+    """
+    HEADER = [[0] * 6177]
+    assert DataIO.clock_epoch_offset_sec("2026-05-20-003.dat", rows=HEADER) == 0.0
+    assert DataIO.clock_epoch_offset_sec("2026-05-20-003.dat", rows=HOT) == SHIFT
+    # ncols 를 직접 넘기는 경로도 같다 — 헤더 폭이면 꺼지고 데이터행 폭이면 켜진다.
+    assert DataIO.clock_epoch_offset_sec("2026-05-20-003.dat", ncols=6177) == 0.0
+    assert DataIO.clock_epoch_offset_sec("2026-05-20-003.dat", ncols=DataIO.HOT_NCOLS) == SHIFT
+
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

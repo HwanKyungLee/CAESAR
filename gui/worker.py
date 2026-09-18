@@ -1760,15 +1760,22 @@ def _pass2_write_file(fp, rows, ctx):
     out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
     _yr = DataIO._file_year(fp) or 2026
 
-    # raw 첫 데이터행의 열 수 = 그 파일의 구성 식별자. 첫 줄만 읽으므로 비용은 없다.
+    # raw **데이터행**의 열 수 = 그 파일의 구성 식별자.
+    # 첫 줄은 LabVIEW 헤더행이고 **핫은 그게 6177 로 데이터행(6181)과 다르다**
+    # (실측 2026-05-18-001 앞 6줄 = [6177, 6181x5]). 첫 줄만 보던 옛 코드는 핫 알파에
+    # `ncols=6177 campaign=unregistered` 를 적고 있었다 — 콜드는 헤더도 6179 라 우연히
+    # 맞았다. 앞 몇 줄의 **최대** 폭을 쓴다. 여전히 수 KB 만 읽으므로 비용은 없다.
     _ncols, _lay_name = 0, "unknown"
     try:
         with open(fp, encoding="utf-8", errors="replace") as _fh:
+            _seen = 0
             for _ln in _fh:
                 if _ln.startswith("#") or not _ln.strip():
                     continue
-                _ncols = len(_ln.split("\t") if "\t" in _ln else _ln.split())
-                break
+                _ncols = max(_ncols, len(_ln.split("\t") if "\t" in _ln else _ln.split()))
+                _seen += 1
+                if _seen >= 5:
+                    break
         from core.raw_parser import CAMPAIGN_LAYOUTS as _CL
         _l = _CL.get(_ncols)
         _lay_name = (_l.campaign or _l.kind) if _l else "unregistered"
@@ -1813,7 +1820,12 @@ def _pass2_write_file(fp, rows, ctx):
         # 시각 규약을 파일이 스스로 말하게 한다 — 보정이 걸렸는지 결과만 보고
         # 알 수 없으면, 언젠가 보정본과 원본을 섞어 쓰게 된다(2026-07-09 산물이
         # 그렇게 9h 어긋난 채 NIER 제출까지 갔다).
-        _clk = DataIO.clock_epoch_offset_sec(fp)
+        # !! `ncols` 를 넘기는 게 필수다. 없으면 이 함수가 열 수를 세려고 **raw 파일을
+        # 통째로 펼친다** — Pass 2 워커엔 그 파일이 캐시에 없어 파일당 raw 를 다시 읽게
+        # 되고, 핫 5/18~5/29 구간에서 저장이 3.4 s/file 로 기어갔다(실측). 위에서 이미
+        # 앞 몇 줄로 데이터행 폭을 알아냈으니 그걸 준다. 탐지 실패(0)면 None 으로 넘겨
+        # 옛 경로(느리지만 정확)로 떨어뜨린다 — 조용히 보정을 끄면 안 된다.
+        _clk = DataIO.clock_epoch_offset_sec(fp, ncols=_ncols or None)
         f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
         f.write("# clock_epoch=%s  (hot 2026-05-29 UTC-toggle; 축 규약은 기록 UTC)\n"
                 % ("pre_fix %+.0fh" % (_clk / 3600.0) if _clk else "none +0h"))
@@ -2051,7 +2063,19 @@ class AlphaExportWorker(QThread):
         # amb_index[fp] = [(row_idx, global_idx, sec, env_t, env_p, spool_idx), ...]
         amb_index = {}
         amb_count = 0
+        import glob as _glob
         import tempfile as _tf
+        # 지난 런이 흘린 스풀 회수 — 이 파일은 파일당 수십 GB 로 자란다(핫 1314파일
+        # = 38 GB). `_cleanup_spool()` 은 정상·중단·예외 경로를 다 덮지만 **프로세스가
+        # 죽으면(GUI 강제종료·크래시) 못 돈다**. 실제로 2026-09-19 에 %TEMP% 에서 죽은
+        # 스풀 138 GB 가 발견됐다. 지금 쓰는 스풀을 만들기 직전에 옛것을 치운다 —
+        # 다른 인스턴스가 쓰는 중이면 Windows 가 삭제를 거부하므로 자연히 건너뛴다.
+        for _old in _glob.glob(os.path.join(_tf.gettempdir(), "caesar_amb_*.bin")):
+            try:
+                if time.time() - os.path.getmtime(_old) > 3600:   # 1시간 넘은 것만
+                    os.remove(_old)
+            except OSError:
+                pass        # 사용 중이거나 권한 없음 — 그냥 둔다
         _amb_spool = _tf.NamedTemporaryFile(prefix='caesar_amb_', suffix='.bin', delete=False)
         _amb_spool_path = _amb_spool.name
         _amb_spool_n = 0   # 기록된 스펙트럼 수
