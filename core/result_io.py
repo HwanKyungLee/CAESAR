@@ -34,6 +34,54 @@ def parse_row_time(ts: str):
     return None
 
 
+# chi2 = Σ(residual²/σ_pix²)/dof 의 "브로드 미스핏" 문턱.
+# 이론 산포는 √(2/dof) 라 3σ ≈ 1.17 이지만 그 값으로 자르면 5.1 % 가 걸리면서
+# 그 행들 잔차 중앙값이 전체 중앙의 1.1 배뿐이다 — 통계적으로만 유의하고 물리적으로는
+# 멀쩡하다(CLAUDE.md §2: 통계 단독 심판 금지). 1.5 에서 1.6 % 가 걸리고 그 행들은
+# 잔차 3.8 배다. 실측 autosave 19,502 행 기준.
+MISFIT_CHI2 = 1.5
+
+
+def quality_label(chi2, attempt=0):
+    """Status 품질 라벨 — **축은 chi2** 다(그 스캔 자신의 픽셀노이즈 대비 잔차).
+
+    2026-09-18 이전에는 `rms < mean|신호| × 10%` 였다. 그 축은 분모가 신호 세기라
+    **알파가 작아지면 멀쩡한 핏도 Unstable** 로 찍혔다. 생산 교차검증 출력
+    (`diagnostics/qdoas_crossval_2026-09/augur_fit/`, 19.2만 행)에서 측정한 실태:
+
+    | 채널 | 옛 라벨 | Unstable 행의 chi2 중앙값 | Unstable 행의 RMS 중앙값 |
+    |---|---|---|---|
+    | ANs  | Unstable 33.7 % | 1.05 (최대 1.66) | 1.23e-9 ← **OK 행(1.33e-9)보다 낮다** |
+    | PNs  | Unstable 23.9 % | 1.01 | 1.17e-9 (OK 1.19e-9) |
+    | cold | Unstable 5.5 %  | 1.04 | 2.72e-9 (OK 2.66e-9) |
+
+    Unstable 행의 잔차가 OK 행과 같거나 더 낮다 — 나빠진 건 분자가 아니라 분모다
+    (|NO2| 중앙값 ANs 0.99 vs 2.77 ppb). 반대로 **cold 은 OK 라벨 행의 31.8 %가
+    chi2>1.5**(최대 630, RMS 최대 3.9e-6)였다. 옛 축은 부정확한 게 아니라
+    품질과 거의 **반대로** 정렬돼 있었다.
+
+    chi2 는 분모가 그 스캔의 인접픽셀 노이즈(Neumann 추정)라 농도에 안 흔들리고,
+    채널 간 비교도 된다(옛 축은 같은 K 가 채널마다 22배 다른 엄격함을 뜻했다 —
+    `docs/HANDOFF.md` §3).
+
+    Args:
+        chi2: 그 행의 축소 chi2. None/NaN/문자열이면 판정 불가 → "Unstable"
+            (헌장: 애매하면 flag, 지우지는 않는다).
+        attempt: 핏 재시도 회차. 1 이면 "Recovered"(1차 실패 후 성공)로 표시한다.
+
+    Returns:
+        "OK" · "Recovered" · "Unstable" 중 하나. 하류가 전부 startswith 로 읽으므로
+        이 값은 Status 문자열 **맨 앞**에 와야 한다.
+    """
+    try:
+        c = float(chi2)
+    except (TypeError, ValueError):
+        return "Unstable"
+    if not (c <= MISFIT_CHI2):          # NaN 포함 — 판정 불가는 flag 쪽으로
+        return "Unstable"
+    return "Recovered" if attempt == 1 else "OK"
+
+
 def robust_rms_thresholds(rms, channels=None, K=8.0, min_n=5):
     """채널별 robust RMS 이상치 임계값을 계산해 {채널: 임계} dict로 반환.
 

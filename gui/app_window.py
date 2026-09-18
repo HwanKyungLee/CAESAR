@@ -451,16 +451,21 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.spin_rms_thresh.setDecimals(1)
         self.spin_rms_thresh.setValue(10.0)
         self.spin_rms_thresh.setToolTip(
-            "OK RMS Threshold(%): OK when RMS residual < (signal mean × threshold).\n"
-            "10% = standard DOAS quality criterion.\n"
-            "Lower = stricter. Raise only if data is extremely noisy.")
+            "Low-signal retry trigger(%): when RMS ≥ (signal mean × threshold), the scan is\n"
+            "refit once in defensive mode (auto pre-calibration of shift/squeeze).\n"
+            "This is NOT the OK/Unstable label — that comes from Chi2 (residual vs the scan's own\n"
+            "pixel noise), because a small alpha shrinks the denominator here and would mark\n"
+            "perfectly good fits Unstable. Lower = more scans get the defensive refit.")
 
         self.chk_qc = QCheckBox("QC")
         self.chk_qc.setToolTip(
-            "Checked: for 'Unstable' rows above the threshold (OK RMS Threshold) or below the SNR floor,\n"
-            "set gas concentration to NaN to exclude from time-series·stats·export. Reason shown in Status.\n"
-            "Rows where the fit failed (clouds/low light; e.g. NO2 runs negative while CHOCHO·H2O rise to offset)\n"
-            "are filtered automatically. Standard DOAS QA/QC. Default = off (flag-only philosophy — enable to exclude).")
+            "Checked: rows above 'RMS max' or below the SNR floor get gas concentration NaN,\n"
+            "excluding them from time-series·stats·export. The reason is prepended to Status.\n"
+            "Catches cloud/low-light fit failures (NO2 runs negative while CHOCHO·H2O rise to offset).\n"
+            "NOTE: the OK/Unstable label is NOT a criterion — it is relative RMS (signal strength), so\n"
+            "using it would delete low-concentration rows that fit perfectly (chi2~1) and bias the mean up.\n"
+            "Both thresholds default to 0 = off, so QC alone excludes nothing until you set one.\n"
+            "Standard DOAS QA/QC. Default = off (flag-only philosophy — enable to exclude).")
         self.chk_qc.setChecked(False)
         self.spin_qc_k = QDoubleSpinBox()
         self.spin_qc_k.setRange(0.0, 30.0)

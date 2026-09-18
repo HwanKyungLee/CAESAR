@@ -17,13 +17,10 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 # RayleighPhysics / KalmanTracker → core/physics.py 에서 공유
 from core.physics import RayleighPhysics, KalmanTracker, air_number_density
 
-
-# chi2 = Σ(residual²/σ_pix²)/dof 의 "브로드 미스핏" 문턱.
-# 이론 산포는 √(2/dof) 라 3σ ≈ 1.17 이지만 그 값으로 자르면 5.1 % 가 걸리면서
-# 그 행들 잔차 중앙값이 전체 중앙의 1.1 배뿐이다 — 통계적으로만 유의하고 물리적으로는
-# 멀쩡하다(CLAUDE.md §2: 통계 단독 심판 금지). 1.5 에서 1.6 % 가 걸리고 그 행들은
-# 잔차 3.8 배다. 실측 autosave 19,502 행 기준.
-MISFIT_CHI2 = 1.5
+# 품질 라벨·문턱은 QC 단일 출처에 있다(CLAUDE.md §3). 결과뷰어의 사후 재판정
+# (`app_window_results._reapply_quality_label`)도 같은 함수를 부른다.
+# MISFIT_CHI2 는 여기 이름으로도 계속 노출한다 — 기존 import 경로 보존.
+from core.result_io import MISFIT_CHI2, quality_label
 
 
 class AnalysisWorker(QThread):
@@ -307,7 +304,7 @@ class AnalysisWorker(QThread):
                 seen.add(nm); names.append(nm)
         return names
 
-    def _solver_status_note(self, result=None):
+    def _solver_status_note(self):
         """마지막 핏의 종료 상태를 Status 열에 붙일 조각. 정상 수렴이면 빈 문자열.
 
         STEP_LIMITED = 보폭 제한(step_limit) 경계에 붙은 채 끝났다 = 이 스캔의 shift는
@@ -317,9 +314,9 @@ class AnalysisWorker(QThread):
         경계 상태에는 **어느 파라미터가 걸렸는지**를 괄호로 붙인다. `AT_BOUND` 하나로는
         허용범위를 넓혀야 할 대상이 sh 인지 sq 인지 알 수 없다.
 
-        MISFIT = chi2 > MISFIT_CHI2. OK/Unstable(상대잔차)과 **직교하는 축**이다 —
-        저쪽 분모는 mean|신호| 라 농도에 끌려가지만 이쪽 분모는 그 스캔 자신의
-        픽셀간 노이즈라 농도에 안 흔들린다. 라벨은 그대로 두고 노트만 더한다."""
+        예전엔 여기서 ` · MISFIT`(chi2 > MISFIT_CHI2)을 붙였다. 2026-09-18 부터
+        품질 라벨 자체가 chi2 축이라(`core.result_io.quality_label`) 같은 말을 두 번
+        하는 셈이 돼 뺐다 — chi2 초과는 이제 `Unstable` 이라는 단어가 말한다."""
         t = getattr(self, '_last_solver_termination', None) or {}
         st = t.get("status")
         note = ""
@@ -328,18 +325,67 @@ class AnalysisWorker(QThread):
             note = f" · {st}({','.join(nm)})" if nm else f" · {st}"
         elif st in ("MAX_NFEV", "FAILED"):
             note = f" · {st}"
-        if isinstance(result, dict):
-            try:
-                if float(result.get('Chi2', 0.0)) > MISFIT_CHI2:
-                    note += " · MISFIT"
-            except (TypeError, ValueError):
-                pass
         if getattr(self, '_last_underdetermined', False):
             # n−p ≤ 0. 오차가 NaN인 것뿐 아니라 **농도 자체가** 신뢰 불가다 —
             # "오차 열만 비어 있는 정상 값"으로 읽히면 안 된다.
             note += " · UNDERDETERMINED"
         return note
-    
+
+    def _low_signal_retry(self, rms, signal_mean):
+        """`rms >= mean|신호| × ok_rms_threshold` — **재시도를 걸지** 판단한다.
+
+        2026-09-18 에 이 식을 Status 라벨에서 떼어냈다(라벨은 이제 chi2 축 —
+        `core.result_io.quality_label`). 그런데 retry 트리거는 **일부러 옛 식에
+        남겼다**: 여기를 chi2 로 바꾸면 지금까지 재시도(`auto_pre_calibrate`) 후
+        2차 핏 결과가 기록돼 온 저농도 행들이 1차 핏 결과로 바뀌어 **농도 숫자가
+        달라진다.** 라벨 교체와 섞으면 어느 쪽이 원인인지 못 가린다.
+
+        즉 이 식은 "저신호 스캔에 방어적 재핏을 한 번 준다"는 뜻이고, 그 이상의
+        품질 주장은 하지 않는다. 재시도 자체가 저농도에서 이득인지는 미검증
+        (`docs/HANDOFF.md` 참조 — 24~34 % 행이 이 경로를 탄다).
+        """
+        try:
+            return not (float(rms) < float(signal_mean) * getattr(self, 'ok_rms_threshold', 0.10))
+        except (TypeError, ValueError):
+            return True
+
+    def _apply_qc(self, result):
+        """자동 품질필터 — 불량 핏 행의 가스 농도를 NaN 으로 제외(헌장: 지우지 말고 flag).
+
+        두 경로(GUI `run`·병렬 `_fit_chunk`)의 **단일 출처**다. 예전엔 같은 블록이
+        양쪽에 복붙돼 있었고 이미 갈라져 있었다.
+
+        기준은 둘뿐이다:
+          (1) 절대 RMS 상한 — 핵심. 구름/저광량 때 알파 신호가 부풀어 상대 RMS 는
+              통과하지만 절대 RMS 는 정상의 ~100배로 튄다.
+          (2) SNR 하한 — 보조.
+
+        **상대 RMS(Unstable)는 기준이 아니다.** 저농도 행을 지우면서 평균을 위로
+        편향시킨다(핫 ch1 34%·ch2 24% 제거, cold median 2.06→1.93). chi2 로 보면
+        멀쩡한 핏이다 — 지울 근거가 못 된다.
+
+        Status 는 **덮어쓰지 않고 앞에 붙인다**. 접두사는 `QC-Excluded` 로 남아
+        하류 startswith 가 그대로 돌고, 포화·헤더행·경계 노트와 원래 라벨이 뒤에
+        살아남는다(그 정보가 가장 필요한 행에서 지워지고 있었다).
+        """
+        if not getattr(self, 'qc_enabled', True):
+            return
+        reason = ''
+        rms = float(result.get('RMS', 0.0) or 0.0)
+        rms_abs = float(getattr(self, 'qc_rms_abs', 0.0) or 0.0)
+        if rms_abs > 0 and rms > rms_abs:
+            reason = f"rms={rms:.1e}>{rms_abs:.1e}"
+        snr_min = float(getattr(self, 'qc_snr_min', 0.0) or 0.0)
+        if (not reason) and snr_min > 0 and float(result.get('SNR', np.inf)) < snr_min:
+            reason = f"snr<{snr_min:.0f}"
+        if not reason:
+            return
+        for nm in self.engine.gas_list:
+            result[nm] = float('nan')
+            if f"{nm}_Smooth" in result:
+                result[f"{nm}_Smooth"] = float('nan')
+        result['Status'] = f"QC-Excluded ({reason}) · " + str(result.get('Status', ''))
+
     # ==========================================
     # 🌟 Main Orchestrator
     # ==========================================
@@ -950,19 +996,10 @@ class AnalysisWorker(QThread):
                         result['DOF'] = dof
                         result['SNR'] = snr
 
-                        ok_thresh = getattr(self, 'ok_rms_threshold', 0.10)
-                        # threshold is a fraction of the mean signal amplitude, in the same units as rms
                         _sig_mean = float(np.mean(abs(signal_for_stats)))
-                        threshold = _sig_mean * ok_thresh
                         result['_signal_mean'] = _sig_mean
-
-                        if rms < threshold:
-                            status = "OK"
-                            if attempt == 1: status = "Recovered"
-                        else:
-                            status = "Unstable"
-
-                        result['Status'] = status + _sat_note + self._solver_status_note(result)
+                        status = quality_label(chi2, attempt)
+                        result['Status'] = status + _sat_note + self._solver_status_note()
                         if state_flag == FLAG_HEADER:
                             # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
                             # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
@@ -981,8 +1018,9 @@ class AnalysisWorker(QThread):
                         if len(opt_shifts) > 0 and state_flag != FLAG_HEADER:
                             last_valid_shift = opt_shifts[ 0 ]
 
-                        # If OK or already retrying, exit the loop
-                        if status in ["OK", "Recovered"] or attempt == max_retries - 1:
+                        # 탈출 조건은 **라벨이 아니라 저신호 재시도 기준**이다
+                        # (라벨은 chi2 축으로 옮겼고, 재시도 동작은 보존 — `_low_signal_retry`).
+                        if (not self._low_signal_retry(rms, _sig_mean)) or attempt == max_retries - 1:
                             break
                         else:
                             # If status is bad, trigger defensive mode in the next loop
@@ -995,38 +1033,8 @@ class AnalysisWorker(QThread):
                 # Keep this outside the retry loop: one final fitted residual per scan.
                 self._write_residual_dump(wave_nm, result, residual)
 
-                # 6.5 ── 자동 품질필터(QC): 불량 핏 행의 가스 농도를 NaN으로 제외 ──
-                # 구름/저광량 등으로 핏이 실패하면(RMS가 신호의 임계% 초과 → Status=Unstable),
-                # NNLS/음수허용 하에서 NO2가 −로 폭주하고 CHOCHO·H2O가 상쇄상승하는 가짜값이
-                # 출력된다. 이 행들의 가스값을 NaN으로 빼서 시계열·통계·내보내기에서 제외한다.
-                # (Status·RMS·SNR 컬럼은 사유 추적용으로 유지.) 표준 DOAS QA/QC.
-                if getattr(self, 'qc_enabled', True):
-                    _qc_reason = ''
-                    _rms = float(result.get('RMS', 0.0) or 0.0)
-                    # (1) 절대 RMS 상한 — 핵심 기준. 구름/저광량 때 알파 신호가 부풀어
-                    #     상대 RMS(Unstable)는 통과하지만 절대 RMS는 정상의 ~100배로 튄다.
-                    _rms_abs = float(getattr(self, 'qc_rms_abs', 0.0) or 0.0)
-                    if _rms_abs > 0 and _rms > _rms_abs:
-                        _qc_reason = f"rms={_rms:.1e}>{_rms_abs:.1e}"
-                    # (2) 상대 RMS(Unstable) — 보조
-                    _st = result.get('Status', '')
-                    if (not _qc_reason) and isinstance(_st, str) and _st.startswith('Unstable'):
-                        _qc_reason = f"rms>{getattr(self,'ok_rms_threshold',0.10)*100:.0f}%"
-                    # (3) SNR 하한 — 보조
-                    _snr_min = float(getattr(self, 'qc_snr_min', 0.0) or 0.0)
-                    if (not _qc_reason) and _snr_min > 0 and float(result.get('SNR', np.inf)) < _snr_min:
-                        _qc_reason = f"snr<{_snr_min:.0f}"
-                    if _qc_reason:
-                        for _nm in self.engine.gas_list:
-                            result[_nm] = float('nan')
-                            if f"{_nm}_Smooth" in result:
-                                result[f"{_nm}_Smooth"] = float('nan')
-                        # 노트는 살려둔다 — 배제 사유(_qc_reason)는 "얼마나 나빴나"만
-                        # 말하고, 노트는 "왜 나빴나"를 말한다. AT_BOUND(NO2_sq)가 붙은
-                        # 배제행은 날씨가 아니라 **허용범위 세팅**이 원인이라는 뜻이라,
-                        # 정작 그 정보가 가장 필요한 행에서 지워지고 있었다.
-                        result['Status'] = (f"QC-Excluded ({_qc_reason})"
-                                            + self._solver_status_note(result))
+                # 6.5 ── 자동 품질필터(QC) — 기준·사유표기는 `_apply_qc` 한 곳에
+                self._apply_qc(result)
 
                 # 7. Send to UI
                 # 렌더 상한 가드: 해석적 자코비안 이후 핏은 ~2.5 ms/scan인데
@@ -1224,23 +1232,18 @@ class AnalysisWorker(QThread):
                         sigma_pix = np.std(np.diff(intensity_raw)) / np.sqrt(2)
                         if sigma_pix < 1e-30:
                             sigma_pix = rms if rms > 1e-30 else 1.0
-                        result['Chi2'] = float(np.sum(residual ** 2 / sigma_pix ** 2) / dof)
+                        chi2 = float(np.sum(residual ** 2 / sigma_pix ** 2) / dof)
+                        result['Chi2'] = chi2
                         result['DOF'] = dof
                         result['SNR'] = float(np.mean(np.abs(optical_depth)) / (rms + 1e-30))
 
-                        ok_thresh = getattr(self, 'ok_rms_threshold', 0.10)
                         _sig_mean = float(np.mean(abs(intensity_raw)))
-                        threshold = _sig_mean * ok_thresh
                         result['_signal_mean'] = _sig_mean
-                        if rms < threshold:
-                            status = "OK"
-                            if attempt == 1: status = "Recovered"
-                        else:
-                            status = "Unstable"
-                        result['Status'] = status + self._solver_status_note(result)
+                        status = quality_label(chi2, attempt)
+                        result['Status'] = status + self._solver_status_note()
                         if len(opt_shifts) > 0:
                             last_valid_shift = opt_shifts[0]
-                        if status in ["OK", "Recovered"] or attempt == max_retries - 1:
+                        if (not self._low_signal_retry(rms, _sig_mean)) or attempt == max_retries - 1:
                             break
                         else:
                             self.needs_pre_calibration = True
@@ -1248,28 +1251,7 @@ class AnalysisWorker(QThread):
                         if attempt == max_retries - 1: raise e
                         self.needs_pre_calibration = True
 
-                # QC (run()과 동일)
-                if getattr(self, 'qc_enabled', True):
-                    _qc_reason = ''
-                    _rms = float(result.get('RMS', 0.0) or 0.0)
-                    _rms_abs = float(getattr(self, 'qc_rms_abs', 0.0) or 0.0)
-                    if _rms_abs > 0 and _rms > _rms_abs:
-                        _qc_reason = f"rms={_rms:.1e}>{_rms_abs:.1e}"
-                    _st = result.get('Status', '')
-                    if (not _qc_reason) and isinstance(_st, str) and _st.startswith('Unstable'):
-                        _qc_reason = f"rms>{getattr(self,'ok_rms_threshold',0.10)*100:.0f}%"
-                    _snr_min = float(getattr(self, 'qc_snr_min', 0.0) or 0.0)
-                    if (not _qc_reason) and _snr_min > 0 and float(result.get('SNR', np.inf)) < _snr_min:
-                        _qc_reason = f"snr<{_snr_min:.0f}"
-                    if _qc_reason:
-                        for _nm in self.engine.gas_list:
-                            result[_nm] = float('nan')
-                        # 노트는 살려둔다 — 배제 사유(_qc_reason)는 "얼마나 나빴나"만
-                        # 말하고, 노트는 "왜 나빴나"를 말한다. AT_BOUND(NO2_sq)가 붙은
-                        # 배제행은 날씨가 아니라 **허용범위 세팅**이 원인이라는 뜻이라,
-                        # 정작 그 정보가 가장 필요한 행에서 지워지고 있었다.
-                        result['Status'] = (f"QC-Excluded ({_qc_reason})"
-                                            + self._solver_status_note(result))
+                self._apply_qc(result)          # run() 과 같은 단일 출처
 
                 # Only body scans are returned to the parent.  It is the sole
                 # writer, so child processes never contend for the dump file.

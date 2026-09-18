@@ -292,12 +292,12 @@ class ResultsQCMixin:
         QMessageBox.information(self, "Done", f"{head}{qc_msg}{saved_msg}")
 
     def reapply_qc(self):
-        """재핏 없이 OK RMS% → Kalman Q/R → 자동 QC 순서로 후처리 재적용."""
+        """재핏 없이 라벨(Chi2) → Kalman Q/R → 자동 QC 순서로 후처리 재적용."""
         if not getattr(self, 'results', None):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Reapply", "No analysis results. Run a fit first.")
             return
-        self._reapply_ok_rms_status()
+        self._reapply_quality_label()
         self._reapply_kalman()
         changed = self._apply_auto_qc()
         self._refresh_after_qc(changed)
@@ -311,32 +311,38 @@ class ResultsQCMixin:
                        if _settle_on else "")
         _n_settle = sum(1 for r in self.results if str(r.get('Status', '')) == 'Settling')
         QMessageBox.information(self, "Reapply",
-                                f"Reapplied OK RMS% ({rms_pct:.1f}%), Kalman (Q={kq}, R={kr}), "
+                                f"Re-judged OK/Unstable (Chi2), Kalman (Q={kq}, R={kr}), "
                                 f"QC (K={K:g}){_settle_str}.\n"
                                 f"Excluded: {len(changed)} / {len(self.results):,} rows"
                                 + (f"  (settling {_n_settle})" if _settle_on else ""))
 
-    def _reapply_ok_rms_status(self):
-        """OK RMS% 임계 변경을 반영해 각 행의 OK/Unstable 상태를 재판정.
-        _qc_orig_status를 갱신해두면 이후 _apply_auto_qc()가 복원 시 새 상태를 쓴다."""
-        import numpy as _np
-        thresh = self.spin_rms_thresh.value() / 100.0 if hasattr(self, 'spin_rms_thresh') else 0.10
+    def _reapply_quality_label(self):
+        """각 행의 OK/Unstable 을 Chi2 로 재판정 — 워커와 **같은 함수**를 쓴다
+        (`core.result_io.quality_label`). _qc_orig_status를 갱신해두면 이후
+        _apply_auto_qc()가 복원 시 새 상태를 쓴다.
+
+        두 가지가 예전과 다르다:
+          · 축이 Chi2 다. 옛 축(rms/mean|신호|)은 알파가 작아지면 멀쩡한 핏을
+            Unstable 로 찍었다(교차검증 19.2만 행 측정 — quality_label 독스트링).
+            그래서 이 재판정은 이제 'OK RMS%' 스핀박스와 무관하다.
+          · **노트를 보존한다.** 예전엔 맨몸 'OK'/'Unstable' 로 덮어써서
+            SATURATED·header row·AT_BOUND 가 Reapply 한 번에 사라졌다.
+        """
+        try:
+            from core.result_io import quality_label
+        except ImportError:
+            from CAESAR.core.result_io import quality_label
         for r in self.results:
-            sig_mean = r.get('_signal_mean')
-            if sig_mean is None:
-                continue
-            try:
-                sig_mean = float(sig_mean)
-                rms = float(r.get('RMS', _np.nan))
-            except (TypeError, ValueError):
-                continue
-            if not (_np.isfinite(sig_mean) and sig_mean > 0 and _np.isfinite(rms)):
-                continue
             orig_st = str(r.get('_qc_orig_status', r.get('Status', '')))
-            if orig_st.startswith('Skip') or orig_st.startswith('Error'):
-                continue
-            new_st = 'OK' if rms < sig_mean * thresh else 'Unstable'
-            r['_qc_orig_status'] = new_st
+            head, sep, tail = orig_st.partition(' · ')
+            if head not in ('OK', 'Recovered', 'Unstable'):
+                continue                      # Skip/Error/Zero-Air/Settling/QC-… 은 건드리지 않는다
+            try:
+                chi2 = float(r.get('Chi2'))
+            except (TypeError, ValueError):
+                continue                      # Chi2 없는 레거시 행 — 로드된 라벨 유지
+            new_st = quality_label(chi2, attempt=1 if head == 'Recovered' else 0)
+            r['_qc_orig_status'] = new_st + sep + tail
 
     def _reapply_kalman(self):
         """현재 Kalman Q/R 값으로 _Smooth 컬럼을 채널별로 재계산.

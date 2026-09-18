@@ -13,6 +13,7 @@ import pandas as pd
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 from core import run_meta
 from core.data_io import DataIO
+from core.result_io import MISFIT_CHI2 as _MISFIT_CHI2
 from core.engine import UniversalEngine
 from core.paths import (DEFAULT_CAMPAIGN, DEFAULT_OUTPUT_DIR, campaign_dir as _campaign_dir, out_path as _out_path,
                         resolve_ref_path)
@@ -196,7 +197,8 @@ class SaveExportMixin:
                     f"# Allow Negative Gas (±Neg): {allow_neg}",
                     f"# Auto QC: {qc_str}",
                     f"# Step Limit: {step_val} px",
-                    f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (fit accepted when RMS/signal < threshold)",
+                    f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (low-signal retry trigger; "
+                    f"OK/Unstable label = Chi2 <= {_MISFIT_CHI2})",
                     f"# Kalman Filter: Q={kalman_q:.4f}, R={kalman_r:.3f}  (concentration columns = raw fit; _Smooth = Kalman-filtered)",
                     f"# Dark Current Subtraction: {dark_loaded}  (scale={dark_scale_val:.4f})",
                     f"# Detector Offset Subtraction: {offset_loaded}  (scale={offset_scale_val:.4f})",

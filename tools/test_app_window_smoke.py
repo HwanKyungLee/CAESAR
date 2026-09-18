@@ -46,7 +46,7 @@ CLASS_ATTRS = """
     _on_day_audit_failed _on_ils_dirty _on_main_tab_changed _on_r_curve_update
     _on_scan_count_ready _on_setup_rt_point_clicked _on_shsq_table_changed _open_test_fit_dialog
     _parse_flags _pick_dates _pipeline_health_checks _pipeline_qc_pick_r_npz _progress_text
-    _qc_state _raw_days _read_drnam_std_t _reapply_kalman _reapply_ok_rms_status
+    _qc_state _raw_days _read_drnam_std_t _reapply_kalman _reapply_quality_label
     _refresh_after_qc _refresh_setup_status _refresh_shsq_summary _render_day_audit
     _render_fast_results _results_date_range _row_index_from_display_name _run_runids
     _set_channel_range_from_selector _setup_shortcuts _show_channel_files _show_setup_r_spectrum

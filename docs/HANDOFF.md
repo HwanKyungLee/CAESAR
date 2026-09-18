@@ -1,7 +1,7 @@
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.
-> 최종 업데이트: **2026-09-17**. 맨 위가 최신 세션. 그 아래는 시간순이 뒤섞여 있으니
+> 최종 업데이트: **2026-09-18**. 맨 위가 최신 세션. 그 아래는 시간순이 뒤섞여 있으니
 > (08-14 → 09-14 → 08-04 …) 날짜 제목을 보고 찾을 것.
 
 ---
@@ -9,6 +9,108 @@
 > 📋 **2026-09-15~16 세션의 교차검증 자료는 [`감사_교차검증_2026-09-16.md`](감사_교차검증_2026-09-16.md)**
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
+
+## 2026-09-18 — `Unstable` 라벨의 축 교체: 상대 RMS → chi2
+
+**증상(운용자 보고)**: Status 에 Unstable 이 너무 많이 뜬다. 그런데 그 행들이 진짜
+불안정한 게 아니라 **알파가 작아지면 Unstable 로 찍힌다.**
+
+**확인**: 맞다. 그리고 문서가 알던 것보다 심했다. 옛 판정식은
+
+```
+status = "OK" if rms < mean|signal| × ok_rms_threshold(10%) else "Unstable"
+```
+
+분모가 신호 세기다. 생산 교차검증 출력(`diagnostics/qdoas_crossval_2026-09/augur_fit/`,
+ANs·PNs·cold 합계 192,593 행)에서 실측:
+
+| 채널 | 옛 Unstable 비율 | Unstable 행 chi2 중앙 | Unstable 행 RMS 중앙 | OK 행 RMS 중앙 | Unstable 행 \|NO2\| 중앙 |
+|---|---|---|---|---|---|
+| ANs  | 33.74 % | 1.05 (최대 1.66) | **1.23e-9** | 1.33e-9 | 0.99 ppb (OK 2.77) |
+| PNs  | 23.87 % | 1.01 | 1.17e-9 | 1.19e-9 | 0.79 ppb (OK 2.31) |
+| cold |  5.46 % | 1.04 | 2.72e-9 | 2.66e-9 | 0.59 ppb (OK 2.20) |
+
+**Unstable 행의 잔차가 OK 행과 같거나 더 낮다** — 나빠진 건 분자가 아니라 분모였다.
+거꾸로 **cold 은 `OK` 라벨 행의 31.8 % 가 chi2>1.5**(최대 630, RMS 최대 3.9e-6,
+\|NO2\| p99 71 ppb·최대 930 ppb)였다. 옛 축은 부정확한 게 아니라 품질과 거의
+**반대로** 정렬돼 있었다. (`docs/ANs_분석_핸드오프_2026-07-23.md` §1-5 가 "Status 필터
+쓰지 말 것"이라 한 게 이것이고, 이번에 라벨 자체를 고쳤다.)
+
+**고친 방식**
+
+* 판정은 **chi2 축**으로 — `core/result_io.py` `quality_label(chi2, attempt)`.
+  chi2 분모는 그 스캔 자신의 인접픽셀 노이즈(Neumann)라 농도에 안 흔들리고 채널 간
+  비교도 된다(옛 축은 같은 K 가 채널마다 22배 다른 엄격함이었다 — 아래 §3).
+  문턱은 이미 있던 `MISFIT_CHI2 = 1.5`(실측 19,502행으로 정한 값)을 그대로 쓴다.
+* 위치가 `core/result_io.py` 인 이유 = CLAUDE.md §3(QC 문턱 단일 출처). 워커와
+  결과뷰어 사후 재판정(`_reapply_quality_label`)이 **같은 함수**를 부른다.
+  `MISFIT_CHI2` 는 `gui.worker` 이름으로도 계속 노출한다(기존 import 경로 보존).
+* ` · MISFIT` 노트는 제거 — 라벨이 같은 축이 돼 같은 말을 두 번 하게 됐다.
+* **retry 트리거는 일부러 옛 식에 남겼다**(`_low_signal_retry`). 여기까지 바꾸면
+  지금껏 재시도(`auto_pre_calibrate`) 후 2차 핏이 기록돼 온 저농도 행 24~34 % 가
+  1차 핏 값으로 바뀌어 **농도 숫자가 달라진다** — 라벨 교체와 섞으면 원인 분리 불가.
+  ⇒ 이번 변경으로 농도는 한 자리도 안 바뀐다. Status 문자열만 바뀐다.
+
+**출력 변화(같은 파일 재라벨링, 실측)**
+
+| 채널 | Unstable 전 → 후 | 되살아난 행 | 새로 잡힌 행 | 새로 잡힌 행의 \|NO2\| |
+|---|---|---|---|---|
+| ANs  | 33.74 % → **1.40 %** | 25,188 | 1,037 | 중앙 11.4 ppb (고농도 쪽 — 강흡수 잔차구조) |
+| PNs  | 23.87 % → **0.44 %** | 17,725 |   226 | 중앙 2.9 ppb |
+| cold |  5.46 % → **30.28 %** | 2,278 | 13,011 | 중앙 3.7 ppb, **p99 229 · 최대 930 ppb** |
+
+cold 에서 새로 잡힌 13,011 행이 바로 그 물리적으로 말 안 되는 값들이다 — 전부
+`OK` 로 찍혀 있었다. 물리(T2)가 새 축을 지지한다.
+
+**같이 들어간 QC 정리(같은 세션)**
+
+* **QC 기준에서 상대 RMS(Unstable) 제거.** 기준은 절대 RMS 상한 + SNR 하한 둘뿐이다.
+  둘 다 GUI 기본값 0=off 라, 예전엔 QC 체크만 켜면 "쓰지 말 것"이라던 규칙이
+  **단독으로** 작동하고 있었다. 이제 QC 체크만으론 아무것도 안 빠진다(문턱을 넣어야 한다).
+  K 기반 사후 자동 QC(`spin_qc_k`, 기본 8, `robust_rms_thresholds`)는 별개 경로로 그대로.
+* **QC 사유는 Status 를 덮어쓰지 않고 앞에 붙인다** —
+  `QC-Excluded (rms=…) · Unstable · SATURATED 3 · header row (T/P borrowed…)`.
+  예전엔 재작성해서 포화·헤더행 노트가 **정작 그게 가장 필요한 배제행에서** 사라졌다.
+  접두사는 `QC-Excluded` 로 남으니 하류 `startswith` 는 그대로 돈다.
+* QC 블록이 GUI 경로·병렬 경로에 복붙돼 있었고 이미 갈라져 있었다(병렬 쪽에 `_sat_note`·
+  헤더행 노트·`_Smooth` NaN 없음) → `_apply_qc` 하나로. worker.py 72줄 삭제.
+* 결과뷰어 Reapply 의 재판정이 맨몸 라벨로 덮어써서 노트를 날리던 것도 같이 고쳤다.
+
+**사람이 읽는 설명도 같이 고쳤다**(안 고치면 GUI·파일이 거짓말을 한다):
+`OK RMS Threshold` 스핀 툴팁 → "저신호 재시도 트리거, 라벨은 Chi2", QC 체크 툴팁,
+결과파일 헤더 `# OK RMS Threshold: 10.0%  (low-signal retry trigger; OK/Unstable label
+= Chi2 <= 1.5)` (`tools/backfill_meta.py` 의 정규식 호환 유지).
+
+**회귀**: `tools/test_status_note.py` 14 PASS — 못 박은 계약은
+`test_label_axis_is_chi2_not_signal_strength`(알파가 작아도 chi2 정상이면 OK),
+`test_unstable_is_not_a_qc_reason`, `test_qc_reason_is_prepended_not_overwritten`,
+`test_low_signal_retry_keeps_the_old_axis`, `test_missing_chi2_flags_instead_of_passing`.
+그 외 `pytest` 60 PASS · `validate_pipeline --no-data` · import smoke 210 OK ·
+`validate_plotmaker` 24 PASS.
+
+**미해결 / 다음 사람 판단거리**
+
+1. **cold 30 % 를 어떻게 볼 것인가.** 새 라벨이 말하는 건 "cold 은 실제로 30 % 가
+   미스핏"이다(chi2 최대 630). 줄이고 싶으면 `MISFIT_CHI2` 를 올리면 되지만,
+   숫자를 예쁘게 만들려고가 아니라 cold 잔차 구조를 보고 정할 일이다.
+   채널별 문턱은 안 만들었다 — chi2 는 자기정규화라 전역 상수가 맞다고 봤다.
+2. **저신호 retry 가 이득인지 미검증.** hot 의 24~34 % 행이 이 경로를 타고, 그
+   2차 핏 결과가 기록된다. chi2 로 보면 1차 핏이 이미 노이즈 바닥이었으므로
+   재시도가 낭비이거나(성능) 저신호 스캔에서 shift 를 노이즈로 재추정해
+   **해로울** 수도 있다. 끄면 그 행들 농도가 바뀐다 → A/B 측정이 필요하다.
+3. `_signal_mean` 열은 이제 읽는 데가 없다(라벨이 chi2 로 갔으므로). 진단용으로
+   남겨 뒀다.
+4. `QC-Auto (rms=…)` (결과뷰어 K 경로, `app_window_results.py`)와 `Settling` 은
+   **여전히 Status 를 덮어쓴다.** 워커 쪽만 prepend 로 바꿨다 — 같은 규약으로
+   맞출지는 뷰어 복원 로직(`_qc_orig_status`)과 같이 봐야 한다.
+5. 기존 결과 파일의 라벨은 안 바뀐다(재핏해야 반영). 결과탭 **Reapply** 는 로드된
+   행을 Chi2 로 재판정한다 — Chi2 열이 없는 레거시 행은 라벨을 그대로 둔다.
+
+**재현**: 위 표 숫자는 `diagnostics/qdoas_crossval_2026-09/augur_fit/*.dat` 3파일에서
+`Status` 접두사와 `Chi2` 열만 세면 나온다. `core.result_io.quality_label` 을 각 행
+`Chi2` 에 돌려 before/after 를 비교했다.
+
+---
 
 ## 2026-09-17 — 매시 스파이크의 정체: 교정 직후 퍼지가스 잔류 (`purge_settle_sec`)
 
