@@ -10,10 +10,17 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
     QListWidget, QDoubleSpinBox, QMessageBox, QCheckBox, QWidget, QGroupBox,
-    QComboBox, QProgressBar,
+    QComboBox, QProgressBar, QSpinBox,
 )
 
 from gui.dlg_dir import dlg_dir
+from core.parallel import set_max_workers
+
+
+def _qsettings():
+    """메인 창과 **같은** 저장소(CAESAR/app). CPU 스핀 값을 둘이 공유한다."""
+    from PyQt6.QtCore import QSettings
+    return QSettings("CAESAR", "app")
 
 
 class AlphaGeneratorDialog(QDialog):
@@ -83,7 +90,6 @@ class AlphaGeneratorDialog(QDialog):
         # 생성 px범위 — 알파 파일에는 이 구간만 저장됨(밖 픽셀은 파일에 없어
         # 나중에 더 넓게 피팅하려면 재생성 필요). 핏 윈도우보다 넉넉하게 두면
         # 이후 핏범위 실험을 알파 재생성 없이 할 수 있다.
-        from PyQt6.QtWidgets import QSpinBox
         opt.addWidget(QLabel("  Gen px:"))
         self._spin_px0 = QSpinBox()
         self._spin_px0.setRange(0, 2047); self._spin_px0.setValue(0)
@@ -103,6 +109,26 @@ class AlphaGeneratorDialog(QDialog):
         self._chk_px_fit.toggled.connect(
             lambda on: (self._spin_px0.setEnabled(not on), self._spin_px1.setEnabled(not on)))
         opt.addWidget(self._chk_px_fit)
+        # 병렬 워커 수 — 값은 core.parallel(환경변수) 단일 출처라 메인 창의 `CPU`
+        # 스핀과 같은 것을 가리킨다. 여기 또 두는 이유는 **긴 작업이 여기서 돈다**:
+        # 메인 창에만 있으면 알파를 돌리는 사람 눈에 안 보인다.
+        opt.addWidget(QLabel("  CPU:"))
+        _cpu_max = os.cpu_count() or 4
+        self._spin_cores = QSpinBox()
+        self._spin_cores.setRange(1, _cpu_max)
+        self._spin_cores.setSuffix(f"/{_cpu_max}")
+        self._spin_cores.setFixedWidth(75)
+        self._spin_cores.setValue(_qsettings().value("cpu_workers", _cpu_max, type=int))
+        self._spin_cores.setToolTip(
+            "Worker processes for alpha generation (Pass 1 parsing and Pass 2 alpha).\n"
+            "Shared with the main window CPU box and with Fast fitting / R(t).\n"
+            f"Default {_cpu_max} = all logical cores. Raw on a USB HDD is disk-bound,\n"
+            "so past ~8 there is nothing to gain; drop it if the GUI feels stuck.\n"
+            "Remembered between sessions.")
+        self._spin_cores.valueChanged.connect(
+            lambda n: (set_max_workers(n), _qsettings().setValue("cpu_workers", n)))
+        set_max_workers(self._spin_cores.value())
+        opt.addWidget(self._spin_cores)
         opt.addStretch(1)
         root.addLayout(opt)
 
