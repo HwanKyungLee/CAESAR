@@ -1636,6 +1636,48 @@ def _avg_ambient_plain(entries, avg_sec, sec_per_row=0.97):
     return out
 
 
+
+def prefetch_into_page_cache(files, out_q, stop, sentinel=None, chunk=1 << 24):
+    """파일을 **순차로** 통째 읽어 OS 페이지캐시에 올리고, 끝난 파일을 out_q 로 알린다.
+
+    알파 Pass 1 의 콜드 HDD 대책. 내용은 버린다 — 목적은 프로세스 메모리가 아니라
+    **페이지캐시**에 올려, 뒤따르는 파서(자식 프로세스)가 디스크 대신 캐시를 때리게
+    하는 것이다. 그래서 파싱 경로는 한 글자도 안 바뀐다(무회귀).
+
+    실측(diagnostics/parallel_scaling_2026-09, 여수 핫 raw 10파일, 8코어, 콜드):
+    워커가 각자 읽으면 4.18 s/file(25.2 MB/s) — 헤드가 파일 사이를 오가며 긁힌다.
+    이 함수가 유일한 리더가 되면 1.41 s/file(74.7 MB/s), 디스크 바닥은 1.28 s/file.
+
+    `out_q` 의 maxsize 가 선행 깊이(=캐시 점유 상한)를 정한다. 소비자가 느리면 여기서
+    막혀 자연히 throttle 된다 — 안 막으면 프리페치가 앞질러 달려 캐시가 밀려난다.
+    `stop` 이 서면 즉시 빠져나오고, 어떤 경로로 끝나든 마지막에 `sentinel` 을 넣는다
+    (소비자가 영원히 기다리지 않게).
+    """
+    import queue as _q
+    try:
+        for path in files:
+            if stop.is_set():
+                break
+            try:
+                with open(path, 'rb') as fh:
+                    while fh.read(chunk):
+                        if stop.is_set():
+                            break
+            except Exception:
+                pass        # 못 읽으면 자식이 평소대로 실패 처리(SKIP(parse))
+            while not stop.is_set():
+                try:
+                    out_q.put(path, timeout=0.5)
+                    break
+                except _q.Full:
+                    continue
+    finally:
+        try:
+            out_q.put(sentinel, timeout=1.0)
+        except Exception:
+            pass
+
+
 def _reread_amb_plain(entries, spool_path, row_bytes, n_pix):
     """AlphaExportWorker._run_inner의 _reread_amb 클로저와 동일(amb_index[fp] 전체
     딕셔너리 대신 그 파일의 entries만 인자로 받음). 스풀은 Pass 1 종료 시 이미
@@ -2171,17 +2213,61 @@ class AlphaExportWorker(QThread):
                 if _fp not in _rpf:
                     _rpf[_fp] = []; _files.append(_fp)
                 _rpf[_fp].append(_ri)
+            # ── 콜드 HDD 대책: 디스크를 읽는 주체를 프리페치 스레드 **하나**로 모은다 ──
+            # 실측(diagnostics/parallel_scaling_2026-09/measure_prefetch.py, 핫 raw 8파일):
+            # 워커가 각자 파일을 열면 2.48 s/file(39.8 MB/s) — 헤드가 파일 사이를 오가며
+            # 긁힌다. 한 스레드가 **순차로** 미리 읽어 OS 페이지캐시에 올려두면
+            # 1.84 s/file(57.2 MB/s), 디스크 바닥은 1.28 s/file(82.0 MB/s)이다.
+            #
+            # 자식(파서)은 평소처럼 파일을 열지만 이미 캐시에 있어 디스크를 안 건드린다
+            # → **파싱 경로는 한 글자도 안 바뀐다**(무회귀). read() 는 GIL 을 놓으므로
+            # 스레드로 충분하고, 슬럽한 내용은 버린다(메모리가 아니라 캐시에 남기는 게 목적).
+            # maxsize 가 선행 깊이 = 캐시 점유 상한(파일 ~100MB 기준 3개면 300MB).
+            import queue as _q
+            import threading as _th
+            _pf_q = _q.Queue(maxsize=3)
+            _pf_stop = _th.Event()
+
+            _pf_th = _th.Thread(target=prefetch_into_page_cache,
+                                args=(_files, _pf_q, _pf_stop),
+                                name='alpha-prefetch', daemon=True)
+
+            def _pf_ready():
+                """프리페치가 다음 파일을 캐시에 올릴 때까지 기다린다(Stop 응답 유지).
+                스레드가 죽었거나 끝났으면 False — 그 뒤로는 그냥 원래대로 제출한다."""
+                while self.is_running:
+                    try:
+                        return _pf_q.get(timeout=0.5) is not None
+                    except _q.Empty:
+                        if not _pf_th.is_alive():
+                            return False
+                return False
+
+
             _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _files]
             # 워커 수 = GUI `CPU cores` 스핀(core.parallel). R calc 병렬파싱과 동일 출처.
             _nproc = max_workers()
-            _win = max(2, _nproc * 2)
+            # 제출 창을 프리페치 선행 깊이에 맞춘다 — 창이 더 넓으면 워커가 캐시를
+            # 앞질러 디스크를 직접 읽게 되고(=헤드 긁힘 복귀) 프리페치가 무의미해진다.
+            _win = max(2, min(_nproc, _pf_q.maxsize + 1))
             self.status_msg.emit(
-                f"Pass 1 (parallel {_nproc} cores): parsing {len(_files)} files…")
+                f"Pass 1 (parallel {_nproc} cores, prefetch): parsing {len(_files)} files…")
             try:
+                _pf_th.start()
                 with _cf.ProcessPoolExecutor(max_workers=_nproc) as _ex:
                     _futs = deque(); _ti = 0
-                    while _ti < len(_tasks) and len(_futs) < _win:
+
+                    def _submit_next():
+                        """프리페치가 캐시에 올린 파일만 제출한다. 프리페치가 끝났거나
+                        죽었으면 게이트 없이 제출(현행 동작으로 자연 폴백)."""
+                        nonlocal _ti
+                        if _ti >= len(_tasks):
+                            return
+                        _pf_ready()
                         _futs.append((_files[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+
+                    while _ti < len(_tasks) and len(_futs) < _win:
+                        _submit_next()
                     while _futs:
                         if not self.is_running:
                             break
@@ -2191,8 +2277,7 @@ class AlphaExportWorker(QThread):
                         except Exception as e:
                             self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
                             _flags = None
-                        if _ti < len(_tasks):
-                            _futs.append((_files[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+                        _submit_next()
                         if _flags is None:
                             for _ri in _rpf[_fp]:
                                 global_idx += 1; self.progress.emit(global_idx)
@@ -2213,6 +2298,14 @@ class AlphaExportWorker(QThread):
                 _cleanup_spool()
                 self.finished.emit(f"ERROR: parallel parsing failed (please rerun): {e}")
                 return
+            finally:
+                # Stop·예외·정상종료 어느 쪽이든 프리페치를 세운다. 안 그러면 데몬
+                # 스레드가 남은 파일 132GB 를 계속 읽는다(취소된 런에서도).
+                _pf_stop.set()
+                try:
+                    _pf_q.get_nowait()      # put 에서 막혀 있으면 풀어준다
+                except Exception:
+                    pass
         else:
             # ── 순차 Pass 1 (폴백/검증용; 기존 로직 보존) ──
             for entry in expanded:
