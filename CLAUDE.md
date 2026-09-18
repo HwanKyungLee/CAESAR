@@ -52,16 +52,12 @@
   남은 퍼지가스. 알파 생성에 `purge_settle_sec`(기본 60초) 제외 규칙을 넣었다 —
   **기존 알파는 재생성해야 반영된다.** 근거·수치·미해결은 `docs/HANDOFF.md` 2026-09-17 절.
 
-- 작업 브랜치 `main`, 작업트리 clean. **origin 보다 앞서 있다(미푸시 — `git status -sb`).** (2026-08-04에 경고돼 있던 미커밋 변경·untracked 뒤섞임은 해소됐다.)
+- 작업 브랜치 `main`, 작업트리 clean, **origin/main 과 동기화됨**(2026-09-19 푸시). 브랜치는 `main` 하나뿐이다.
 - 최근 두 주는 **수치 감사**였다: 파장축 파서 단일 출처화, `flag=0` 헤더행 T/P 차용,
   CCD 포화 감지, 공분산 λ 불일치, σ̂² 분모 `RSS/n` → `RSS/(n-p)`. 무엇이 **출력을 바꿨고**
   무엇이 안 바꿨는지는 `docs/감사_교차검증_2026-09-16.md` §1 표에 한눈에 있다.
 - 남은 감사 항목은 `docs/HANDOFF.md`의 "출발점" 절 4·6·7·8번
   (수치 바닥값 산재 / `estimate_shift` 실패=0 / `_is_alpha_input` 오판 / T/P 명목값 → 오차예산).
-- `git stash list`에 오래된 stash 2개가 남아 있다 — `stash@{0}` 은 oculus 12파일
-  (`varpro-dense-w-removal` 시절), `stash@{1}` 은 **ui_dialogs.py 5236줄 변경**으로
-  그 파일이 `gui/ui_dialogs_*` 로 쪼개지기 **전** 판본이다(`docs/refactor_notes.md`).
-  둘 다 지금 트리에 되살릴 수 없다 — 버려도 된다.
 
 ## 회귀 검증 (코드 수정 후 반드시)
 
