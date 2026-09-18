@@ -167,6 +167,15 @@ python tools/t2_reference_check.py cold     # 레퍼런스 물리 심판(O4 판�
 | `core/doas_fit.py` | VarPro 핏 엔진. **Center 모드 + 교집합 공백 가드**(§16) |
 | `core/fit_optimizer.py` | 구 Stage1(핏레인지 perr 탐색). **폐기·참고용**(§1 방향전환) |
 
+> **2026-09-19 — "그리드를 병렬화하자"는 제안은 기각됐다.** 폐기 경로라는 것 말고
+> 비용도 안 맞는다(여수 콜드 실알파 12스캔 실측): `fit_window` 1회 **85 ms**,
+> `aggregate_cell`(12스캔) **0.81 s**, 64셀 그리드 전체 **약 52 s**. 살아있는 최상위
+> 진입점 `tools/build_fitset.py cold` 는 **18.8 s**, Explorer V1(72 fit)은 약 6 s 다.
+> 손으로 가끔 돌리는 도구에서 45초 아끼자고 프로세스풀을 얹을 자리가 아니다.
+> **루프 개수로 비용을 추정하지 말 것** — 그 제안이 정확히 그렇게 나왔다.
+> 재현·수치는 `docs/HANDOFF.md` 2026-09-19 절 §3. ⚠️`build_fitset.py` 는 돌리면
+> `scenarios/AutoFitSet_<key>.json` 을 덮어쓴다(끄는 옵션 없음).
+
 ### 10-C. 다음 스텝 (우선순위)
 1. ~~**Test Fit 버튼 이식**~~ — **완료**. 탭1 자동 파라미터 추천+사람 승인 Apply, 탭2 1스캔
    미리보기, worker thread/진행 표시가 구현됐다. Explorer는 이 기능과 별도이며 자동 Apply하지 않는다.
