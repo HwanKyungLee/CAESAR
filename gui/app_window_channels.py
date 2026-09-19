@@ -131,12 +131,25 @@ class ChannelConfigMixin:
             "rl_factor": self.spin_rl_factor.value() if hasattr(self, 'spin_rl_factor') else 1.0,
         }
 
-    def _calibration_state(self):
+    def _calibration_state(self, cfg=None):
         """`.meta.json`용 캘리브 세트 식별자. `_capture_config`가 안 담는 것들만 모은다.
 
-        파일은 **basename**으로 남긴다 — 절대경로를 넣으면 같은 캘리브가 머신마다 다른
-        runid가 된다. 'Auto from ZA/He scans'처럼 파일이 아닌 상태도 그 문구 그대로 남겨야
-        "무엇으로 보정했나"가 보존된다."""
+        **`cfg` 는 그 채널의 config 다(`_channel_configs[ch]`).** 주면 wavecal 을 거기서
+        가져온다 — 안 그러면 창에 '지금 로드된' 것 하나를 모든 채널 메타에 똑같이 적는다.
+        2026-09-19 에 실제로 그 일이 있었다: 콜드/ANs/PNs 가 각각 cold/roi1/roi2 wavecal
+        로 **정상 피팅**됐는데 메타엔 셋 다 roi 것이 박혔고, 그 기록을 믿고 "콜드 ILS 가
+        17 % 틀렸다"고 오진했다. 핏은 `_build_engine_from_config(cfg)` 가 채널별로 하는데
+        기록만 전역이었다 — 같은 출처를 봐야 한다.
+
+        파일은 **부모 폴더 + basename**으로 남긴다. 절대경로는 머신마다 runid 가 달라져
+        안 되지만(그래서 예전엔 basename 만 썼다), basename 만으로는 **구분이 안 된다** —
+        `roi1/Calib_20260619_Hg_400-499nm_Poly2.txt` 와 `roi2/…` 가 이름이 같고 내용이
+        다르다(축 0.03 nm 차이). 폴더 한 겹은 상대경로라 머신 독립을 안 깬다.
+
+        `ils_fwhm_*` 위젯은 **전역 하나뿐이고 핏에 안 쓰인다**(ILS 는 `Ref_*.dat` 에 이미
+        컨볼루션돼 있다). 그래서 그 값이 이 채널 것이라고 말할 수 있을 때 —
+        wavecal 폴더가 지금 로드된 것과 같을 때 — 만 적고, 아니면 None 으로 둔다.
+        틀린 숫자보다 '기록 없음'이 낫다(헌장 ②)."""
         def _lbl(name, default=""):
             w = getattr(self, name, None)
             return w.text().strip() if w is not None else default
@@ -145,10 +158,25 @@ class ChannelConfigMixin:
             w = getattr(self, name, None)
             return w.value() if w is not None else default
 
+        def _tag(path):
+            """'…/wv_cal/roi2/Calib_x.txt' → 'roi2/Calib_x.txt'. 없으면 ''."""
+            path = (path or "").strip()
+            if not path:
+                return ""
+            parent = os.path.basename(os.path.dirname(path))
+            base = os.path.basename(path)
+            return f"{parent}/{base}" if parent else base
+
+        live_wl = getattr(self, 'loaded_wl_path', "") or ""
+        wl = (cfg or {}).get('wl_path', live_wl) or live_wl
+        same_set = os.path.normcase(os.path.dirname(os.path.abspath(wl or "."))) ==                    os.path.normcase(os.path.dirname(os.path.abspath(live_wl or ".")))
         return {
-            "wavecal": os.path.basename(getattr(self, 'loaded_wl_path', "") or ""),
-            "ils_fwhm_nm": _val('spin_fwhm_nm'),
-            "ils_fwhm_px": _val('spin_fwhm'),
+            "wavecal": _tag(wl),
+            # 레퍼런스가 어느 세트에서 왔나 — ILS 는 이 파일들에 들어 있다.
+            "refs_dir": os.path.basename(os.path.dirname(
+                ((cfg or {}).get('refs') or [{}])[0].get('path', '') or '')) or "",
+            "ils_fwhm_nm": _val('spin_fwhm_nm') if same_set else None,
+            "ils_fwhm_px": _val('spin_fwhm') if same_set else None,
             "i0": _lbl('lbl_i0_path'),
             "r": _lbl('lbl_r_path'),
             "dark": _lbl('lbl_dark_path'),
@@ -161,6 +189,7 @@ class ChannelConfigMixin:
             "d_cm": _val('spin_d_len'),
             "rl_factor": _val('spin_rl_factor'),
         }
+
 
     def _qc_state(self):
         """`.meta.json`용 QC/후처리 상태. 재핏 없이 적용되는 값이라 **저장 시점**이 정본이다."""

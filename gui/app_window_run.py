@@ -269,9 +269,13 @@ class AnalysisRunMixin:
         # .meta.json 용 동결: 핏설정·캘리브는 **이 숫자를 만든 값**이어야 하므로 RUN 시점에
         # 얼려둔다(RUN 뒤 Save 전에 UI를 만져도 meta는 안 흔들린다). QC는 재핏 없는 후처리라
         # 저장 시점 값이 맞아서 여기서 얼리지 않는다 — save()가 그때 읽는다.
+        # 캘리브도 **채널별**로 얼린다. 예전엔 하나만 얼려 모든 채널 메타에 같은 값이
+        # 들어갔고, 그래서 cold/roi1/roi2 로 각각 정상 피팅된 결과의 메타가 셋 다 같은
+        # wavecal 을 가리켰다(2026-09-19). 핏은 채널 config 로 하는데 기록만 전역이었다.
+        _cfgs = copy.deepcopy(self._channel_configs)
         self._run_frozen = {
-            "configs": copy.deepcopy(self._channel_configs),
-            "calibration": self._calibration_state(),
+            "configs": _cfgs,
+            "calibration": {ch: self._calibration_state(c) for ch, c in _cfgs.items()},
         }
         ch_list = sorted(self._alpha_groups)        # 데이터 있는 채널만(early 블록에서 구성)
         # 모니터의 Components/Fit View 채널 콤보를 실제 데이터 있는 채널로 한정.
@@ -619,11 +623,16 @@ class AnalysisRunMixin:
             frozen = getattr(self, '_run_frozen', None) or {}
             cfg = ((frozen.get('configs') or self._channel_configs).get(ch)
                    or self._channel_configs.get(ch) or {})
+            _frozen_cal = frozen.get('calibration')
             from core.provenance import code_version as _cv
             meta = run_meta.build_meta(
                 cfg, channel=ch,
                 qc=self._qc_state(),
-                calibration=frozen.get('calibration') or self._calibration_state(),
+                # 채널별 동결값 우선. 옛 런(전역 dict 하나)도 읽히게 dict-of-channel 이
+                # 아니면 그대로 쓴다 — 없으면 지금 cfg 로 만든다.
+                calibration=(_frozen_cal.get(ch) if isinstance(_frozen_cal, dict)
+                             and ch in _frozen_cal else
+                             (_frozen_cal or self._calibration_state(cfg))),
                 data_days=data_days, rows=rows,
                 campaign=campaign if campaign is not None else self._campaign(),
                 scenario=getattr(self, '_scenario_name', None),
