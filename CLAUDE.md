@@ -59,6 +59,22 @@
 - 남은 감사 항목은 `docs/HANDOFF.md`의 "출발점" 절 4·6·7·8번
   (수치 바닥값 산재 / `estimate_shift` 실패=0 / `_is_alpha_input` 오판 / T/P 명목값 → 오차예산).
 
+## 함정 (밟고 나서 적은 것들)
+
+- **`DataIO.clock_epoch_offset_sec(path)` 를 `ncols` 없이 부르면 파일을 통째로
+  로드한다** (`core/data_io.py:1127`). 시각만 필요해서 가볍게 파싱하는 코드가
+  여기서 통째로 무의미해진다(실측: raw 1파일 1.7초 → 10분 초과). 앞 10줄의 탭
+  개수로 폭을 세서 `ncols=` 로 넘겨라 — 그쪽 판정식과 같은 계산이다.
+  예: `tools/extract_cal_knots.py`.
+- **knot 커버리지를 잴 때 knot 출처가 알파 구간을 덮는지 먼저 확인하라.** 7일치
+  진단 캐시로 전 캠페인 알파를 재면 "I₀ 범위밖 88 %" 가 나오는데 커버리지가
+  아니라 입력 불일치다. `tools/alpha_context_sidecar.py` 가 이제 경고한다.
+- **시각축 `day` 는 0-based** 다(`day = sec/86400`, `sec = (doy−1)·86400`).
+  `day 137.11 = 2026-05-18 02:38` 이지 05-17 이 아니다. 하루 밀려 읽기 쉽다.
+- **`DoasFitter.gas_active_in_window` 는 `ref_properties` 에 없는 기체도 True 를
+  돌려준다**(`active_bands_nm` 이 비면 활성). 엔진에 등록만 해두면 그 기체는
+  핏에 들어간다 — "이 기체는 빼고 핏" 을 하려면 **엔진에 등록하지 말아야** 한다.
+
 ## 회귀 검증 (코드 수정 후 반드시)
 
 ```
