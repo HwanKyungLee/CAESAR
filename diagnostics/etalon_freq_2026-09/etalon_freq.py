@@ -95,7 +95,15 @@ class Channel:
         return float(self.fitter.detect_etalon_frequency(
             self.vp, a * alpha_fit_scale(a), int(self.cfg["poly_deg"]), FREQ_MIN, FREQ_MAX))
 
-    def fit(self, alpha, T_C, P_mbar, e_f, start):
+    def fit(self, alpha, T_C, P_mbar, e_f, start, want_diag=False):
+        """want_diag=True 면 잔차 RMS·보고 σ 를 같이 낸다.
+
+        `return_diagnostics=True` 는 반환 튜플 `o` 를 **바꾸지 않는다** — 진단은
+        핏이 끝난 뒤 따로 계산된다. 그래서 농도·shift 는 바이트 동일하고,
+        기존 호출부(want_diag 기본 False)는 한 글자도 영향받지 않는다.
+        `_perr` 는 반환 튜플의 `c_perr`(조건부 선형 오차, 운영 `<gas>_Error` 와
+        같은 양)를 ppb 로 환산한 것이다.
+        """
         c = self.cfg
         a = np.asarray(alpha, float)[self.sl]
         s = alpha_fit_scale(a)
@@ -113,7 +121,11 @@ class Channel:
         o = self.fitter.execute_varpro_fit(
             self.vp, a * s, np.ones(self.n), act, fx, lk, t0, lb, ub,
             int(c["poly_deg"]), float(e_f), self.vp[self.n // 2], 1.0,
-            c["ref_props"], T_C, 0.0, False, allow_negative_gas=True)
+            c["ref_props"], T_C, 0.0, False, allow_negative_gas=True,
+            return_diagnostics=want_diag)
+        diag = None
+        if want_diag:
+            o, diag = o
         gco = np.asarray(o[2], float) / s
         na = air_number_density(T_C, P_mbar)
         out = {g: float(gco[i] * self.eng.multipliers.get(g, 1.0)
@@ -122,6 +134,16 @@ class Channel:
         out["_shift"] = float(o[0][self.eng.gas_list.index(self.target)])
         out["_squeeze"] = float(o[1][self.eng.gas_list.index(self.target)])
         out["_e_f"] = float(e_f)
+        if diag is not None:
+            # 잔차는 스케일된 α 위에서 최소화됐다 — s 로 나눠 물리 단위로 되돌린다
+            obj = float(diag.get("objective_final", np.nan))
+            out["_resid_rms"] = (float(np.sqrt(max(obj, 0.0) / self.n)) / s
+                                 if np.isfinite(obj) else np.nan)
+            pe = np.asarray(o[6], float) / s
+            out["_perr"] = {g: float(pe[i] * self.eng.multipliers.get(g, 1.0)
+                                     / self.eng.scaling_factors.get(g, 1.0) / na * 1e9)
+                            for i, g in enumerate(self.eng.gas_list)}
+            out["_status"] = str((diag.get("solver_termination") or {}).get("status", ""))
         # shift 가 상자 끝에 붙었나. 붙은 핏의 농도차를 "섭동 효과"로 읽으면 안 된다
         # (그건 step_limit 이 만든 값이다) — T7 이 다루는 바로 그 상태.
         sh_key = f"{self.target}_sh"

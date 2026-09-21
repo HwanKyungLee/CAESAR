@@ -74,6 +74,9 @@ cache/
 # 빈/knot 단위 산출 CSV(4 MB). 표는 docs/Augur_오차예산_생산런_2026-09-21.md 에
 # 있고 생성 명령이 문서에 박혀 있다 — 워커 수와 무관하게 바이트 동일하게 재생성된다.
 /diagnostics/i0_interp_2026-09/*.csv
+# 시계 정렬 R npz(13 MB×2). `tools/rt_clockfix.py` 가 운영 npz 에서 몇 초에
+# 재생성한다 — 라벨만 옮긴 파생물이라 원본이 단일 출처다.
+/diagnostics/i0_interp_2026-09/R_CH*_clockfixed.npz
 /diagnostics/yeosu_acceptance_2026-09/**
 /diagnostics/yeosu_profile_2026-09/**
 /diagnostics/yeosu_reprovenanced_alpha_2026-09/**

@@ -193,11 +193,30 @@ def collect(files, channel, purge_settle_sec=60.0, avg_sec=60.0, parallel=True):
         amb_bins.extend(_avg_ambient_plain(entries, avg_sec))
 
     if parallel and len(files) > 1:
+        import collections
         import concurrent.futures as cf
-        with cf.ProcessPoolExecutor(max_workers=max_workers()) as ex:
-            for out in ex.map(_extract_task, [(fp, channel) for fp in files]):
+        # `ex.map` 은 **전 과제를 즉시 제출**한다. 결과가 소비보다 빨리 쌓이면
+        # 한 파일 30 MB × 파일수가 통째로 메모리에 앉는다(157파일 4.7 GB 는
+        # 버티고 203파일에서 워커가 죽었다 — 그때 핏 20워커가 9 GB 를 쓰고
+        # 있었다). 그래서 **in-flight 를 2·워커수로 묶는다.**
+        # FIFO 로 꺼내므로 입력 순서가 보존된다 = gidx 배정 무회귀.
+        nw = max_workers()
+        tasks = iter((fp, channel) for fp in files)
+        with cf.ProcessPoolExecutor(max_workers=nw) as ex:
+            futs = collections.deque()
+            for _ in range(2 * nw):
+                try:
+                    futs.append(ex.submit(_extract_task, next(tasks)))
+                except StopIteration:
+                    break
+            while futs:
+                out = futs.popleft().result()
                 _consume(*out)
                 del out
+                try:
+                    futs.append(ex.submit(_extract_task, next(tasks)))
+                except StopIteration:
+                    pass
     else:
         for fp in files:
             _consume(*extract_raw_file_for_parallel((fp, 0, CH_PIXELS, channel)))
@@ -323,9 +342,9 @@ class ScanFitter:
         sh, sq, ef_auto, _conc = self.ch.seed(alpha, T_C, P_mbar)
         return sh, sq, ef_auto
 
-    def fit(self, alpha, T_C, P_mbar, start, e_f=None):
+    def fit(self, alpha, T_C, P_mbar, start, e_f=None, want_diag=False):
         r = self.ch.fit(alpha, T_C, P_mbar,
-                        self.e_f if e_f is None else e_f, start)
+                        self.e_f if e_f is None else e_f, start, want_diag=want_diag)
         return r
 
 
