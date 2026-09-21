@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QSettings
 
-from .core import _MODES, _shade
+from .core import _MODES, _shade, mathtext_to_html, has_markup
 from .data import Dataset, load_dataset
 from . import modes as _modes_registration  # noqa: F401 — import 자체가 @register_mode 실행(등록) 트리거
 
@@ -276,7 +276,9 @@ class PlotMakerWidget(QWidget):
         self._btn_cursor = QPushButton("Cursor"); self._btn_cursor.setCheckable(True)
         self._btn_cursor.setToolTip("데이터 커서(크로스헤어): 마우스 위치 x·y 표시")
         self._btn_cursor.toggled.connect(self._toggle_cursor)
-        b_annot = QPushButton("Annotate"); b_annot.setToolTip("마커선: 이벤트 세로선·LOD/임계 가로선")
+        b_annot = QPushButton("Annotate")
+        b_annot.setToolTip("주석 레이어: 세로/가로선 · 구간 음영 · 텍스트 · 화살표 · 사각형\n"
+                           "그래프를 클릭해 위치를 찍는다(2점짜리는 두 번). 라벨은 mathtext 문법.")
         b_annot.clicked.connect(self._edit_annotations)
         crow.addWidget(self._btn_colors); crow.addWidget(self._btn_cursor); crow.addWidget(b_annot)
         sv.addLayout(crow)
@@ -424,6 +426,11 @@ class PlotMakerWidget(QWidget):
         fll.addRow("Size", self._legend_size)
         gv.addWidget(gbl)
         gb = QGroupBox("Labels (override, blank=auto)")
+        gb.setToolTip("수식 표기는 mathtext 문법 — 화면·Publish 양쪽에 똑같이 나옵니다.\n"
+                      "  NO$_2$        → NO₂\n"
+                      "  $\\mu$g m$^{-3}$ → μg m⁻³\n"
+                      "  $\\times$10$^{-9}$ → ×10⁻⁹\n"
+                      "범례 이름(시리즈 ✎ Rename)과 주석 라벨에도 같은 문법을 씁니다.")
         fl = QFormLayout(gb)
         self._label_style_widgets = {}
         self._ed_title = QLineEdit(); self._ed_x = QLineEdit()
@@ -533,6 +540,10 @@ class PlotMakerWidget(QWidget):
         self.p1.getAxis("right").linkToView(self.vb_right)
         self.vb_right.setXLink(self.p1)
         self.p1.vb.sigResized.connect(self.update_views)
+        # 줌/팬/창크기 변경 → 화살촉 각도 재계산(각도는 픽셀 기준이라 범위에 딸림)
+        self.p1.vb.sigRangeChanged.connect(lambda *_: self._update_annot_arrows())
+        self.p1.vb.sigResized.connect(lambda *_: self._update_annot_arrows())
+        self._annot_arrows = []
         # 데이터 커서(크로스헤어) — ⌖ Cursor 토글로 켜짐
         self._time_axis = False
         self._cursor_on = False
@@ -606,19 +617,146 @@ class PlotMakerWidget(QWidget):
                 _ln.setVisible(self._cursor_on)
         self._draw_annotations_pg()
 
+    # ── 주석 레이어 (M3) ────────────────────────────────────────────────
+    # kind → (표시명, 필요한 클릭 수, 값 입력으로도 만들 수 있나)
+    # 좌표는 전부 **데이터 좌표**다. 축 비율 좌표("그림 왼쪽 위에 (a)")는 일부러
+    # 안 넣었다 — pg는 줌하면 어긋나고(화면≠출력), 그 용도는 M2 Composer의 패널
+    # 자동 라벨이 더 싸게 해결한다.
+    _ANNOT_KINDS = {
+        "vline": ("세로선 (x)", 1, True),
+        "hline": ("가로선 (y)", 1, True),
+        "vspan": ("세로 구간 음영 (x1~x2)", 2, True),
+        "hspan": ("가로 구간 음영 (y1~y2)", 2, True),
+        "text":  ("텍스트", 1, False),
+        "arrow": ("화살표 (점 → 라벨)", 2, False),
+        "rect":  ("사각형", 2, False),
+    }
+
+    @staticmethod
+    def _annot_norm(a):
+        """옛 레코드({"kind","val",…})를 현재 스키마(x1,y1,x2,y2)로 올린다.
+        예전 설정/세션이 그대로 살아야 하므로 읽는 쪽에서 흡수한다."""
+        if "val" in a and "x1" not in a and "y1" not in a:
+            a = dict(a)
+            v = a.pop("val")
+            a["y1" if a.get("kind") == "hline" else "x1"] = v
+        return a
+
+    @staticmethod
+    def _annot_from_points(kind, pts, label, color):
+        """클릭 좌표 [(x,y), …] → 주석 레코드. 종류마다 쓰는 좌표가 다르다:
+        세로선은 x만, 가로선은 y만, 구간은 그 축의 두 값, 화살표는
+        (첫 클릭=가리킬 점, 둘째=라벨 자리), 사각형은 두 모서리."""
+        rec = {"kind": kind, "label": label, "color": color}
+        (x1, y1) = pts[0]
+        (x2, y2) = pts[1] if len(pts) > 1 else (None, None)
+        if kind == "vline":
+            rec["x1"] = x1
+        elif kind == "hline":
+            rec["y1"] = y1
+        elif kind == "vspan":
+            rec["x1"], rec["x2"] = x1, x2
+        elif kind == "hspan":
+            rec["y1"], rec["y2"] = y1, y2
+        else:                                   # text / arrow / rect
+            rec["x1"], rec["y1"] = x1, y1
+            if x2 is not None:
+                rec["x2"], rec["y2"] = x2, y2
+        return rec
+
+    def _update_annot_arrows(self):
+        """화살촉 각도를 **현재 축 범위 기준으로** 다시 계산한다.
+
+        각도는 화면(씬) 좌표로 재야 한다 — x가 epoch초, y가 ppb처럼 단위 스케일이
+        딴판이라 데이터 좌표로 잰 각도는 화면에서 엉뚱한 방향을 가리킨다.
+        그런데 주석은 `clear_plot()` 시점, 즉 **데이터를 그리기 전·autoscale 전**에
+        만들어져서 그때 매핑을 쓰면 *직전 렌더의 범위*로 계산된 각도가 박힌다
+        (헤드리스 실측: 위로 향해야 할 화살표가 179.9° = 거의 수평으로 나왔다).
+        그래서 생성 때는 각도를 비워두고, 범위가 확정된 뒤(autoscale 끝·줌/팬 때)
+        여기서 채운다."""
+        import math
+        vb = self.p1.vb
+        for ar, (x1, y1), (x2, y2) in getattr(self, "_annot_arrows", []):
+            try:
+                pt = vb.mapViewToScene(pg.Point(x1, y1))
+                pf = vb.mapViewToScene(pg.Point(x2, y2))
+                ar.setStyle(angle=math.degrees(math.atan2(pf.y() - pt.y(),
+                                                          pf.x() - pt.x())))
+            except Exception:
+                pass          # 부가 표시가 본 플롯을 막지 않는다
+
+    def _annot_line_with_label(self, at, angle, col, lbl, visible=True):
+        """InfiniteLine + 라벨. 라벨 위치 계산을 pg에 맡기려고 구간 음영의 라벨도
+        '펜 없는(보이지 않는) 선'에 붙인다 — 주석은 clear_plot 시점(데이터 그리기
+        **전**)에 그려져서 뷰 범위를 모르기 때문에 직접 계산할 수가 없다."""
+        pen = (pg.mkPen(col, width=1, style=Qt.PenStyle.DashLine) if visible
+               else pg.mkPen(None))
+        ln = pg.InfiniteLine(at, angle=angle, movable=False, pen=pen, label=lbl,
+                             labelOpts={"position": 0.92 if angle == 90 else 0.08,
+                                        "color": col, "fill": (255, 255, 255, 160)})
+        ln.setZValue(150)
+        self.p1.addItem(ln, ignoreBounds=True)
+
     def _draw_annotations_pg(self):
-        """주석 마커선(세로=이벤트, 가로=LOD/임계)을 p1에 그림. clear_plot마다 재추가."""
-        for a in getattr(self, "_annots", []):
+        """주석 레이어(선·구간·텍스트·화살표·사각형)를 p1에 그림. clear_plot마다 재추가.
+        mpl 쪽(_apply_axes_mpl)에 **같은 분기**가 있다 — 한쪽만 고치면 화면과
+        Publish가 갈라진다(2026-07-06에 실제로 겪은 버그류)."""
+        from PyQt6.QtWidgets import QGraphicsRectItem
+        from PyQt6.QtCore import QRectF
+        self._annot_arrows = []      # (ArrowItem, 가리킬 점, 꼬리 점) — 각도 재계산용
+        for a in [self._annot_norm(x) for x in getattr(self, "_annots", [])]:
+            kind = a.get("kind")
             col = a.get("color") or "#555"
-            vert = a["kind"] == "vline"
-            ln = pg.InfiniteLine(
-                a["val"], angle=90 if vert else 0, movable=False,
-                pen=pg.mkPen(col, width=1, style=Qt.PenStyle.DashLine),
-                label=a.get("label") or "",
-                labelOpts={"position": 0.92 if vert else 0.08, "color": col,
-                           "fill": (255, 255, 255, 160)})
-            ln.setZValue(150)
-            self.p1.addItem(ln, ignoreBounds=True)
+            lbl = mathtext_to_html(a.get("label") or "")
+            x1, y1, x2, y2 = a.get("x1"), a.get("y1"), a.get("x2"), a.get("y2")
+            fill = pg.mkColor(col); fill.setAlpha(45)
+
+            if kind == "vline" and x1 is not None:
+                self._annot_line_with_label(x1, 90, col, lbl)
+            elif kind == "hline" and y1 is not None:
+                self._annot_line_with_label(y1, 0, col, lbl)
+            elif kind == "vspan" and None not in (x1, x2):
+                reg = pg.LinearRegionItem([x1, x2], orientation="vertical", movable=False,
+                                          brush=pg.mkBrush(fill), pen=pg.mkPen(None))
+                reg.setZValue(-90)
+                self.p1.addItem(reg, ignoreBounds=True)
+                if lbl:
+                    self._annot_line_with_label(x1, 90, col, lbl, visible=False)
+            elif kind == "hspan" and None not in (y1, y2):
+                reg = pg.LinearRegionItem([y1, y2], orientation="horizontal", movable=False,
+                                          brush=pg.mkBrush(fill), pen=pg.mkPen(None))
+                reg.setZValue(-90)
+                self.p1.addItem(reg, ignoreBounds=True)
+                if lbl:
+                    self._annot_line_with_label(y1, 0, col, lbl, visible=False)
+            elif kind == "text" and None not in (x1, y1):
+                ti = pg.TextItem(html=f'<span style="color:{col};">{lbl}</span>', anchor=(0, 1))
+                ti.setPos(x1, y1); ti.setZValue(160)
+                self.p1.addItem(ti, ignoreBounds=True)
+            elif kind == "arrow" and None not in (x1, y1, x2, y2):
+                self.p1.addItem(pg.PlotDataItem([x2, x1], [y2, y1],
+                                                pen=pg.mkPen(col, width=1)), ignoreBounds=True)
+                ar = pg.ArrowItem(pos=(x1, y1), headLen=12,
+                                  pen=pg.mkPen(col), brush=pg.mkBrush(col))
+                ar.setZValue(160)
+                self.p1.addItem(ar, ignoreBounds=True)
+                # 각도는 여기서 정하지 않는다 — 아래 _update_annot_arrows() 참고.
+                self._annot_arrows.append((ar, (x1, y1), (x2, y2)))
+                if lbl:
+                    ti = pg.TextItem(html=f'<span style="color:{col};">{lbl}</span>',
+                                     anchor=(0.5, 1))
+                    ti.setPos(x2, y2); ti.setZValue(160)
+                    self.p1.addItem(ti, ignoreBounds=True)
+            elif kind == "rect" and None not in (x1, y1, x2, y2):
+                r = QGraphicsRectItem(QRectF(min(x1, x2), min(y1, y2),
+                                             abs(x2 - x1), abs(y2 - y1)))
+                r.setPen(pg.mkPen(col, width=1)); r.setBrush(pg.mkBrush(fill))
+                r.setZValue(-80)
+                self.p1.addItem(r, ignoreBounds=True)
+                if lbl:
+                    ti = pg.TextItem(html=f'<span style="color:{col};">{lbl}</span>', anchor=(0, 1))
+                    ti.setPos(min(x1, x2), max(y1, y2)); ti.setZValue(160)
+                    self.p1.addItem(ti, ignoreBounds=True)
 
     def _parse_annot_x(self, text):
         """주석 세로선 값 파싱: 시간축이면 날짜시각→epoch, 아니면 숫자. 실패 None."""
@@ -648,33 +786,47 @@ class PlotMakerWidget(QWidget):
                                      QComboBox, QLineEdit, QPushButton, QLabel,
                                      QColorDialog)
         from PyQt6.QtGui import QColor
+        import datetime as _dt
         dlg = QDialog(self)
         dlg.setModal(False)
-        dlg.setWindowTitle("Annotations (marker lines)")
-        dlg.resize(460, 340)
+        dlg.setWindowTitle("Annotations — 선·구간·텍스트·화살표")
+        dlg.resize(520, 380)
         v = QVBoxLayout(dlg)
         lst = QListWidget()
 
+        def _fmt(val, is_x):
+            if val is None:
+                return None
+            if is_x and self._time_axis:
+                try:
+                    return _dt.datetime.fromtimestamp(val).strftime("%m-%d %H:%M")
+                except Exception:
+                    pass
+            return f"{val:.6g}"
+
         def refresh():
             lst.clear()
-            for a in self._annots:
-                tag = "x=" if a["kind"] == "vline" else "─ y="
-                if a["kind"] == "vline" and self._time_axis:
-                    import datetime as _dt
-                    try:
-                        vs = _dt.datetime.fromtimestamp(a["val"]).strftime("%m-%d %H:%M")
-                    except Exception:
-                        vs = f"{a['val']:.6g}"
-                else:
-                    vs = f"{a['val']:.6g}"
-                lst.addItem(f"{tag}{vs}   {a.get('label', '')}")
+            for a0 in self._annots:
+                a = self._annot_norm(a0)
+                nm = self._ANNOT_KINDS.get(a.get("kind"), (a.get("kind"), 1, False))[0]
+                bits = [f"{k}={_fmt(a.get(k), k.startswith('x'))}"
+                        for k in ("x1", "y1", "x2", "y2") if a.get(k) is not None]
+                lst.addItem(f"{nm}  {' '.join(bits)}   {a.get('label', '')}")
         refresh()
         self._annot_dlg_refresh = refresh   # _on_plot_clicked가 클릭 추가 후 여기 갱신
-        v.addWidget(QLabel("현재 마커선 (선택 후 Remove)"))
+        v.addWidget(QLabel("현재 주석 (선택 후 Remove) · 라벨은 mathtext 문법 사용 가능"))
         v.addWidget(lst, 1)
 
         row = QHBoxLayout()
-        cb = QComboBox(); cb.addItems(["Vertical (x)", "Horizontal (y)"])
+        _kinds = list(self._ANNOT_KINDS.keys())
+        cb = QComboBox()
+        for _k in _kinds:
+            cb.addItem(self._ANNOT_KINDS[_k][0])
+        cb.setToolTip("텍스트·화살표·사각형은 좌표가 2개 이상 필요해 **그래프 클릭**으로만 만듭니다.\n"
+                      "화살표: 첫 클릭=가리킬 점, 둘째 클릭=라벨 자리.")
+
+        def cur_kind():
+            return _kinds[max(0, cb.currentIndex())]
         ed_lab = QLineEdit(); ed_lab.setPlaceholderText("라벨(선택)")
         cstate = {"c": "#d32f2f"}
         b_col = QPushButton("Col"); b_col.setFixedWidth(34)
@@ -687,40 +839,51 @@ class PlotMakerWidget(QWidget):
                 b_col.setStyleSheet(f"background:{c.name()};color:white;")
         b_col.clicked.connect(pick_col)
         b_pick = QPushButton("그래프에서 클릭해 찍기")
-        b_pick.setToolTip("누르고 그래프의 원하는 위치를 클릭하면 그 자리에 마커가 생김.\n"
-                          "우클릭하면 취소.")
+        b_pick.setToolTip("누르고 그래프의 원하는 위치를 클릭하면 그 자리에 주석이 생김.\n"
+                          "2점이 필요한 종류는 두 번 클릭. 우클릭하면 취소.")
 
         def start_pick():
-            kind = "vline" if cb.currentIndex() == 0 else "hline"
+            kind = cur_kind()
+            nm, need, _ = self._ANNOT_KINDS[kind]
             self._annot_pick = {"kind": kind, "label": ed_lab.text().strip(),
-                                "color": cstate["c"]}
-            axis = "세로선(x)" if kind == "vline" else "가로선(y)"
-            self.set_status(f"그래프를 클릭하면 {axis} 마커 추가 — 우클릭=취소")
+                                "color": cstate["c"], "pts": []}
+            self.set_status(f"그래프를 {need}번 클릭하면 '{nm}' 추가 — 우클릭=취소")
         b_pick.clicked.connect(start_pick)
         row.addWidget(cb); row.addWidget(ed_lab, 1); row.addWidget(b_col); row.addWidget(b_pick)
         v.addLayout(row)
 
         row1b = QHBoxLayout()
-        ed_val = QLineEdit(); ed_val.setPlaceholderText("직접 값 입력(선택) — 숫자, 시간축 세로선은 'MM-DD HH:MM'")
-        b_add = QPushButton("+ Add (typed value)")
+        ed_val = QLineEdit(); ed_val.setPlaceholderText("값1 — 숫자, 시간축 x는 'MM-DD HH:MM'")
+        ed_val2 = QLineEdit(); ed_val2.setPlaceholderText("값2 (구간일 때)")
+        b_add = QPushButton("+ Add (typed)")
 
         def add():
-            kind = "vline" if cb.currentIndex() == 0 else "hline"
-            if kind == "vline":
-                val = self._parse_annot_x(ed_val.text())
-            else:
-                try:
-                    val = float(ed_val.text().strip())
-                except ValueError:
-                    val = None
-            if val is None:
-                self.set_status("주석 값 파싱 실패 — 숫자(시간축 세로선은 날짜시각) 또는 위의  클릭 찍기 사용.")
+            kind = cur_kind()
+            nm, need, typed_ok = self._ANNOT_KINDS[kind]
+            if not typed_ok:
+                self.set_status(f"'{nm}'는 좌표가 x·y 둘 다 필요해 그래프 클릭으로만 추가합니다.")
                 return
-            self._annots.append({"kind": kind, "val": val,
-                                 "label": ed_lab.text().strip(), "color": cstate["c"]})
-            ed_val.clear(); refresh(); self._mode.render()
+            is_x = kind in ("vline", "vspan")
+
+            def _num(t):
+                try:
+                    return float((t or "").strip())
+                except ValueError:
+                    return None
+            p1 = self._parse_annot_x(ed_val.text()) if is_x else _num(ed_val.text())
+            p2 = ((self._parse_annot_x(ed_val2.text()) if is_x else _num(ed_val2.text()))
+                  if need == 2 else None)
+            if p1 is None or (need == 2 and p2 is None):
+                self.set_status("주석 값 파싱 실패 — 숫자(시간축 x는 날짜시각) 또는 위의 클릭 찍기 사용.")
+                return
+            rec = {"kind": kind, "label": ed_lab.text().strip(), "color": cstate["c"]}
+            rec["x1" if is_x else "y1"] = p1
+            if need == 2:
+                rec["x2" if is_x else "y2"] = p2
+            self._annots.append(rec)
+            ed_val.clear(); ed_val2.clear(); refresh(); self._mode.render()
         b_add.clicked.connect(add)
-        row1b.addWidget(ed_val, 1); row1b.addWidget(b_add)
+        row1b.addWidget(ed_val, 1); row1b.addWidget(ed_val2, 1); row1b.addWidget(b_add)
         v.addLayout(row1b)
 
         row2 = QHBoxLayout()
@@ -950,21 +1113,18 @@ class PlotMakerWidget(QWidget):
             return
         mp = self.p1.vb.mapSceneToView(ev.scenePos())
         kind = self._annot_pick["kind"]
-        val = float(mp.x() if kind == "vline" else mp.y())
-        self._annots.append({"kind": kind, "val": val,
-                             "label": self._annot_pick.get("label", ""),
-                             "color": self._annot_pick.get("color", "#d32f2f")})
+        nm, need, _ = self._ANNOT_KINDS.get(kind, ("주석", 1, True))
+        pts = self._annot_pick.setdefault("pts", [])
+        pts.append((float(mp.x()), float(mp.y())))
+        if len(pts) < need:      # 2점짜리는 한 번 더 받는다
+            self.set_status(f"'{nm}' — {need - len(pts)}점 더 클릭 (우클릭=취소)")
+            return
+        self._annots.append(self._annot_from_points(
+            kind, pts, self._annot_pick.get("label", ""),
+            self._annot_pick.get("color", "#d32f2f")))
         self._annot_pick = None
         self._mode.render()
-        if self._time_axis and kind == "vline":
-            import datetime as _dt
-            try:
-                vs = _dt.datetime.fromtimestamp(val).strftime("%m-%d %H:%M")
-            except Exception:
-                vs = f"{val:.6g}"
-        else:
-            vs = f"{val:.6g}"
-        self.set_status(f"마커 추가됨: {vs}")
+        self.set_status(f"주석 추가됨: {nm}")
         refresh = getattr(self, "_annot_dlg_refresh", None)
         if refresh:
             try:
@@ -982,6 +1142,7 @@ class PlotMakerWidget(QWidget):
         vb.autoRange()
         self.update_views()
         self.apply_axes()
+        self._update_annot_arrows()   # 범위가 정해진 뒤에야 화살촉 각도가 맞는다
 
     # ── 라벨(제목/축) 그리기 — pg(화면)·mpl(Publish) 공용 진입점 ─────────────
     # 모드들은 p1.setLabel/setTitle·ax.set_ylabel 등을 직접 부르지 않고 이 두
@@ -1016,15 +1177,18 @@ class PlotMakerWidget(QWidget):
                 pass
         size = st.get("size") or (self._lbl_size.value() or 10)
         color = st.get("color")
+        # 입력은 mathtext 문법(예 NO$_2$) — pg는 HTML만 알아들으므로 여기서 변환.
+        # mpl 쪽(mpl_label)은 원문 그대로 넘긴다. 이게 M5의 전부다.
+        html = mathtext_to_html(text)
         if st.get("pos") is None:
             if key == "title":
-                self.p1.setTitle(text, size=f"{size}pt", **({"color": color} if color else {}))
+                self.p1.setTitle(html, size=f"{size}pt", **({"color": color} if color else {}))
             else:
                 ax = self.p1.getAxis(self._AXIS_OF_KEY[key])
                 style = {"font-size": f"{size}pt"}
                 if color:
                     style["color"] = color
-                ax.setLabel(text, **style)
+                ax.setLabel(html, **style)
             return
         # 자유배치: 원래 자리는 비우고 드래그 가능한 텍스트로 대체
         if key == "title":
@@ -1040,6 +1204,9 @@ class PlotMakerWidget(QWidget):
                                anchor=(0.5, 0.5), angle=angle)
         from PyQt6.QtGui import QFont
         font = QFont(); font.setPointSize(int(size)); item.setFont(font)
+        if has_markup(text):   # TextItem(text=)는 평문 경로 — 마크업이 있을 때만 HTML로
+            item.setHtml('<span style="color:%s; font-size:%dpt;">%s</span>'
+                         % (color or "#000000", int(size), html))
         fx, fy = st["pos"]
         sx, sy = self._label_scene_pos(key, fx, fy)
         item.setPos(sx, sy)
@@ -1484,27 +1651,65 @@ class PlotMakerWidget(QWidget):
             for a in axes:
                 a.autoscale_view()          # 사용자가 xlim/ylim 지정했으면 그대로 유지됨
             saved_lims = [(a, a.get_xlim(), a.get_ylim()) for a in axes]
-        for an in getattr(self, "_annots", []):
+        from matplotlib.patches import Rectangle as _Rect
+        _bbox = dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1)
+
+        def _xconv(v):
+            """x 데이터값 → mpl 축 값(시간축이면 datetime)."""
+            return _dt.datetime.fromtimestamp(v) if self._time_axis else v
+
+        for an in [self._annot_norm(x) for x in getattr(self, "_annots", [])]:
+            kind = an.get("kind")
             col = an.get("color") or "#555"
             lbl = an.get("label") or None
+            x1, y1, x2, y2 = an.get("x1"), an.get("y1"), an.get("x2"), an.get("y2")
             for ai, a in enumerate(axes):
                 show_label = (ai == 0) and lbl   # 라벨은 첫 패널에만(중복 방지)
-                if an["kind"] == "vline":
-                    xv = (_dt.datetime.fromtimestamp(an["val"]) if self._time_axis
-                          else an["val"])
-                    a.axvline(xv, color=col, ls="--", lw=1)
+                # 라벨은 axvline(label=)이 아니라 text()로 — 범례를 꺼도 보여야 한다
+                # (2026-07-06 실버그: label=만 줘서 범례 off면 증발).
+                if kind == "vline" and x1 is not None:
+                    a.axvline(_xconv(x1), color=col, ls="--", lw=1)
                     if show_label:
-                        ylo, yhi = a.get_ylim()
-                        a.text(xv, yhi, f" {lbl}", color=col, fontsize=8,
-                              va="top", ha="left", clip_on=True,   # 범위 밖 라벨은 선처럼 안 보이게
-                              bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
-                else:
-                    a.axhline(an["val"], color=col, ls="--", lw=1)
+                        a.text(_xconv(x1), a.get_ylim()[1], f" {lbl}", color=col, fontsize=8,
+                               va="top", ha="left", clip_on=True, bbox=_bbox)
+                elif kind == "hline" and y1 is not None:
+                    a.axhline(y1, color=col, ls="--", lw=1)
                     if show_label:
-                        xlo, xhi = a.get_xlim()
-                        a.text(xlo, an["val"], f"{lbl} ", color=col, fontsize=8,
-                              va="bottom", ha="left", clip_on=True,
-                              bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1))
+                        a.text(a.get_xlim()[0], y1, f"{lbl} ", color=col, fontsize=8,
+                               va="bottom", ha="left", clip_on=True, bbox=_bbox)
+                elif kind == "vspan" and None not in (x1, x2):
+                    a.axvspan(_xconv(x1), _xconv(x2), color=col, alpha=0.18, lw=0, zorder=0)
+                    if show_label:
+                        a.text(_xconv(x1), a.get_ylim()[1], f" {lbl}", color=col, fontsize=8,
+                               va="top", ha="left", clip_on=True, bbox=_bbox)
+                elif kind == "hspan" and None not in (y1, y2):
+                    a.axhspan(y1, y2, color=col, alpha=0.18, lw=0, zorder=0)
+                    if show_label:
+                        a.text(a.get_xlim()[0], y1, f"{lbl} ", color=col, fontsize=8,
+                               va="bottom", ha="left", clip_on=True, bbox=_bbox)
+                elif kind == "text" and None not in (x1, y1):
+                    if lbl and ai == 0:
+                        a.text(_xconv(x1), y1, lbl, color=col, fontsize=8,
+                               va="bottom", ha="left", clip_on=True, bbox=_bbox)
+                elif kind == "arrow" and None not in (x1, y1, x2, y2):
+                    if ai == 0:
+                        a.annotate(lbl or "", xy=(_xconv(x1), y1), xytext=(_xconv(x2), y2),
+                                   color=col, fontsize=8, ha="center", va="bottom",
+                                   annotation_clip=True,
+                                   arrowprops=dict(arrowstyle="->", color=col, lw=1))
+                elif kind == "rect" and None not in (x1, y1, x2, y2):
+                    # Rectangle은 폭이 숫자여야 한다 — 시간축이면 mpl 날짜수(일)로
+                    # 바꿔서 넣는다(datetime - datetime = timedelta라 그냥은 안 된다).
+                    import matplotlib.dates as _mdates
+                    conv = (lambda v: _mdates.date2num(_dt.datetime.fromtimestamp(v))
+                            ) if self._time_axis else (lambda v: v)
+                    xa, xb = conv(min(x1, x2)), conv(max(x1, x2))
+                    a.add_patch(_Rect((xa, min(y1, y2)),
+                                      (xb - xa), abs(y2 - y1),
+                                      facecolor=col, alpha=0.18, edgecolor=col, lw=1, zorder=0))
+                    if show_label:
+                        a.text(xa, max(y1, y2), f" {lbl}", color=col, fontsize=8,
+                               va="bottom", ha="left", clip_on=True, bbox=_bbox)
         if getattr(self, "_annots", []):
             for a, xl, yl in saved_lims:    # 주석이 늘려놓은 범위 원상복구(ignoreBounds 동치)
                 a.set_xlim(xl); a.set_ylim(yl)
@@ -2226,6 +2431,9 @@ class PlotMakerWidget(QWidget):
                      "ytickmarks_on": self._chk_ytickmarks.isChecked()},
             "fig_size": [self._fig_w.value(), self._fig_h.value()], "dpi": self._dpi_spin.value(),
             "mode_cfg": {m.key: m.to_config() for m in self._modes},
+            # 주석은 데이터 좌표에 묶인 '그 그림만의 것'이라 style 템플릿이 아니라
+            # 여기(plot config)에 저장한다. 전엔 아예 저장되지 않아 불러오면 사라졌다.
+            "annots": [self._annot_norm(a) for a in self._annots],
         }
         try:
             with open(out, "w", encoding="utf-8") as f:
@@ -2265,6 +2473,8 @@ class PlotMakerWidget(QWidget):
         self._res_combo.setCurrentText(cfg.get("resample", "Raw"))
         self._smooth_spin.setValue(int(cfg.get("smooth", 1)))
         self._shift_spin.setValue(float(cfg.get("time_shift_h", 0.0)))
+        if "annots" in cfg:     # 없는 옛 설정은 현재 주석을 건드리지 않는다
+            self._annots = [self._annot_norm(a) for a in (cfg.get("annots") or [])]
         lab = cfg.get("labels", {})
         self._ed_title.setText(lab.get("title", ""))
         self._ed_x.setText(lab.get("xlabel", ""))

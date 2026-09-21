@@ -51,6 +51,15 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     (2026-07-07 요청 — "원하는 날짜에서 며칠 간격")
 24. 눈금선 방향/길이 : 바깥(out)/안(in)·길이(px)가 pg(tickLength 부호)·
     mpl(direction/length)에 같은 규칙으로 적용 (2026-07-07 요청)
+25. 시리즈 kind 7종 : line/marker/step/bar/area/band/errorbar가 pg·mpl 양쪽에서
+    무사고 + step 좌표가 steps-post 정확 + 짝 없는 band 폴백 (M4, 2026-09-21)
+26. 라벨 마크업 : 입력은 mathtext 하나 — pg는 HTML로 변환, mpl은 원문 유지.
+    `$…$` 밖의 밑줄(R_mean)은 건드리지 않음 (M5, 2026-09-21)
+27. 주석 7종 : 선·구간음영·텍스트·화살표·사각형이 pg·mpl 양쪽에(범례 off여도)
+    + .pmcfg.json 저장/복원 + 옛 {"val":…} 레코드 호환 (M3, 2026-09-21)
+    · **화살촉 각도**: autoscale 후 재계산되나 + 줌하면 따라오나 (2026-09-21
+      실측 버그 — 생성 시점에 각도를 박으면 '직전 렌더의 축 범위'로 계산돼
+      위로 향할 화살표가 179.9°=거의 수평이 됐다)
 """
 from __future__ import annotations
 import os, sys
@@ -756,6 +765,198 @@ def c_tick_direction_length():
     if kw2.get("tickdir") != "out":
         return "FAIL", "mpl out 미반영"
     return "PASS", "in/8px: pg=-8·mpl in 8 — out/auto: pg=+5·mpl out. 규칙 일치"
+
+
+# ── 25. 시리즈 표현 타입(kind): 7종 × pg/mpl 무사고 + 계단 좌표 정확성 ────
+# M4(2026-09-21). line/marker 말고도 step·bar·area·band·errorbar를 고를 수 있게
+# 했다. 새 kind를 한쪽 렌더러에만 넣어 화면·Publish가 갈라지는 게 이 파일의
+# 단골 버그라 **두 경로를 같이** 돌린다.
+@check("시리즈 kind 7종: pg·mpl 양쪽 무사고 + step 좌표")
+def c_series_kinds():
+    from gui.ui_plot_maker.processing import step_xy, bar_width
+    from matplotlib.figure import Figure
+    # 계단 좌표는 라이브러리 옵션이 아니라 우리가 펴므로 값 자체를 검사한다
+    xs, ys = step_xy(np.array([0.0, 1.0, 2.0]), np.array([10.0, 20.0, 30.0]))
+    if list(xs) != [0, 1, 1, 2, 2] or list(ys) != [10, 10, 20, 20, 30]:
+        return "FAIL", f"step_xy 좌표가 steps-post가 아님: x={list(xs)} y={list(ys)}"
+    if bar_width(np.array([0.0, 60.0, 120.0])) != 48.0:      # 60 × 0.8
+        return "FAIL", f"bar_width 오산: {bar_width(np.array([0.0, 60.0, 120.0]))}"
+
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    # 2개 시리즈 — band는 '다음 시리즈'와의 사이를 채우므로 짝이 있어야 한다
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._series.append(["fixture:CHOCHO", "R", None, None])
+    ts._refresh_list()
+    ts._chk_err.setChecked(True)            # errorbar가 쓸 값 공급
+    bad = []
+    for kind in ts.KINDS:
+        ts._styles["fixture:NO2"] = {"kind": kind}
+        try:
+            ts.render()
+            fig = Figure(figsize=(6, 4))
+            ts.render_mpl(fig)
+            if not fig.axes or not (fig.axes[0].lines or fig.axes[0].patches
+                                    or fig.axes[0].collections or fig.axes[0].containers):
+                bad.append(f"{kind}(mpl 빈 축)")
+        except Exception as e:
+            bad.append(f"{kind}: {type(e).__name__} {e}")
+    if bad:
+        return "FAIL", " · ".join(bad)
+    # 마지막 시리즈에 band를 걸면 짝이 없다 → 죽지 말고 선으로 폴백해야 한다
+    ts._styles = {"fixture:CHOCHO": {"kind": "band"}}
+    try:
+        ts.render()
+        ts.render_mpl(Figure(figsize=(6, 4)))
+    except Exception as e:
+        return "FAIL", f"짝 없는 band에서 예외: {type(e).__name__} {e}"
+    # 옛 설정(kind 키 없음)도 그대로 살아야 한다
+    ts._styles = {"fixture:NO2": {"width": 3, "dash": "dash"}}
+    st = ts._style_of("fixture:NO2")
+    if st["kind"] != "line" or st["width"] != 3:
+        return "FAIL", f"구버전 스타일 기본값 채우기 실패: {st}"
+    return "PASS", f"{len(ts.KINDS)}종 × pg/mpl 무사고 · step 좌표 정확 · 짝없는 band 폴백 · 구설정 호환"
+
+
+# ── 26. 라벨 마크업(M5): mathtext 하나로 입력 → pg는 HTML, mpl은 원문 ────
+# 그 전에는 `NO$_2$`가 화면에 literal, `NO<sub>2</sub>`가 Publish에 literal이었다.
+@check("라벨 마크업: mathtext → pg HTML, mpl 원문 유지")
+def c_label_markup():
+    from gui.ui_plot_maker.core import mathtext_to_html
+    cases = {
+        "NO$_2$": "NO<sub>2</sub>",
+        "$\\mu$g m$^{-3}$": "μg m<sup>-3</sup>",
+        "$\\times$10$^{-9}$": "×10<sup>-9</sup>",
+        "R_mean": "R_mean",                 # $ 밖의 밑줄은 건드리지 않는다
+        "NO2_Error (ppb)": "NO2_Error (ppb)",
+        "a < b": "a &lt; b",                # HTML 특수문자 이스케이프
+        "$\\unknowncmd$": "\\unknowncmd",   # 모르는 토큰은 통과(조용히 지우지 않음)
+    }
+    bad = [f"{k!r}→{mathtext_to_html(k)!r}(기대 {v!r})"
+           for k, v in cases.items() if mathtext_to_html(k) != v]
+    if bad:
+        return "FAIL", " · ".join(bad)
+
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    w._ed_y.setText("NO$_2$ [ppb]")
+    w.custom["ylabel"] = "NO$_2$ [ppb]"
+    ts.render()
+    pg_lbl = w.p1.getAxis("left").labelText
+    if "<sub>2</sub>" not in pg_lbl:
+        return "FAIL", f"pg 축라벨이 HTML로 안 바뀜: {pg_lbl!r}"
+    fig = w._build_publish_fig()
+    mpl_lbl = fig.axes[0].get_ylabel()
+    if mpl_lbl != "NO$_2$ [ppb]":
+        return "FAIL", f"mpl 축라벨이 원문이 아님(mathtext가 깨짐): {mpl_lbl!r}"
+    return "PASS", f"7케이스 변환 정확 · pg={pg_lbl!r} · mpl 원문 유지"
+
+
+# ── 27. 주석 레이어(M3): 7종이 pg·mpl 양쪽에 그려지나 + 옛 레코드 호환 ────
+# 가드 17번(마커선)의 확장. 주석은 kind마다 pg/mpl 분기가 따로라 한쪽만 고치기
+# 쉽고, 그게 이 파일의 단골 버그였다.
+@check("주석 7종: pg·mpl 양쪽 + 설정 왕복 + 옛 레코드 호환")
+def c_annot_kinds():
+    import pyqtgraph as pg_
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()
+    t = w.shelf["fixture"].time
+    t0, t1 = float(t[100]), float(t[200])
+    w._annots = [
+        {"kind": "vline", "x1": t0, "label": "evt", "color": "#d32f2f"},
+        {"kind": "hline", "y1": 5.0, "label": "LOD", "color": "#7B1FA2"},
+        {"kind": "vspan", "x1": t0, "x2": t1, "label": "purge", "color": "#0097A7"},
+        {"kind": "hspan", "y1": 4.0, "y2": 6.0, "label": "band", "color": "#689F38"},
+        {"kind": "text", "x1": t0, "y1": 6.0, "label": "여기 주목", "color": "#333333"},
+        {"kind": "arrow", "x1": t0, "y1": 5.5, "x2": t1, "y2": 7.0,
+         "label": "spike", "color": "#E65100"},
+        {"kind": "rect", "x1": t0, "y1": 4.5, "x2": t1, "y2": 6.5,
+         "label": "ROI", "color": "#455A64"},
+    ]
+    try:
+        ts.render()
+    except Exception as e:
+        return "FAIL", f"pg 렌더 예외: {type(e).__name__} {e}"
+    n_region = sum(isinstance(it, pg_.LinearRegionItem) for it in w.p1.items)
+    n_text = sum(isinstance(it, pg_.TextItem) for it in w.p1.items)
+    n_arrow = sum(isinstance(it, pg_.ArrowItem) for it in w.p1.items)
+    if n_region != 2:
+        return "FAIL", f"pg 구간 음영 {n_region}개 (vspan+hspan=2 기대)"
+    if n_arrow != 1:
+        return "FAIL", f"pg 화살표 {n_arrow}개 (1 기대)"
+    if n_text < 3:          # text·arrow 라벨·rect 라벨
+        return "FAIL", f"pg 텍스트 {n_text}개 (3개 이상 기대)"
+
+    # 화살촉 각도: 실제 레이아웃이 있어야 의미가 있다(씬 좌표 기준).
+    # 2026-09-21 실측 버그 — 주석은 clear_plot()에서, 즉 데이터 그리기·autoscale
+    # **전**에 만들어져서 생성 시점에 각도를 박으면 '직전 렌더의 축 범위'로 계산된다
+    # (위로 향해야 할 화살표가 179.9° = 거의 수평이었다). autoscale 후 재계산이 정답.
+    w.show(); _APP.processEvents()
+    ts.render(); _APP.processEvents()
+    arrows = getattr(w, "_annot_arrows", [])
+    if len(arrows) != 1:
+        return "FAIL", f"화살표 추적 목록 {len(arrows)}개 (1 기대)"
+    ang = arrows[0][0].opts.get("angle")
+    # 목표(t0, 5.5)는 꼬리(t1, 7.0)보다 화면상 **왼쪽 아래** → 화살표는 좌하향.
+    # 각도 = atan2(꼬리−목표) 이므로 (dx>0, dy<0) → −90~0도.
+    if not (-90.0 < float(ang) < 0.0):
+        return "FAIL", f"화살촉 각도 {ang:.1f}° — 축 범위 확정 전 값이 박힌 듯(−90~0 기대)"
+    vb = w.p1.vb
+    (xa, xb) = vb.viewRange()[0]
+    vb.setXRange(xa, (xa + xb) / 2); _APP.processEvents()
+    if abs(float(arrows[0][0].opts.get("angle")) - float(ang)) < 1e-6:
+        return "FAIL", "줌해도 화살촉 각도가 안 따라옴(sigRangeChanged 연결 끊김)"
+    ts.render(); _APP.processEvents()
+
+    w._legend_combo.setCurrentText("off")   # 범례를 꺼도 주석은 보여야 한다(가드17 정신)
+    try:
+        fig = w._build_publish_fig()
+    except Exception as e:
+        w._legend_combo.setCurrentText("auto")
+        return "FAIL", f"mpl 렌더 예외: {type(e).__name__} {e}"
+    ax = fig.axes[0]
+    texts = {t_.get_text().strip() for a in fig.axes for t_ in a.texts}
+    missing = [s for s in ("evt", "LOD", "purge", "band", "여기 주목", "spike", "ROI")
+               if s not in texts]
+    if missing:
+        w._legend_combo.setCurrentText("auto")
+        return "FAIL", f"mpl 라벨 누락: {missing}"
+    if len(ax.patches) < 3:   # vspan·hspan·rect
+        w._legend_combo.setCurrentText("auto")
+        return "FAIL", f"mpl 패치 {len(ax.patches)}개 (3개 이상 기대)"
+    w._legend_combo.setCurrentText("auto")
+
+    # 옛 레코드({"val": …})도 그대로 살아야 한다
+    old = w._annot_norm({"kind": "hline", "val": 3.0})
+    if old.get("y1") != 3.0:
+        return "FAIL", f"옛 레코드 승격 실패: {old}"
+    # 설정 저장/불러오기 왕복 — 전에는 주석이 아예 저장되지 않아 사라졌다
+    import json as _json, tempfile, os as _os
+    fd, p = tempfile.mkstemp(suffix=".pmcfg.json"); _os.close(fd)
+    try:
+        from unittest.mock import patch as _patch
+        with _patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName",
+                    return_value=(p, "")):
+            w._save_cfg()
+        saved = _json.load(open(p, encoding="utf-8"))
+        if len(saved.get("annots", [])) != 7:
+            return "FAIL", f"설정에 주석 {len(saved.get('annots', []))}개 저장됨 (7 기대)"
+        w._annots = []
+        with _patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName",
+                    return_value=(p, "")):
+            w._load_cfg()
+        if len(w._annots) != 7:
+            return "FAIL", f"불러오기 후 주석 {len(w._annots)}개 (7 기대)"
+    finally:
+        try:
+            _os.remove(p)
+        except OSError:
+            pass
+    return "PASS", "7종 pg(구간2·화살표1·텍스트3+)·mpl(라벨7·패치3+) · 설정 왕복 · 옛 레코드 호환"
 
 
 def main():
