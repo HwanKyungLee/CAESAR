@@ -959,6 +959,43 @@ def c_annot_kinds():
     return "PASS", "7종 pg(구간2·화살표1·텍스트3+)·mpl(라벨7·패치3+) · 설정 왕복 · 옛 레코드 호환"
 
 
+# ── 28. Publish 폰트 처리: 저널이 받는 PDF · 편집 가능한 SVG ──────────────
+# mpl 기본값이 우리 용도와 정반대였다(2026-09-21):
+#   pdf/ps.fonttype=3(Type 3) → 임베딩돼도 투고 시스템이 거부하는 곳이 있다
+#   svg.fonttype='path'       → 글자가 패스로 박혀 Illustrator/Inkscape 편집 불가
+@check("Publish 폰트: PDF/PS Type 42 · SVG는 텍스트 유지")
+def c_publish_fonts():
+    import matplotlib, tempfile, os as _os
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()
+    fig = w._build_publish_fig()          # 여기서 _apply_mpl_rc가 돈다
+    rc = matplotlib.rcParams
+    bad = []
+    if rc["pdf.fonttype"] != 42:
+        bad.append(f"pdf.fonttype={rc['pdf.fonttype']} (42 기대 — Type 3는 투고 거부 사례)")
+    if rc["ps.fonttype"] != 42:
+        bad.append(f"ps.fonttype={rc['ps.fonttype']} (42 기대)")
+    if rc["svg.fonttype"] != "none":
+        bad.append(f"svg.fonttype={rc['svg.fonttype']!r} ('none' 기대)")
+    if bad:
+        return "FAIL", " · ".join(bad)
+    # 설정만 보지 말고 실제 파일로 — SVG에 <text>가 남아야 편집이 된다
+    fd, p = tempfile.mkstemp(suffix=".svg"); _os.close(fd)
+    try:
+        fig.savefig(p)
+        svg = open(p, encoding="utf-8").read()
+    finally:
+        try:
+            _os.remove(p)
+        except OSError:
+            pass
+    if "<text" not in svg:
+        return "FAIL", "SVG 글자가 패스로 박힘 — 벡터 편집 불가(svg.fonttype 되돌아갔나)"
+    return "PASS", "pdf/ps=Type42 · svg=none · 실제 SVG에 <text> 유지됨"
+
+
 def main():
     print("=" * 64)
     print(" Plot Maker 회귀 검증 (offscreen)")

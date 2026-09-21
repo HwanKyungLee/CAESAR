@@ -2162,8 +2162,24 @@ class PlotMakerWidget(QWidget):
 
     # ── Export / config ────────────────────────────────────────────────
     @staticmethod
-    def _apply_korean_font(matplotlib):
-        """한글 라벨이 로 깨지지 않게 한글 지원 폰트를 1회 설정(있으면)."""
+    def _apply_mpl_rc(matplotlib):
+        """Publish(matplotlib) 전역 설정 1회 — 한글 폰트 + **출판용 폰트 처리**.
+
+        폰트 타입 (2026-09-21 추가, 근거: Copernicus(ACP·AMT) 저자 규정
+        "vector graphics first, fonts must be embedded"):
+
+          · `pdf.fonttype`/`ps.fonttype` = **42**(TrueType). matplotlib 기본은
+            **3**(Type 3)인데, Type 3는 임베딩돼 있어도 **투고 시스템이 거부하는
+            곳이 있다**(IEEE·AAAI 보고 사례). 그림은 잘 보이는데 제출에서 막히는,
+            제일 늦게 발견되는 종류의 사고다. 파일이 조금 커지는 값은 치를 만하다.
+            ⚠ EPS 출력을 나중에 붙일 때: mpl에 Type 42 + EPS 조합 버그가 보고돼
+              있다(matplotlib#27328) — 그때 실제 파일로 확인할 것.
+          · `svg.fonttype` = **"none"**(글자를 글자로). 기본 `'path'`는 글자를
+            패스로 바꿔 박아서 **Illustrator/Inkscape에서 편집이 불가능**하다.
+            우리 설계는 "마지막 5%는 SVG로 넘겨 벡터 편집"이므로 기본이 정반대였다.
+            대가: SVG를 여는 쪽에 그 폰트가 없으면 다른 글꼴로 대체된다 →
+            **배포·열람용은 PDF**(폰트 임베딩됨), **편집용은 SVG**로 나눠 쓴다.
+        """
         if getattr(PlotMakerWidget, "_kfont_done", False):
             return
         PlotMakerWidget._kfont_done = True
@@ -2176,6 +2192,9 @@ class PlotMakerWidget(QWidget):
                     matplotlib.rcParams["font.family"] = cand
                     break
             matplotlib.rcParams["axes.unicode_minus"] = False   # 음수 기호 깨짐 방지
+            matplotlib.rcParams["pdf.fonttype"] = 42
+            matplotlib.rcParams["ps.fonttype"] = 42
+            matplotlib.rcParams["svg.fonttype"] = "none"
         except Exception:
             pass
 
@@ -2189,7 +2208,7 @@ class PlotMakerWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Publish", f"matplotlib 사용 불가: {e}")
             return None
-        self._apply_korean_font(matplotlib)
+        self._apply_mpl_rc(matplotlib)
         fig = Figure(figsize=(self._fig_w.value(), self._fig_h.value()))
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
         self._mode.render_mpl(fig)
