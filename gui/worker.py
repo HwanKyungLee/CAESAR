@@ -1795,6 +1795,11 @@ def _pass2_write_file(fp, rows, ctx):
         f.write(f"# channel={ctx['channel']}  label={ctx['channel_label'] or 'single'}\n")
         f.write(f"# RL_factor={ctx['rl_factor']}  d={ctx['cavity_len']} cm\n")
         f.write(f"# I0_mode={ctx['i0_mode']}  ZA_count={ctx['n_za']}\n")
+        # I0 블록 선두에서 잘라낸 과도구간 스캔 수. 0 이면 블록이 이미 정착해
+        # 있었다는 뜻(정상 주기). 값이 있으면 그 I0 는 wait-before 를 쓴 것이다.
+        f.write(f"# i0_settle_drop_ZA={ctx.get('n_za_drop', 0)}"
+                f"  i0_settle_drop_He={ctx.get('n_he_drop', 0)}"
+                f"  tol={SETTLE_TOL}\n")
         # flag=0 헤더행은 HK 28열이 전부 65535라 T/P가 없다. 버리지 않고 **다음
         # 실측행의 T/P를 차용**해 계산한다(운용자 결정 2026-09-15). 이 알파를
         # 나중에 읽는 사람이 그 사실을 모르면 안 되므로 파일 자체에 남긴다.
@@ -1836,6 +1841,50 @@ def _pass2_write_file(fp, rows, ctx):
             vals = '\t'.join(f"{v:.6e}" for v in alpha)
             f.write(f"{rid}\t{doy:.6f}\t{iso}\t{T:.2f}\t{P:.2f}\t{vals}\n")
     return out_path
+
+
+# ── I0 블록 선두 과도구간 판정 ──
+# 가스 전환 직후 캐비티가 채워지는 동안의 스캔이 블록 앞에 섞인다. 정상 주기엔
+# `502`/`512` wait-before 가 27초 먼저 돌아서 `500`/`510` 블록은 **첫 행부터 평평**
+# 하다 → 아래 규칙이 한 행도 안 버린다(운영 알파 무변경, tools/test_i0_settle_trim.py).
+#
+# 인젝션 실험처럼 wait-before 자체를 I0 로 쓰면 다르다. NO2 를 ZA 라인으로 흘려서
+# 계기가 인젝션 전체를 `500` 으로 적었고, 제로에어는 앞의 `502` 를 60초로 늘려
+# 찍었다 — 그 60초의 앞 13초가 과도구간이다. 2026-08-10-005 실측:
+# PNs 17190→14780(-14 %), ANs 17131→13520(-21 %), 이후 평평. 64행을 통째로
+# 평균하면 I0 가 PNs +1.5 % · ANs +2.9 % 높아지고 NO2 가 채널당 약 0.08 ppb
+# 낮게 나온다. 근거·수치는 docs/NO2_인젝션_실험_핸드오프_2026-08.md.
+SETTLE_TOL = 0.02        # 정착 산포는 ~0.3 %, 과도구간은 14~21 % — 그 사이
+SETTLE_MIN_ROWS = 8      # 이보다 짧으면 정착 기준을 못 세운다
+
+
+def settle_start(block, tol=SETTLE_TOL):
+    """block(rows x pixels)에서 정착이 시작되는 행 인덱스. 0이면 트리밍 없음.
+
+    기준은 블록 **뒤쪽 1/3의 중앙값**이다(평균이 아니라 중앙값 — 과도구간이
+    뒤에 걸치면 평균이 끌려간다). 기준 대비 tol 을 넘는 **마지막** 행 다음까지
+    버린다(아래 주석 참조 — 과도구간이 단조롭지 않아 '처음 들어오는 행'은 틀린다).
+    """
+    b = np.asarray(block, dtype=float)
+    if b.ndim != 2 or len(b) < SETTLE_MIN_ROWS:
+        return 0
+    if not np.isfinite(b).any(axis=1).all():   # 전부 NaN 인 행이 있으면 판정 안 함
+        return 0
+    lvl = np.nanmean(b, axis=1)
+    if not np.all(np.isfinite(lvl)):
+        return 0
+    ref = float(np.nanmedian(lvl[-max(5, len(lvl) // 3):]))
+    if not np.isfinite(ref) or ref <= 0:
+        return 0
+    bad = np.abs(lvl / ref - 1.0) > tol
+    # **마지막으로** 벗어난 행 다음까지 버린다 — '처음 들어오는 행'에서 멈추면 안 된다.
+    # 과도구간은 단조롭지 않다: 2026-08-10-005 의 PNs 는 14492 로 한 번 기준 안에
+    # 들어왔다가 15481 로 다시 나간다(+4.7 %). 거기서 멈추면 7행만 버리고 과도구간
+    # 절반을 I0 에 남긴다. 전부 벗어난 경우는 k=len 이 되어 아래 절반 캡에 걸린다.
+    k = int(np.flatnonzero(bad)[-1]) + 1 if bad.any() else 0
+    # 절반 넘게 버려야 하면 트리밍하지 않는다 — 블록 전체가 의심스럽다는 뜻이고,
+    # 조용히 일부만 I0 로 쓰는 게 통째로 쓰는 것보다 위험하다.
+    return k if 0 < k <= len(b) // 2 else 0
 
 
 def _pass2_process_file(fp, entries, ctx):
@@ -2392,20 +2441,29 @@ class AlphaExportWorker(QThread):
             T = np.array(t_list, dtype=float)[order]
             P = np.array(p_list, dtype=float)[order]
             splits = np.where(np.diff(g) > gap)[0] + 1
-            bg   = [float(np.mean(b))     for b in np.split(g, splits)]
-            bsec = [float(np.nanmean(b))  for b in np.split(SEC, splits)]
-            bs   = [np.nanmean(b, axis=0) for b in np.split(S, splits)]
-            bt   = [float(np.nanmean(b))  for b in np.split(T, splits)]
-            bp   = [float(np.nanmean(b))  for b in np.split(P, splits)]
-            return bg, bsec, bs, bt, bp
+            # 블록마다 선두 과도구간을 잘라낸다. 정착된 블록은 k=0 이라 무변경.
+            sb = np.split(S, splits)
+            ks = [settle_start(b) for b in sb]
+            bg   = [float(np.mean(b[k:]))     for b, k in zip(np.split(g, splits), ks)]
+            bsec = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(SEC, splits), ks)]
+            bs   = [np.nanmean(b[k:], axis=0) for b, k in zip(sb, ks)]
+            bt   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(T, splits), ks)]
+            bp   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(P, splits), ks)]
+            return bg, bsec, bs, bt, bp, int(sum(ks))
 
         n_za_raw, n_he_raw = len(za_gidx), len(he_gidx)
-        za_gidx, za_sec, za_spectra, za_t_list, za_p_list = _block_average(
+        za_gidx, za_sec, za_spectra, za_t_list, za_p_list, n_za_drop = _block_average(
             za_gidx, za_sec, za_spectra, za_t_list, za_p_list)
-        he_gidx, he_sec, he_spectra, he_t_list, he_p_list = _block_average(
+        he_gidx, he_sec, he_spectra, he_t_list, he_p_list, n_he_drop = _block_average(
             he_gidx, he_sec, he_spectra, he_t_list, he_p_list)
         self.status_msg.emit(
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
+        if n_za_drop or n_he_drop:
+            self.status_msg.emit(
+                f"[I0 settle] 블록 선두 과도구간 제외: ZA {n_za_drop}/{n_za_raw} · "
+                f"He {n_he_drop}/{n_he_raw} 스캔 — 가스 전환 직후 캐비티가 아직 "
+                f"채워지는 구간이다 (raw 는 그대로, 헤더에 기록됨)."
+            )
 
         # 강도 보정(dark·offset·stray) — 블록평균 후 한 번만. RUN 경로와 동일 물리.
         # 기본값(scale=1·offset=None·ε=0)에선 기존 'I−dark'와 byte-동일(무회귀).
@@ -2933,6 +2991,7 @@ class AlphaExportWorker(QThread):
             'pix_min': pix_min, 'wave_nm': wave_nm,
             'channel': self.channel, 'cavity_len': self.cavity_len,
             'i0_mode': i0_mode, 'n_za': n_za,
+            'n_za_drop': n_za_drop, 'n_he_drop': n_he_drop,
             'rt_calib_note': rt_calib_note, 'calib_info_per_file': calib_info_per_file,
         }
 

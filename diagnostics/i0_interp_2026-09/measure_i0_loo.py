@@ -98,8 +98,15 @@ def _time_blocks(gidx_list, sec_list, gap=10):
 
 
 def _block_average(gidx_list, sec_list, spec_list, t_list, p_list, gap=10):
-    """gui/worker.py `_run_inner._block_average` 와 동일(그쪽은 클로저라 임포트 불가).
-    한 글자도 바꾸지 않는다 — 바꾸면 이 진단이 production knot 을 안 재는 게 된다."""
+    """gui/worker.py `_run_inner._block_average` 와 같은 분할·평균(그쪽은 클로저라
+    임포트 불가). 분할 규칙(gidx 간격 > gap)과 평균은 한 글자도 바꾸지 않는다.
+
+    ⚠ **딱 하나 다르다**: worker 는 블록마다 `settle_start(b)` 로 선두 과도구간을
+    잘라내고(gui/worker.py:2444) 여기는 안 자른다. 운영 자료에서는 무해하다 —
+    그 규칙의 문턱이 `SETTLE_TOL = 2 %` 인데 여수 ZA 블록의 블록내 준위 변동은
+    실측 ±250 ppm(0.025 %)으로 **두 자릿수 아래**라 k=0 이 나온다
+    (`tools/test_i0_settle_trim.py`, worker 주석 gui/worker.py:1847).
+    인젝션 자료(과도구간 14~21 %)에 이 진단을 쓰면 **여기부터 어긋난다.**"""
     if not gidx_list:
         return [], [], [], [], [], [], [], [], [], [[], [], [], []], []
     g = np.array(gidx_list, dtype=float)
@@ -324,6 +331,14 @@ class ScanFitter:
 
 def _split_half(args, d, wave, inwin, za_x, breaks, is_sec, alpha_at, fitter, gkeys):
     """knot 자체 잡음이 농도에 주는 효과 — **간격 외삽 없이** 직접 잰다.
+
+    ⚠ **이 값은 knot 잡음의 하한이다 — 논문 본문에 쓰지 말 것.**
+    짝/홀은 블록 내 드리프트를 상쇄한다. 그게 장점처럼 보이지만, production 의
+    knot 은 **연속 스캔 전체**의 평균이라 그 구조를 실제로 안고 있다. 같은 스캔
+    수로 연속 분할해 재면 짝/홀보다 **ANs 2.26배 · PNs 1.22배** 크다
+    (2026-09-21, `docs/Augur_오차예산_생산런_2026-09-21.md` §10-B).
+    즉 여기 나오는 % 는 그만큼 과소다. 전 빈 LOO(`production_budget.py`)가
+    직접 측정이므로 그쪽을 쓴다.
 
     각 ZA 블록을 짝/홀로 갈라 두 반쪽으로 각각 I₀(t) 를 만들고, 같은 ambient 빈을
     두 번 핏해 NO₂ 차를 본다. 보간 간격이 개입하지 않으므로 LOO 의 ×0.5~0.7 외삽이
@@ -1046,7 +1061,10 @@ def main():
                     help="ε 을 knot 간격의 함수로만 재고 끝낸다 (leave=1..MAXLEAVE). "
                          "핏은 안 돈다 — 간격-오차 곡선과 운용 간격 외삽만 낸다")
     ap.add_argument("--split-half", action="store_true",
-                    help="ZA 블록을 짝/홀로 갈라 knot 잡음 효과를 **외삽 없이** 직접 잰다")
+                    help="ZA 블록을 짝/홀로 갈라 knot 잡음을 외삽 없이 잰다. "
+                         "⚠ 짝/홀은 블록내 드리프트를 상쇄해 **하한만** 준다"
+                         "(연속 기저 대비 ANs 2.26배·PNs 1.22배 과소) — 본문 값은 "
+                         "production_budget.py 를 쓸 것")
     ap.add_argument("--joint-loo", action="store_true",
                     help="같은 시각의 ZA knot 과 R knot 을 **동시에** 빼서 잰다. "
                          "둘은 같은 ZA 블록에서 나오므로 제곱합이 과소계상이다")
