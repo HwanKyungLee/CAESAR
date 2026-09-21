@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from datetime import datetime
 
 import numpy as np
@@ -89,6 +90,16 @@ _PALETTE_AUTO = "자동(종별)"
 # 앞쪽 4개만 써도 구분되게 배열돼 있다.
 # ⚠ 5번째 노랑(#F0E442)은 흰 배경의 **가는 선**에서 잘 안 보인다. 시리즈가 5개를
 #    넘으면 그 시리즈만 색을 따로 잡거나 선을 굵게 하는 게 낫다.
+# Publish 크기 프리셋 → (가로 in, 세로 in, dpi).
+# 논문 폭은 Copernicus(ACP·AMT) 규정에서: 최소 8 cm, 단컬럼 8.3 cm(3.27 in),
+# 양컬럼 17 cm(6.69 in), 300 dpi. 높이는 흔한 비율의 출발점일 뿐 — 손으로 바꾸면 된다.
+_PUBLISH_PRESETS = {
+    "논문 1컬럼 (8.3 cm)": (3.27, 2.45, 300),
+    "논문 2컬럼 (17 cm)": (6.69, 3.94, 300),
+    "발표 슬라이드 (16:9)": (13.33, 7.50, 150),
+    "보고서 (와이드)": (10.0, 5.5, 200),
+}
+
 _CATEGORICAL = {
     "Okabe-Ito (색각안전)": ["#000000", "#E69F00", "#56B4E9", "#009E73",
                              "#F0E442", "#0072B2", "#D55E00", "#CC79A7"],
@@ -446,7 +457,9 @@ class PlotMakerWidget(QWidget):
                       "  NO$_2$        → NO₂\n"
                       "  $\\mu$g m$^{-3}$ → μg m⁻³\n"
                       "  $\\times$10$^{-9}$ → ×10⁻⁹\n"
-                      "범례 이름(시리즈 ✎ Rename)과 주석 라벨에도 같은 문법을 씁니다.")
+                      "범례 이름(시리즈 ✎ Rename)과 주석 라벨에도 같은 문법을 씁니다.\n"
+                      "⚠ 한 라벨에 한글과 $…$를 **같이** 쓰면 한글이 □로 깨집니다\n"
+                      "   (matplotlib 수식 엔진에 한글이 없음). 둘 중 하나만 쓰세요.")
         fl = QFormLayout(gb)
         self._label_style_widgets = {}
         self._ed_title = QLineEdit(); self._ed_x = QLineEdit()
@@ -480,15 +493,24 @@ class PlotMakerWidget(QWidget):
         tab_exp = QWidget(); xv = QVBoxLayout(tab_exp)
         gbs = QGroupBox("Publish size")
         fls = QFormLayout(gbs)
+        self._preset_combo = QComboBox()
+        self._preset_combo.addItems(["(직접 지정)"] + list(_PUBLISH_PRESETS.keys()))
+        self._preset_combo.setToolTip(
+            "목적별 크기·해상도 프리셋. 논문 폭은 Copernicus(ACP·AMT) 기준\n"
+            "— 단컬럼 8.3 cm, 양컬럼 17 cm, 300 dpi (최소 폭 8 cm 규정).\n"
+            "고르면 '모드별 권장 크기 자동'은 꺼진다(모드 바꿀 때 덮어쓰지 않게).")
+        self._preset_combo.activated.connect(
+            lambda *_: self._apply_publish_preset(self._preset_combo.currentText()))
+        fls.addRow("프리셋", self._preset_combo)
         self._dpi_spin = QSpinBox()
         self._dpi_spin.setRange(72, 1200); self._dpi_spin.setValue(300); self._dpi_spin.setSingleStep(50)
         self._dpi_spin.setToolTip("Publish PNG 해상도(벡터 PDF/SVG는 무관). PPT=150~200, 논문=300~600")
         fls.addRow("DPI (PNG)", self._dpi_spin)
         szr = QHBoxLayout()
         self._fig_w = QDoubleSpinBox(); self._fig_w.setRange(2.0, 40.0); self._fig_w.setValue(10.0)
-        self._fig_w.setSingleStep(0.5); self._fig_w.setDecimals(1); self._fig_w.setToolTip("가로(인치)")
+        self._fig_w.setSingleStep(0.5); self._fig_w.setDecimals(2); self._fig_w.setToolTip("가로(인치)")
         self._fig_h = QDoubleSpinBox(); self._fig_h.setRange(1.5, 40.0); self._fig_h.setValue(5.5)
-        self._fig_h.setSingleStep(0.5); self._fig_h.setDecimals(1); self._fig_h.setToolTip("세로(인치)")
+        self._fig_h.setSingleStep(0.5); self._fig_h.setDecimals(2); self._fig_h.setToolTip("세로(인치)")
         szr.addWidget(QLabel("W")); szr.addWidget(self._fig_w)
         szr.addWidget(QLabel("H")); szr.addWidget(self._fig_h)
         fls.addRow("Size (in)", szr)
@@ -656,6 +678,9 @@ class PlotMakerWidget(QWidget):
             a = dict(a)
             v = a.pop("val")
             a["y1" if a.get("kind") == "hline" else "x1"] = v
+        if "visible" not in a:      # 옛 레코드에는 없다 — 기본은 보이기
+            a = dict(a)
+            a["visible"] = True
         return a
 
     @staticmethod
@@ -721,6 +746,8 @@ class PlotMakerWidget(QWidget):
         from PyQt6.QtCore import QRectF
         self._annot_arrows = []      # (ArrowItem, 가리킬 점, 꼬리 점) — 각도 재계산용
         for a in [self._annot_norm(x) for x in getattr(self, "_annots", [])]:
+            if not a.get("visible", True):      # 체크 해제 = 숨김(삭제 아님)
+                continue
             kind = a.get("kind")
             col = a.get("color") or "#555"
             lbl = mathtext_to_html(a.get("label") or "")
@@ -799,8 +826,8 @@ class PlotMakerWidget(QWidget):
             except RuntimeError:
                 self._annot_dlg = None
         from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
-                                     QComboBox, QLineEdit, QPushButton, QLabel,
-                                     QColorDialog)
+                                     QListWidgetItem, QComboBox, QLineEdit, QPushButton,
+                                     QLabel, QColorDialog)
         from PyQt6.QtGui import QColor
         import datetime as _dt
         dlg = QDialog(self)
@@ -821,16 +848,32 @@ class PlotMakerWidget(QWidget):
             return f"{val:.6g}"
 
         def refresh():
+            lst.blockSignals(True)
             lst.clear()
             for a0 in self._annots:
                 a = self._annot_norm(a0)
                 nm = self._ANNOT_KINDS.get(a.get("kind"), (a.get("kind"), 1, False))[0]
                 bits = [f"{k}={_fmt(a.get(k), k.startswith('x'))}"
                         for k in ("x1", "y1", "x2", "y2") if a.get(k) is not None]
-                lst.addItem(f"{nm}  {' '.join(bits)}   {a.get('label', '')}")
+                it = QListWidgetItem(f"{nm}  {' '.join(bits)}   {a.get('label', '')}")
+                it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                it.setCheckState(Qt.CheckState.Checked if a.get("visible", True)
+                                 else Qt.CheckState.Unchecked)
+                lst.addItem(it)
+            lst.blockSignals(False)
+
+        def on_checked(item):
+            """체크 해제 = 그림에서만 숨김(삭제 아님). 시리즈 목록과 같은 규칙."""
+            i = lst.row(item)
+            if 0 <= i < len(self._annots):
+                self._annots[i] = self._annot_norm(self._annots[i])
+                self._annots[i]["visible"] = item.checkState() == Qt.CheckState.Checked
+                self._mode.render()
+        lst.itemChanged.connect(on_checked)
         refresh()
         self._annot_dlg_refresh = refresh   # _on_plot_clicked가 클릭 추가 후 여기 갱신
-        v.addWidget(QLabel("현재 주석 (선택 후 Remove) · 라벨은 mathtext 문법 사용 가능"))
+        v.addWidget(QLabel("현재 주석 — 체크 해제 = 숨김(삭제 아님) · 선택 후 Remove\n"
+                           "라벨은 mathtext 문법 사용 가능"))
         v.addWidget(lst, 1)
 
         row = QHBoxLayout()
@@ -1675,6 +1718,8 @@ class PlotMakerWidget(QWidget):
             return _dt.datetime.fromtimestamp(v) if self._time_axis else v
 
         for an in [self._annot_norm(x) for x in getattr(self, "_annots", [])]:
+            if not an.get("visible", True):     # 화면과 같은 규칙으로 숨긴다
+                continue
             kind = an.get("kind")
             col = an.get("color") or "#555"
             lbl = an.get("label") or None
@@ -2021,6 +2066,18 @@ class PlotMakerWidget(QWidget):
         self._apply_recommended_size()      # 모드별 권장 크기 자동(체크 시)
         self._mode.render()
 
+    def _apply_publish_preset(self, name):
+        """크기·해상도 프리셋 적용. '모드별 권장 크기 자동'은 끈다 — 안 그러면
+        모드를 바꾸는 순간 프리셋이 조용히 덮여서 논문 폭으로 맞춘 게 풀린다."""
+        pre = _PUBLISH_PRESETS.get(name)
+        if not pre:
+            return
+        w, h, dpi = pre
+        self._chk_autosize.setChecked(False)
+        self._fig_w.setValue(w); self._fig_h.setValue(h); self._dpi_spin.setValue(dpi)
+        self.set_status(f"Publish 프리셋: {name} — {w}×{h} in @ {dpi} dpi "
+                        f"(모드별 권장 크기 자동 해제됨)")
+
     def _apply_recommended_size(self, force=False):
         """현재 모드에 맞는 권장 Publish 크기(W×H 인치)를 적용.
         force=False면 '자동' 체크가 켜졌을 때만(모드 전환용). force=True면 버튼."""
@@ -2209,17 +2266,48 @@ class PlotMakerWidget(QWidget):
         try:
             from matplotlib import font_manager as fm
             avail = {f.name for f in fm.fontManager.ttflist}
-            for cand in ("Malgun Gothic", "NanumGothic", "AppleGothic",
-                         "Noto Sans CJK KR", "Noto Sans KR", "Gulim", "Batang"):
-                if cand in avail:
-                    matplotlib.rcParams["font.family"] = cand
-                    break
+            # 한글 폰트를 **전역 family로 걸지 않는다**(2026-09-21).
+            # 예전엔 `font.family = "Malgun Gothic"`이라 한글이 한 글자도 없는 논문
+            # 그림까지 한글 폰트로 찍혔다 — 임베딩이 무겁고, Copernicus의 "한 폰트
+            # 패밀리·sans-serif 권장"과도 어긋난다.
+            # 대신 **`font.family`에 목록**을 준다 → matplotlib이 글리프 단위로
+            # 폴백해서 ASCII는 Arial로, 한글 글자만 한글 폰트로 찍힌다.
+            # ⚠ `font.sans-serif` 목록으로는 안 된다(실측): 그건 "하나를 고르는
+            #    후보 목록"이라 첫 폰트에 없는 글리프는 그냥 □가 된다.
+            #    family=['sans-serif'] + sans-serif=[Arial,Malgun] → 한글 4자 누락,
+            #    family=['Arial','Malgun Gothic']                  → 누락 0.
+            ko = next((c for c in ("Malgun Gothic", "NanumGothic", "AppleGothic",
+                                   "Noto Sans CJK KR", "Noto Sans KR", "Gulim", "Batang")
+                       if c in avail), None)
+            fams = [f for f in ("Arial", "Helvetica") if f in avail]
+            if ko:
+                fams.append(ko)
+            fams.append("DejaVu Sans")          # mpl 기본(항상 있음)
+            matplotlib.rcParams["font.family"] = fams
             matplotlib.rcParams["axes.unicode_minus"] = False   # 음수 기호 깨짐 방지
             matplotlib.rcParams["pdf.fonttype"] = 42
             matplotlib.rcParams["ps.fonttype"] = 42
             matplotlib.rcParams["svg.fonttype"] = "none"
         except Exception:
             pass
+
+    # 한글 음절 + 자모 (라벨에 한글이 섞였는지 판정용)
+    _HANGUL_RE = re.compile(r"[가-힣ᄀ-ᇿ㄰-㆏]")
+
+    def _mixed_hangul_mathtext(self):
+        """한글과 수식(`$…$`)이 **한 문자열에 섞인** 라벨 목록.
+
+        matplotlib의 mathtext 엔진은 `$`가 하나라도 있으면 문자열 전체를 자기
+        폰트셋으로 그리는데 거기엔 한글이 없다 → **한글만 조용히 □로 깨진다**
+        (`mathtext.fontset='custom'`으로도 안 고쳐지는 걸 실측했다).
+        한글만·수식만 있으면 멀쩡하다. 그래서 고치는 대신 **알려준다** —
+        Publish PDF에서야 발견하는 게 제일 나쁘다."""
+        texts = [t for t in self.custom.values() if t]
+        ts = next((m for m in self._modes if m.key == "timeseries"), None)
+        if ts is not None:
+            texts += [s[3] for s in ts._series if s[3]]
+        texts += [a.get("label") for a in getattr(self, "_annots", []) if a.get("label")]
+        return [t for t in texts if "$" in t and self._HANGUL_RE.search(t)]
 
     def _build_publish_fig(self):
         """Publish용 matplotlib Figure 생성 — 미리보기·저장 공용(완전 동일 경로).
@@ -2264,6 +2352,10 @@ class PlotMakerWidget(QWidget):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea
         pix = QPixmap()
         pix.loadFromData(buf.getvalue(), "PNG")
+        mixed = self._mixed_hangul_mathtext()
+        if mixed:
+            self.set_status(f"⚠ 한글+수식이 섞인 라벨 {len(mixed)}개 — 한글이 □로 깨집니다"
+                            f" (예: {mixed[0][:20]}). 한글 라벨에서 $…$를 빼세요.")
         dlg = QDialog(self)
         dlg.setWindowTitle("Publish preview — 출력 그대로 (저장은  Publish)")
         lay = QVBoxLayout(dlg)
@@ -2297,7 +2389,7 @@ class PlotMakerWidget(QWidget):
         out, _ = QFileDialog.getSaveFileName(
             self, "Publish (high quality)",
             os.path.join(self._figure_dir(), self._default_export_name() + ".png"),
-            "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)")
+            "PNG (*.png);;PDF (*.pdf);;SVG (*.svg);;EPS (*.eps)")
         if not out:
             return
         from gui.dlg_dir import dlg_dir as _dd
@@ -2311,7 +2403,17 @@ class PlotMakerWidget(QWidget):
             fig.savefig(out, dpi=self._dpi_spin.value(), bbox_inches="tight")
             ext = os.path.splitext(out)[1].lstrip(".").upper()
             extra = f" @ {self._dpi_spin.value()}dpi" if ext == "PNG" else " (vector)"
-            self.set_status(f"Published: {os.path.basename(out)} [{ext}{extra}]")
+            msg = f"Published: {os.path.basename(out)} [{ext}{extra}]"
+            mixed = self._mixed_hangul_mathtext()
+            if mixed:
+                msg += (f"  ⚠ 한글+수식이 섞인 라벨 {len(mixed)}개는 한글이 □로 깨집니다"
+                        f" (예: {mixed[0][:20]}) — 한글 라벨에서 $…$를 빼세요.")
+            if ext == "EPS":
+                # PostScript에는 알파 채널이 없다 — 반투명이 불투명하게 찍힌다.
+                # 조용히 다른 그림이 나가는 것보다 말해주는 게 낫다.
+                msg += ("  ⚠ EPS는 투명도를 지원하지 않습니다 — 에러밴드·야간음영·"
+                        "area/band 채움이 불투명하게 나옵니다. 투명도가 필요하면 PDF로.")
+            self.set_status(msg)
         except NotImplementedError:
             QMessageBox.information(self, "Publish",
                                    "이 모드는 아직 고화질 출력을 지원하지 않습니다.")

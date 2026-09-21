@@ -65,6 +65,12 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 29. Okabe-Ito 팔레트 : 색각안전 8색이 시리즈 순서대로·8개 넘으면 순환 (2026-09-21)
 30. 상관 히트맵 컬러맵 : 음=파랑·양=빨강이 pg·mpl 동일(RdBu를 _r 없이 쓰면 부호가
     조용히 뒤집힌다) + 셀 글자색이 배경 휘도 기준인가 (2026-09-21)
+31. Publish 프리셋 + EPS : 논문 폭(Copernicus 8.3/17cm) 프리셋이 figure 크기까지
+    반영되고 autosize를 끄나 · EPS에 글리프가 실제로 들어갔나 (2026-09-21)
+32. 폰트 폴백 : font.family 목록으로 한글 글리프 폴백(ASCII는 Arial) ·
+    한글+수식 혼합 라벨 감지(mathtext 엔진엔 한글이 없어 □가 된다) (2026-09-21)
+33. 표시 토글 : 시리즈·주석 체크 해제가 화면·Publish 양쪽에서 숨기되 **삭제하지
+    않나** · 곡선에 시리즈 라벨이 태깅돼 클릭→편집이 가능한가 (2026-09-21)
 """
 from __future__ import annotations
 import os, sys
@@ -1057,6 +1063,130 @@ def c_heatmap_cmap_sign():
         return "FAIL", "짙은 셀(|r|=1)에 검은 글자 — 배경 휘도 판정이 깨졌다"
     return "PASS", (f"{HeatmapMode.CMAP} · pg/mpl 둘 다 -1=파랑, +1=빨강 · "
                     f"글자색은 배경 휘도 기준(|r|=0.5 검정, 1.0 흰색)")
+
+
+# ── 31. Publish 프리셋 + EPS 출력 ──────────────────────────────────────────
+@check("Publish 프리셋(논문 폭) + EPS 벡터 출력")
+def c_publish_preset_eps():
+    import tempfile, os as _os, re as _re
+    from gui.ui_plot_maker.widget import _PUBLISH_PRESETS
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None]); ts.render()
+    name = "논문 1컬럼 (8.3 cm)"
+    if name not in _PUBLISH_PRESETS:
+        return "FAIL", f"프리셋 목록에 '{name}' 없음: {list(_PUBLISH_PRESETS)}"
+    w._chk_autosize.setChecked(True)
+    w._apply_publish_preset(name)
+    ww, hh, dpi = _PUBLISH_PRESETS[name]
+    if (round(w._fig_w.value(), 2), round(w._fig_h.value(), 2), w._dpi_spin.value()) != (ww, hh, dpi):
+        return "FAIL", f"프리셋 미반영: {w._fig_w.value()}×{w._fig_h.value()} @{w._dpi_spin.value()}"
+    if w._chk_autosize.isChecked():
+        return "FAIL", "프리셋을 골랐는데 '모드별 권장 크기 자동'이 켜진 채 — 모드 바꾸면 덮인다"
+    fig = w._build_publish_fig()
+    if tuple(round(v, 2) for v in fig.get_size_inches()) != (ww, hh):
+        return "FAIL", f"figure 크기가 프리셋과 다름: {fig.get_size_inches()}"
+    # EPS: 실제로 저장되고 텍스트가 글리프로 들어갔나(mpl#27328 = 글자 통째 증발 가드)
+    fd, p = tempfile.mkstemp(suffix=".eps"); _os.close(fd)
+    try:
+        fig.savefig(p)
+        raw = open(p, "rb").read()
+    finally:
+        try:
+            _os.remove(p)
+        except OSError:
+            pass
+    if not raw.startswith(b"%!PS-Adobe"):
+        return "FAIL", "EPS 헤더가 아님"
+    if b"selectfont" not in raw or b"glyphshow" not in raw:
+        return "FAIL", "EPS에 텍스트 드로잉이 없음 — 눈금/라벨이 통째로 빠졌다(mpl#27328류)"
+    return "PASS", f"{name} {ww}×{hh}in@{dpi} 적용·autosize 해제 · EPS {len(raw)//1024}KB에 글리프 포함"
+
+
+# ── 32. 폰트: 한글은 글리프 폴백, 한글+수식 혼합은 감지 ─────────────────────
+# 예전엔 font.family를 한글 폰트로 통째 바꿔 한글 없는 논문 그림까지 한글 폰트로
+# 찍혔다. 이제 family에 목록을 줘 글리프 단위로 폴백한다(font.sans-serif 목록으로는
+# 안 된다 — 그건 '하나를 고르는 후보'라 없는 글리프는 □가 된다. 실측함).
+@check("폰트: 한글 글리프 폴백 · 한글+수식 혼합 감지")
+def c_font_fallback():
+    import warnings, tempfile, os as _os, matplotlib
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    w.custom["title"] = "여수 캠페인 한글 제목"      # 한글만
+    w.custom["ylabel"] = "NO$_2$ [ppb]"              # 수식만
+    ts.render()
+    fig = w._build_publish_fig()
+    fam = matplotlib.rcParams["font.family"]
+    if not isinstance(fam, list) or len(fam) < 2:
+        return "FAIL", f"font.family가 목록이 아님({fam}) — 목록이어야 글리프 폴백이 된다"
+    fd, p = tempfile.mkstemp(suffix=".png"); _os.close(fd)
+    try:
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            fig.savefig(p, dpi=100)
+        miss = [str(x.message) for x in ws if "missing from font" in str(x.message)]
+    finally:
+        try:
+            _os.remove(p)
+        except OSError:
+            pass
+    if miss:
+        return "FAIL", f"한글/수식 라벨에서 글리프 누락 {len(miss)}건: {miss[0][:60]}"
+    if w._mixed_hangul_mathtext():
+        return "FAIL", "분리된 라벨을 '혼합'으로 오탐"
+    w.custom["title"] = "한글 NO$_2$ 농도"           # 한 라벨에 섞기 → 감지돼야
+    if not w._mixed_hangul_mathtext():
+        return "FAIL", "한글+수식 혼합 라벨을 감지 못함(한글이 □로 나가는데 조용하다)"
+    return "PASS", f"family={fam[:2]}… 폴백 정상 · 누락 0 · 혼합 라벨 감지"
+
+
+# ── 33. 표시 토글(숨김≠삭제) + 곡선 클릭 → 스타일 편집 ─────────────────────
+# Object Manager를 새 패널로 만들지 않고, **이미 있는 두 목록**(시리즈·주석)에
+# 체크박스를 달았다. 헌장 ①의 UI판 — 숨기는 것이지 지우는 게 아니다.
+@check("표시 토글: 시리즈·주석 숨김(삭제 아님) + 곡선 클릭 대상 태깅")
+def c_visibility_and_click():
+    import pyqtgraph as pg_
+    from PyQt6.QtCore import Qt as Qt_
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._series.append(["fixture:CHOCHO", "L", None, None])
+    ts._refresh_list()
+    ts.render()
+    n_all = len(ts._resolve_specs())
+    if n_all != 2:
+        return "FAIL", f"시리즈 2개인데 specs {n_all}개"
+    # 목록 체크 해제 → 그림에서만 빠지고 _series에는 남아야 한다
+    ts._list.item(0).setCheckState(Qt_.CheckState.Unchecked)
+    if len(ts._resolve_specs()) != 1:
+        return "FAIL", "체크 해제했는데 여전히 그려짐"
+    if len(ts._series) != 2:
+        return "FAIL", f"숨김이 삭제로 동작함 — _series {len(ts._series)}개 (2 기대)"
+    ts._list.item(0).setCheckState(Qt_.CheckState.Checked)
+    if len(ts._resolve_specs()) != 2:
+        return "FAIL", "다시 체크했는데 안 돌아옴"
+    # 주석도 같은 규칙
+    t0 = float(w.shelf["fixture"].time[10])
+    w._annots = [{"kind": "vline", "x1": t0, "label": "evt", "color": "#d32f2f"}]
+    ts.render()
+    n_on = sum(isinstance(i, pg_.InfiniteLine) for i in w.p1.items)
+    w._annots[0]["visible"] = False
+    ts.render()
+    n_off = sum(isinstance(i, pg_.InfiniteLine) for i in w.p1.items)
+    if n_off != n_on - 1:
+        return "FAIL", f"주석 숨김 미동작(선 {n_on}→{n_off})"
+    fig = w._build_publish_fig()      # Publish도 같은 규칙이어야 한다
+    if any(ln.get_linestyle() == "--" for ln in fig.axes[0].lines):
+        return "FAIL", "화면에선 숨겼는데 Publish에는 주석이 남음"
+    # 곡선 클릭 → 어느 시리즈인지 찾아갈 수 있게 태깅됐나
+    ts.render()
+    tagged = [getattr(i, "_pm_label", None) for i in w.p1.items
+              if isinstance(i, pg_.PlotDataItem) and getattr(i, "_pm_label", None)]
+    if "fixture:NO2" not in tagged:
+        return "FAIL", f"곡선에 시리즈 라벨 태그 없음 — 클릭해도 뭘 편집할지 모른다: {tagged}"
+    return "PASS", "시리즈·주석 숨김이 화면·Publish 양쪽에 · _series 보존 · 곡선 태깅 확인"
 
 
 def main():

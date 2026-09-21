@@ -99,9 +99,11 @@ class TimeSeriesMode(PlotMode):
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.setToolTip("선반에서 컬럼 선택 후 [+ Left/Right Y].\n"
+                              "체크박스 = 보이기/숨기기(삭제 아님),\n"
                               "더블클릭 = 좌↔우 전환, 우클릭 = 빠른 메뉴,\n"
                               "드래그 = 그리는 순서(범례·겹침순서) 변경, Delete = 제거.")
         self._list.itemDoubleClicked.connect(self._toggle_axis)
+        self._list.itemChanged.connect(self._on_item_checked)
         self._list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self._list.model().rowsMoved.connect(lambda *a: self._sync_order_from_list())
@@ -231,16 +233,34 @@ class TimeSeriesMode(PlotMode):
 
     def _refresh_list(self):
         from PyQt6.QtGui import QPixmap, QIcon, QColor
+        self._list.blockSignals(True)      # 체크박스 채우다 itemChanged가 되돌아오지 않게
         self._list.clear()
         for s in self._series:
             lab, axis, color, name = s
             disp = self._display(lab, name)
+            st = self._style_of(lab)
             it = QListWidgetItem(f"[{axis}] {disp}")
-            it.setToolTip(f"{lab}\n드래그로 순서 변경 · Delete로 제거")
+            it.setToolTip(f"{lab}\n체크 해제 = 그림에서만 숨김(삭제 아님) · "
+                          f"드래그로 순서 변경 · Delete로 제거\n"
+                          f"그래프에서 선을 직접 클릭해도 스타일 창이 열립니다")
             pix = QPixmap(14, 14); pix.fill(QColor(self._effective_color(lab, color, name)))
             it.setIcon(QIcon(pix))
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if st["visible"]
+                             else Qt.CheckState.Unchecked)
             it.setData(Qt.ItemDataRole.UserRole, id(s))   # id값(int) 저장 — 객체 자체는 identity 안 보존됨
             self._list.addItem(it)
+        self._list.blockSignals(False)
+
+    def _on_item_checked(self, item):
+        """목록 체크박스 = 보이기/숨기기. **삭제가 아니다** — 설정에도 남고
+        다시 켜면 그대로 돌아온다(헌장 ①의 UI판: 지우지 말고 감추기)."""
+        s = self._series_by_id(item.data(Qt.ItemDataRole.UserRole))
+        if s is None:
+            return
+        vis = item.checkState() == Qt.CheckState.Checked
+        self._styles.setdefault(s[0], {})["visible"] = vis
+        self.render()
 
     def on_shelf_changed(self):
         valid = set(self.host.column_choices())
@@ -302,10 +322,12 @@ class TimeSeriesMode(PlotMode):
             if res is None:
                 continue
             ds, col, y, t = res
+            st = self._style_of(lab)
+            if not st["visible"]:      # 체크 해제한 시리즈 — 지우지 않고 안 그리기만
+                continue
             xs, ys = self._proc(y, t)
             disp = self._display(lab, name)
             ci = color or self._auto_color(disp)
-            st = self._style_of(lab)
             elo = ehi = None
             if err_on:
                 err = host.error_of(lab)
@@ -351,7 +373,7 @@ class TimeSeriesMode(PlotMode):
                  "band=**목록의 바로 다음 시리즈**와의 사이를 채움(순서는 드래그로 바꿈)\n"
                  "errorbar=오차막대(캡). ± Error band 체크가 켜져 있어야 값이 있음")
     _STYLE_DEFAULT = {"width": 2, "dash": "solid", "marker": "o", "msize": 3,
-                      "kind": "line", "alpha": 1.0}
+                      "kind": "line", "alpha": 1.0, "visible": True}
 
     def _style_of(self, lab):
         """라벨별 스타일 dict(빠진 키는 기본값으로 채워서 반환).
@@ -361,6 +383,7 @@ class TimeSeriesMode(PlotMode):
         st.update(self._styles.get(lab, {}))
         st["width"] = int(st["width"]); st["msize"] = int(st["msize"])
         st["alpha"] = float(st["alpha"])
+        st["visible"] = bool(st["visible"])
         if st["kind"] not in self.KINDS:      # 옛/깨진 설정 방어
             st["kind"] = "line"
         return st
@@ -519,6 +542,7 @@ class TimeSeriesMode(PlotMode):
             # 계단은 좌표를 편 상태라 그 위에 마커를 찍으면 점이 두 배가 된다 →
             # 선은 편 좌표로, 마커는 원래 점 위치에 따로.
             curve = pg.PlotDataItem(xs, ys, pen=pen, name=name)
+            self._make_clickable(curve, s.label)
             self._add_pg(host, vb, curve, name)
             self._add_pg(host, vb, pg.PlotDataItem(s.x, s.y, pen=None, symbol=sym,
                                                    symbolSize=s.msize, symbolBrush=col,
@@ -526,6 +550,7 @@ class TimeSeriesMode(PlotMode):
             return
         curve = pg.PlotDataItem(xs, ys, pen=pen, name=name, symbol=sym,
                                 symbolSize=s.msize, symbolBrush=col, symbolPen=None)
+        self._make_clickable(curve, s.label)
         self._add_pg(host, vb, curve, name)
 
     @staticmethod
@@ -535,6 +560,37 @@ class TimeSeriesMode(PlotMode):
         vb.addItem(item)
         if legend_name and host.legend is not None and vb is not host.p1:
             host.legend.addItem(item, legend_name)
+
+    def _make_clickable(self, item, lab):
+        """그린 곡선을 **직접 클릭**하면 그 시리즈의 스타일 창이 열리게 한다.
+
+        Origin의 미니 툴바(객체를 고르면 바로 편집)에서 가져온 것 — 표현 타입이
+        7종이 되고 나니 '고르는 경로가 좌측 목록뿐'인 게 병목이었다. 새 팝업을
+        만들지 않고 **기존 ✏ 스타일 창을 그대로 연다**(목록에서 그 줄을 선택한
+        뒤 `_edit_style()` 호출) — 편집 경로가 하나로 유지된다.
+        BarGraphItem은 클릭 시그널이 없어 빠진다(막대는 목록에서 편집)."""
+        try:
+            item.setCurveClickable(True, width=8)      # 선 근처 8px까지 잡아준다
+        except Exception:
+            return
+        item._pm_label = lab
+        item.sigClicked.connect(self._on_curve_clicked)
+
+    def _on_curve_clicked(self, item, ev=None):
+        lab = getattr(item, "_pm_label", None)
+        if lab is None or self._w is None:
+            return
+        if getattr(self.host, "_annot_pick", None) is not None:
+            return          # 주석 찍는 중이면 그쪽이 먼저 — 클릭을 뺏지 않는다
+        for i in range(self._list.count()):
+            it = self._list.item(i)
+            s = self._series_by_id(it.data(Qt.ItemDataRole.UserRole))
+            if s is not None and s[0] == lab:
+                self._list.setCurrentRow(i)
+                break
+        else:
+            return
+        self._edit_style()
 
     def _draw_mpl_series(self, ax, s, specs):
         """Publish(mpl)에서 시리즈 하나 그리기 — _draw_pg_series와 같은 분기.
