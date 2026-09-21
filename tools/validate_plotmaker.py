@@ -60,6 +60,11 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     · **화살촉 각도**: autoscale 후 재계산되나 + 줌하면 따라오나 (2026-09-21
       실측 버그 — 생성 시점에 각도를 박으면 '직전 렌더의 축 범위'로 계산돼
       위로 향할 화살표가 179.9°=거의 수평이 됐다)
+28. Publish 폰트 : pdf/ps=Type42(저널 거부 사례 회피)·svg=none(벡터 편집 가능).
+    설정만 보지 않고 실제 SVG를 저장해 <text> 유무까지 본다 (2026-09-21)
+29. Okabe-Ito 팔레트 : 색각안전 8색이 시리즈 순서대로·8개 넘으면 순환 (2026-09-21)
+30. 상관 히트맵 컬러맵 : 음=파랑·양=빨강이 pg·mpl 동일(RdBu를 _r 없이 쓰면 부호가
+    조용히 뒤집힌다) + 셀 글자색이 배경 휘도 기준인가 (2026-09-21)
 """
 from __future__ import annotations
 import os, sys
@@ -994,6 +999,64 @@ def c_publish_fonts():
     if "<text" not in svg:
         return "FAIL", "SVG 글자가 패스로 박힘 — 벡터 편집 불가(svg.fonttype 되돌아갔나)"
     return "PASS", "pdf/ps=Type42 · svg=none · 실제 SVG에 <text> 유지됨"
+
+
+# ── 29. Okabe-Ito 범주형 팔레트: 순서대로 배색 + 8개 넘으면 순환 ───────────
+@check("팔레트: Okabe-Ito 색각안전 배색")
+def c_okabe_ito():
+    from gui.ui_plot_maker.widget import _CATEGORICAL
+    name = "Okabe-Ito (색각안전)"
+    pal = _CATEGORICAL.get(name)
+    if not pal or len(pal) != 8:
+        return "FAIL", f"Okabe-Ito 팔레트가 없거나 8색이 아님: {pal}"
+    w = _widget_with_fixture()
+    if name not in [w._palette_combo.itemText(i) for i in range(w._palette_combo.count())]:
+        return "FAIL", "팔레트 콤보에 Okabe-Ito가 없음"
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    for _ in range(10):                      # 8색보다 많게 → 순환 확인
+        ts._series.append(["fixture:NO2", "L", None, None])
+    ts._refresh_list()
+    w._apply_palette(name)
+    got = [s[2] for s in ts._series]
+    want = [pal[i % 8] for i in range(10)]
+    if got != want:
+        return "FAIL", f"배색 불일치: {got[:4]}… (기대 {want[:4]}…)"
+    # 계통색(단일 hue 진↔연) 경로가 안 깨졌나
+    w._apply_palette("파랑")
+    if ts._series[0][2] == pal[0]:
+        return "FAIL", "계통색 팔레트가 Okabe-Ito 값을 그대로 둠(분기 오류)"
+    return "PASS", f"8색 순서·순환 정확 · 콤보 노출 · 계통색 경로 무사"
+
+
+# ── 30. 상관 히트맵 컬러맵: 부호 방향(음=파랑, 양=빨강)이 pg·mpl 동일 ────────
+# bwr → RdBu_r 교체(2026-09-21) 때의 함정 가드. RdBu를 `_r` 없이 쓰면 색은 비슷한데
+# **상관의 부호가 조용히 뒤집힌다** — 그림이 멀쩡해 보여서 아무도 못 알아챈다.
+@check("상관 히트맵 컬러맵: 음=파랑 · 양=빨강 (pg·mpl)")
+def c_heatmap_cmap_sign():
+    from matplotlib import colormaps
+    import pyqtgraph as pg_
+    from gui.ui_plot_maker.modes import HeatmapMode
+    cm = colormaps[HeatmapMode.CMAP]
+    lo = cm(0.0)[:3]            # r = -1
+    hi = cm(1.0)[:3]            # r = +1
+    if not (lo[2] > lo[0]):
+        return "FAIL", f"mpl: r=-1이 파랑이 아님 RGB={tuple(round(v,2) for v in lo)} (RdBu를 _r 없이 쓴 듯)"
+    if not (hi[0] > hi[2]):
+        return "FAIL", f"mpl: r=+1이 빨강이 아님 RGB={tuple(round(v,2) for v in hi)}"
+    try:
+        lut = pg_.colormap.getFromMatplotlib(HeatmapMode.CMAP).getLookupTable(0.0, 1.0, 256)
+    except Exception as e:
+        return "FAIL", f"pg가 {HeatmapMode.CMAP}를 못 읽음: {e}"
+    if not (int(lut[0][2]) > int(lut[0][0]) and int(lut[-1][0]) > int(lut[-1][2])):
+        return "FAIL", f"pg 부호 방향 불일치: -1={tuple(int(v) for v in lut[0][:3])} +1={tuple(int(v) for v in lut[-1][:3])}"
+    # 셀 글자색은 배경 휘도로 정해야 한다 — |r| 문턱을 박으면 컬러맵 바꿀 때 어긋난다
+    if HeatmapMode._white_text(0.5) or HeatmapMode._white_text(0.0):
+        return "FAIL", "밝은 셀(|r|≤0.5)에 흰 글자 — 배경 휘도 판정이 깨졌다"
+    if not (HeatmapMode._white_text(1.0) and HeatmapMode._white_text(-1.0)):
+        return "FAIL", "짙은 셀(|r|=1)에 검은 글자 — 배경 휘도 판정이 깨졌다"
+    return "PASS", (f"{HeatmapMode.CMAP} · pg/mpl 둘 다 -1=파랑, +1=빨강 · "
+                    f"글자색은 배경 휘도 기준(|r|=0.5 검정, 1.0 흰색)")
 
 
 def main():

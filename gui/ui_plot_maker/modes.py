@@ -1002,6 +1002,36 @@ class HeatmapMode(PlotMode):
     key = "heatmap"
     label = "Correlation heatmap"
 
+    # 상관계수(-1~+1) 발산형 컬러맵. 2026-09-21에 `bwr`에서 바꿨다.
+    #   · `bwr`은 양 끝이 완전 채도라 |r| 차이가 뭉개지고, 한가운데 순백이
+    #     급격한 명도 단절을 만들어 **없는 경계가 있는 것처럼** 보인다.
+    #     흑백 인쇄하면 ±가 같은 회색이 돼 부호가 사라진다.
+    #   · `RdBu`(ColorBrewer)는 명도가 완만히 변해 위 문제가 없고 색각이상·
+    #     흑백 인쇄를 염두에 두고 설계됐다.
+    # **`_r`이 핵심**: RdBu는 빨강(낮음)→파랑(높음)이라 그냥 쓰면 상관 **부호가
+    # 뒤집혀** 보인다. 기존 관례(음=파랑, 양=빨강)를 지키려면 반전판을 써야 한다.
+    CMAP = "RdBu_r"
+
+    @classmethod
+    def _white_text(cls, r):
+        """셀의 r 값 글자를 흰색으로 쓸까? — **배경 휘도로** 정한다.
+
+        전엔 `abs(r) > 0.5`로 문턱을 박아뒀는데, 이런 상수는 컬러맵을 바꾸는 순간
+        조용히 어긋난다. 실제로 재보니:
+          · RdBu_r: |r|=0.5~0.6은 아직 밝은 살구색 → 흰 글자가 거의 안 보였다
+          · bwr:    |r|=0.9에서도 검은 글자 대비가 더 좋았다(5.40 vs 3.89)
+            = 옛 규칙은 **바꾸기 전에도 이미 틀려 있었다**
+        그래서 숫자 대신 WCAG 상대휘도로 판정한다 — 컬러맵을 또 바꿔도 따라온다."""
+        from matplotlib import colormaps
+        try:
+            v = float(r)
+            rgb = colormaps[cls.CMAP]((max(-1.0, min(1.0, v)) + 1.0) / 2.0)[:3]
+        except Exception:
+            return abs(float(r)) > 0.7
+        f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        lum = 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2])
+        return lum < 0.179          # 흰↔검 대비가 뒤집히는 휘도(WCAG 교차점)
+
     def __init__(self, host):
         super().__init__(host)
         self._w = None
@@ -1124,7 +1154,7 @@ class HeatmapMode(PlotMode):
         img.setImage(C)
         img.setLevels([-1, 1])
         try:
-            lut = pg.colormap.getFromMatplotlib("bwr").getLookupTable(0.0, 1.0, 256)
+            lut = pg.colormap.getFromMatplotlib(self.CMAP).getLookupTable(0.0, 1.0, 256)
             img.setLookupTable(lut)
         except Exception:
             pass
@@ -1137,7 +1167,7 @@ class HeatmapMode(PlotMode):
         for i in range(len(names)):
             for j in range(len(names)):
                 ti = pg.TextItem(f"{C[i, j]:.2f}", anchor=(0.5, 0.5),
-                                 color="w" if abs(C[i, j]) > 0.5 else "k")
+                                 color="w" if self._white_text(C[i, j]) else "k")
                 ti.setPos(j + 0.5, i + 0.5)
                 host.p1.addItem(ti)
         host.p1.invertY(True)
@@ -1153,7 +1183,7 @@ class HeatmapMode(PlotMode):
             return
         names, C = mat
         short = self._short(names)
-        im = ax.imshow(C, vmin=-1, vmax=1, cmap="bwr")
+        im = ax.imshow(C, vmin=-1, vmax=1, cmap=self.CMAP)
         ax.set_xticks(range(len(names)))
         ax.set_xticklabels(short, rotation=45, ha="right")
         ax.set_yticks(range(len(names)))
@@ -1161,7 +1191,8 @@ class HeatmapMode(PlotMode):
         for i in range(len(names)):
             for j in range(len(names)):
                 ax.text(j, i, f"{C[i, j]:.2f}", ha="center", va="center",
-                        fontsize=8, color="white" if abs(C[i, j]) > 0.5 else "black")
+                        fontsize=8,
+                        color="white" if self._white_text(C[i, j]) else "black")
         fig.colorbar(im, ax=ax, shrink=0.8)
         self.host.mpl_label(ax, "title", self.host.lbl("title", "Correlation matrix (Pearson r)"))
 

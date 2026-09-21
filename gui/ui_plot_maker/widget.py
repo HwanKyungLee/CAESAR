@@ -82,6 +82,18 @@ _FAMILIES = {
 }
 _PALETTE_AUTO = "자동(종별)"
 
+# 범주형(categorical) 팔레트 — _FAMILIES처럼 한 색의 진↔연이 아니라, **서로 구분되는
+# 색 목록**을 시리즈 순서대로 쓴다.
+# Okabe-Ito: 세 가지 색각이상(P·D·T) 모두에서 구분되게 설계된 사실상의 표준
+# (R 4.0+ 기본 팔레트, Nature/Science 계열 접근성 권고). 순서도 원안 그대로 —
+# 앞쪽 4개만 써도 구분되게 배열돼 있다.
+# ⚠ 5번째 노랑(#F0E442)은 흰 배경의 **가는 선**에서 잘 안 보인다. 시리즈가 5개를
+#    넘으면 그 시리즈만 색을 따로 잡거나 선을 굵게 하는 게 낫다.
+_CATEGORICAL = {
+    "Okabe-Ito (색각안전)": ["#000000", "#E69F00", "#56B4E9", "#009E73",
+                             "#F0E442", "#0072B2", "#D55E00", "#CC79A7"],
+}
+
 
 def _family_shades(base, n):
     """계통색 base에서 n개의 '같은 계열' 톤을 진한→연한 순으로. n=1이면 base 그대로.
@@ -255,10 +267,14 @@ class PlotMakerWidget(QWidget):
         tab_style = QWidget(); sv = QVBoxLayout(tab_style)
         prow = QHBoxLayout(); prow.addWidget(QLabel("Palette"))
         self._palette_combo = QComboBox()
-        self._palette_combo.addItems([_PALETTE_AUTO] + list(_FAMILIES.keys()))
-        self._palette_combo.setToolTip("색 계열 프리셋: 계통색을 고르면 그 계열 톤으로 자동 배색.\n"
-                                       "시리즈 여러 개·diurnal 3곡선도 같은 계열 진↔연으로.\n"
-                                       "'자동(종별)'=종 이름 기반 색(ANs 초록 등).")
+        self._palette_combo.addItems([_PALETTE_AUTO] + list(_CATEGORICAL.keys())
+                                     + list(_FAMILIES.keys()))
+        self._palette_combo.setToolTip(
+            "'자동(종별)' = 종 이름 기반 색(ANs 초록 등).\n"
+            "'Okabe-Ito (색각안전)' = 세 색각이상에서 모두 구분되는 표준 8색을\n"
+            "   시리즈 순서대로. 논문·발표용 기본으로 권장.\n"
+            "   (5번째 노랑은 흰 배경 가는 선에서 흐릿 — 시리즈 5개 넘으면 확인)\n"
+            "그 밖의 계통색 = 그 색의 진↔연 톤으로 자동 배색.")
         self._palette_combo.activated.connect(
             lambda *_: self._apply_palette(self._palette_combo.currentText()))
         prow.addWidget(self._palette_combo, 1); sv.addLayout(prow)
@@ -2036,12 +2052,19 @@ class PlotMakerWidget(QWidget):
             self.set_status("색: 자동(종별)로 복귀")
             self._mode.render()
             return
+        # 범주형(Okabe-Ito 등)은 목록을 순서대로 돌려 쓰고, 계통색은 진↔연 톤을 만든다.
+        cat = _CATEGORICAL.get(family)
         base = _FAMILIES.get(family)
-        if not base:
+        if cat is None and not base:
             return
+
+        def colors_for(n):
+            if cat is not None:
+                return [cat[i % len(cat)] for i in range(max(n, 1))]
+            return _family_shades(base, max(n, 1))
+
         if mode.key == "timeseries":
-            n = len(mode._series)
-            shades = _family_shades(base, max(n, 1))
+            shades = colors_for(len(mode._series))
             for i, s in enumerate(mode._series):
                 s[2] = shades[i]
             if hasattr(mode, "_refresh_list"):
@@ -2049,7 +2072,7 @@ class PlotMakerWidget(QWidget):
         else:
             keys = mode.color_keys()
             if keys:
-                shades = _family_shades(base, len(keys))
+                shades = colors_for(len(keys))
                 for (key, _lab, _def), c in zip(keys, shades):
                     mode.colors[key] = c
         self.set_status(f"색 계열 적용: {family}")
