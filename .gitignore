@@ -69,6 +69,11 @@ cache/
 /diagnostics/qdoas_crossval_2026-09/**
 /diagnostics/seosan_operational_2026-09/**
 /diagnostics/varpro_speed_2026-09/results_*.json
+# T1 오차예산 진단의 raw 파싱 캐시(5~74 MB, 재생성 가능 — --refresh)
+/diagnostics/i0_interp_2026-09/_cache_*.npz
+# 빈/knot 단위 산출 CSV(4 MB). 표는 docs/Augur_오차예산_생산런_2026-09-21.md 에
+# 있고 생성 명령이 문서에 박혀 있다 — 워커 수와 무관하게 바이트 동일하게 재생성된다.
+/diagnostics/i0_interp_2026-09/*.csv
 /diagnostics/yeosu_acceptance_2026-09/**
 /diagnostics/yeosu_profile_2026-09/**
 /diagnostics/yeosu_reprovenanced_alpha_2026-09/**

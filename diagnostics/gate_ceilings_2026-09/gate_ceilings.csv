@@ -1,0 +1,3 @@
+product,n,median_ppb,robustSD_ppb,reported_unc_ppb,sigma_ceiling_ppb,per_channel_ceiling_ppb
+SigmaANs,15665,0.0974565,0.208517,0.0253088,0.0643771,0.0455215
+SigmaPNs,8503,-0.369145,1.42194,0.0383808,0.388298,0.274568

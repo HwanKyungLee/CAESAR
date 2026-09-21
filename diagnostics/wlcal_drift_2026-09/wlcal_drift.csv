@@ -1,0 +1,7 @@
+group,kind,ref,other,n,med,p95,mx,span,disp
+cold,calib_epoch,Calib_20260523_Hg_4line_400-497nm_Poly2.txt,Calib_20260602_Hg_399-498nm_Poly2.txt,575,-18.279,18.8188,18.9002,0.823444,0.048307
+cold,calib_epoch,Calib_20260523_Hg_4line_400-497nm_Poly2.txt,Calib_20260507_Hg_399-494nm_Poly2.txt,575,-30.1052,45.2788,47.2985,27.8188,0.048307
+hot_roi1,calib_epoch,Calib_20260619_Hg_400-499nm_Poly2.txt,Calib_20260403_Hg_400-499nm(roi1).txt,751,-0.483893,1.40577,1.54014,1.48551,0.048333
+hot_roi2,calib_epoch,Calib_20260619_Hg_400-499nm_Poly2.txt,Calib_20260403_Hg_400-499nm(roi2).txt,551,-0.00861002,0.0382462,0.042485,0.0490303,0.0480835
+cold,hg_lamp,2026 5월 06 10_46_46.csv,2026 5월 23 07_55_37.csv,4,-10.8402,17.5582,18.5396,30.5367,nan
+alpha_vs_fitset,wiring,Calib_20260619_Hg_400-499nm_Poly2.txt,2026-05-18-001_ANs_alpha_trace.dat,2047,0.613099,0.714746,0.744994,0.166175,0.048275

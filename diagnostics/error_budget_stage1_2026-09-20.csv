@@ -1,0 +1,13 @@
+term,nature,cold,hot_ANs,hot_PNs,ch_differential_ANs_minus_PNs,unit,reported_1sig,ratio_to_reported_max_channel,source,note
+i0_time_interp_full,random_sign_1h_correlated,0.0252,0.0810,0.0355,not_cancelling_independent,rel_channel_NO2,0.0055,14.7,diagnostics/i0_interp_2026-09/i0_loo_*.csv,LOO upper bound; operational estimate ~0.7x
+i0_time_interp_scale_only,random_sign_1h_correlated,0.00367,0.00330,0.00196,,rel_channel_NO2,0.0055,0.7,diagnostics/i0_interp_2026-09/i0_loo_*.csv,invisible to every fit diagnostic (same as R(t))
+i0_time_interp_shape_only,random_sign_1h_correlated,0.0320,0.0785,0.0328,,rel_channel_NO2,0.0055,14.3,diagnostics/i0_interp_2026-09/i0_loo_*.csv,carries the whole term
+tp_time_interp,random_sign,0.000131,0.000367,0.000488,0.00012,rel_channel_NO2,0.0055,0.09,diagnostics/i0_interp_2026-09/i0_loo_*.csv,negligible
+etalon_frequency_misspec,systematic_per_run,0.0120,-0.0061,-0.0094,0.0033,rel_channel_NO2_signed,0.0055,3.0,diagnostics/etalon_freq_2026-09/etalon_f_*.csv,f 0.12 -> channel modal bin; largely cancels between hot channels
+wavelength_axis_wiring_roi_swap,fixed_systematic,0.0,0.613,-0.613,1.226,pixel,,,diagnostics/wlcal_drift_2026-09/wlcal_drift.csv,BUG not uncertainty: ch1 alpha uses roi2 wavecal and vice versa
+wavelength_calibration_drift,unknown,-11.0,,,,pixel,,,diagnostics/wlcal_drift_2026-09/wlcal_drift.csv,cold 2026-05-06->05-23 only; hot has NO in-campaign Hg measurement = UNQUANTIFIED
+r_t_interp,,,0.0330,0.0330,not_cancelling,rel_channel_NO2,0.0055,6.0,prior audit,not re-measured in this pass
+unmodelled_etalon_amplitude_1pct,,,0.0490,0.0490,not_cancelling,rel_channel_NO2,0.0055,8.9,prior audit,not re-measured; DIFFERENT term from etalon_frequency_misspec
+ils,,,,,,rel_channel_NO2,0.0055,,prior audit,denominator needs restating before use
+i0_amplification_measured,measured_input,33.6,197.9,87.3,,ratio,,,diagnostics/i0_interp_2026-09/README.md,median |I0/(I0-I)| in fit window; instruction-sheet order-of-magnitude estimate was 5.6-31.8
+za_block_photon_noise,measured_input,0.00135,0.000998,0.000939,,rel_I0,,,diagnostics/i0_interp_2026-09/README.md,block-mean I0 relative noise = the floor of eps

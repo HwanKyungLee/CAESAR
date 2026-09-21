@@ -1,6 +1,6 @@
 # 2026 여수 캠페인 필드로그 정리 (CAESAR 관련만)
 
-원본: `C:\Doasis_Work\yeosu_2026\field_log\` (일자별 PDF, 대부분 3페이지 — page1만 CAESAR-Cold/Hot 표 있음, page2=ACSM/PTR-ToF/OHR, page3=GC-MS/FID+Any events, CAESAR와 무관해서 스킵). **5/17~5/21 로그 없음(5/22부터 시작)**.
+원본: `C:\GHL\2026 yeosu\filed log\` (2026-09-20 확인, 55개. 예전 기재 `C:\Doasis_Work\yeosu_2026\field_log\` 는 이 PC 에 없다) (일자별 PDF, 대부분 3페이지 — page1만 CAESAR-Cold/Hot 표 있음, page2=ACSM/PTR-ToF/OHR, page3=GC-MS/FID+Any events, CAESAR와 무관해서 스킵). **5/17~5/21 로그 없음(5/22부터 시작)**.
 
 시각은 로그에 적힌 그대로(KST 또는 UTC 명시된 대로) 옮김 — 임의 변환 안 함.
 
