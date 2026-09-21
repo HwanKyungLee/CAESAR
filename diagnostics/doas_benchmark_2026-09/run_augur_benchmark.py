@@ -54,8 +54,11 @@ from core.engine import UniversalEngine
 from core.parallel import max_workers
 
 GASES = ("NO2", "CHOCHO", "H2O")
-SHIFT_LIMIT = 8.0          # 진값이 ±4 px 안에 있다 — 상자를 그보다 넉넉히
-STEP_LIMIT = 8.0           # 한 스캔 보폭 제한. 벤치마크는 시계열이 아니라 제한 없음과 같게
+# 기준 구현은 [-5, 5] 를 0.02 px 격자로 **전수 탐색**한다. Augur 는 시드 13개에서
+# 상자 ±step 의 비선형 탐색이다. 범위가 다르면 다른 국소해로 갈 수 있으므로
+# `--shift-limit 5` 로 맞춰 볼 수 있게 열어 둔다(C·E 차이의 원인 후보).
+SHIFT_LIMIT = 8.0
+STEP_LIMIT = 8.0
 
 
 def load_channel(bench, channel):
@@ -103,10 +106,11 @@ def build_engine(wave, sig, kind="cubic", gases=GASES):
     return eng
 
 
-def props(gases, squeeze):
+def props(gases, squeeze, lim=None):
     """NO2 앵커 + 동반종 Link — 운영 FitSet 구조. squeeze 는 manifest 값으로 **고정**."""
+    lim = float(lim or SHIFT_LIMIT)
     sq = f"{squeeze - 1.0:.10g}"          # Augur 의 squeeze 는 1 로부터의 편차
-    p = {"NO2": {"sh_mode": "Limit", "sh_val": f"-{SHIFT_LIMIT}, {SHIFT_LIMIT}",
+    p = {"NO2": {"sh_mode": "Limit", "sh_val": f"-{lim}, {lim}",
                  "sq_mode": "Fix", "sq_val": sq, "t_ref": 25.0, "t_coeff": 0.0}}
     for g in gases:
         if g != "NO2":
@@ -115,15 +119,16 @@ def props(gases, squeeze):
     return p
 
 
-def fit_case(eng, fitter, y, px, centre, gases, squeeze, order, e_f, seed_grid):
+def fit_case(eng, fitter, y, px, centre, gases, squeeze, order, e_f, seed_grid, lim=None):
     """격자 시딩 → VarPro. 운영 `fit_scan` 의 controlled_start=None 경로와 같은 규약."""
     s = alpha_fit_scale(y)
     ys = y * s
     w = np.ones(len(px))
-    rp = props(gases, squeeze)
+    rp = props(gases, squeeze, lim)
     best = None
     for sh0 in seed_grid:
-        act, fx, lk, t0, lb, ub = fitter.setup_fit_parameters(rp, sh0, [sh0, 1.0], STEP_LIMIT)
+        act, fx, lk, t0, lb, ub = fitter.setup_fit_parameters(
+            rp, sh0, [sh0, 1.0], float(lim or STEP_LIMIT))
         try:
             out, diag = fitter.execute_varpro_fit(
                 px, ys, w, act, fx, lk, t0, lb, ub, order, float(e_f),
@@ -137,13 +142,14 @@ def fit_case(eng, fitter, y, px, centre, gases, squeeze, order, e_f, seed_grid):
     return best
 
 
-def run(bench, sigma_kind, out_path, limit=None, kind="cubic"):
+def run(bench, sigma_kind, out_path, limit=None, kind="cubic", shift_limit=None):
     man = list(csv.DictReader(open(os.path.join(bench, "cases", "manifest.csv"),
                                    encoding="utf-8")))
     Z = np.load(os.path.join(bench, "cases", "spectra.npz"))
     chans, waves = {}, {}
     rows = []
-    seed_grid = np.arange(-6.0, 6.001, 1.0)
+    lim = float(shift_limit or SHIFT_LIMIT)
+    seed_grid = np.arange(-(lim - 2.0), lim - 1.999, 1.0)
     for i, r in enumerate(man):
         if limit and i >= limit:
             break
@@ -160,7 +166,7 @@ def run(bench, sigma_kind, out_path, limit=None, kind="cubic"):
         y = np.asarray(Z[r["case_id"]], float)
         best = fit_case(eng, fitter, y, px, float(r["centre_pixel"]),
                         gases, float(r["squeeze_factor"]), int(r["fit_poly_order"]),
-                        float(r["fit_etalon_f"]), seed_grid)
+                        float(r["fit_etalon_f"]), seed_grid, shift_limit)
         if best is None:
             rows.append(dict(case_id=r["case_id"], NO2=np.nan, NO2_sigma=np.nan,
                              shift_px=np.nan, shift_sigma=np.inf,
@@ -204,10 +210,12 @@ def main():
     ap.add_argument("--sigma", choices=("lin", "joint"), default="joint")
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--shift-limit", type=float,
+                    help="shift 허용범위 ±px (기본 8). 기준 구현은 ±5 격자 전수탐색")
     ap.add_argument("--interp", choices=("cubic", "linear"), default="cubic",
                     help="레퍼런스 보간 차수. 운영은 cubic — 벤치마크 전방모델은 linear 다")
     a = ap.parse_args()
-    run(a.bench, a.sigma, a.out, a.limit, a.interp)
+    run(a.bench, a.sigma, a.out, a.limit, a.interp, a.shift_limit)
 
 
 if __name__ == "__main__":
