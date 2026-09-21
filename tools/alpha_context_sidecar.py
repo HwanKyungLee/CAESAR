@@ -89,7 +89,8 @@ def context(sec, knots):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--alpha-dir", required=True)
+    ap.add_argument("--alpha-dir", required=True, nargs="+",
+                    help="알파 폴더(들). 여러 개 또는 glob 가능 — 캠페인 전체를 한 번에")
     ap.add_argument("--rt", help="R(t) npz (knot_sec)")
     ap.add_argument("--za-npz", help="ZA knot 시각을 가진 npz (za_sec). 없으면 I0_* 는 NaN")
     ap.add_argument("--year-start-doy", type=float, default=1.0,
@@ -97,7 +98,11 @@ def main():
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
-    paths = sorted(glob.glob(os.path.join(a.alpha_dir, "*alpha_trace.dat")))
+    paths = []
+    for d in a.alpha_dir:
+        for dd in (sorted(glob.glob(d)) or [d]):
+            paths += glob.glob(os.path.join(dd, "*alpha_trace.dat"))
+    paths = sorted(set(paths))
     if not paths:
         raise SystemExit(f"ABSTAIN: {a.alpha_dir} 에 *alpha_trace.dat 이 없다")
 
@@ -113,6 +118,7 @@ def main():
         rk = np.asarray(r["knot_sec"], float)
 
     rows = 0
+    _span = [np.inf, -np.inf]
     with open(a.out, "w", encoding="utf-8") as fh:
         fh.write("file,row,doy,sec,I0_dt_s,I0_gap_h,I0_edge,R_dt_s,R_gap_h,R_edge\n")
         for p in paths:
@@ -128,8 +134,22 @@ def main():
                          % (b, j, doy[j], sec[j], i_dt[j], i_gap[j], int(i_ed[j]),
                             r_dt[j], r_gap[j], int(r_ed[j])))
             rows += len(sec)
+            _span[0] = min(_span[0], float(np.nanmin(sec)))
+            _span[1] = max(_span[1], float(np.nanmax(sec)))
 
     print(f"→ {a.out}  ({rows} rows, {len(paths)} files)")
+    # ⚠ knot 출처가 알파 구간을 **안 덮으면** '범위밖' 이 그 사실만 재게 된다.
+    #   실측으로 한 번 당했다(7일치 ZA 캐시로 전 캠페인 알파를 재서 I0 범위밖
+    #   88.1 % — 커버리지 결함이 아니라 입력 불일치였다). 그래서 먼저 경고한다.
+    lo, hi = _span[0], _span[1]
+    for tag, k in (("I0", za), ("R", rk)):
+        if k is None or not len(k):
+            continue
+        if k.min() > lo + 3600 or k.max() < hi - 3600:
+            print("  ⚠ [%s] knot 구간(%.2f~%.2f day)이 알파 구간(%.2f~%.2f day)을 "
+                  "안 덮는다 — '범위밖' 은 커버리지가 아니라 **입력 불일치**를 잰다."
+                  % (tag, k.min() / SEC_PER_DAY, k.max() / SEC_PER_DAY,
+                     lo / SEC_PER_DAY, hi / SEC_PER_DAY))
     # 한 줄 요약 — 커버리지 문제가 있으면 여기서 바로 보인다
     import csv as _csv
     R = list(_csv.DictReader(open(a.out, encoding="utf-8")))
