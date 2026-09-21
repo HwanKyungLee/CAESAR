@@ -50,7 +50,7 @@ class AnalysisWorker(QThread):
     r_curve_update = pyqtSignal(object, object)
     scan_count_ready = pyqtSignal(int)   # emitted once after all files are expanded
 
-    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=None, flag_he=None, flag_amb=None, dark_array=None, dark_scale_factor=1.0, offset_array=None, offset_scale_factor=1.0, stray_light_fraction=0.0, use_temporal_i0=False, save_alpha=False, alpha_save_dir='', rl_factor=1.0, channel=1, residual_dump_path=None):
+    def __init__(self, engine, file_list, pixel_min, pixel_max, p0, bounds, update_interval, delay_ms=0, ref_properties=None, i0_array=None, r_array=None, cavity_len=100.0, temperature=25.0, pressure=1013.25, flag_za=None, flag_he=None, flag_amb=None, dark_array=None, dark_scale_factor=1.0, offset_array=None, offset_scale_factor=1.0, stray_light_fraction=0.0, use_temporal_i0=False, save_alpha=False, alpha_save_dir='', rl_factor=1.0, channel=1, residual_dump_path=None, i0_low_light_frac=0.0):
         super().__init__()
         self.engine = engine
         self.file_list = file_list
@@ -76,6 +76,7 @@ class AnalysisWorker(QThread):
         self.offset_scale_factor   = offset_scale_factor   # n_meas / n_offset  (scan count ratio)
         self.stray_light_fraction  = stray_light_fraction  # ε: scattered light fraction; I_corr=(I-ε·mean(I))/(1-ε)
         self.use_temporal_i0       = use_temporal_i0       # If True, interpolate I0 from bracketing ZA scans
+        self.i0_low_light_frac     = float(i0_low_light_frac or 0.0)  # §6.3 저광량 I0 knot 게이트(0=끔)
 
         # [ Environment Variables ]
         self.temperature = temperature
@@ -1798,6 +1799,8 @@ def _pass2_write_file(fp, rows, ctx):
         # I0 블록 선두에서 잘라낸 과도구간 스캔 수. 0 이면 블록이 이미 정착해
         # 있었다는 뜻(정상 주기). 값이 있으면 그 I0 는 wait-before 를 쓴 것이다.
         f.write(f"# i0_settle_drop_ZA={ctx.get('n_za_drop', 0)}"
+                f"  i0_low_light_drop={ctx.get('n_ll_drop', 0)}"
+                f"  i0_low_light_frac={ctx.get('i0_low_light_frac', 0.0):g}"
                 f"  i0_settle_drop_He={ctx.get('n_he_drop', 0)}"
                 f"  tol={SETTLE_TOL}\n")
         # flag=0 헤더행은 HK 28열이 전부 65535라 T/P가 없다. 버리지 않고 **다음
@@ -1885,6 +1888,39 @@ def settle_start(block, tol=SETTLE_TOL):
     # 절반 넘게 버려야 하면 트리밍하지 않는다 — 블록 전체가 의심스럽다는 뜻이고,
     # 조용히 일부만 I0 로 쓰는 게 통째로 쓰는 것보다 위험하다.
     return k if 0 < k <= len(b) // 2 else 0
+
+
+# ── I0 knot 저광량 게이팅 (§6.3) ──
+# R(t) knot 에는 이미 품질 게이트가 있다(reflectance_calc `min_valid_fraction`,
+# Leff [0.5×,2×] 밴드). **I₀ knot 에는 없었다** — 구름·광원 저하로 어두운 ZA
+# 블록도 밝은 블록과 똑같은 가중으로 PCHIP 에 들어간다. 그 블록의 상대 광자잡음이
+# ε 의 바닥을 올리고(실측: cold 1.377e-03 대 hot 9.4e-04, 1.5배), 저광량 블록
+# 13/164 개가 eps 분산의 99.9 % 를 진 사례가 있다.
+#
+# **기본은 꺼짐(frac=0)** — 켜지 않으면 한 블록도 안 버린다(운영 산출물 무변경).
+# 문턱은 매직넘버가 아니라 **그 런의 블록 중앙값 대비 비율**이다. 절대 카운트로
+# 잡으면 채널·적분시간마다 다른 수를 손으로 정해야 한다.
+def low_light_knots(spectra, frac, pixel_min=None, pixel_max=None):
+    """버려야 할 ZA 블록 인덱스 집합. frac<=0 이면 항상 빈 집합.
+
+    판정값은 **핏창 안 중앙 카운트**다. 창 밖(차단필터 바깥 등)은 광량 판정에
+    쓰면 안 된다 — 거기는 원래 어둡다.
+    """
+    if not spectra or not frac or frac <= 0:
+        return set()
+    lo = max(0, int(pixel_min or 0))
+    lvl = []
+    for sp in spectra:
+        a = np.asarray(sp, dtype=float)
+        hi = min(len(a), int(pixel_max)) if pixel_max else len(a)
+        seg = a[lo:hi] if hi > lo else a
+        ok = seg[np.isfinite(seg)] if seg.size else seg
+        lvl.append(float(np.median(ok)) if ok.size else np.nan)
+    lvl = np.asarray(lvl, dtype=float)
+    ref = float(np.nanmedian(lvl[np.isfinite(lvl)])) if np.isfinite(lvl).any() else np.nan
+    if not np.isfinite(ref) or ref <= 0:
+        return set()          # 기준을 못 세우면 아무것도 안 버린다(헌장: 애매하면 남긴다)
+    return {i for i, v in enumerate(lvl) if not np.isfinite(v) or v < frac * ref}
 
 
 def _pass2_process_file(fp, entries, ctx):
@@ -1988,6 +2024,9 @@ class AlphaExportWorker(QThread):
                  drnam_chlabel="",      # 박사님 형식 채널 접두(ch1/ch2/ch3)
                  channel_subdir="",     # wide 형식: 멀티채널 시 출력 하위폴더(ch1/ch2/…), 단일이면 ""
                  rt_path=None,          # R(t) npz 경로(rt_precompute). 주면 자체 R 대신 이걸 시간보간해 사용
+                 i0_low_light_frac=0.0, # §6.3 저광량 I0 knot 게이트. 0=끔(기본, 무변경).
+                                        # 핏창 중앙 카운트가 블록중앙값의 이 배수 미만인
+                                        # ZA 블록을 knot 에서 제외한다 — `low_light_knots`.
                  campaign=""):          # 산출물 최상위 폴더(A3). 비면 'default'
         """
         r_cal_valid_min, r_cal_omr_max : ZA block 별 R-cal 후보 채택 기준.
@@ -2019,6 +2058,7 @@ class AlphaExportWorker(QThread):
         self.drnam_chlabel   = str(drnam_chlabel)
         self.channel_subdir  = str(channel_subdir)
         self.rt_path         = rt_path
+        self.i0_low_light_frac = float(i0_low_light_frac or 0.0)
         self.campaign        = str(campaign or "")
         self.is_running  = True
         # dark_spectrum: fit-window slice (pixel_min..pixel_max) already extracted
@@ -2464,6 +2504,28 @@ class AlphaExportWorker(QThread):
                 f"He {n_he_drop}/{n_he_raw} 스캔 — 가스 전환 직후 캐비티가 아직 "
                 f"채워지는 구간이다 (raw 는 그대로, 헤더에 기록됨)."
             )
+
+        # §6.3 저광량 I0 knot 게이트. 기본 frac=0 → 한 블록도 안 빠진다(무변경).
+        n_ll_drop = 0
+        _ll = low_light_knots(za_spectra, self.i0_low_light_frac,
+                              self.pixel_min, self.pixel_max)
+        if _ll:
+            if len(za_gidx) - len(_ll) < 2:
+                self.status_msg.emit(
+                    f"[I0 저광량] 게이트가 knot 을 {len(_ll)}/{len(za_gidx)}개 버리려 한다 "
+                    f"— 2개 미만이 남아 **적용하지 않는다**. frac 을 낮춰라.")
+            else:
+                n_ll_drop = len(_ll)
+                _keep = [i for i in range(len(za_gidx)) if i not in _ll]
+                za_gidx = [za_gidx[i] for i in _keep]
+                za_sec = [za_sec[i] for i in _keep]
+                za_spectra = [za_spectra[i] for i in _keep]
+                za_t_list = [za_t_list[i] for i in _keep]
+                za_p_list = [za_p_list[i] for i in _keep]
+                self.status_msg.emit(
+                    f"[I0 저광량] ZA knot {n_ll_drop}/{n_ll_drop + len(_keep)}개 제외 "
+                    f"(핏창 중앙 카운트 < 블록중앙값의 {self.i0_low_light_frac:g}배) — "
+                    f"raw 는 그대로, 헤더에 기록됨.")
 
         # 강도 보정(dark·offset·stray) — 블록평균 후 한 번만. RUN 경로와 동일 물리.
         # 기본값(scale=1·offset=None·ε=0)에선 기존 'I−dark'와 byte-동일(무회귀).
@@ -2992,6 +3054,8 @@ class AlphaExportWorker(QThread):
             'channel': self.channel, 'cavity_len': self.cavity_len,
             'i0_mode': i0_mode, 'n_za': n_za,
             'n_za_drop': n_za_drop, 'n_he_drop': n_he_drop,
+            'n_ll_drop': n_ll_drop,
+            'i0_low_light_frac': self.i0_low_light_frac,
             'rt_calib_note': rt_calib_note, 'calib_info_per_file': calib_info_per_file,
         }
 
