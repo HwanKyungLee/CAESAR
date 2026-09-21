@@ -333,6 +333,21 @@ class AnalysisWorker(QThread):
             note += " · UNDERDETERMINED"
         return note
 
+    def _fit_status_cols(self, result):
+        """종료 상태를 **기계가 읽을 수 있는 열**로. Status 문자열은 그대로 둔다.
+
+        여태 `_solver_status_note()` 가 " · AT_BOUND(NO2_sq)" 를 Status 문자열에
+        덧붙이는 것으로만 나갔다. 하류가 세려면 문자열을 파싱해야 했고, 실측
+        부록 A-1 이 "1085건 전부 squeeze" 를 밝히는 데 별도 조사가 필요했던
+        이유가 이것이다. 값은 이미 계산돼 있다 — 열로 내보내기만 한다.
+
+        기존 열은 하나도 안 건드린다(감사 규약: 새 값은 새 열로).
+        """
+        t = getattr(self, '_last_solver_termination', None) or {}
+        result['Fit_Status'] = str(t.get("status") or "")
+        result['Bound_Params'] = ",".join(self._bound_param_names())
+        result['Underdetermined'] = int(bool(getattr(self, '_last_underdetermined', False)))
+
     def _low_signal_retry(self, rms, signal_mean):
         """`rms >= mean|신호| × ok_rms_threshold` — **재시도를 걸지** 판단한다.
 
@@ -936,6 +951,7 @@ class AnalysisWorker(QThread):
                         # Export the exact state used for the ppb conversion.
                         result['T_used_C'] = float(self.temperature)
                         result['P_used_mbar'] = float(self.pressure)
+                        self._fit_status_cols(result)
                         for gi, nm in enumerate(self.engine.gas_list):
                             result[f"{nm}_RealConc"] = float(raw_concentrations[gi])
 
@@ -1207,6 +1223,7 @@ class AnalysisWorker(QThread):
 
                         result['T_used_C'] = float(self.temperature)
                         result['P_used_mbar'] = float(self.pressure)
+                        self._fit_status_cols(result)
                         for gj, nm in enumerate(self.engine.gas_list):
                             result[f"{nm}_RealConc"] = float(raw_concentrations[gj])
 

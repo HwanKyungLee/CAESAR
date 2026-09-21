@@ -760,6 +760,7 @@ class DoasFitter:
         # 기존 perr는 **덮어쓰지 않는다**. 새 값으로 따로 내보내 두 값을 비교해야
         # "결합항을 넣으면 오차가 X% 증가한다"를 논문에 쓸 수 있다.
         perr_joint = np.full(num_gases, np.nan)
+        theta_err_joint: dict[str, float] = {}
         try:
             if (_ref_deriv and len(active_vars)
                     and all(n in _ref_deriv for n in self.engine.gas_list)):
@@ -786,8 +787,15 @@ class DoasFitter:
                 dj = np.sqrt(np.maximum(np.diag(cov_j), 0.0))
                 for gi, name in enumerate(self.engine.gas_list):
                     perr_joint[gi] = dj[keep_pos[gi]] if gas_active[name] else 0.0
+                # theta(shift·squeeze) 쪽 표준오차. 같은 공분산의 **뒤쪽 블록**이라
+                # 공짜인데 여태 버리고 있었다 — shift 가 자료로 구속되는지(§5.5)를
+                # 판정하려면 이게 있어야 한다. 기체 오차는 건드리지 않는다.
+                if len(active_vars):
+                    theta_err_joint = {nm: float(dj[-len(active_vars) + k])
+                                       for k, nm in enumerate(active_vars)}
         except Exception:
             perr_joint = np.full(num_gases, np.nan)   # 모르면 NaN (0 아님)
+            theta_err_joint = {}
 
         c_gas = c_opt[0:num_gases].copy()
         c_perr = perr_lin[0:num_gases].copy()
@@ -831,6 +839,10 @@ class DoasFitter:
                        # 기체 계수 단위. 조건부(반환 튜플의 c_perr)와 **나란히** 쓰라고
                        # 따로 낸다 — 기존 열을 덮지 않는다.
                        "perr_joint": perr_joint.tolist(),
+                       # active_vars 이름 → 그 파라미터의 결합 표준오차(px 단위).
+                       # 못 구했으면 **빈 dict** — 0 으로 채우면 "오차 없음"이라는
+                       # 거짓 주장이 된다(perr_joint 와 같은 규약).
+                       "theta_err_joint": theta_err_joint,
                        "dof": int(_dof),
                        "underdetermined": bool(_dof <= 0),
                        "cond_raw": _safe_cond(A_f_w[:, keep_mask]),
