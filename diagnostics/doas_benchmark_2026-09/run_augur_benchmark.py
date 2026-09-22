@@ -106,12 +106,19 @@ def build_engine(wave, sig, kind="cubic", gases=GASES):
     return eng
 
 
-def props(gases, squeeze, lim=None):
-    """NO2 앵커 + 동반종 Link — 운영 FitSet 구조. squeeze 는 manifest 값으로 **고정**."""
+def props(gases, squeeze, lim=None, fix_sh=None):
+    """NO2 앵커 + 동반종 Link — 운영 FitSet 구조. squeeze 는 manifest 값으로 **고정**.
+
+    `fix_sh` 가 주어지면 shift 도 그 값에 **고정**한다 — B 군의 `scatter/reported`
+    가 shift 자유도 때문인지 가르는 진단 스위치다(운영 경로는 항상 Limit).
+    """
     lim = float(lim or SHIFT_LIMIT)
     sq = f"{squeeze - 1.0:.10g}"          # Augur 의 squeeze 는 1 로부터의 편차
-    p = {"NO2": {"sh_mode": "Limit", "sh_val": f"-{lim}, {lim}",
-                 "sq_mode": "Fix", "sq_val": sq, "t_ref": 25.0, "t_coeff": 0.0}}
+    if fix_sh is None:
+        sh = {"sh_mode": "Limit", "sh_val": f"-{lim}, {lim}"}
+    else:
+        sh = {"sh_mode": "Fix", "sh_val": f"{fix_sh:.10g}"}
+    p = {"NO2": dict(sh, sq_mode="Fix", sq_val=sq, t_ref=25.0, t_coeff=0.0)}
     for g in gases:
         if g != "NO2":
             p[g] = {"sh_mode": "Link", "sh_val": "NO2", "sq_mode": "Link",
@@ -119,12 +126,13 @@ def props(gases, squeeze, lim=None):
     return p
 
 
-def fit_case(eng, fitter, y, px, centre, gases, squeeze, order, e_f, seed_grid, lim=None):
+def fit_case(eng, fitter, y, px, centre, gases, squeeze, order, e_f, seed_grid,
+             lim=None, fix_sh=None):
     """격자 시딩 → VarPro. 운영 `fit_scan` 의 controlled_start=None 경로와 같은 규약."""
     s = alpha_fit_scale(y)
     ys = y * s
     w = np.ones(len(px))
-    rp = props(gases, squeeze, lim)
+    rp = props(gases, squeeze, lim, fix_sh)
     best = None
     for sh0 in seed_grid:
         act, fx, lk, t0, lb, ub = fitter.setup_fit_parameters(
@@ -142,7 +150,8 @@ def fit_case(eng, fitter, y, px, centre, gases, squeeze, order, e_f, seed_grid, 
     return best
 
 
-def run(bench, sigma_kind, out_path, limit=None, kind="cubic", shift_limit=None):
+def run(bench, sigma_kind, out_path, limit=None, kind="cubic", shift_limit=None,
+        group=None, fix_shift=False):
     man = list(csv.DictReader(open(os.path.join(bench, "cases", "manifest.csv"),
                                    encoding="utf-8")))
     Z = np.load(os.path.join(bench, "cases", "spectra.npz"))
@@ -150,6 +159,8 @@ def run(bench, sigma_kind, out_path, limit=None, kind="cubic", shift_limit=None)
     rows = []
     lim = float(shift_limit or SHIFT_LIMIT)
     seed_grid = np.arange(-(lim - 2.0), lim - 1.999, 1.0)
+    if group:
+        man = [r for r in man if r["group"] == group]
     for i, r in enumerate(man):
         if limit and i >= limit:
             break
@@ -166,7 +177,8 @@ def run(bench, sigma_kind, out_path, limit=None, kind="cubic", shift_limit=None)
         y = np.asarray(Z[r["case_id"]], float)
         best = fit_case(eng, fitter, y, px, float(r["centre_pixel"]),
                         gases, float(r["squeeze_factor"]), int(r["fit_poly_order"]),
-                        float(r["fit_etalon_f"]), seed_grid, shift_limit)
+                        float(r["fit_etalon_f"]), seed_grid, shift_limit,
+                        float(r["shift_px"]) if fix_shift else None)
         if best is None:
             rows.append(dict(case_id=r["case_id"], NO2=np.nan, NO2_sigma=np.nan,
                              shift_px=np.nan, shift_sigma=np.inf,
@@ -214,8 +226,11 @@ def main():
                     help="shift 허용범위 ±px (기본 8). 기준 구현은 ±5 격자 전수탐색")
     ap.add_argument("--interp", choices=("cubic", "linear"), default="cubic",
                     help="레퍼런스 보간 차수. 운영은 cubic — 벤치마크 전방모델은 linear 다")
+    ap.add_argument("--group", help="그 군만 돌린다 (예: B_noise)")
+    ap.add_argument("--fix-shift", action="store_true",
+                    help="진단 — shift 를 manifest 진값에 고정한다. 운영 경로가 아니다")
     a = ap.parse_args()
-    run(a.bench, a.sigma, a.out, a.limit, a.interp, a.shift_limit)
+    run(a.bench, a.sigma, a.out, a.limit, a.interp, a.shift_limit, a.group, a.fix_shift)
 
 
 if __name__ == "__main__":
