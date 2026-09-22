@@ -41,33 +41,48 @@ except AttributeError:
 BIN_S = 300.0                      # 산출물은 5분 평균이다
 
 
-def load_fit(path, cols=("Time", "NO2", "NO2_Error", "Chi2")):
-    """핏 산물 .dat → dict of arrays. 헤더행은 `File\\tChannel\\tTime…` 로 시작한다."""
+def load_fit(path, cols=("Time", "NO2", "NO2_Error", "Chi2"), str_cols=("Status",)):
+    """핏 산물 .dat → dict of arrays. 헤더행은 `File\tChannel\tTime…` 로 시작한다.
+
+    한 행이 깨지면 **그 행 전체를 버린다**. 열마다 따로 append 하면 길이가
+    어긋나서 조용히 다른 시각의 값끼리 짝지어진다 — 그래서 행 단위로 모은다.
+    `str_cols` 는 문자열 열(예: `Status`)이고 존재할 때만 담는다.
+    """
     idx = None
-    out = {c: [] for c in cols}
+    recs = []
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             if line.startswith("#"):
                 continue
-            f = line.rstrip("\n").split("\t")
+            f = line.rstrip(chr(10)).split(chr(9))
             if idx is None:
                 if "Time" not in f:
                     continue
-                idx = {c: f.index(c) for c in cols}
+                have = [c for c in cols if c in f]
+                idx = {c: f.index(c) for c in have}
                 continue
+            row = []
             try:
-                for c in cols:
+                for c in idx:
                     v = f[idx[c]]
-                    out[c].append(v if c == "Time" else float(v))
+                    row.append(v if c == "Time" or c in str_cols else float(v))
             except (IndexError, ValueError):
-                for c in cols:                       # 길이를 다시 맞춘다
-                    if len(out[c]) > len(out["Time"]) - 1:
-                        pass
-                continue
-    t = np.array([_sec(s) for s in out["Time"]], float)
-    d = {c: np.asarray(out[c], float) for c in cols if c != "Time"}
-    d["sec"] = t
-    return d
+                continue                                  # 행 전체를 버린다
+            recs.append(row)
+    keys = list(idx)
+    out = {}
+    for i, c in enumerate(keys):
+        col = [r[i] for r in recs]
+        if c == "Time":
+            out["sec"] = np.array([_sec(x) for x in col], float)
+        elif c in str_cols:
+            out[c] = np.array(col, dtype=object)
+        else:
+            out[c] = np.asarray(col, float)
+    for c in cols:                                        # 없는 열은 NaN 으로
+        if c not in out and c != "Time":
+            out[c] = np.full(len(recs), np.nan)
+    return out
 
 
 def _sec(s):
