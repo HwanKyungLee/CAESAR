@@ -1,0 +1,9 @@
+group,metric,value,target,pass_,extra
+A_exact,max relative error,4.724298188245296e-13,< 1e-6,True,
+B_noise:noise x1,scatter / reported sigma,1.1904699294134518,1.0 +- 0.2,True,"bias -2.19 %, scatter 20.28 %, reported 17.04 %"
+B_noise:noise x2,scatter / reported sigma,1.3252475610873686,1.0 +- 0.2,False,"bias +4.80 %, scatter 44.98 %, reported 33.94 %"
+B_noise:AR(1) 0.5,scatter / reported sigma,1.5715461302692513,1.0 +- 0.2,False,"bias +7.79 %, scatter 26.12 %, reported 16.62 %"
+C_mismatch,max |bias| in units of the noise RMS,1.2279056632123384,reported sigma is not expected to cover it,,"scored on 15 of 16 cases (1 declared unconstrained, 0 of those false alarms); worst C_missing_a1e-07; max relative bias among detectable cases (truth > 3x noise) 37.7 %; max |bias|/reported sigma 11.2"
+D_identifiability,cases declared unconstrained,4/5,5/5,False,returned shift spread 9.30 px
+F_subpixel,median |error| from sub-pixel model,0.0006782349335468906,"report, do not pass/fail",,"max 9.69e-04; truth is band-limited, so this is the cost of the interpolator chosen"
+E_window,max window-to-window disagreement (truth > 10x noise),0.04650183216906334,within the combined reported sigma,False,all pairs: max 0.386; 5/8 inside the combined reported sigma; median shift sigma cold 0.28 px vs hot_PNs 0.34 px
