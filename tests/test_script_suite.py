@@ -30,7 +30,8 @@ import sys
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCAN_DIRS = ("core", "gui", "oculus", "tools", "diagnostics", "calibration")
+SCAN_DIRS = ("core", "gui", "oculus", "tools", "diagnostics", "calibration",
+             "benchmark")
 
 # 제외 — {상대경로: 사유}. 늘리기 전에 "정말 테스트가 아닌가"를 먼저 의심할 것.
 EXCLUDE = {

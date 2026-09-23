@@ -1,6 +1,6 @@
 # DOAS extinction-domain retrieval benchmark, v2
 
-249 synthetic extinction spectra with known truth, for testing DOAS-style
+261 synthetic extinction spectra with known truth, for testing DOAS-style
 retrieval codes. Every spectrum comes from an explicit forward model; no retrieval
 code was used to make them, so the benchmark does not favour any implementation.
 

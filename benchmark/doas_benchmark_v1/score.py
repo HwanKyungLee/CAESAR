@@ -26,7 +26,15 @@ def score(man, sub):
     rep.append(dict(group="A_exact", metric="max relative error", value=float(e.max()),
                     target="< 1e-6", pass_=bool(e.max() < 1e-6)))
 
-    for tag, lab in (("B_n1_", "noise x1"), ("B_n2_", "noise x2"), ("B_ar_", "AR(1) 0.5")):
+    # Tags are discovered from the case ids rather than hard-coded, so a package
+    # generated with --noise-levels beyond the default two is scored in full.
+    # For the shipped package this yields exactly n1, n2, ar, in that order.
+    seen = [c.split("_")[1] for c in d[d.group == "B_noise"].case_id]
+    tags = sorted({t for t in seen if t != "ar"},
+                  key=lambda t: float(t[1:]) if t[1:] else 0.0)
+    tags += ["ar"] if "ar" in seen else []
+    for tag, lab in ((f"B_{t}_", f"noise x{t[1:]}" if t != "ar" else "AR(1) 0.5")
+                     for t in tags):
         b = d[d.case_id.str.startswith(tag)]
         if not len(b):
             continue
