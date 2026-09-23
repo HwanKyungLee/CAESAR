@@ -157,12 +157,19 @@ class Channel:
         return out
 
     def seed(self, alpha, T_C, P_mbar):
-        """격자 시딩은 production 과 같은 `fit_scan` 에 맡긴다."""
+        """격자 시딩은 production 과 같은 `fit_scan` 에 맡긴다.
+
+        `cfg["seed_step"]` 가 있으면 격자 간격만 그 값으로 바꾼다(민감도 스윕용).
+        없으면 `fit_scan` 의 기본 0.25 px — 즉 기존 호출은 한 글자도 안 바뀐다.
+        """
+        kw = {}
+        if self.cfg.get("seed_step"):
+            kw["seed_step"] = float(self.cfg["seed_step"])
         r = PO.fit_scan(self.eng, self.fitter, self.cfg["ref_props"], self.wave,
                         np.asarray(alpha, float), T_C, P_mbar,
                         self.px_min, self.px_max, int(self.cfg["poly_deg"]),
                         float(self.cfg["step_limit"]), target=self.target,
-                        allow_negative_gas=True)
+                        allow_negative_gas=True, **kw)
         # **수렴한 shift 가 아니라 격자 시드**를 돌려준다. fit_scan 은 상자를 시드에
         # 앵커하므로(anchor = seed), 재핏도 같은 상자를 써야 같은 계를 푸는 것이 된다.
         # 수렴값에 앵커했더니 cold 처럼 shift 가 경계에 붙는 채널에서 31/31 이

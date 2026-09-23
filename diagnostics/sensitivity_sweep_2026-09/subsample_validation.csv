@@ -1,0 +1,4 @@
+sample,n_bins,structural_rSD,structural_SD,denom_sigma,ratio_lo,ratio_hi
+full_8847,8847,0.0700662,0.124512,0.0501,1.71927,2.67891
+subsample_1000,963,0.0715131,0.11862,0.0501,1.74284,2.57019
+deviation_pct,,2.065,-4.732,,1.371,-4.059

@@ -215,8 +215,14 @@ def run_channel(C, args, tag):
     # 몇 시간(knot 7개)만 보게 되고, 그 구간이 대표적이라는 보장이 전혀 없다
     # (실측: 앞 400빈은 ANs shift 중앙 −6.6 px 로 전체 −5.2 와 딴판이었다).
     stride = max(1, len(C.ax) // args.limit) if args.limit else 1
+    # 민감도 스윕은 **설정마다 같은 빈**을 써야 비교가 성립한다. --sec-file 이 주어지면
+    # stride 대신 그 초 목록으로 고른다(기본 None = 기존 동작 그대로).
+    want = getattr(args, "_sec_set", None)
+    idxs = (range(0, len(C.ax), stride) if want is None
+            else [j for j in range(len(C.ax))
+                  if round(float(C.d["amb_sec"][j]), 3) in want])
     by_knot = {}
-    for jj in range(0, len(C.ax), stride):
+    for jj in idxs:
         k = int(knot_of[jj])
         if k <= 0 or k >= nk - 1:
             continue
@@ -282,6 +288,33 @@ def run_channel(C, args, tag):
                 n2=np.asarray(base_no2, float))
 
 
+def apply_overrides(cfg, args, target="NO2"):
+    """민감도 스윕용 설정 변형(`diagnostics/sensitivity_sweep_2026-09`).
+
+    인자가 전부 기본이면 cfg 를 **그대로** 돌려준다 — 기존 재현 명령은 무회귀다.
+    상자는 운영 상자의 **중심을 유지한 채 반폭만** 바꾼다(2026-09-23 사용자 결정):
+    hot ANs 의 운영 상자는 `-10, 0.5` 로 애초에 비대칭이고 실측 shift 가 −5.2 px 라,
+    0 을 중심으로 대칭화하면 '상자 폭' 이 아니라 '해를 잘라냈는가' 를 재게 된다.
+    """
+    if not (args.box_half or args.poly_delta or args.n_seeds):
+        return cfg
+    cfg = dict(cfg)
+    cfg["ref_props"] = {g: dict(v) for g, v in cfg["ref_props"].items()}
+    props = cfg["ref_props"][target]
+    lo, hi = (float(v) for v in str(props["sh_val"]).split(","))
+    if args.box_half:
+        c = 0.5 * (lo + hi)
+        lo, hi = c - args.box_half, c + args.box_half
+        props["sh_val"] = "%g, %g" % (lo, hi)
+    if args.poly_delta:
+        cfg["poly_deg"] = int(cfg["poly_deg"]) + int(args.poly_delta)
+    if args.n_seeds:
+        # 시드 격자는 ±15 px 와 전역 sh_val 의 교집합 위에 놓인다(`_seed_shift`).
+        g_lo, g_hi = max(-15.0, lo), min(15.0, hi)
+        cfg["seed_step"] = (g_hi - g_lo) / max(int(args.n_seeds) - 1, 1)
+    return cfg
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -303,12 +336,29 @@ def main():
                     help="병렬 워커 수(0=core/parallel.max_workers). 워커마다 npz "
                          "~350 MB 를 따로 든다 — 메모리 모자라면 줄여라")
     ap.add_argument("--out", default=os.path.join(_HERE, "production_budget.csv"))
+    # ── 민감도 스윕용(기본값이면 동작 무변화) ──────────────────────────────
+    ap.add_argument("--sec-file", help="이 파일에 적힌 초(한 줄에 하나)의 빈만 쓴다")
+    ap.add_argument("--box-half", type=float, help="shift 상자 반폭(px). 중심은 운영 그대로")
+    ap.add_argument("--poly-delta", type=int, default=0, help="poly_deg 에 더할 값")
+    ap.add_argument("--n-seeds", type=int, default=0, help="shift 시드 격자 점 수(0=운영 0.25 px)")
     args = ap.parse_args()
+
+    args._sec_set = None
+    if args.sec_file:
+        with open(args.sec_file, encoding="utf-8") as fh:
+            args._sec_set = {round(float(l), 3) for l in fh if l.strip()}
+        print(f"[스윕] 고정 부분표본 {len(args._sec_set)} 빈 ← {args.sec_file}")
 
     ch = json.load(open(args.fitset, encoding="utf-8"))["channels"]
     print("[생산 런] 전 빈 전파 · scale 은 마지막 한 번 · 가중=빈(=스캔) 단위")
-    A = Chan(args.cache_a, args.rt_a, ch[args.key_a], args.ef_a, args.step_limit)
-    B = Chan(args.cache_b, args.rt_b, ch[args.key_b], args.ef_b, args.step_limit)
+    cfg_a = apply_overrides(ch[args.key_a], args)
+    cfg_b = apply_overrides(ch[args.key_b], args)
+    for tag, c in (("ANs", cfg_a), ("PNs", cfg_b)):
+        print("  [%s] sh_val %s · poly %d · step_limit %g · seed_step %s"
+              % (tag, c["ref_props"]["NO2"]["sh_val"], int(c["poly_deg"]),
+                 args.step_limit, c.get("seed_step", "0.25(운영)")))
+    A = Chan(args.cache_a, args.rt_a, cfg_a, args.ef_a, args.step_limit)
+    B = Chan(args.cache_b, args.rt_b, cfg_b, args.ef_b, args.step_limit)
     RA = run_channel(A, args, "ANs")
     RB = run_channel(B, args, "PNs")
     sa, va, ampa = RA["sec"], RA["v"], RA["amp"]
