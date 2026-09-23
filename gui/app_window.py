@@ -441,6 +441,14 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             "removing positive-rectification bias → unbiased PNs difference. Default = on (unbiased).")
         self.chk_allow_neg.setChecked(True)
 
+        self.chk_etalon = QCheckBox("Fit etalon")
+        self.chk_etalon.setToolTip(
+            "Checked (default): FFT-detect one etalon fringe frequency (0.02–0.40 cyc/px) and fit\n"
+            "sin+cos columns. Unchecked: no etalon columns and no detection — use only when the\n"
+            "spectrum has no fringe; in narrow windows the unneeded pair can double NO2 scatter.\n"
+            "Saved per channel in the FitSet as \"etalon\": {\"enabled\": ...}.")
+        self.chk_etalon.setChecked(True)
+
         self.ref_props = {}
         btn_props = QPushButton("Properties")
         btn_props.setStyleSheet("font-weight: bold;")
@@ -541,7 +549,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # r0
         _pg.addWidget(_lbl("Step"), 0, 0); _pg.addWidget(self.spin_step_limit, 0, 1)
         _pg.addWidget(_lbl("Poly Deg"),  0, 2); _pg.addWidget(self.spin_poly_deg,  0, 3)
-        _pg.addWidget(self.chk_allow_neg, 0, 4, 1, 2)
+        _pg.addWidget(self.chk_allow_neg, 0, 4)
+        _pg.addWidget(self.chk_etalon,    0, 5)
         _pg.addWidget(btn_props,         0, 6, 1, 2)
         # r1: QC 핵심 + 정착 스캔 제외(⏱ Settling, N)
         _pg.addWidget(self.chk_qc,        1, 0, 1, 2)

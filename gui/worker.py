@@ -120,6 +120,9 @@ class AnalysisWorker(QThread):
         self.kalman_r = 0.050
         self.etalon_freq_min = 0.02
         self.etalon_freq_max = 0.40
+        # FitSet 채널 `etalon.enabled`(core.doas_fit.etalon_enabled). False면 FFT 검출을
+        # 아예 안 부르고 fixed_e_f=None으로 etalon 열 없이 핏한다. 기본 True = 현행.
+        self.etalon_enabled = True
 
     def _write_residual_dump(self, wave_nm, result, residual):
         """Append one fitted residual row, opening and validating the file once."""
@@ -851,7 +854,7 @@ class AnalysisWorker(QThread):
                 absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw)/2.0
 
                 # 2. Etalon detection
-                if getattr(self, 'etalon_freq', None) is None:
+                if self.etalon_enabled and getattr(self, 'etalon_freq', None) is None:
                     self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
 
                 # 3. Fitting loop
@@ -871,7 +874,7 @@ class AnalysisWorker(QThread):
                     
                     # 4. Parameter setup
                     active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = self._setup_fit_parameters(initial_shift_center, current_params)
-                    fixed_e_f = self.etalon_freq  
+                    fixed_e_f = self.etalon_freq if self.etalon_enabled else None   # None = etalon 열 없음
                     # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
                     #  두 선형열로 처리. 위상 append 제거.)
                     
@@ -908,7 +911,7 @@ class AnalysisWorker(QThread):
                         )
                         
                         abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
-                        etalon_part_orig = (etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                        etalon_part_orig = (etalon_amp_scaled * np.sin((fixed_e_f or 0.0) * pixel_idx + best_ep)) / scale_factor
 
                         y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
                         # residual must be in the same units as the fitted signal (optical_depth)
@@ -927,7 +930,8 @@ class AnalysisWorker(QThread):
                             'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
                             'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
                             'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f),
+                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f or 0.0),
+                            'etalon_enabled': fixed_e_f is not None,
                             'channel': self.channel
                         }
                         result['Params'] = final_params_dict 
@@ -1001,7 +1005,7 @@ class AnalysisWorker(QThread):
                         # SNR: signal / noise, both in the same (scaled) units.
                         n_pts = len(pixel_idx)
                         n_gases = len(self.engine.gas_list)
-                        n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
+                        n_params = len(theta0) + n_gases + (poly_order + 1) + (2 if fixed_e_f is not None else 0)  # etalon=sin+cos 2열(끄면 0)
                         dof = max(n_pts - n_params, 1)
                         # Neumann estimator σ on the fitted signal (optical_depth units for both modes)
                         signal_for_stats = intensity_raw if is_linear_mode else optical_depth
@@ -1166,7 +1170,7 @@ class AnalysisWorker(QThread):
                 poly_order = len(current_params) - poly_start_idx - 1
                 absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw) / 2.0
 
-                if self.etalon_freq is None:
+                if self.etalon_enabled and self.etalon_freq is None:
                     self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
 
                 max_retries = 2
@@ -1183,7 +1187,7 @@ class AnalysisWorker(QThread):
 
                     active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = \
                         self._setup_fit_parameters(initial_shift_center, current_params)
-                    fixed_e_f = self.etalon_freq
+                    fixed_e_f = self.etalon_freq if self.etalon_enabled else None   # None = etalon 열 없음
                     # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
                     #  두 선형열로 처리. 위상 append 제거.)
                     try:
@@ -1197,7 +1201,7 @@ class AnalysisWorker(QThread):
                         _, abs_val_scaled, poly_val_scaled, _, _ = self.engine.get_model_components(
                             pixel_idx, opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled)
                         abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
-                        etalon_part_orig = (etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                        etalon_part_orig = (etalon_amp_scaled * np.sin((fixed_e_f or 0.0) * pixel_idx + best_ep)) / scale_factor
                         y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
                         residual = intensity_raw - y_fit_model_orig
                         rms = np.sqrt(np.mean(residual ** 2))
@@ -1210,7 +1214,8 @@ class AnalysisWorker(QThread):
                             'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
                             'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
                             'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f),
+                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f or 0.0),
+                            'etalon_enabled': fixed_e_f is not None,
                             'channel': self.channel}
 
                         raw_concentrations, real_errors = [], []
@@ -1246,7 +1251,7 @@ class AnalysisWorker(QThread):
                             result[f"{nm}_Squeeze"] = opt_squeezes[gj]
 
                         n_pts = len(pixel_idx); n_gases = len(self.engine.gas_list)
-                        n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
+                        n_params = len(theta0) + n_gases + (poly_order + 1) + (2 if fixed_e_f is not None else 0)  # etalon=sin+cos 2열(끄면 0)
                         dof = max(n_pts - n_params, 1)
                         sigma_pix = np.std(np.diff(intensity_raw)) / np.sqrt(2)
                         if sigma_pix < 1e-30:
@@ -1317,6 +1322,7 @@ class AnalysisWorker(QThread):
             'tz_offset_sec': getattr(self, 'tz_offset_sec', 0),
             'etalon_freq_min': getattr(self, 'etalon_freq_min', 0.02),
             'etalon_freq_max': getattr(self, 'etalon_freq_max', 0.40),
+            'etalon_enabled': self.etalon_enabled,
             # Children receive only this flag, never the parent output path.
             'residual_dump_enabled': bool(self.residual_dump_path),
         }
@@ -1563,7 +1569,7 @@ def _chunk_init(engine, cfg):
               'allow_negative_gas', 'fit_unit', 'fit_lo_nm', 'fit_hi_nm',
               'qc_enabled', 'qc_rms_abs', 'qc_snr_min', 'ok_rms_threshold',
               'gas_temp_override', 'tz_offset_sec', 'etalon_freq_min', 'etalon_freq_max',
-              'residual_dump_enabled'):
+              'etalon_enabled', 'residual_dump_enabled'):
         if k in cfg:
             setattr(w, k, cfg[k])
     if not isinstance(w.allow_negative_gas, bool):

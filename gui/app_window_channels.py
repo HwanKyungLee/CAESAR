@@ -125,6 +125,7 @@ class ChannelConfigMixin:
             "tikhonov_lambda": self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0,
             "use_robust": self.chk_robust.isChecked() if hasattr(self, 'chk_robust') else False,
             "allow_negative_gas": self.chk_allow_neg.isChecked(),
+            "etalon": {"enabled": self.chk_etalon.isChecked() if hasattr(self, 'chk_etalon') else True},
             "kalman_q": self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005,
             "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050,
             "cavity_d": self.spin_d_len.value() if hasattr(self, 'spin_d_len') else 100.0,
@@ -250,6 +251,9 @@ class ChannelConfigMixin:
                     self, "Legacy Fit Scenario",
                     "This scenario does not record the ±Neg gas policy. "
                     "The current checkbox value was preserved; verify it before running.")
+        if hasattr(self, 'chk_etalon'):
+            from core.doas_fit import etalon_enabled
+            self.chk_etalon.setChecked(etalon_enabled(scenario))   # 키 없으면 True(현행)
         if hasattr(self, 'spin_kalman_q'):
             self.spin_kalman_q.setValue(scenario.get("kalman_q", 0.0005))
         if hasattr(self, 'spin_kalman_r'):

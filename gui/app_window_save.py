@@ -182,6 +182,19 @@ class SaveExportMixin:
                 except Exception as _ce:
                     collin_line = f"n/a ({_ce})"
 
+                # etalon 은 이번 런이 **실제로** 쓴 것(Params)에서 채널별로 쓴다 — UI 체크박스는
+                # 저장 시점 값이라 런과 다를 수 있다. 옛 Params(키 없음)는 켜짐이다.
+                _et = {}
+                for r in self.results:
+                    _p = r.get('Params') or {}
+                    if _p:
+                        _et.setdefault(int(_p.get('channel', r.get('Channel', 1)) or 1),
+                                       (_p.get('etalon_enabled', True), _p.get('etalon_freq')))
+                etalon_str = "; ".join(
+                    f"CH{c} " + (f"ON (f={float(f):.4f} rad/px, FFT-detected)" if on and f else
+                                 "ON" if on else "OFF (no etalon columns)")
+                    for c, (on, f) in sorted(_et.items())) or "(no fitted rows)"
+
                 header_lines = [
                     "# ==========================================================",
                     "# Augur Analysis Report",
@@ -195,6 +208,7 @@ class SaveExportMixin:
                     f"# Tikhonov Lambda: {lam_val:g}",
                     f"# Robust Fitting (IRLS): {robust_status}",
                     f"# Allow Negative Gas (±Neg): {allow_neg}",
+                    f"# Etalon Fit: {etalon_str}",
                     f"# Auto QC: {qc_str}",
                     f"# Step Limit: {step_val} px",
                     f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (low-signal retry trigger; "

@@ -20,6 +20,10 @@ from core import param_optimizer as PO
 
 
 COEFFICIENT_UNIT = "normalized_reference_coefficient"
+# V2 가 fit_scan 에 **실제로 넘기는** etalon 값. policy.json 기록도 이것에서 만든다.
+# 2026-09-24 전까지 policy 는 "DISABLED" 라고 적었지만 fit_scan 은 기본값(켬)으로
+# 돌았다 — 기록만 틀렸고 동작은 늘 켬이었다. 동작을 바꾸는 건 사용자 결정 사항.
+V2_ETALON_ENABLED = True
 
 
 def _runtime_callback(engine, cfg, driver, reference_support):
@@ -33,7 +37,7 @@ def _runtime_callback(engine, cfg, driver, reference_support):
             candidate["poly"], cfg["step_limit"], driver, allow_negative_gas=True,
             controlled_start=(start["shift"], start["squeeze"]), controlled_bounds=bounds,
             controlled_initial_values=FE.independent_initial_values(bounds, driver),
-            return_solver_diagnostics=True)
+            return_solver_diagnostics=True, etalon=V2_ETALON_ENABLED)
         diagnostics = result["solver_diagnostics"]
         strengths, differential, support_ok = {}, {}, {}
         pixels = np.arange(candidate["px_min"], candidate["px_max"] + 1, dtype=float)
@@ -401,7 +405,10 @@ def run_recommendation(mission, bindings, output_directory, *, criteria=None, hi
                          {"plan": plan, "criteria": criteria, "execution_hash": token,
                           "runtime_defaults": {"allow_negative_gas": True, "secondary_registration": "LINK_TO_DRIVER",
                             "reference_temperature_C": 25., "reference_temperature_coefficient": 0.,
-                            "step_limit": .5, "etalon": "DISABLED",
+                            "step_limit": .5,
+                            "etalon": ({"enabled": True, "frequency": "FFT-detected per scan",
+                                        "detection_band_cycles_per_px": [0.02, 0.40]}
+                                       if V2_ETALON_ENABLED else {"enabled": False, "frequency": None}),
                             "coefficient_unit": COEFFICIENT_UNIT}}, immutable=True)
     history_ok, history_reasons = _record_history(history_path or _history_path(), token, observations, roles)
     independent = (history_ok and bool(plan["split"]["holdout"])

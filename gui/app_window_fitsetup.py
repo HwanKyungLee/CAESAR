@@ -308,15 +308,20 @@ class FitSetupMixin:
         # (구식 etalon 위상 append 제거 — doas_fit가 etalon을 sin·cos 선형열로
         #  처리한 뒤로는 위상이 비선형 파라미터가 아니다. 워커와 동일하게 theta는
         #  shift/squeeze만. 전부 Fix면 theta=[]여도 doas_fit가 선형해 1회로 처리.)
+        # etalon: RUN(워커)과 같은 FFT 검출·같은 밴드. 끄면 None(열 없음·검출 안 함).
+        # 예전엔 여기서 fixed_e_f=0.0을 넘겼다 — cos(0)=상수열이라 특이행렬이 되고
+        # QR→lsq_linear 폴백이 조용히 삼켜, Test Fit은 사실상 etalon 없이 돌고 있었다.
+        e_f = (fitter.detect_etalon_frequency(vp_pixel, a, self.spin_poly_deg.value(), 0.02, 0.40)
+               if self.chk_etalon.isChecked() else None)
         out = fitter.execute_varpro_fit(
             vp_pixel, a, np.ones(len(a)), active, fixed, linked, t0, lb, ub,
-            self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
+            self.spin_poly_deg.value(), e_f, vp_center, 1.0, rp, T_C,
             self.spin_lambda.value(), self.chk_robust.isChecked(),
             allow_negative_gas=self.chk_allow_neg.isChecked())
         opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out
         full_model, *_ = eng.get_model_components(
             vp_pixel, opt_shifts, opt_squeezes, gas_coeffs, poly_c,
-            etalon_amp=etal_amp, etalon_freq=0.0, etalon_phase=best_ep)
+            etalon_amp=etal_amp, etalon_freq=(e_f or 0.0), etalon_phase=best_ep)
         resid = a - full_model
         # 가스별 기여(진짜 레퍼런스 오버레이, S-C): 핏이 내부에서 쓰는 것과 동일식
         gas_models = []
@@ -338,10 +343,8 @@ class FitSetupMixin:
         # etalon–기체 공선성 진단(보고 전용, 핏 불변) — RUN과 동일한 FFT 검출
         # 주파수(워커 기본 밴드 0.02~0.40 rad/px)에서 평가. 실패해도 팝업은 뜬다.
         try:
-            e_f_diag = fitter.detect_etalon_frequency(
-                vp_pixel, a, self.spin_poly_deg.value(), 0.02, 0.40)
             collin = fitter.etalon_collinearity(
-                vp_pixel, e_f_diag, self.spin_poly_deg.value(), rp,
+                vp_pixel, e_f, self.spin_poly_deg.value(), rp,
                 temperature=T_C, fit_sign=1.0,
                 opt_shifts=opt_shifts, opt_squeezes=opt_squeezes,
                 absolute_center=vp_center)

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QDialog, QMessageBox, QVBoxLayout
 from core import run_meta
 from core.__version__ import __version__
 from core.data_io import DataIO
+from core.doas_fit import etalon_enabled
 from core.parallel import max_workers
 from core.paths import (DEFAULT_CAMPAIGN, DEFAULT_OUTPUT_DIR,
                         campaign_dir as _campaign_dir, special_dir as _special_dir)
@@ -331,6 +332,7 @@ class AnalysisRunMixin:
                 cav_ch = cfg.get('cavity_d', cavity_d); rl_ch = cfg.get('rl_factor', 1.0)
                 lam_ch = cfg.get('tikhonov_lambda', 0.0); rob_ch = cfg.get('use_robust', False)
                 step_ch = cfg.get('step_limit', 0.5)
+                et_ch = etalon_enabled(cfg)
                 kq_ch = cfg.get('kalman_q', self.spin_kalman_q.value())
                 kr_ch = cfg.get('kalman_r', self.spin_kalman_r.value())
             else:
@@ -347,6 +349,7 @@ class AnalysisRunMixin:
                 cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
                 lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
                 step_ch = step_limit_val
+                et_ch = self.chk_etalon.isChecked()
                 kq_ch = self.spin_kalman_q.value(); kr_ch = self.spin_kalman_r.value()
 
             w = AnalysisWorker(
@@ -373,6 +376,7 @@ class AnalysisRunMixin:
             w.tikhonov_lambda = lam_ch
             w.use_robust_fitting = rob_ch
             w.allow_negative_gas = neg_ch
+            w.etalon_enabled = et_ch
             w.qc_enabled = self.chk_qc.isChecked() if hasattr(self, 'chk_qc') else True
             w.qc_rms_abs = self.spin_qc_rms.value() if hasattr(self, 'spin_qc_rms') else 0.0
             w.qc_snr_min = self.spin_qc_snr.value() if hasattr(self, 'spin_qc_snr') else 0.0
@@ -644,6 +648,12 @@ class AnalysisRunMixin:
             # 측정일 감사(D1) 결과를 결과 파일에 붙인다 — "이 농도가 R(t) 외삽 구간
             # 위에서 나왔나"를 나중에 물을 수 있어야 한다. runid 해시엔 안 들어간다
             # (설정이 아니라 그날 데이터의 성질).
+            # 검출 주파수는 설정이 아니라 데이터에서 나온 값 → 런 결과에서 채운다(끄면 null).
+            if meta["etalon"]["enabled"]:
+                meta["etalon"]["freq_rad_px"] = next(
+                    (float(p['etalon_freq']) for p in
+                     ((r.get('Params') or {}) for r in (getattr(self, 'results', None) or []))
+                     if int(p.get('channel', 0) or 0) == ch and p.get('etalon_freq')), None)
             audit = getattr(self, '_day_audit', None) or {}
             hit = {d: audit[d].to_meta() for d in data_days if d in audit}
             if hit:

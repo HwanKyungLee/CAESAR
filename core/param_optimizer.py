@@ -97,9 +97,11 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              px_min, px_max, poly_deg, step_limit, target="NO2",
              seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
              controlled_start=None, controlled_bounds=None, controlled_initial_values=None,
-             return_solver_diagnostics=False, return_model=False):
+             return_solver_diagnostics=False, return_model=False, etalon=True):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
-    이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
+    이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가).
+    etalon=False면 FFT 검출을 건너뛰고 etalon 열 없이 핏한다(FitSet `etalon.enabled`,
+    `core.doas_fit.etalon_enabled(cfg)`로 읽어 넘길 것). 기본 True = 종전과 동일."""
     allow_negative_gas = _require_bool(allow_negative_gas)
     sl = slice(px_min, px_max + 1)
     wl = np.asarray(wave, float)[sl]
@@ -121,7 +123,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                              fill_value="extrapolate")(wl), float)
     center = vp[len(vp) // 2]
 
-    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40)
+    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40) if etalon else None
 
     # ★초기 shift 시딩(필수): DOAS의 shift 지형은 레퍼런스가 진동해 **비볼록**이라
     # x0=0에서 least_squares만 돌리면 멀리 있는 진짜 최소(예: 핫 -4.95px)를 못 찾고
@@ -185,7 +187,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     perr = np.asarray(perr, float) / scale_factor
 
     full, tot, base, etal, _ = eng.get_model_components(
-        vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp, etalon_freq=ef,
+        vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp, etalon_freq=(ef or 0.0),
         etalon_phase=ep)
     resid = a - full
     rms = float(np.sqrt(np.mean(resid ** 2)))
@@ -217,7 +219,8 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     result = dict(conc=conc, conc_all=conc_all, perr_rel=perr_rel, rms=rms, sig=sig,
                 rms_sig=float(rms / (sig + 1e-30)), autocorr1=autocorr1,
                 shifts=shifts, squeezes=squeezes, coeffs=coeffs, n_free=len(active),
-                etalon_frequency=float(ef),
+                etalon_enabled=ef is not None,
+                etalon_frequency=(None if ef is None else float(ef)),
                 deterministic_seed={"shift": float(seed), "squeeze": float(seed_sq),
                                     "source": ("controlled_start" if controlled_start is not None
                                                else "deterministic_grid")},

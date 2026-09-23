@@ -26,8 +26,10 @@ from core.provenance import is_reproducible as _reproducible
 
 try:                                  # 패키지로 임포트된 평소 경로
     from core.paths import resolve_ref_path
+    from core.doas_fit import etalon_enabled
 except ImportError:                   # `python core/run_meta.py` 직접 실행(자기검증)
     from paths import resolve_ref_path
+    from doas_fit import etalon_enabled
 
 SCHEMA = "augur-run-meta-v1"
 
@@ -117,6 +119,9 @@ def build_meta(cfg: dict, *, channel, qc: dict, calibration: dict,
         "gas_temp": _num(cfg.get("gas_temp"), 0),
         "time_shift_h": _num(cfg.get("time_shift_h"), 0),
         "species": _species(cfg),
+        # freq_rad_px 는 **데이터에서 검출된 값**이라 설정이 아니다 — 호출부가 런 결과에서
+        # 채운다(끄면 null). runid 에는 enabled 만 들어간다(`_runid_view`).
+        "etalon": {"enabled": etalon_enabled(cfg), "freq_rad_px": None},
         "calibration": dict(calibration or {}),
         "qc": dict(qc or {}),
         "rows": dict(rows or {}),
@@ -149,9 +154,20 @@ _RUNID_KEYS = ("channel", "window", "poly_deg", "step_limit", "allow_neg",
                "gas_temp", "time_shift_h", "species", "calibration", "qc")
 
 
+def _runid_view(meta: dict) -> dict:
+    """runid 해시·diff 가 보는 설정 dict. 둘이 반드시 같은 것을 봐야 한다.
+
+    etalon 은 **꺼졌을 때만** 들어간다. 켜짐이 도입 전 동작이라, 켜짐을 해시에 넣으면
+    키가 없던 옛 meta 와 새 meta 가 같은 설정인데 runid 가 갈라진다."""
+    view = {k: meta.get(k) for k in _RUNID_KEYS}
+    if (meta.get("etalon") or {}).get("enabled") is False:
+        view["etalon_enabled"] = False
+    return view
+
+
 def compute_runid(meta: dict, prefix: str = "r") -> str:
     """설정만의 sha1 앞 5자리 → 'r3f8a1'. 같은 설정 = 같은 runid."""
-    payload = {k: meta.get(k) for k in _RUNID_KEYS}
+    payload = _runid_view(meta)
     # 종 순서는 설계행렬의 열 순서일 뿐 해를 안 바꾼다 → 순서만 다른 걸 '다른 설정'으로
     # 보고하지 않게 해시에서만 이름순 정렬한다(meta 본문은 표시 순서 그대로 보존).
     if isinstance(payload.get("species"), list):
@@ -190,8 +206,8 @@ def diff_meta(a: dict, b: dict) -> list:
     한다. 그래서 목록을 따로 두지 않고 한 상수를 공유한다.
     종이 추가/삭제된 쪽은 없는 값이 `None`으로 나온다.
     """
-    fa = _flatten({k: a.get(k) for k in _RUNID_KEYS})
-    fb = _flatten({k: b.get(k) for k in _RUNID_KEYS})
+    fa = _flatten(_runid_view(a))
+    fb = _flatten(_runid_view(b))
     return [(k, fa.get(k), fb.get(k))
             for k in sorted(set(fa) | set(fb))
             if fa.get(k) != fb.get(k)]
@@ -422,6 +438,8 @@ def meta_to_cfg(meta: dict, ref_dir: str | None = None) -> tuple:
         # 핏 수치를 바꾸는 값이라 반드시 meta에서 가져온다(기본값으로 때우면 안 됨).
         "tikhonov_lambda": qc.get("tikhonov") or 0.0,
         "use_robust": bool(qc.get("robust")),
+        # 옛 meta 엔 키가 없다 → 켜짐(그때는 끌 수 없었다).
+        "etalon": {"enabled": (meta.get("etalon") or {}).get("enabled", True)},
     }
     return cfg, unresolved
 
@@ -514,6 +532,24 @@ def _demo():
         assert (mx["runid"] != a["runid"]) == bool(diff_meta(a, mx)), mutate
     same = build_meta(cfg, **kw)
     assert same["runid"] == a["runid"] and diff_meta(a, same) == []
+
+    # etalon 스위치(2026-09-24). 키 없음 = 켜짐 = 도입 전 runid 그대로여야 한다.
+    # 'rea9e5' 는 스위치 도입 직전 커밋(58d0287)에서 이 cfg 로 계산한 값이다.
+    assert a["runid"] == "rea9e5", a["runid"]
+    assert a["etalon"] == {"enabled": True, "freq_rad_px": None}
+    on = build_meta({**cfg, "etalon": {"enabled": True}}, **kw)
+    off = build_meta({**cfg, "etalon": {"enabled": False}}, **kw)
+    assert on["runid"] == a["runid"] and diff_meta(a, on) == []
+    assert off["runid"] != a["runid"] and diff_meta(a, off) == [("etalon_enabled", None, False)]
+    old = {k: v for k, v in a.items() if k != "etalon"}          # 도입 전 meta 파일
+    assert compute_runid(old) == a["runid"] and diff_meta(old, on) == []
+    assert meta_to_cfg(old)[0]["etalon"] == {"enabled": True}
+    assert meta_to_cfg(off)[0]["etalon"] == {"enabled": False}
+    try:
+        build_meta({**cfg, "etalon": {"enabled": "false"}}, **kw)
+        raise AssertionError("string etalon.enabled must be rejected")
+    except TypeError:
+        pass
     # 종 순서만 바뀐 건 runid도 diff도 변화 없음(설계행렬 열 순서는 해를 안 바꾼다)
     assert diff_meta(build_meta(c4, **kw), build_meta(c5, **kw)) == []
 

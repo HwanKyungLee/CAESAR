@@ -32,7 +32,7 @@ import pandas as pd
 from core import fitset_builder as FB
 from core import param_optimizer as PO
 from core.data_io import DataIO
-from core.doas_fit import DoasFitter
+from core.doas_fit import DoasFitter, etalon_enabled
 from core.paths import REFERENCE_DIR, WV_CAL_DIR
 from core.run_meta import meta_to_cfg, read_meta
 
@@ -217,7 +217,8 @@ def refit_row(fit_path, alpha_path, row_idx, *, saved_conc=None, saved_shift=Non
                           t_used, p_row, i0, i1, int(cfg["poly_deg"]),
                           float(cfg["step_limit"]), target=target,
                           allow_negative_gas=bool(cfg["allow_negative_gas"]),
-                          controlled_start=start, return_model=True)
+                          controlled_start=start, return_model=True,
+                          etalon=etalon_enabled(cfg))
     except Exception as e:                      # noqa: BLE001
         return {"ok": False, "reason": "잔차 불가: 재핏 실패 — %s" % e}
 

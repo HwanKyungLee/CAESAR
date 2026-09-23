@@ -33,6 +33,30 @@ ETALON_CORR_WARN = 0.5
 BOUND_REL_TOL = 0.02
 
 
+def etalon_enabled(cfg):
+    """채널 config(FitSet 채널 dict) → etalon 핏 여부. 이 판정의 단일 출처.
+
+    키 `"etalon": {"enabled": bool}` 이 **없으면 True**(도입 전 FitSet = 현행 동작).
+    bool 이 아닌 값은 거부한다 — "false" 문자열이 참으로 읽히는 사고를 막는다."""
+    v = ((cfg or {}).get("etalon") or {}).get("enabled", True)
+    if not isinstance(v, (bool, np.bool_)):
+        raise TypeError(f"etalon.enabled must be bool, got {v!r}")
+    return bool(v)
+
+
+def check_etalon_freq(fixed_e_f):
+    """`execute_varpro_fit` 의 fixed_e_f 계약. None=끔(False), 양의 유한 실수=켬(True).
+
+    0·NaN·음수는 **오류**다. f=0 이면 cos 열이 상수항과 같아 특이행렬이 되고,
+    예전엔 그걸 QR 실패 → lsq_linear 폴백이 조용히 삼켰다. '끔'은 None 으로만 말한다."""
+    if fixed_e_f is None:
+        return False
+    f = float(fixed_e_f)
+    if not (np.isfinite(f) and f > 0):
+        raise ValueError(f"fixed_e_f must be a positive finite rad/px or None (off), got {fixed_e_f!r}")
+    return True
+
+
 def policy_floats(gas, kind, mode, raw, n):
     """shift/squeeze 정책 문자열 -> 실수 n개. 못 읽으면 **조용한 기본값 대신 예외**.
 
@@ -156,7 +180,10 @@ class DoasFitter:
         반환 dict:
           per_gas: {gas: {"r": float, "vif": float, "vif_no_etalon": float}}
           e_f: 사용한 각주파수, warn: |r| > ETALON_CORR_WARN 인 기체 목록
-        비활성/영-노름 열은 NaN. 실패해도 예외를 밖으로 던지지 않는 건 호출부 책임."""
+        비활성/영-노름 열은 NaN. 실패해도 예외를 밖으로 던지지 않는 건 호출부 책임.
+        fixed_e_f=None(etalon 끔)이면 잴 대상이 없다 → 빈 per_gas(format이 n/a로 쓴다)."""
+        if not check_etalon_freq(fixed_e_f):
+            return {"per_gas": {}, "e_f": None, "warn": [], "etalon_enabled": False}
         pixel_idx = np.asarray(pixel_idx, dtype=float)
         n = len(pixel_idx)
         gases = list(self.engine.gas_list)
@@ -254,6 +281,8 @@ class DoasFitter:
     @staticmethod
     def format_etalon_collinearity(diag):
         """진단 dict → 한 줄 문자열 (Test Fit 팝업·결과 헤더 공용)."""
+        if diag and diag.get("etalon_enabled") is False:
+            return "etalon-gas collinearity: n/a (etalon off)"
         if not diag or not diag.get("per_gas"):
             return "etalon-gas collinearity: n/a"
         parts = []
@@ -406,7 +435,10 @@ class DoasFitter:
           열로 유지되므로 반환 인덱싱이 보존되고 gas 계수(c_opt[0:num_gases])도 불변.
         bounds_meta: `setup_fit_parameters(..., return_bounds=True)`의 7번째 반환값.
           주면 종료 상태가 CONVERGED/AT_BOUND/STEP_LIMITED로 갈린다(진단에만 나타남).
-          None이면 기존대로 CONVERGED/MAX_NFEV/FAILED만."""
+          None이면 기존대로 CONVERGED/MAX_NFEV/FAILED만.
+        fixed_e_f: etalon 각주파수(rad/px). **None이면 etalon 열 0개**(끔) — 반환
+          etalon_amp·etalon_phase는 0.0, 진단 `etalon_enabled=False`. 0·NaN·음수는
+          ValueError(`check_etalon_freq`). 켠 경우는 종전과 바이트동일."""
         gas_lb = -np.inf if allow_negative_gas else 0.0
         x_min, x_max = pixel_idx[0], pixel_idx[-1]
         x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
@@ -476,11 +508,17 @@ class DoasFitter:
         # 동일(gas → poly → custom → sin → cos)이라 하류 인덱싱·반환값이 불변.
         # etalon: sin·cos 두 선형열 — 진폭/위상을 선형으로 흡수(비선형 위상 e_p 제거).
         # A·sin(f·x+φ)=A·cosφ·sin(f·x)+A·sinφ·cos(f·x) 라 같은 모델공간이며 전역 선형해.
+        # fixed_e_f=None → etalon 열 0개(끔). 0·NaN·음수는 거부한다 — f=0이면 cos 열이
+        # 상수항과 같아져 특이행렬이 되는데, 그걸 '끔'으로 읽어주면 문제를 숨긴다.
+        etalon_on = check_etalon_freq(fixed_e_f)
+        n_et = 2 if etalon_on else 0
         const_cols = [T[:, j] for j in range(poly_order + 1)]
         if CB is not None:
             const_cols += [CB[:, kk] for kk in range(CB.shape[1])]
-        const_cols += [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
-        CONST = np.column_stack(const_cols)
+        if etalon_on:
+            const_cols += [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
+        CONST = (np.column_stack(const_cols) if const_cols
+                 else np.zeros((len(pixel_idx), 0)))
 
         # ── 해석적(Golub–Pereyra) 자코비안 준비 ─────────────────────
         # 쓸 수 있는 조건: 선형 단계가 **무제약**일 때만. gas_lb=0(±Neg OFF)이면 해가
@@ -806,10 +844,14 @@ class DoasFitter:
 
         # etalon: 마지막 두 열 = a·sin + b·cos → 진폭/위상으로 환산해 반환(하류의
         # `amp·sin(f·x + phase)` 재구성과 정확히 동일: a=A·cosφ, b=A·sinφ).
-        a_et, b_et = float(c_opt[-2]), float(c_opt[-1])
-        etalon_amp = float(np.hypot(a_et, b_et))
-        etalon_phase = float(np.arctan2(b_et, a_et))
-        poly_coeffs = c_opt[num_gases:-2]
+        # 끈 경우 (0.0, 0.0) — 재구성 amp·sin(...)이 0이 된다.
+        if etalon_on:
+            a_et, b_et = float(c_opt[-2]), float(c_opt[-1])
+            etalon_amp = float(np.hypot(a_et, b_et))
+            etalon_phase = float(np.arctan2(b_et, a_et))
+        else:
+            etalon_amp = etalon_phase = 0.0
+        poly_coeffs = c_opt[num_gases:len(c_opt) - n_et]
 
         result = (opt_shifts, opt_squeezes, c_gas, poly_coeffs,
                   etalon_amp, etalon_phase, c_perr)
@@ -843,6 +885,7 @@ class DoasFitter:
                        # 못 구했으면 **빈 dict** — 0 으로 채우면 "오차 없음"이라는
                        # 거짓 주장이 된다(perr_joint 와 같은 규약).
                        "theta_err_joint": theta_err_joint,
+                       "etalon_enabled": etalon_on,
                        "dof": int(_dof),
                        "underdetermined": bool(_dof <= 0),
                        "cond_raw": _safe_cond(A_f_w[:, keep_mask]),

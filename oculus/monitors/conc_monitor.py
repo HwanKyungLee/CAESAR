@@ -27,7 +27,7 @@ import warnings
 
 import numpy as np
 
-from core.doas_fit import DoasFitter
+from core.doas_fit import DoasFitter, etalon_enabled
 from core import param_optimizer as PO
 from oculus.alert_engine import OK, P0, P1, P2, worse
 from tools import optimize_params as OP
@@ -81,6 +81,8 @@ class ConcMonitor:
             self.allow_negative_gas = cfg.allow_negative_gas
             self.gas_policy_provenance = "legacy FitSet fallback: Oculus profile"
 
+        self.etalon = etalon_enabled(fit_ch)   # FitSet 채널 키, 없으면 켬(현행)
+
         self._za_buf: list = []
         self._i0: Optional[np.ndarray] = None
         self._last_fit_time: Optional[datetime] = None
@@ -125,7 +127,8 @@ class ConcMonitor:
             result = PO.fit_scan(self.eng, self.fitter, self._seeded_ref_props(), self.wave,
                                  alpha, temp_c, press_mbar, self.px_min, self.px_max,
                                  self.poly_deg, self.step_limit, self.cfg.target,
-                                 allow_negative_gas=self.allow_negative_gas)
+                                 allow_negative_gas=self.allow_negative_gas,
+                                 etalon=self.etalon)
         except Exception as e:                # noqa: BLE001
             self._fail_streak += 1
             return self._fail_status(str(e))
