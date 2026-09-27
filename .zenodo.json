@@ -1,0 +1,29 @@
+{
+  "upload_type": "software",
+  "title": "Augur: variable-projection BBCEAS/DOAS retrieval software with self-reported fit diagnostics",
+  "version": "0.2.0",
+  "license": "MIT",
+  "creators": [
+    {
+      "name": "Lee, HwanKyung",
+      "affiliation": "Gwangju Institute of Science and Technology (GIST), Republic of Korea"
+    }
+  ],
+  "description": "Augur is a post-hoc retrieval pipeline for broadband cavity-enhanced absorption spectroscopy (BBCEAS). The fit is solved in the extinction (alpha) domain by variable projection (Golub–Pereyra) with Chebyshev baselines and a time-resolved, PCHIP-interpolated mirror reflectivity R(t). Instrument and campaign layouts come from JSON profiles. This archive also contains the scripts and derived data that reproduce Figs. 2–6 of the accompanying AMT manuscript (paper/amt2026/).",
+  "keywords": [
+    "BBCEAS",
+    "DOAS",
+    "variable projection",
+    "NO2",
+    "retrieval uncertainty",
+    "thermal dissociation"
+  ],
+  "related_identifiers": [
+    {
+      "relation": "isSupplementTo",
+      "identifier": "https://github.com/HwanKyungLee/CAESAR",
+      "scheme": "url"
+    }
+  ],
+  "notes": "TODO before publishing: add ORCID and co-authors; add the AMT discussion-paper DOI as isSupplementTo."
+}

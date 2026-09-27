@@ -1,0 +1,28 @@
+{
+  "upload_type": "dataset",
+  "title": "DOAS extinction-domain retrieval benchmark, v2 (261 synthetic BBCEAS spectra with known truth)",
+  "version": "2",
+  "license": "CC-BY-4.0",
+  "creators": [
+    {
+      "name": "Lee, HwanKyung",
+      "affiliation": "Gwangju Institute of Science and Technology (GIST), Republic of Korea"
+    }
+  ],
+  "description": "261 synthetic extinction spectra with known truth for testing DOAS-style retrieval codes, in two instrument windows (hot_PNs 444.146–470.685 nm, cold 438.42–475.741 nm). Three of the five case groups test whether the uncertainty a code reports is right and whether the answer survives a change of fitting window. Includes the generator (seed 20260921), a reference implementation and a scorer. Cross sections are instrument-convolved from Vandaele et al. (NO2), Volkamer et al. (CHOCHO) and HITRAN (H2O); cite the original cross-section papers. Change from v1: the H2O cross section was re-assembled from HITRAN line data and peaks 2.5 % higher in the fitting windows.",
+  "keywords": [
+    "DOAS",
+    "benchmark",
+    "BBCEAS",
+    "synthetic spectra",
+    "retrieval uncertainty"
+  ],
+  "related_identifiers": [
+    {
+      "relation": "isSupplementTo",
+      "identifier": "https://github.com/HwanKyungLee/CAESAR",
+      "scheme": "url"
+    }
+  ],
+  "notes": "TODO before publishing: add ORCID and co-authors; add the AMT discussion-paper DOI as isSupplementTo."
+}

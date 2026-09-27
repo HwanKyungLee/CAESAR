@@ -8,11 +8,12 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 title: "Augur (CAESAR): BBCEAS trace-gas retrieval software"
+# doi: "TODO-Z1 (Zenodo 코드 DOI)"
 type: software
 authors:
-  - family-names: "TODO-성"
-    given-names: "TODO-이름"
-    affiliation: "TODO-소속"
+  - family-names: "Lee"
+    given-names: "HwanKyung"
+    affiliation: "Gwangju Institute of Science and Technology (GIST)"
     # orcid: "https://orcid.org/0000-0000-0000-0000"
 repository-code: "https://github.com/HwanKyungLee/CAESAR"
 license: MIT
