@@ -18,5 +18,12 @@ Captions and provenance: `amt_fig2_caption.md`, `amt_fig3_caption.md`, `amt_fig6
 
 ## Before archiving at Zenodo
 - Fig 1 still needs a standalone script. Its recorded lineage contains hand-typed instrument-space values (`white_vals`, `ar1_vals`) that must be replaced by a file read from the Explorer trace before archiving; do not archive the lineage code as is.
-- Decide whether field data (`Output/…`, `RAW/…`) can be archived (TBD-Z3). The derived CSVs in `data/` are enough to redraw Fig 2–6 either way.
+- Field data are not archived (release rule of 2026-09-14); see the section below.
 - Channel identity for 2026 Yeosu hot raw: see `CHANNEL_IDENTITY_YEOSU2026.md` at the repository root.
+
+## Public release (Zenodo) vs this private repository
+The 2026-09-14 release rule (`docs/공개_릴리스_체크리스트.md`) is that no measured instrument data are published —
+raw scans, spectrometer output, campaign time series or anything row-level derived from them. The files in `data/` other
+than `varpro_synth_results.csv`, `h2h_E1_coverage.csv` and `h2h_E2_basin.csv` are campaign- or laboratory-derived and
+are left out of the public archive. In the public archive only Fig. 3 can be redrawn from the files shipped; Figs. 2, 4, 5
+and 6 need the private `data/` files ("available from the authors on reasonable request").
