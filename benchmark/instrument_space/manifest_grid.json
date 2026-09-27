@@ -1,0 +1,567 @@
+{
+  "base": {
+    "ils_scale": 1.0,
+    "window_scale": 1.0,
+    "pixel_dispersion_scale": 1.0,
+    "noise_levels": [
+      1.0,
+      2.0
+    ],
+    "poly_orders": [
+      3
+    ],
+    "fit_poly_order": 0
+  },
+  "coordinates": {
+    "baseline": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "ils0.5": {
+      "ils_scale": 0.5,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "ils2": {
+      "ils_scale": 2.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "win0.7": {
+      "ils_scale": 1.0,
+      "window_scale": 0.7,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            448.12685,
+            466.70415
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            983,
+            1369
+          ],
+          "n_pixels": 387,
+          "centre_pixel": 1176.0
+        },
+        "cold": {
+          "window_nm": [
+            444.01815000000005,
+            470.14285
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            890,
+            1431
+          ],
+          "n_pixels": 542,
+          "centre_pixel": 1160.5
+        }
+      }
+    },
+    "win1.3": {
+      "ils_scale": 1.0,
+      "window_scale": 1.3,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            440.16515000000004,
+            474.66585
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            819,
+            1536
+          ],
+          "n_pixels": 718,
+          "centre_pixel": 1177.5
+        },
+        "cold": {
+          "window_nm": [
+            432.82185000000004,
+            481.33915
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            660,
+            1666
+          ],
+          "n_pixels": 1007,
+          "centre_pixel": 1163.0
+        }
+      }
+    },
+    "disp0.7": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 0.7,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            784,
+            1571
+          ],
+          "n_pixels": 788,
+          "centre_pixel": 1177.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            611,
+            1717
+          ],
+          "n_pixels": 1107,
+          "centre_pixel": 1164.0
+        }
+      }
+    },
+    "disp1.4": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.4,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            979,
+            1373
+          ],
+          "n_pixels": 395,
+          "centre_pixel": 1176.0
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            884,
+            1437
+          ],
+          "n_pixels": 554,
+          "centre_pixel": 1160.5
+        }
+      }
+    },
+    "snr6": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        0.25,
+        0.5,
+        1.0,
+        2.0,
+        4.0,
+        8.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 501,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "genpoly2": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        2
+      ],
+      "fit_poly_order": 0,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "fitpoly2": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 2,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "fitpoly4": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 4,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "fitpoly5": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 5,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    },
+    "fitpoly6": {
+      "ils_scale": 1.0,
+      "window_scale": 1.0,
+      "pixel_dispersion_scale": 1.0,
+      "noise_levels": [
+        1.0,
+        2.0
+      ],
+      "poly_orders": [
+        3
+      ],
+      "fit_poly_order": 6,
+      "n_cases": 261,
+      "channels": {
+        "hot_PNs": {
+          "window_nm": [
+            444.146,
+            470.685
+          ],
+          "poly_order": 3,
+          "window_pixels": [
+            901,
+            1452
+          ],
+          "n_pixels": 552,
+          "centre_pixel": 1176.5
+        },
+        "cold": {
+          "window_nm": [
+            438.42,
+            475.741
+          ],
+          "poly_order": 4,
+          "window_pixels": [
+            774,
+            1548
+          ],
+          "n_pixels": 775,
+          "centre_pixel": 1161.0
+        }
+      }
+    }
+  }
+}

@@ -99,3 +99,9 @@ core/_build_version.py
 
 # 로컬 가상환경 (env/.gitignore 에 의존하지 않도록 여기에도 둔다 — git status 속도)
 env/
+
+# 민감도 스윕의 설정별 빈 단위 CSV(중간산물, ~200 KB x 10). 요약표 3개와 코드만 추적한다.
+/diagnostics/sensitivity_sweep_2026-09/raw/
+
+# 계기 좌표 스윕의 좌표별 생성 패키지·제출본(중간산물, 좌표당 ~2 MB). 요약표와 코드만 추적한다.
+/benchmark/instrument_space/work/

@@ -1,0 +1,52 @@
+{
+  "name": "DOAS extinction-domain retrieval benchmark",
+  "version": 2,
+  "seed": 20260921,
+  "n_cases": 261,
+  "alpha_units": "cm-1",
+  "sigma_units": "cm2 molec-1",
+  "noise_rms_cm1": 6.16e-09,
+  "reference_multiplier_applied": {
+    "NO2": 0,
+    "CHOCHO": 0,
+    "H2O": -12
+  },
+  "shift_convention": "p_prime = centre + (p - centre) * squeeze + shift_px",
+  "channels": {
+    "hot_PNs": {
+      "window_nm": [
+        444.146,
+        470.685
+      ],
+      "poly_order": 3,
+      "window_pixels": [
+        901,
+        1452
+      ],
+      "n_pixels": 552,
+      "centre_pixel": 1176.5
+    },
+    "cold": {
+      "window_nm": [
+        438.42,
+        475.741
+      ],
+      "poly_order": 4,
+      "window_pixels": [
+        774,
+        1548
+      ],
+      "n_pixels": 775,
+      "centre_pixel": 1161.0
+    }
+  },
+  "cross_section_provenance": "instrument-convolved references from a two-channel thermal-dissociation BBCEAS; NO2 after Vandaele et al., CHOCHO after Volkamer et al., H2O from HITRAN. Cite the original cross-section papers, not this package.",
+  "groups": {
+    "B_noise": 180,
+    "A_exact": 32,
+    "C_mismatch": 16,
+    "E_window": 16,
+    "F_subpixel": 12,
+    "D_identifiability": 5
+  }
+}
