@@ -15,8 +15,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from .core import ResolvedSeries, PlotMode, register_mode, _shade
-from .processing import resample_mean, smooth, regress, allan_deviation
+from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
+                   mathtext_to_html)
+from .processing import (resample_mean, smooth, regress, allan_deviation,
+                         step_xy, bar_width)
 
 
 @register_mode
@@ -97,9 +99,11 @@ class TimeSeriesMode(PlotMode):
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.setToolTip("선반에서 컬럼 선택 후 [+ Left/Right Y].\n"
+                              "체크박스 = 보이기/숨기기(삭제 아님),\n"
                               "더블클릭 = 좌↔우 전환, 우클릭 = 빠른 메뉴,\n"
                               "드래그 = 그리는 순서(범례·겹침순서) 변경, Delete = 제거.")
         self._list.itemDoubleClicked.connect(self._toggle_axis)
+        self._list.itemChanged.connect(self._on_item_checked)
         self._list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self._list.model().rowsMoved.connect(lambda *a: self._sync_order_from_list())
@@ -229,16 +233,34 @@ class TimeSeriesMode(PlotMode):
 
     def _refresh_list(self):
         from PyQt6.QtGui import QPixmap, QIcon, QColor
+        self._list.blockSignals(True)      # 체크박스 채우다 itemChanged가 되돌아오지 않게
         self._list.clear()
         for s in self._series:
             lab, axis, color, name = s
             disp = self._display(lab, name)
+            st = self._style_of(lab)
             it = QListWidgetItem(f"[{axis}] {disp}")
-            it.setToolTip(f"{lab}\n드래그로 순서 변경 · Delete로 제거")
+            it.setToolTip(f"{lab}\n체크 해제 = 그림에서만 숨김(삭제 아님) · "
+                          f"드래그로 순서 변경 · Delete로 제거\n"
+                          f"그래프에서 선을 직접 클릭해도 스타일 창이 열립니다")
             pix = QPixmap(14, 14); pix.fill(QColor(self._effective_color(lab, color, name)))
             it.setIcon(QIcon(pix))
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if st["visible"]
+                             else Qt.CheckState.Unchecked)
             it.setData(Qt.ItemDataRole.UserRole, id(s))   # id값(int) 저장 — 객체 자체는 identity 안 보존됨
             self._list.addItem(it)
+        self._list.blockSignals(False)
+
+    def _on_item_checked(self, item):
+        """목록 체크박스 = 보이기/숨기기. **삭제가 아니다** — 설정에도 남고
+        다시 켜면 그대로 돌아온다(헌장 ①의 UI판: 지우지 말고 감추기)."""
+        s = self._series_by_id(item.data(Qt.ItemDataRole.UserRole))
+        if s is None:
+            return
+        vis = item.checkState() == Qt.CheckState.Checked
+        self._styles.setdefault(s[0], {})["visible"] = vis
+        self.render()
 
     def on_shelf_changed(self):
         valid = set(self.host.column_choices())
@@ -300,10 +322,12 @@ class TimeSeriesMode(PlotMode):
             if res is None:
                 continue
             ds, col, y, t = res
+            st = self._style_of(lab)
+            if not st["visible"]:      # 체크 해제한 시리즈 — 지우지 않고 안 그리기만
+                continue
             xs, ys = self._proc(y, t)
             disp = self._display(lab, name)
             ci = color or self._auto_color(disp)
-            w_, dash, mk, ms = self._style_of(lab)
             elo = ehi = None
             if err_on:
                 err = host.error_of(lab)
@@ -313,7 +337,8 @@ class TimeSeriesMode(PlotMode):
             out.append(ResolvedSeries(
                 label=lab, display_name=disp, color=ci, axis=axis,
                 x=xs, y=ys, err_lo=elo, err_hi=ehi,
-                width=w_, dash=dash, marker=mk, msize=ms,
+                width=st["width"], dash=st["dash"], marker=st["marker"],
+                msize=st["msize"], kind=st["kind"], alpha=st["alpha"],
                 unit=host.unit_of(lab),
                 extra={"has_time": t is not None, "col": col}))
         return out
@@ -342,13 +367,26 @@ class TimeSeriesMode(PlotMode):
     _MPL_MARK = {"none": None, "o": "o", "s": "s", "t": "^", "t1": "v",
                  "d": "D", "+": "+", "x": "x", "star": "*", "p": "p", "h": "h"}
 
+    # 표현 방식(kind). 색·선스타일과 직교 — "무엇으로 그리나"만 고른다.
+    KINDS = ["line", "marker", "step", "bar", "area", "band", "errorbar"]
+    _KIND_TIP = ("line=선 · marker=점만 · step=계단 · bar=막대 · area=0까지 채움\n"
+                 "band=**목록의 바로 다음 시리즈**와의 사이를 채움(순서는 드래그로 바꿈)\n"
+                 "errorbar=오차막대(캡). ± Error band 체크가 켜져 있어야 값이 있음")
+    _STYLE_DEFAULT = {"width": 2, "dash": "solid", "marker": "o", "msize": 3,
+                      "kind": "line", "alpha": 1.0, "visible": True}
+
     def _style_of(self, lab):
-        """(width, dash, marker, msize) — 라벨별 스타일.
+        """라벨별 스타일 dict(빠진 키는 기본값으로 채워서 반환).
         기본: 실선 2px + 점마커(o, 3px) — 박사님 요청(시계열은 선+데이터점 표시).
         점 빼고 싶으면 시리즈별 ✏에서 marker=none."""
-        st = self._styles.get(lab, {})
-        return (int(st.get("width", 2)), st.get("dash", "solid"),
-                st.get("marker", "o"), int(st.get("msize", 3)))
+        st = dict(self._STYLE_DEFAULT)
+        st.update(self._styles.get(lab, {}))
+        st["width"] = int(st["width"]); st["msize"] = int(st["msize"])
+        st["alpha"] = float(st["alpha"])
+        st["visible"] = bool(st["visible"])
+        if st["kind"] not in self.KINDS:      # 옛/깨진 설정 방어
+            st["kind"] = "line"
+        return st
 
     def _edit_style(self):
         sel = self._selected_series()
@@ -356,23 +394,31 @@ class TimeSeriesMode(PlotMode):
             self.host.set_status("스타일을 바꿀 시리즈를 목록에서 선택하세요.")
             return
         lab = sel[0][0]
-        w_, dash, mk, ms = self._style_of(lab)
+        st0 = self._style_of(lab)
         from PyQt6.QtWidgets import (QDialog, QFormLayout, QSpinBox, QComboBox,
-                                     QDialogButtonBox)
+                                     QDialogButtonBox, QDoubleSpinBox)
         dlg = QDialog(self._w)
         dlg.setWindowTitle(f"Series style — {self._display(sel[0][0], sel[0][3])}")
         form = QFormLayout(dlg)
-        sp_w = QSpinBox(); sp_w.setRange(1, 12); sp_w.setValue(w_)
-        cb_d = QComboBox(); cb_d.addItems(list(self._DASH.keys())); cb_d.setCurrentText(dash)
+        cb_k = QComboBox(); cb_k.addItems(self.KINDS); cb_k.setCurrentText(st0["kind"])
+        cb_k.setToolTip(self._KIND_TIP)
+        sp_w = QSpinBox(); sp_w.setRange(1, 12); sp_w.setValue(st0["width"])
+        cb_d = QComboBox(); cb_d.addItems(list(self._DASH.keys()))
+        cb_d.setCurrentText(st0["dash"])
         cb_m = QComboBox()
         cb_m.addItems(["none", "o", "s", "t", "t1", "d", "+", "x", "star", "p", "h"])
-        cb_m.setCurrentText(mk)
+        cb_m.setCurrentText(st0["marker"])
         cb_m.setToolTip("o=원 s=사각 t=세모 t1=역세모 d=마름모 +=십자 x=엑스 star=별 p=오각 h=육각")
-        sp_m = QSpinBox(); sp_m.setRange(2, 20); sp_m.setValue(ms)
+        sp_m = QSpinBox(); sp_m.setRange(2, 20); sp_m.setValue(st0["msize"])
+        sp_a = QDoubleSpinBox(); sp_a.setRange(0.05, 1.0); sp_a.setSingleStep(0.05)
+        sp_a.setDecimals(2); sp_a.setValue(st0["alpha"])
+        sp_a.setToolTip("불투명도(1=불투명). 시리즈가 겹쳐 뒤가 안 보일 때 낮춤.")
+        form.addRow("Type", cb_k)
         form.addRow("Line width", sp_w)
         form.addRow("Line style", cb_d)
         form.addRow("Marker", cb_m)
         form.addRow("Marker size", sp_m)
+        form.addRow("Opacity", sp_a)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                               QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
@@ -381,7 +427,8 @@ class TimeSeriesMode(PlotMode):
             return
         # 선택한 모든 시리즈에 적용
         style = {"width": sp_w.value(), "dash": cb_d.currentText(),
-                 "marker": cb_m.currentText(), "msize": sp_m.value()}
+                 "marker": cb_m.currentText(), "msize": sp_m.value(),
+                 "kind": cb_k.currentText(), "alpha": sp_a.value()}
         for s in sel:
             self._styles[s[0]] = dict(style)
         self.render()
@@ -420,6 +467,173 @@ class TimeSeriesMode(PlotMode):
             d += _dt.timedelta(days=1)
         return spans
 
+    # ── kind별 그리기 (pg·mpl 공용 규칙) ──────────────────────────────
+    # 두 렌더러가 **같은 분기**를 갖는다. 새 kind를 넣으면 반드시 양쪽에 넣을 것
+    # (한쪽만 고쳐 화면·Publish가 갈라지는 게 이 파일의 단골 버그였다).
+
+    @staticmethod
+    def _rgba(color, alpha):
+        c = pg.mkColor(color)
+        c.setAlpha(max(0, min(255, int(round(255 * alpha)))))
+        return c
+
+    def _partner_y(self, s, specs):
+        """band용 짝 = **목록의 바로 다음 시리즈**. x가 다르면 s.x 위로 보간.
+
+        ponytail: 짝 지정 UI를 따로 두지 않는다 — 시리즈 목록은 이미 드래그로
+        순서를 바꿀 수 있어서 '위아래로 붙이면 밴드'가 규칙으로 충분하다.
+        다음 시리즈가 없으면 None → 호출측이 선으로 폴백."""
+        try:
+            i = specs.index(s)
+        except ValueError:
+            return None
+        if i + 1 >= len(specs):
+            return None
+        p = specs[i + 1]
+        if p.x is None or p.y is None or len(p.x) < 2:
+            return None
+        if len(p.x) == len(s.x):
+            return p.y
+        return np.interp(s.x, p.x, p.y, left=np.nan, right=np.nan)
+
+    def _fill_base(self, s, specs):
+        """area/band의 채움 기준선. band인데 짝이 없으면 None(선으로 폴백)."""
+        if s.kind == "area":
+            return np.zeros_like(s.y)
+        return self._partner_y(s, specs)
+
+    def _draw_pg_series(self, host, s, specs):
+        """화면(pg)에서 시리즈 하나 그리기 — kind 분기."""
+        vb = host.vb_right if s.axis == "R" else host.p1
+        # 범례도 라벨과 같은 규칙 — 입력은 mathtext, pg에 넣기 직전 HTML로(M5).
+        name = mathtext_to_html(f"{s.display_name} (R)" if s.axis == "R" else s.display_name)
+        col = self._rgba(s.color, s.alpha)
+
+        if s.kind == "bar":
+            w = bar_width(s.x) or 1.0
+            vb.addItem(pg.BarGraphItem(x=s.x, height=s.y, width=w,
+                                       brush=pg.mkBrush(col), pen=pg.mkPen(None)))
+            if host.legend is not None:   # BarGraphItem은 범례에 안 잡혀 대리 항목
+                host.legend.addItem(pg.PlotDataItem([], [], pen=pg.mkPen(col, width=6)), name)
+            return
+
+        if s.kind in ("area", "band"):
+            base = self._fill_base(s, specs)
+            if base is not None:
+                c0 = pg.PlotDataItem(s.x, base, pen=pg.mkPen(None))
+                c1 = pg.PlotDataItem(s.x, s.y, pen=pg.mkPen(None))
+                fb = pg.FillBetweenItem(c0, c1, brush=pg.mkBrush(self._rgba(s.color, 0.30 * s.alpha)))
+                fb.setZValue(-40)
+                vb.addItem(fb)
+
+        if s.kind == "errorbar" and s.err_lo is not None:
+            eb = pg.ErrorBarItem(x=s.x, y=s.y, top=s.err_hi - s.y, bottom=s.y - s.err_lo,
+                                 beam=(bar_width(s.x) or 1.0) * 0.3, pen=pg.mkPen(col, width=1))
+            vb.addItem(eb)
+
+        xs, ys = (step_xy(s.x, s.y) if s.kind == "step" else (s.x, s.y))
+        line_off = (s.dash == "none") or (s.kind == "marker")
+        pen = None if line_off else pg.mkPen(col, width=s.width,
+                                             style=self._DASH.get(s.dash, Qt.PenStyle.SolidLine))
+        sym = None if s.marker == "none" else s.marker
+        if line_off and sym is None:          # 둘 다 없으면 안 보이니 마커로 폴백
+            sym = "o"
+        if s.kind == "step" and sym is not None:
+            # 계단은 좌표를 편 상태라 그 위에 마커를 찍으면 점이 두 배가 된다 →
+            # 선은 편 좌표로, 마커는 원래 점 위치에 따로.
+            curve = pg.PlotDataItem(xs, ys, pen=pen, name=name)
+            self._make_clickable(curve, s.label)
+            self._add_pg(host, vb, curve, name)
+            self._add_pg(host, vb, pg.PlotDataItem(s.x, s.y, pen=None, symbol=sym,
+                                                   symbolSize=s.msize, symbolBrush=col,
+                                                   symbolPen=None), None)
+            return
+        curve = pg.PlotDataItem(xs, ys, pen=pen, name=name, symbol=sym,
+                                symbolSize=s.msize, symbolBrush=col, symbolPen=None)
+        self._make_clickable(curve, s.label)
+        self._add_pg(host, vb, curve, name)
+
+    @staticmethod
+    def _add_pg(host, vb, item, legend_name):
+        """PlotItem.addItem은 name이 있으면 범례에 자동 등록하지만, 오른쪽 축은
+        보조 ViewBox(p1이 아님)라 자동이 안 된다 — 그때만 명시적으로 넣는다."""
+        vb.addItem(item)
+        if legend_name and host.legend is not None and vb is not host.p1:
+            host.legend.addItem(item, legend_name)
+
+    def _make_clickable(self, item, lab):
+        """그린 곡선을 **직접 클릭**하면 그 시리즈의 스타일 창이 열리게 한다.
+
+        Origin의 미니 툴바(객체를 고르면 바로 편집)에서 가져온 것 — 표현 타입이
+        7종이 되고 나니 '고르는 경로가 좌측 목록뿐'인 게 병목이었다. 새 팝업을
+        만들지 않고 **기존 ✏ 스타일 창을 그대로 연다**(목록에서 그 줄을 선택한
+        뒤 `_edit_style()` 호출) — 편집 경로가 하나로 유지된다.
+        BarGraphItem은 클릭 시그널이 없어 빠진다(막대는 목록에서 편집)."""
+        try:
+            item.setCurveClickable(True, width=8)      # 선 근처 8px까지 잡아준다
+        except Exception:
+            return
+        item._pm_label = lab
+        item.sigClicked.connect(self._on_curve_clicked)
+
+    def _on_curve_clicked(self, item, ev=None):
+        lab = getattr(item, "_pm_label", None)
+        if lab is None or self._w is None:
+            return
+        if getattr(self.host, "_annot_pick", None) is not None:
+            return          # 주석 찍는 중이면 그쪽이 먼저 — 클릭을 뺏지 않는다
+        for i in range(self._list.count()):
+            it = self._list.item(i)
+            s = self._series_by_id(it.data(Qt.ItemDataRole.UserRole))
+            if s is not None and s[0] == lab:
+                self._list.setCurrentRow(i)
+                break
+        else:
+            return
+        self._edit_style()
+
+    def _draw_mpl_series(self, ax, s, specs):
+        """Publish(mpl)에서 시리즈 하나 그리기 — _draw_pg_series와 같은 분기.
+        범례용 (handle, label)을 반환(없으면 (None, None))."""
+        has_t = bool(s.extra.get("has_time"))
+        conv = (lambda a: [datetime.fromtimestamp(v) for v in a]) if has_t else (lambda a: a)
+        name = s.display_name
+        col = s.color
+        al = s.alpha
+
+        if s.kind == "bar":
+            w = bar_width(s.x)
+            if w and has_t:
+                w /= 86400.0                   # mpl 날짜축의 폭 단위는 '일'
+            h = ax.bar(conv(s.x), s.y, width=(w or 0.8), color=col, alpha=al,
+                       linewidth=0, label=name)
+            return h, name
+
+        if s.kind in ("area", "band"):
+            base = self._fill_base(s, specs)
+            if base is not None:
+                ax.fill_between(conv(s.x), base, s.y, color=col, alpha=0.30 * al, lw=0)
+
+        if s.kind == "errorbar" and s.err_lo is not None:
+            ax.errorbar(conv(s.x), s.y, yerr=[s.y - s.err_lo, s.err_hi - s.y],
+                        fmt="none", ecolor=col, elinewidth=1, capsize=2, alpha=al)
+
+        ls = self._MPL_DASH.get(s.dash, "-")
+        mk = self._MPL_MARK.get(s.marker)
+        if s.kind == "marker":
+            ls = "None"
+        if ls == "None" and mk is None:        # 둘 다 none → 마커로 폴백
+            mk = "o"
+        if s.kind == "step":
+            xs, ys = step_xy(s.x, s.y)
+            line, = ax.plot(conv(xs), ys, color=col, lw=s.width, ls=ls, alpha=al, label=name)
+            if mk is not None:                 # 마커는 원래 점 위치에(pg와 동일 규칙)
+                ax.plot(conv(s.x), s.y, color=col, ls="None", marker=mk, ms=s.msize, alpha=al)
+            return line, name
+        line, = ax.plot(conv(s.x), s.y, color=col, lw=s.width, ls=ls, marker=mk,
+                        ms=s.msize, alpha=al, label=name)
+        return line, name
+
     def _draw_err_band(self, host, axis, xs, lo, hi, ci):
         col = pg.mkColor(ci); col.setAlpha(55)
         c_lo = pg.PlotDataItem(xs, lo, pen=pg.mkPen(None))
@@ -445,24 +659,10 @@ class TimeSeriesMode(PlotMode):
         any_time = any(s.extra["has_time"] for s in specs)
         tspan = self._tspan(specs)
         for s in specs:
-            pen = (None if s.dash == "none"    # 선 없이 마커만
-                   else pg.mkPen(s.color, width=s.width,
-                                 style=self._DASH.get(s.dash, Qt.PenStyle.SolidLine)))
-            sym = None if s.marker == "none" else s.marker
-            if s.dash == "none" and sym is None:   # 둘 다 none이면 안 보이니 마커로 폴백
-                sym = "o"
-            if s.err_lo is not None:
+            # errorbar는 밴드 대신 캡 막대로 그린다(_draw_pg_series) — 둘 다 그리면 중복
+            if s.err_lo is not None and s.kind != "errorbar":
                 self._draw_err_band(host, s.axis, s.x, s.err_lo, s.err_hi, s.color)
-            if s.axis == "R":
-                curve = pg.PlotDataItem(s.x, s.y, pen=pen, name=f"{s.display_name} (R)",
-                                        symbol=sym, symbolSize=s.msize, symbolBrush=s.color,
-                                        symbolPen=None)
-                host.vb_right.addItem(curve)
-                if host.legend is not None:
-                    host.legend.addItem(curve, f"{s.display_name} (R)")
-            else:
-                host.p1.plot(s.x, s.y, pen=pen, name=s.display_name, symbol=sym,
-                             symbolSize=s.msize, symbolBrush=s.color, symbolPen=None)
+            self._draw_pg_series(host, s, specs)
         if (self._chk_night.isChecked() if hasattr(self, "_chk_night") else False) \
                 and any_time and tspan[0] is not None:
             self._draw_night_pg(host, tspan[0], tspan[1])
@@ -491,16 +691,12 @@ class TimeSeriesMode(PlotMode):
                     and any_time and tspan[0] is not None)
         for a, s in zip(axes, specs):
             xv = ([datetime.fromtimestamp(v) for v in s.x] if s.extra["has_time"] else s.x)
-            ls = self._MPL_DASH.get(s.dash, "-"); mpl_mk = self._MPL_MARK.get(s.marker)
-            if ls == "None" and mpl_mk is None:   # 둘 다 none → 마커로 폴백
-                mpl_mk = "o"
             if night_on:
                 for s0, s1 in self._night_spans(tspan[0], tspan[1]):
                     a.axvspan(_dt.datetime.fromtimestamp(s0), _dt.datetime.fromtimestamp(s1),
                               color=self._night_color, alpha=0.18, lw=0, zorder=0)
-            a.plot(xv, s.y, color=s.color, lw=s.width, ls=ls, marker=mpl_mk, ms=s.msize,
-                   label=s.display_name)
-            if s.err_lo is not None:
+            self._draw_mpl_series(a, s, specs)
+            if s.err_lo is not None and s.kind != "errorbar":
                 a.fill_between(xv, s.err_lo, s.err_hi, color=s.color, alpha=0.2, lw=0)
             a.set_ylabel(f"{s.display_name} [{s.unit}]" if s.unit else s.display_name)
             a.grid(True, alpha=0.3)
@@ -528,24 +724,18 @@ class TimeSeriesMode(PlotMode):
         hl, ll = [], []   # 두 축 범례 통합
         for s in specs:
             xv = ([datetime.fromtimestamp(v) for v in s.x] if s.extra["has_time"] else s.x)
-            ls = self._MPL_DASH.get(s.dash, "-")
-            mpl_mk = self._MPL_MARK.get(s.marker)
-            if ls == "None" and mpl_mk is None:   # 둘 다 none → 마커로 폴백
-                mpl_mk = "o"
             if s.axis == "R":
                 if ax_r is None:
                     ax_r = ax.twinx()
-                line, = ax_r.plot(xv, s.y, color=s.color, lw=s.width, ls=ls, marker=mpl_mk,
-                                  ms=s.msize, label=f"{s.display_name} (R)")
-                if s.err_lo is not None:
-                    ax_r.fill_between(xv, s.err_lo, s.err_hi, color=s.color, alpha=0.2, lw=0)
+                target = ax_r
             else:
-                line, = ax.plot(xv, s.y, color=s.color, lw=s.width, ls=ls, marker=mpl_mk,
-                                ms=s.msize, label=s.display_name)
-                if s.err_lo is not None:
-                    ax.fill_between(xv, s.err_lo, s.err_hi, color=s.color, alpha=0.2, lw=0)
-            hl.append(line)
-            ll.append(line.get_label())
+                target = ax
+            line, lbl = self._draw_mpl_series(target, s, specs)
+            if s.err_lo is not None and s.kind != "errorbar":
+                target.fill_between(xv, s.err_lo, s.err_hi, color=s.color, alpha=0.2, lw=0)
+            if line is not None:
+                hl.append(line)
+                ll.append(f"{lbl} (R)" if s.axis == "R" else lbl)
         if (self._chk_night.isChecked() if hasattr(self, "_chk_night") else False) \
                 and any_time and tspan[0] is not None:
             import datetime as _dt
@@ -868,6 +1058,36 @@ class HeatmapMode(PlotMode):
     key = "heatmap"
     label = "Correlation heatmap"
 
+    # 상관계수(-1~+1) 발산형 컬러맵. 2026-09-21에 `bwr`에서 바꿨다.
+    #   · `bwr`은 양 끝이 완전 채도라 |r| 차이가 뭉개지고, 한가운데 순백이
+    #     급격한 명도 단절을 만들어 **없는 경계가 있는 것처럼** 보인다.
+    #     흑백 인쇄하면 ±가 같은 회색이 돼 부호가 사라진다.
+    #   · `RdBu`(ColorBrewer)는 명도가 완만히 변해 위 문제가 없고 색각이상·
+    #     흑백 인쇄를 염두에 두고 설계됐다.
+    # **`_r`이 핵심**: RdBu는 빨강(낮음)→파랑(높음)이라 그냥 쓰면 상관 **부호가
+    # 뒤집혀** 보인다. 기존 관례(음=파랑, 양=빨강)를 지키려면 반전판을 써야 한다.
+    CMAP = "RdBu_r"
+
+    @classmethod
+    def _white_text(cls, r):
+        """셀의 r 값 글자를 흰색으로 쓸까? — **배경 휘도로** 정한다.
+
+        전엔 `abs(r) > 0.5`로 문턱을 박아뒀는데, 이런 상수는 컬러맵을 바꾸는 순간
+        조용히 어긋난다. 실제로 재보니:
+          · RdBu_r: |r|=0.5~0.6은 아직 밝은 살구색 → 흰 글자가 거의 안 보였다
+          · bwr:    |r|=0.9에서도 검은 글자 대비가 더 좋았다(5.40 vs 3.89)
+            = 옛 규칙은 **바꾸기 전에도 이미 틀려 있었다**
+        그래서 숫자 대신 WCAG 상대휘도로 판정한다 — 컬러맵을 또 바꿔도 따라온다."""
+        from matplotlib import colormaps
+        try:
+            v = float(r)
+            rgb = colormaps[cls.CMAP]((max(-1.0, min(1.0, v)) + 1.0) / 2.0)[:3]
+        except Exception:
+            return abs(float(r)) > 0.7
+        f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        lum = 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2])
+        return lum < 0.179          # 흰↔검 대비가 뒤집히는 휘도(WCAG 교차점)
+
     def __init__(self, host):
         super().__init__(host)
         self._w = None
@@ -990,7 +1210,7 @@ class HeatmapMode(PlotMode):
         img.setImage(C)
         img.setLevels([-1, 1])
         try:
-            lut = pg.colormap.getFromMatplotlib("bwr").getLookupTable(0.0, 1.0, 256)
+            lut = pg.colormap.getFromMatplotlib(self.CMAP).getLookupTable(0.0, 1.0, 256)
             img.setLookupTable(lut)
         except Exception:
             pass
@@ -1003,7 +1223,7 @@ class HeatmapMode(PlotMode):
         for i in range(len(names)):
             for j in range(len(names)):
                 ti = pg.TextItem(f"{C[i, j]:.2f}", anchor=(0.5, 0.5),
-                                 color="w" if abs(C[i, j]) > 0.5 else "k")
+                                 color="w" if self._white_text(C[i, j]) else "k")
                 ti.setPos(j + 0.5, i + 0.5)
                 host.p1.addItem(ti)
         host.p1.invertY(True)
@@ -1019,7 +1239,7 @@ class HeatmapMode(PlotMode):
             return
         names, C = mat
         short = self._short(names)
-        im = ax.imshow(C, vmin=-1, vmax=1, cmap="bwr")
+        im = ax.imshow(C, vmin=-1, vmax=1, cmap=self.CMAP)
         ax.set_xticks(range(len(names)))
         ax.set_xticklabels(short, rotation=45, ha="right")
         ax.set_yticks(range(len(names)))
@@ -1027,7 +1247,8 @@ class HeatmapMode(PlotMode):
         for i in range(len(names)):
             for j in range(len(names)):
                 ax.text(j, i, f"{C[i, j]:.2f}", ha="center", va="center",
-                        fontsize=8, color="white" if abs(C[i, j]) > 0.5 else "black")
+                        fontsize=8,
+                        color="white" if self._white_text(C[i, j]) else "black")
         fig.colorbar(im, ax=ax, shrink=0.8)
         self.host.mpl_label(ax, "title", self.host.lbl("title", "Correlation matrix (Pearson r)"))
 

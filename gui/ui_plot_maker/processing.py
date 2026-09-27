@@ -31,6 +31,31 @@ def smooth(y, n):
     return pd.Series(y).rolling(n, min_periods=1, center=True).mean().to_numpy()
 
 
+def step_xy(x, y):
+    """계단(steps-post) 좌표로 확장 — 구간마다 수평선+수직선 두 점으로 편다.
+
+    pg와 mpl의 계단 옵션 의미가 서로 미묘하게 다르다(pyqtgraph는
+    stepMode='center'/'left'/'right', matplotlib은 drawstyle='steps-pre/post/mid').
+    그래서 **양쪽 다 '그냥 선'으로 그리게** 좌표를 여기서 편다 — 두 렌더러가
+    반드시 같은 그림을 낸다(화면·Publish 드리프트 방지 규약).
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if len(x) < 2 or len(y) < 2:
+        return x, y
+    return np.repeat(x, 2)[1:], np.repeat(y, 2)[:-1]
+
+
+def bar_width(x, frac=0.8):
+    """막대 폭(x 단위) = 인접 간격 중앙값 × frac. 못 정하면 None."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if len(x) < 2:
+        return None
+    d = float(np.median(np.diff(np.sort(x))))
+    return d * frac if d > 0 else None
+
+
 def regress(x, y):
     """최소제곱 직선 적합 → (slope, intercept, r2, n) 또는 None."""
     m = np.isfinite(x) & np.isfinite(y)

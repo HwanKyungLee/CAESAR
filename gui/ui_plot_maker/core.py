@@ -33,6 +33,61 @@ def _shade(hex_color, factor):
     return "#%02X%02X%02X" % (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
 
+# ── 라벨 마크업: 입력 문법은 mathtext 하나 ────────────────────────────────
+# 그 전에는 같은 문자열이 화면과 Publish에서 다르게 나왔다 — 화면(pyqtgraph)은
+# HTML(`<sub>`)만, Publish(matplotlib)는 mathtext(`$_2$`)만 알아들어서 `NO$_2$`는
+# 화면에 literal로, `NO<sub>2</sub>`는 출력에 literal로 찍혔다. 논문 그림에 제일
+# 자주 필요한 아래첨자에서 둘 중 하나를 포기해야 했다.
+# → **입력은 mathtext로 통일**(최종 산출물이 mpl이고 논문 관례가 그쪽)하고,
+#   화면에 넣기 직전 여기서 한 번 HTML로 바꾼다.
+_TEX_SYMBOLS = {
+    "mu": "μ", "alpha": "α", "beta": "β", "gamma": "γ", "Delta": "Δ", "delta": "δ",
+    "epsilon": "ε", "theta": "θ", "lambda": "λ", "nu": "ν", "pi": "π", "rho": "ρ",
+    "sigma": "σ", "tau": "τ", "phi": "φ", "chi": "χ", "omega": "ω", "Omega": "Ω",
+    "times": "×", "cdot": "·", "pm": "±", "approx": "≈", "leq": "≤", "geq": "≥",
+    "infty": "∞", "degree": "°", "circ": "°", "propto": "∝", "rightarrow": "→",
+}
+
+
+def mathtext_to_html(text):
+    """mathtext 문자열 → pyqtgraph가 렌더하는 HTML. (mpl 쪽은 원문 그대로 쓴다.)
+
+    예) `NO$_2$` → `NO<sub>2</sub>` · `$\\times$10$^{-9}$` → `×10<sup>-9</sup>`
+        `$\\mu$g m$^{-3}$` → `μg m<sup>-3</sup>`
+
+    전부 옮기지 않는다 — 아래/위첨자 + 자주 쓰는 기호만 화이트리스트로 바꾸고,
+    **모르는 토큰은 원문 그대로 통과**시킨다. 조용히 지우면 사용자가 뭘 잘못 쳤는지
+    모른다(모르는 건 모르는 채로 보여주는 게 낫다).
+    """
+    import re
+    if not text:
+        return text
+
+    def esc(t):
+        return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    out = []
+    # **`$…$` 안만 수식으로 본다** — mpl과 같은 규칙. 밖의 밑줄은 그냥 밑줄이다
+    # (컬럼명 `R_mean`·`NO2_Error`가 아래첨자로 둔갑하면 안 된다).
+    for i, part in enumerate(re.split(r"\$", text)):
+        p = esc(part)
+        if i % 2 == 1:                            # $…$ 안쪽
+            p = re.sub(r"\\([A-Za-z]+)",
+                       lambda m: _TEX_SYMBOLS.get(m.group(1), m.group(0)), p)
+            p = re.sub(r"\\[,;: ]", " ", p)       # \, \; \: = 얇은 공백
+            p = re.sub(r"_\{([^{}]*)\}", r"<sub>\1</sub>", p)
+            p = re.sub(r"\^\{([^{}]*)\}", r"<sup>\1</sup>", p)
+            p = re.sub(r"_(\w)", r"<sub>\1</sub>", p)   # 중괄호 없는 한 글자꼴
+            p = re.sub(r"\^(\w)", r"<sup>\1</sup>", p)
+        out.append(p)
+    return "".join(out)
+
+
+def has_markup(text):
+    """mathtext 변환이 실제로 무언가 바꾸는 문자열인가(HTML 경로가 필요한가)."""
+    return bool(text) and mathtext_to_html(text) != text
+
+
 @dataclass
 class ResolvedSeries:
     """render()(화면·pyqtgraph)와 render_mpl()(Publish·matplotlib)이 공용으로
@@ -52,6 +107,10 @@ class ResolvedSeries:
     dash: str = "solid"        # _DASH(pg)/_MPL_DASH(mpl) 공용 키
     marker: str = "o"          # pg 심볼 = mpl 마커(둘 다 유효한 값만 사용)
     msize: int = 3
+    kind: str = "line"         # 표현 방식 — line/marker/step/bar/area/band/errorbar.
+                               # 색·스타일과 같은 규칙: 여기서 한 번 정하고 두
+                               # 렌더러는 분기만 한다(각자 재계산 금지).
+    alpha: float = 1.0         # 0~1 불투명도(색에 곱함). 겹친 시리즈 볼 때.
     unit: str = None
     extra: dict = field(default_factory=dict)   # 모드별 부가정보(예: kind="median")
 
