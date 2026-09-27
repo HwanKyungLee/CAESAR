@@ -12,7 +12,7 @@ title: "Augur (CAESAR): BBCEAS trace-gas retrieval software"
 type: software
 authors:
   - family-names: "Lee"
-    given-names: "HwanKyung"
+    given-names: "Gyung-Hwan"
     affiliation: "Gwangju Institute of Science and Technology (GIST)"
     # orcid: "https://orcid.org/0000-0000-0000-0000"
 repository-code: "https://github.com/HwanKyungLee/CAESAR"

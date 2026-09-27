@@ -20,6 +20,21 @@ import numpy as np
 import openpyxl
 import pandas as pd
 
+# 연락처는 공개 저장소에 두지 않는다 — tools/labshare_contact.local.json(.gitignore)에서 읽는다.
+_CONTACT_KEYS = ("pi_name", "pi_affiliation", "pi_email", "pi_phone",
+                 "contact_name", "contact_email", "contact_phone")
+def _load_contact():
+    import json as _json
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labshare_contact.local.json")
+    try:
+        with open(p, encoding="utf-8") as fh:
+            d = _json.load(fh)
+    except FileNotFoundError:
+        print(f"[labshare] {p} 없음 — Info 시트 연락처 칸을 비워 둔다", file=sys.stderr)
+        d = {}
+    return {k: d.get(k, "") for k in _CONTACT_KEYS}
+
+
 CFG_DIR = r"C:\Doasis_Work\Output\fitting\ch1_429.5~461.9_ch2_444.1~470.6_ch3_438.4~475.8"
 G = 0.82
 
@@ -197,13 +212,14 @@ def build_xlsx(path):
     info = wb["Info"]
     for r, lab in LABELS.items():
         info.cell(r, 1).value = lab
-    info.cell(1, 2).value = "민경은 (Kyung-Eun Min)"
-    info.cell(2, 2).value = "광주과학기술원 (Gwangju Institute of Science and Technology, GIST)"
-    info.cell(3, 2).value = "kemin@gist.ac.kr"
-    info.cell(4, 2).value = "062-715-3280"
-    info.cell(5, 2).value = "이경환 (Gyung-Hwan Lee)"
-    info.cell(6, 2).value = "gh548080@gist.ac.kr"
-    info.cell(7, 2).value = "062-715-2470"
+    _c = _load_contact()
+    info.cell(1, 2).value = _c["pi_name"]
+    info.cell(2, 2).value = _c["pi_affiliation"]
+    info.cell(3, 2).value = _c["pi_email"]
+    info.cell(4, 2).value = _c["pi_phone"]
+    info.cell(5, 2).value = _c["contact_name"]
+    info.cell(6, 2).value = _c["contact_email"]
+    info.cell(7, 2).value = _c["contact_phone"]
     info.cell(8, 2).value = "R0"
     info.cell(9, 2).value = "전남 순천시 해룡면 신대리 2040 (34.92959, 127.54514)"
     info.cell(10, 2).value = ("Nitrogen dioxide (NO2): CAESAR-cold, BBCEAS (Broadband "
