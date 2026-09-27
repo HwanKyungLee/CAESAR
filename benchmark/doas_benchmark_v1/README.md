@@ -166,6 +166,10 @@ was declared unconstrained are excluded from the scored figure.
 
 instrument-convolved references from a two-channel thermal-dissociation BBCEAS; NO2 after Vandaele et al., CHOCHO after Volkamer et al., H2O from HITRAN. Cite the original cross-section papers, not this package.
 
+Change from v1: the H2O cross section was re-assembled from HITRAN line data. Its peak value in the
+fitting windows is 2.5 % higher than in v1; the NO2 and CHOCHO cross sections are unchanged (correlation
+1.00000 with v1). Results for H2O are therefore not directly comparable between v1 and v2.
+
 Cross sections are supplied after applying the instrument's power-of-ten
 multipliers ({'NO2': 0, 'CHOCHO': 0, 'H2O': -12}), so the tabulated values are
 in cm2 molec-1 and need no further scaling.
