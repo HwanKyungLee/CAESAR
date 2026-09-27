@@ -132,6 +132,7 @@ class SaveExportMixin:
                 current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 robust_on = hasattr(self, 'chk_robust') and self.chk_robust.isChecked()
                 robust_status = "ON" if robust_on else "OFF"
+                etalon_status = "ON" if (not hasattr(self, 'chk_etalon') or self.chk_etalon.isChecked()) else "OFF"
 
                 kalman_q = self.spin_kalman_q.value()
                 kalman_r = self.spin_kalman_r.value()
@@ -194,6 +195,7 @@ class SaveExportMixin:
                     f"# Polynomial Degree: {poly_deg}",
                     f"# Tikhonov Lambda: {lam_val:g}",
                     f"# Robust Fitting (IRLS): {robust_status}",
+                    f"# Etalon Term (sin/cos fringe): {etalon_status}",
                     f"# Allow Negative Gas (±Neg): {allow_neg}",
                     f"# Auto QC: {qc_str}",
                     f"# Step Limit: {step_val} px",

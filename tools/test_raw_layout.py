@@ -59,8 +59,8 @@ def test_builtin_layouts(d):
     check("hot kind", hot.layout.kind == "hot", hot.layout.kind)
     check("cold 채널 = NO2 primary",
           cold.layout.spec_blocks == {"NO2": RP.SPEC_PRIMARY}, cold.layout.spec_blocks)
-    check("hot 채널 = PNs primary + ANs secondary",
-          hot.layout.spec_blocks == {"PNs": RP.SPEC_PRIMARY, "ANs": RP.SPEC_SECONDARY},
+    check("hot 채널 = ANs primary + PNs secondary (2026-09-27 판정)",
+          hot.layout.spec_blocks == {"ANs": RP.SPEC_PRIMARY, "PNs": RP.SPEC_SECONDARY},
           hot.layout.spec_blocks)
     # 기존 코드가 `is`로 본다(tools/test_raw_parser.py) — 레지스트리가 사본을 만들면 깨진다
     check("cold hk_map is ColdHKMap", cold.layout.hk_map is RP.ColdHKMap)

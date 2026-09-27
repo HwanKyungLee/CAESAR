@@ -1,3 +1,5 @@
+> ★ **핫 채널 정체(2026 여수): col 2053 = ΣANs 300 °C(청색 LED), col 4101 = ΣPNs 180 °C(469 nm LED).** 2026-09-25의 반대 판정은 철회. → [`CHANNEL_IDENTITY_YEOSU2026.md`](CHANNEL_IDENTITY_YEOSU2026.md)
+
 # Augur
 
 > **CAESAR** BBCEAS 미량기체 분석 소프트웨어 (구 "CAESAR Pro"). 랩 통합 관측시스템 **ARGUS** 아래, 계측기 **CAESAR**의 데이터를 농도로 확정하는 분석 프로그램이다. (측정 중 실시간 감시는 별도 프로그램 **Oculus**가 맡는다 — 설계: [`docs/Oculus_설계_2026-07.md`](docs/Oculus_설계_2026-07.md))
@@ -91,9 +93,9 @@ Windows에서는 `Augur_실행.bat` 더블클릭으로도 켜진다(콘솔 없�
 | **shift / squeeze** | 파장축의 미세한 이동·신축. 피팅 중 자동 보정한다 |
 | **ZA / He** | Zero Air / Helium 보정 스캔. R(반사율) 계산에 쓰는 기준 측정 (flag 500 / 510) |
 | **Cold / Hot** | 두 측정 채널(저온·고온 캐비티). 데이터 컬럼 구조와 보정값이 다르다 |
-| **ch1 / ch2** | **물리 채널**(캐비티). ch1=ANs(300 ℃), ch2=PNs(180 ℃) — 장비 보수 초기에 붙인 이름이다. raw 폴더·알파 파일이 이 이름을 쓴다 |
-| **roi1 / roi2** | **검출기 판독 영역**(ROI). 파장보정 폴더 `reference_data/wv_cal/roi1|roi2`가 이것이다. ⚠ **번호가 ch와 반대로 붙어 있다 — roi1=PNs, roi2=ANs.** 같은 번호끼리 짝지으면(ch1↔roi1) 다른 채널의 파장보정·단면으로 핏하게 된다 |
-| **핏창(창/poly)** | 종을 가리키는 **가장 안전한 이름**. 실측 확인: 600–1270px·poly4 = 429.5–462.0 nm = **ANs**, 900–1450px·poly3 = 444.1–470.6 nm = **PNs** (운영 결과 파일명 `ANs_430-462nm_Poly4`·`PNs_444-471nm_Poly3`와 일치). 핏 시나리오 JSON의 `ROI1`/`ROI2` **라벨**은 검출기 roi와 또 다른 축이니 종을 가리킬 때 쓰지 말 것 |
+| **ch1 / ch2** | **물리 채널**(캐비티). **2026 여수 구성(2026-09-27 인젝션으로 판정): ch1 = raw 블록 2053–4100 = ANs(300 ℃, 청색 LED ~428–456 nm), ch2 = raw 블록 4101–6148 = PNs(180 ℃, 469 nm LED).** 알파·피팅 파일 이름표(`ch1…_ANs_`, `ch2…_PNs_`)는 **맞다**. 2026-09-25의 '정정'(ch1=PNs)은 틀렸고 철회됐다. 근거: `C:\GHL\2026 yeosu\RAW\260927 failed\채널정체_판정_2026-09-27.md`. 8/11 이후 광섬유–ROI 배치가 바뀌었으므로(9/27 실험실은 block 2053 = 콜드) raw 블록 번호만으로 채널을 판단하지 말고 LED 스펙트럼으로 확인할 것 — `core/raw_parser.py`는 6181열 이름을 파일 날짜 2026-05-01~08-31에만 붙인다 |
+| **roi1 / roi2** | **검출기 판독 영역**(ROI). 파장보정 폴더 `reference_data/wv_cal/roi1|roi2`가 이것이다. 운영 핏셋 짝은 **번호가 ch와 반대**다: ch1(ANs) ↔ roi2, ch2(PNs) ↔ roi1 (필드로그 'ROI2 = Blue'와 일치) |
+| **핏창(창/poly)** | 운영 핏창: ch1(ANs, 300 ℃) = 600–1270px·poly4 = 429.5–462.0 nm, ch2(PNs, 180 ℃) = 900–1450px·poly3 = 444.1–470.6 nm. 운영 결과 파일명 `ANs_430-462nm_Poly4` = ch1 = ANs, `PNs_444-471nm_Poly3` = ch2 = PNs (이름표 그대로 맞음). 핏 시나리오 JSON의 `ROI1`/`ROI2` 라벨은 검출기 roi와 또 다른 축이니 종을 가리킬 때 쓰지 말 것 |
 
 > ⚠ **Shift 부호 규약 — 외부 도구(QDOAS/DOASIS)와 비교할 때 반드시 확인**:
 > Augur의 `shift`는 `model(x) = reference(x + shift)`로 정의되어 있다. 이는

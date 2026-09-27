@@ -406,7 +406,9 @@ class DoasFitter:
           열로 유지되므로 반환 인덱싱이 보존되고 gas 계수(c_opt[0:num_gases])도 불변.
         bounds_meta: `setup_fit_parameters(..., return_bounds=True)`의 7번째 반환값.
           주면 종료 상태가 CONVERGED/AT_BOUND/STEP_LIMITED로 갈린다(진단에만 나타남).
-          None이면 기존대로 CONVERGED/MAX_NFEV/FAILED만."""
+          None이면 기존대로 CONVERGED/MAX_NFEV/FAILED만.
+        fixed_e_f: etalon 각주파수(rad/px). None이면 etalon sin/cos 열 없이 푼다(etalon OFF)
+          — 반환 etalon_amp=etalon_phase=0."""
         gas_lb = -np.inf if allow_negative_gas else 0.0
         x_min, x_max = pixel_idx[0], pixel_idx[-1]
         x_mapped = (2.0 * (pixel_idx - x_min) / (x_max - x_min)) - 1.0
@@ -479,7 +481,11 @@ class DoasFitter:
         const_cols = [T[:, j] for j in range(poly_order + 1)]
         if CB is not None:
             const_cols += [CB[:, kk] for kk in range(CB.shape[1])]
-        const_cols += [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
+        # fixed_e_f=None → etalon OFF: sin/cos 열을 넣지 않는다(2026-09-26 추가, 기본은 ON).
+        # 좁은 흡수선(H2O 등)과 etalon 열의 공선성을 피해야 할 때 쓴다. None이 아니면 기존과 바이트동일.
+        _use_etalon = fixed_e_f is not None
+        if _use_etalon:
+            const_cols += [np.sin(fixed_e_f * pixel_idx), np.cos(fixed_e_f * pixel_idx)]
         CONST = np.column_stack(const_cols)
 
         # ── 해석적(Golub–Pereyra) 자코비안 준비 ─────────────────────
@@ -806,10 +812,14 @@ class DoasFitter:
 
         # etalon: 마지막 두 열 = a·sin + b·cos → 진폭/위상으로 환산해 반환(하류의
         # `amp·sin(f·x + phase)` 재구성과 정확히 동일: a=A·cosφ, b=A·sinφ).
-        a_et, b_et = float(c_opt[-2]), float(c_opt[-1])
-        etalon_amp = float(np.hypot(a_et, b_et))
-        etalon_phase = float(np.arctan2(b_et, a_et))
-        poly_coeffs = c_opt[num_gases:-2]
+        if _use_etalon:
+            a_et, b_et = float(c_opt[-2]), float(c_opt[-1])
+            etalon_amp = float(np.hypot(a_et, b_et))
+            etalon_phase = float(np.arctan2(b_et, a_et))
+            poly_coeffs = c_opt[num_gases:-2]
+        else:                                   # etalon OFF: 진폭 0, 나머지는 poly(+custom)
+            etalon_amp, etalon_phase = 0.0, 0.0
+            poly_coeffs = c_opt[num_gases:]
 
         result = (opt_shifts, opt_squeezes, c_gas, poly_coeffs,
                   etalon_amp, etalon_phase, c_perr)

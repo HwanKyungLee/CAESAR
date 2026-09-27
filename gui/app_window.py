@@ -435,6 +435,14 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.chk_robust.setToolTip("Robust (IRLS): auto-ignore spike noise and cosmic rays")
         self.chk_robust.setChecked(False)
 
+        # Etalon 항 ON/OFF (2026-09-26). OFF면 핏 기저에서 etalon sin·cos 두 열을 뺀다 —
+        # 좁은 흡수선(H2O 등)이 etalon 열과 공선일 때 쓴다. 기본 ON(기존 동작과 동일).
+        self.chk_etalon = QCheckBox("Etalon")
+        self.chk_etalon.setToolTip("Etalon: fit a sin/cos fringe term (default ON).\n"
+                                   "Turn OFF when narrow absorption lines (e.g. H2O) trade off\n"
+                                   "against the fringe term.")
+        self.chk_etalon.setChecked(True)
+
         self.chk_allow_neg = QCheckBox("± Neg")
         self.chk_allow_neg.setToolTip(
             "Checked: gas coefficient lower bound 0→−∞ (NNLS off). Noise of near-zero gases can go negative,\n"
@@ -597,7 +605,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         _apg.setHorizontalSpacing(3); _apg.setVerticalSpacing(3)
         _apg.setContentsMargins(0, 0, 0, 0)
         _apg.addWidget(_lbl("Tik λ"), 0, 0); _apg.addWidget(self.spin_lambda, 0, 1)
-        _apg.addWidget(self.chk_robust, 0, 2, 1, 2)
+        _apg.addWidget(self.chk_robust, 0, 2)
+        _apg.addWidget(self.chk_etalon, 0, 3)
         _apg.addWidget(_lbl("OK RMS%"), 0, 4); _apg.addWidget(self.spin_rms_thresh, 0, 5)
         _apg.addWidget(_lbl("Kal Q"), 1, 0); _apg.addWidget(self.spin_kalman_q, 1, 1)
         _apg.addWidget(_lbl("R"), 1, 2); _apg.addWidget(self.spin_kalman_r, 1, 3)

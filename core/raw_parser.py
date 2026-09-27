@@ -20,8 +20,10 @@ Layout (verified against 2026-05 Yeosu campaign data + 박사님
   col  3      : tempccd (CCD temp, ÷100 = °C)
   col  4      : state flag (1=Atmosphere, 500=ZA, 510=He, 502/512=wait, 503/513=end)
   col  5–2052 : ** EMPTY / NOISE in 2026 ** (was ch3 in 박사님 2025 3-channel build)
-  col 2053–4100: PRIMARY spectrum  — Cold: NO2 cell.   Hot: PNs cell ("좌측")
-  col 4101–6148: SECONDARY spectrum — Hot only: ANs cell ("우측"). Cold: noise.
+  col 2053–4100: PRIMARY spectrum  — Cold: NO2 cell.   Hot(2026 여수): **ANs 300 °C** cell (청색 LED)
+  col 4101–6148: SECONDARY spectrum — Hot(2026 여수): **PNs 180 °C** cell (469 nm LED). Cold: noise.
+                 ※ 2026-09-27 인젝션으로 판정(아래 register_campaign_layout 주석). 과거 주석의
+                   'PNs=좌측=primary'는 틀렸다. 캠페인 이후 광섬유 배치가 바뀌면 다시 판정할 것.
   col 6149+   : HK block (housekeeping). Cold: 30 cols. Hot: 32 cols.
 
 Verified by VALUE-INSPECTION (2026-05-25-001 Cold, 2026-05-26-001 Hot):
@@ -149,6 +151,7 @@ bytepack spacing is reliable (~0.97 s/row) — see ``ParsedRow.bytepack_sec``.
 """
 from __future__ import annotations
 
+import re
 import sys
 import os
 import struct
@@ -402,6 +405,11 @@ class CampaignLayout:
     hk_map: dict                  # 이름 → (절대열, scale, unit, kind)
     campaign: str = ""
     source: str = "builtin"
+    # 채널 **이름**(PNs/ANs 등)이 유효한 파일 날짜 구간 ("YYYY-MM-DD", 양끝 포함). None = 제한 없음.
+    # 같은 ncols라도 캠페인이 끝나고 광섬유-ROI 배치가 바뀌면 이름이 거짓말이 된다
+    # (실측: 2026-09-27 실험실 raw는 6181열인데 block 2053 = 콜드 캐비티).
+    # 구간 밖 파일은 구조적 이름(ch1/ch2)으로 떨어뜨린다 — 블록 위치·HK 열은 그대로.
+    date_range: tuple = None
 
     def spec_blocks(self) -> dict:
         out = {}
@@ -414,7 +422,8 @@ CAMPAIGN_LAYOUTS: dict[int, CampaignLayout] = {}
 
 
 def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
-                             source="builtin", replace=False) -> CampaignLayout:
+                             source="builtin", replace=False,
+                             date_range=None) -> CampaignLayout:
     """raw 구성 하나를 등록한다. 같은 ncols가 이미 있으면 `replace=True`라야 덮는다.
 
     조용한 덮어쓰기를 막는 이유: 두 캠페인이 우연히 같은 ncols를 쓰면 나중에 등록된 쪽이
@@ -428,7 +437,8 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
     # hk_map은 **사본을 만들지 않는다** — 기존 코드가 `layout.hk_map is ColdHKMap`로
     # 동일성을 본다(tools/test_raw_parser.py). 사본을 쥐어주면 조용히 깨진다.
     lay = CampaignLayout(ncols=int(ncols), kind=str(kind), channels=dict(channels),
-                         hk_map=hk_map, campaign=str(campaign), source=str(source))
+                         hk_map=hk_map, campaign=str(campaign), source=str(source),
+                         date_range=(tuple(date_range) if date_range else None))
     for name, role in lay.channels.items():
         if isinstance(role, str) and role not in ROLE_BLOCKS:
             raise ValueError(f"채널 '{name}'의 역할 '{role}'을 모른다. "
@@ -553,8 +563,17 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
 # 2026 여수 구성 — 이 파일 상단 VALUE-INSPECTION 기록에서 나온 값.
 register_campaign_layout(6179, "cold", {"NO2": "primary"}, ColdHKMap,
                          campaign="2026-yeosu")
-register_campaign_layout(6181, "hot", {"PNs": "primary", "ANs": "secondary"}, HotHKMap,
-                         campaign="2026-yeosu")
+# ★ 핫 채널 정체 (2026-09-27 판정, RAW/260927 failed/채널정체_판정_2026-09-27.md):
+#   primary   (col 2053-4100, 청색 LED 반치 ~428-456 nm) = **ANs 300 °C** 셀
+#   secondary (col 4101-6148, 청록 469 nm LED)          = **PNs 180 °C** 셀
+#   근거: 300 °C 오븐만 통과시킨 NO2가 청색 LED 캐비티에서 흡수(t=72), 그 LED+필터
+#   스펙트럼이 캠페인 block 2053과 r=0.991. 캠페인 이후 LED·캐비티 교체 없음(사용자 확인).
+#   (2026-09-25~27에 쓰던 'PNs=primary'는 틀렸다.)
+#   **여수 캠페인(+같은 배치인 8/10-11 실험실) 전용** — date_range 밖 6181열 파일은
+#   ch1/ch2 구조 이름으로 떨어진다(9/27 실험실은 block 2053 = 콜드).
+#   HK 이름(P_PNs/P_ANs, tempcell1/2)의 센서-캐비티 짝은 **미검증** — 이름만 보고 쓰지 말 것.
+register_campaign_layout(6181, "hot", {"ANs": "primary", "PNs": "secondary"}, HotHKMap,
+                         campaign="2026-yeosu", date_range=("2026-05-01", "2026-08-31"))
 
 register_campaign_layout(6174, "cold", {"NO2": "primary"}, Cold6174HKMap,
                          campaign="2026-yeosu")   # 6/11~6/15 HK 선두 5열 결손 구성
@@ -607,6 +626,24 @@ class FileLayout:
 # ──────────────────────────────────────────────────────────────────────────────────
 # Parser
 # ──────────────────────────────────────────────────────────────────────────────────
+
+_DATE_RE = re.compile(r"(20\d\d)-(\d\d)-(\d\d)")
+
+
+def _file_date(path: str):
+    """파일명의 YYYY-MM-DD, 없으면 None. (mtime은 복사하면 바뀌므로 쓰지 않는다.)"""
+    m = _DATE_RE.search(os.path.basename(path))
+    return "-".join(m.groups()) if m else None
+
+
+def _in_date_range(path: str, mtime, date_range) -> bool:
+    """파일명 날짜가 구간 밖일 때만 False. 날짜를 모르면 제한하지 않는다(합성 테스트 파일 등)."""
+    d = _file_date(path)
+    if d is None:
+        return True
+    lo, hi = date_range
+    return lo <= d <= hi
+
 
 class RawParser:
     """Streaming parser for CAESAR Araon Mega-Matrix .dat files.
@@ -665,6 +702,19 @@ class RawParser:
         mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=KST)
 
         lay = CAMPAIGN_LAYOUTS.get(ncols)
+        if lay is not None and lay.date_range and not _in_date_range(path, mtime, lay.date_range):
+            # 같은 열 수지만 캠페인 기간 밖 — 채널 이름은 주장하지 않는다(블록·HK는 유지).
+            blocks = spec_blocks_for_ncols(ncols)
+            blocks = {k: v for k, v in blocks.items() if v in lay.spec_blocks().values()}
+            print(f"[raw_parser] {os.path.basename(path)}: {lay.campaign} 기간"
+                  f"{lay.date_range} 밖 → 채널 이름 대신 구조 이름 {list(blocks)} 사용",
+                  file=sys.stderr)
+            return FileLayout(
+                path=path, ncols=ncols, kind=f"{lay.kind}(outside {lay.campaign})",
+                hk_map=lay.hk_map,
+                spec_blocks=blocks,
+                mtime=mtime,
+            )
         if lay is not None:
             return FileLayout(
                 path=path, ncols=ncols, kind=lay.kind,
@@ -756,6 +806,11 @@ class RawParser:
         """Stream rows together with selected spectra. Memory-efficient."""
         blocks = {ch: self.layout.spec_blocks[ch] for ch in channels
                   if ch in self.layout.spec_blocks}
+        missing = [ch for ch in channels if ch not in self.layout.spec_blocks]
+        if missing:
+            # 조용히 빼면 '채널 하나가 비었다'를 아무도 모른다(캠페인 기간 밖 파일 등).
+            print(f"[raw_parser] {os.path.basename(self.path)}: 요청 채널 {missing} 없음 "
+                  f"(가능: {list(self.layout.spec_blocks)})", file=sys.stderr)
         for i, line in enumerate(self._iter_data_lines()):
             toks = line.split("\t") if "\t" in line else line.split()
             if len(toks) < self.layout.ncols:

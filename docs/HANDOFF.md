@@ -1,3 +1,5 @@
+> ★ 2026-09-27 — 핫 채널 정체 확정: col 2053 = ANs 300 °C, col 4101 = PNs 180 °C (09-25 반대 판정 철회). 기준 [`../CHANNEL_IDENTITY_YEOSU2026.md`](../CHANNEL_IDENTITY_YEOSU2026.md)
+
 # CAESAR Pro — 세션 핸드오프 노트
 
 > 다른 컴퓨터/세션의 Claude Code가 이어받기 위한 진행 상황 기록.

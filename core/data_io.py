@@ -16,6 +16,8 @@ from .raw_parser import (
     P_VALID_LO as _RP_P_LO,
     P_VALID_HI as _RP_P_HI,
     CAMPAIGN_LAYOUTS as _CAMPAIGN_LAYOUTS,
+    ROLE_BLOCKS as _RP_ROLE_BLOCKS,
+    _in_date_range as _rp_in_date_range,
     FLAG_HEADER,
     FLAG_AMBIENT,
 )
@@ -228,7 +230,7 @@ class DataIO:
     # Araon Mega-Matrix column layout:
     #   META block  : cols    0 – 2052   (2053 cols, metadata + UTC + flags)
     #   CH1 spectrum: cols 2053 – 4100   (2048 px)
-    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot ROI2/ANs only
+    #   CH2 spectrum: cols 4101 – 6148   (2048 px)  — Hot only (2026 여수: PNs 180 °C; CH1 = ANs 300 °C — 2026-09-27 판정)
     #   CH3 spectrum: cols 6149 – 8196   (2048 px)  — 3-channel config only
     #   HK block    : cols (2053 + N×2048) onward
     #
@@ -249,14 +251,33 @@ class DataIO:
     _warned: set = set()
 
     @staticmethod
+    def _slot_identity(lay, ch: int, filepath):
+        """슬롯 번호 `ch`(1=block 2053, 2=block 4101)에 붙은 채널 **이름**을 돌려준다.
+
+        레이아웃에 이름이 없거나, 이름의 유효 날짜 구간(date_range) 밖 파일이면 None.
+        파일명에 날짜가 없으면 raw_parser와 같은 규칙으로 제한하지 않는다.
+        """
+        if lay is None or not getattr(lay, 'channels', None):
+            return None
+        dr = getattr(lay, 'date_range', None)
+        if dr and not _rp_in_date_range(str(filepath), None, dr):
+            return None
+        start = DataIO._META_COLS + (int(ch) - 1) * DataIO._CH_PIXELS
+        for name, role in lay.channels.items():
+            blk = _RP_ROLE_BLOCKS.get(role) if isinstance(role, str) else tuple(role)
+            if blk is not None and int(blk[0]) == start:
+                return str(name)
+        return None
+
+    @staticmethod
     def _warn_once(msg: str) -> None:
         if msg not in DataIO._warned:
             DataIO._warned.add(msg)
             print(f"[data_io][WARN] {msg}")
     _HK_REL = {
         'cold_p':   11,   # Cold inlet pressure raw count → ×0.6895 = mbar
-        'hot_p':    13,   # Hot CH1(PNs) pressure raw count → ×0.6895 = mbar (abs 6162)
-        'hot_p_ans':15,   # Hot CH2(ANs) pressure raw count → ×0.6895 = mbar (abs 6164)
+        'hot_p':    13,   # abs 6162 = P_PNs = 180 °C 경로 = 캠페인 block 4101 (레거시 폴백 전용)
+        'hot_p_ans':15,   # abs 6164 = P_ANs = 300 °C 경로 = 캠페인 block 2053 (레거시 폴백 전용)
         'hot_cav_t': 6,   # Cell-heater SETPOINT (~75°C) — 가스온도 아님(과냉방지용).
                           # 최후 폴백 전용. 쓰면 ppb 가 ~15% 과대평가(아래 주석 참조).
         'cold_cav_t':24,  # Unheated cavity temperature  → /100 = °C (~24°C)
@@ -721,8 +742,8 @@ class DataIO:
         The Araon LabVIEW system saves each scan as a single horizontal row with
         6175+ columns (the 'Mega-Matrix' format):
 
-          Column range  2053–4100  →  CH1 spectrum  (ROI1 / PNs / 180°C inlet)
-          Column range  4101–6148  →  CH2 spectrum  (ROI2 / ANs / 300°C inlet)
+          Column range  2053–4100  →  CH1 spectrum  (2026 여수: ANs / 300°C inlet, 청색 LED — 2026-09-27 판정)
+          Column range  4101–6148  →  CH2 spectrum  (2026 여수: PNs / 180°C inlet, 469 nm LED)
           Column        4          →  state flag  (1=Ambient, 500~503=ZA, 510~513=He)
           HK block      6149+      →  T, P, oven temps, etc.
 
@@ -831,11 +852,29 @@ class DataIO:
 
                     # 채널별 선호 이름 → 공통 이름 → 같은 kind 아무거나.
                     # 'Cold'/'Hot' 같은 구성 이름으로 분기하지 않는다(Oculus 설계 §0-A.6).
-                    if ch >= 2:
+                    # ★ 압력 센서는 **채널 정체(이름)로** 고른다 — 슬롯 번호로 고르지 않는다
+                    #   (2026-09-27 판정, CHANNEL_IDENTITY_YEOSU2026.md §4). 여수 캠페인에서
+                    #   P_ANs(6164)는 300 °C 경로 = primary(block 2053, 'ANs'),
+                    #   P_PNs(6162)는 180 °C 경로 = secondary(block 4101, 'PNs').
+                    #   근거: 6164가 캠페인 내내 ~43 mbar 낮고, 9/27 180 °C 라인만 바꿨을 때
+                    #   6162의 He−ZA dP만 18→10 mbar로 변함(6164는 41→43 그대로).
+                    #   예전 코드는 슬롯 1 ← P_PNs, 슬롯 2 ← P_ANs 로 **반대**였다(채널당 ~0.6 %).
+                    #   이름이 없는 파일(date_range 밖·미등록)은 예전 슬롯 규칙을 유지한다 —
+                    #   9/27 이후 실험실 raw는 block 4101 = 300 °C 셀이라 그 규칙이 맞다.
+                    _ident = DataIO._slot_identity(_lay, ch, filepath)
+                    if _ident == 'ANs':
+                        pv = _get('P_ANs', 'cavity_P', 'p_cavity')
+                    elif _ident == 'PNs':
+                        pv = _get('P_PNs', 'cavity_P', 'p_cavity')
+                    elif ch >= 2:
                         pv = _get('P_ANs', 'P_PNs', 'cavity_P', 'p_cavity')
-                        tv = _get('tempcell2', 'tempcell1', 'cavity_T', 't_cavity')
                     else:
                         pv = _get('P_PNs', 'cavity_P', 'p_cavity')
+                    # 셀 온도 센서(tempcell1/2)의 캐비티 짝은 데이터로 특정 불가(오븐과 무관하게
+                    # 항상 +3.1–3.4 °C 차) — 영향 < 0.1 %라 슬롯 규칙 그대로 둔다.
+                    if ch >= 2:
+                        tv = _get('tempcell2', 'tempcell1', 'cavity_T', 't_cavity')
+                    else:
                         tv = _get('tempcell1', 'tempcell2', 'cavity_T', 't_cavity')
                     if not np.isfinite(pv):
                         pv = _any_of_kind('press')

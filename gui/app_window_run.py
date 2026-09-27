@@ -330,6 +330,7 @@ class AnalysisRunMixin:
                         pmin, pmax = pixel_min, pixel_max
                 cav_ch = cfg.get('cavity_d', cavity_d); rl_ch = cfg.get('rl_factor', 1.0)
                 lam_ch = cfg.get('tikhonov_lambda', 0.0); rob_ch = cfg.get('use_robust', False)
+                et_ch = cfg.get('use_etalon', True)
                 step_ch = cfg.get('step_limit', 0.5)
                 kq_ch = cfg.get('kalman_q', self.spin_kalman_q.value())
                 kr_ch = cfg.get('kalman_r', self.spin_kalman_r.value())
@@ -346,6 +347,7 @@ class AnalysisRunMixin:
                 pmin, pmax = pixel_min, pixel_max
                 cav_ch = cavity_d; rl_ch = self.spin_rl_factor.value()
                 lam_ch = self.spin_lambda.value(); rob_ch = self.chk_robust.isChecked()
+                et_ch = self.chk_etalon.isChecked() if hasattr(self, 'chk_etalon') else True
                 step_ch = step_limit_val
                 kq_ch = self.spin_kalman_q.value(); kr_ch = self.spin_kalman_r.value()
 
@@ -372,6 +374,7 @@ class AnalysisRunMixin:
             w.step_limit = step_ch
             w.tikhonov_lambda = lam_ch
             w.use_robust_fitting = rob_ch
+            w.use_etalon = bool(et_ch)
             w.allow_negative_gas = neg_ch
             w.qc_enabled = self.chk_qc.isChecked() if hasattr(self, 'chk_qc') else True
             w.qc_rms_abs = self.spin_qc_rms.value() if hasattr(self, 'spin_qc_rms') else 0.0

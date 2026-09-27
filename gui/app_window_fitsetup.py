@@ -310,7 +310,9 @@ class FitSetupMixin:
         #  shift/squeeze만. 전부 Fix면 theta=[]여도 doas_fit가 선형해 1회로 처리.)
         out = fitter.execute_varpro_fit(
             vp_pixel, a, np.ones(len(a)), active, fixed, linked, t0, lb, ub,
-            self.spin_poly_deg.value(), 0.0, vp_center, 1.0, rp, T_C,
+            self.spin_poly_deg.value(),
+            (0.0 if (not hasattr(self, 'chk_etalon') or self.chk_etalon.isChecked()) else None),
+            vp_center, 1.0, rp, T_C,
             self.spin_lambda.value(), self.chk_robust.isChecked(),
             allow_negative_gas=self.chk_allow_neg.isChecked())
         opt_shifts, opt_squeezes, gas_coeffs, poly_c, etal_amp, best_ep, perr = out

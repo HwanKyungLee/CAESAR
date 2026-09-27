@@ -422,6 +422,8 @@ def meta_to_cfg(meta: dict, ref_dir: str | None = None) -> tuple:
         # 핏 수치를 바꾸는 값이라 반드시 meta에서 가져온다(기본값으로 때우면 안 됨).
         "tikhonov_lambda": qc.get("tikhonov") or 0.0,
         "use_robust": bool(qc.get("robust")),
+        # etalon 항 ON/OFF(2026-09-26). 옛 meta에는 키가 없다 → 그때는 항상 ON이었다.
+        "use_etalon": bool(qc.get("etalon", True)),
     }
     return cfg, unresolved
 

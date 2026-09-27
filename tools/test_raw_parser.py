@@ -58,7 +58,7 @@ def test_known_layouts_unchanged():
     p_hot = RawParser(_write_row_file(6181))
     check("hot kind", p_hot.layout.kind == "hot", p_hot.layout.kind)
     check("hot hk_map == HotHKMap", p_hot.layout.hk_map is HotHKMap)
-    check("hot spec_blocks", p_hot.layout.spec_blocks == {"PNs": SPEC_PRIMARY, "ANs": SPEC_SECONDARY},
+    check("hot spec_blocks", p_hot.layout.spec_blocks == {"ANs": SPEC_PRIMARY, "PNs": SPEC_SECONDARY},
           p_hot.layout.spec_blocks)
 
 
@@ -91,9 +91,31 @@ def test_spec_blocks_for_ncols_direct():
     check("6179에서도 ch1==SPEC_PRIMARY", spec_blocks_for_ncols(6179)["ch1"] == SPEC_PRIMARY)
 
 
+def _write_named_row_file(ncols: int, name: str) -> str:
+    d = tempfile.mkdtemp()
+    fp = os.path.join(d, name)
+    with open(fp, "w") as fh:
+        fh.write("\t".join("1" for _ in range(ncols)) + "\n")
+    return fp
+
+
+def test_yeosu_hot_date_range():
+    print("[4] 2026 여수 핫 채널 이름은 캠페인 기간 파일에만 (2026-09-27 판정)")
+    p = RawParser(_write_named_row_file(6181, "2026-06-09-013.dat"))
+    check("캠페인 파일: ANs = primary(2053), PNs = secondary(4101)",
+          p.layout.spec_blocks == {"ANs": SPEC_PRIMARY, "PNs": SPEC_SECONDARY}, p.layout.spec_blocks)
+    p = RawParser(_write_named_row_file(6181, "2026-08-11-003(0_10).dat"))
+    check("8/11 실험실(같은 배치)도 여수 이름", "ANs" in p.layout.spec_blocks, p.layout.spec_blocks)
+    p = RawParser(_write_named_row_file(6181, "2026-09-27-001.dat"))
+    check("기간 밖 파일은 구조 이름 ch1/ch2",
+          p.layout.spec_blocks == {"ch1": SPEC_PRIMARY, "ch2": SPEC_SECONDARY}, p.layout.spec_blocks)
+    check("기간 밖이어도 HK 지도는 유지", p.layout.hk_map is HotHKMap)
+    check("kind에 기간 밖 표시", "outside" in p.layout.kind, p.layout.kind)
+
+
 def main():
     for t in (test_known_layouts_unchanged, test_unregistered_ncols_structural_fallback,
-              test_spec_blocks_for_ncols_direct):
+              test_spec_blocks_for_ncols_direct, test_yeosu_hot_date_range):
         t()
     print(f"\nraw_parser tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0

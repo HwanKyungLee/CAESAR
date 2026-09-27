@@ -124,6 +124,7 @@ class ChannelConfigMixin:
             "ref_props": dict(getattr(self, 'ref_props', {})),
             "tikhonov_lambda": self.spin_lambda.value() if hasattr(self, 'spin_lambda') else 0.0,
             "use_robust": self.chk_robust.isChecked() if hasattr(self, 'chk_robust') else False,
+            "use_etalon": self.chk_etalon.isChecked() if hasattr(self, 'chk_etalon') else True,
             "allow_negative_gas": self.chk_allow_neg.isChecked(),
             "kalman_q": self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005,
             "kalman_r": self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050,
@@ -211,6 +212,7 @@ class ChannelConfigMixin:
             "ok_rms_pct": _val('spin_rms_thresh'),
             "tikhonov": _val('spin_lambda', 0.0),
             "robust": _chk('chk_robust'),
+            "etalon": _chk('chk_etalon'),
             "kalman_q": _val('spin_kalman_q'),
             "kalman_r": _val('spin_kalman_r'),
         }
@@ -240,6 +242,8 @@ class ChannelConfigMixin:
             self.spin_lambda.setValue(scenario.get("tikhonov_lambda", 0.0))
         if hasattr(self, 'chk_robust'):
             self.chk_robust.setChecked(scenario.get("use_robust", False))
+        if hasattr(self, 'chk_etalon'):
+            self.chk_etalon.setChecked(scenario.get("use_etalon", True))   # 키 없으면 기존 동작(ON)
         if hasattr(self, 'chk_allow_neg'):
             value, provenance = _scenario_gas_policy(
                 scenario, self.chk_allow_neg.isChecked())

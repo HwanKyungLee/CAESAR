@@ -31,7 +31,7 @@ from core.doas_fit import alpha_fit_scale, policy_floats
 
 # ──────────────────────────────────────────────────────────────────────────
 def fit_window(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
-               px_min, px_max, poly_deg, step_limit=0.5, target="NO2"):
+               px_min, px_max, poly_deg, step_limit=0.5, target="NO2", use_etalon=True):
     """한 스캔을 한 (창, 차수)로 핏 → 스코어링 지표 dict.
 
     residual_compare.fit_one의 확장판: `perr`(검색 불확실도)와 shift-경계 여부,
@@ -55,7 +55,7 @@ def fit_window(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     scale = alpha_fit_scale(a)
     a_scaled = a * scale
 
-    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40)
+    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40) if use_etalon else None
     active, fixed, linked, t0, lb, ub = fitter.setup_fit_parameters(
         ref_props, 0.0, [0.0, 1.0], step_limit)
 
@@ -70,8 +70,8 @@ def fit_window(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     perr = np.asarray(perr, float) / scale
 
     full, tot, base, etal, _ = eng.get_model_components(
-        vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp, etalon_freq=ef,
-        etalon_phase=ep)
+        vp, opt_sh, opt_sq, gco, poly_c, etalon_amp=eamp,
+        etalon_freq=(ef if ef is not None else 0.0), etalon_phase=ep)
     resid = a - full
     rms = float(np.sqrt(np.mean(resid ** 2)))
     sig = float(np.sqrt(np.mean(tot ** 2)))          # 가스흡수 신호 크기

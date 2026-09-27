@@ -343,7 +343,7 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
         "step_limit": float(step["value"]) if step.get("value") else 0.5,
         "ref_props": ref_props,
         # 원칙 고정(최적화 대상 아님)
-        "tikhonov_lambda": 0.0, "use_robust": False,
+        "tikhonov_lambda": 0.0, "use_robust": False, "use_etalon": True,
         "allow_negative_gas": bool(allow_negative_gas),
         "kalman_q": 0.0005, "kalman_r": 0.05,
         "cavity_d": cavity_d, "rl_factor": 1.0,

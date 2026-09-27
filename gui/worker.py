@@ -113,6 +113,7 @@ class AnalysisWorker(QThread):
         self.is_running = True
         self.tikhonov_lambda = 0.0
         self.use_robust_fitting = False
+        self.use_etalon = True          # False면 etalon sin/cos 열 없이 핏(2026-09-26)
         self.needs_pre_calibration = False
         self.etalon_freq = None
         self.step_limit = 0.5
@@ -851,7 +852,7 @@ class AnalysisWorker(QThread):
                 absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw)/2.0
 
                 # 2. Etalon detection
-                if getattr(self, 'etalon_freq', None) is None:
+                if getattr(self, 'use_etalon', True) and getattr(self, 'etalon_freq', None) is None:
                     self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
 
                 # 3. Fitting loop
@@ -871,7 +872,7 @@ class AnalysisWorker(QThread):
                     
                     # 4. Parameter setup
                     active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = self._setup_fit_parameters(initial_shift_center, current_params)
-                    fixed_e_f = self.etalon_freq  
+                    fixed_e_f = self.etalon_freq if getattr(self, 'use_etalon', True) else None
                     # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
                     #  두 선형열로 처리. 위상 append 제거.)
                     
@@ -927,7 +928,7 @@ class AnalysisWorker(QThread):
                             'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
                             'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
                             'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f),
+                            'etalon_phase': float(best_ep), 'etalon_freq': (float(fixed_e_f) if fixed_e_f is not None else 0.0),
                             'channel': self.channel
                         }
                         result['Params'] = final_params_dict 
@@ -1166,7 +1167,7 @@ class AnalysisWorker(QThread):
                 poly_order = len(current_params) - poly_start_idx - 1
                 absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw) / 2.0
 
-                if self.etalon_freq is None:
+                if getattr(self, 'use_etalon', True) and self.etalon_freq is None:
                     self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
 
                 max_retries = 2
@@ -1183,7 +1184,7 @@ class AnalysisWorker(QThread):
 
                     active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = \
                         self._setup_fit_parameters(initial_shift_center, current_params)
-                    fixed_e_f = self.etalon_freq
+                    fixed_e_f = self.etalon_freq if getattr(self, 'use_etalon', True) else None
                     # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
                     #  두 선형열로 처리. 위상 append 제거.)
                     try:
@@ -1210,7 +1211,7 @@ class AnalysisWorker(QThread):
                             'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
                             'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
                             'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': float(fixed_e_f),
+                            'etalon_phase': float(best_ep), 'etalon_freq': (float(fixed_e_f) if fixed_e_f is not None else 0.0),
                             'channel': self.channel}
 
                         raw_concentrations, real_errors = [], []
@@ -1305,6 +1306,7 @@ class AnalysisWorker(QThread):
             'step_limit': getattr(self, 'step_limit', 0.5),
             'tikhonov_lambda': getattr(self, 'tikhonov_lambda', 0.0),
             'use_robust_fitting': getattr(self, 'use_robust_fitting', False),
+            'use_etalon': getattr(self, 'use_etalon', True),
             'allow_negative_gas': self.allow_negative_gas,
             'fit_unit': getattr(self, 'fit_unit', 'nm'),
             'fit_lo_nm': getattr(self, 'fit_lo_nm', None),
@@ -1559,7 +1561,7 @@ def _chunk_init(engine, cfg):
         QCoreApplication(_sys.argv)                 # QThread needs an app object
     w = AnalysisWorker(engine, [], cfg['pixel_min'], cfg['pixel_max'],
                        cfg['params'], cfg['bounds'], -1, channel=cfg['channel'])
-    for k in ('ref_properties', 'step_limit', 'tikhonov_lambda', 'use_robust_fitting',
+    for k in ('ref_properties', 'step_limit', 'tikhonov_lambda', 'use_robust_fitting', 'use_etalon',
               'allow_negative_gas', 'fit_unit', 'fit_lo_nm', 'fit_hi_nm',
               'qc_enabled', 'qc_rms_abs', 'qc_snr_min', 'ok_rms_threshold',
               'gas_temp_override', 'tz_offset_sec', 'etalon_freq_min', 'etalon_freq_max',
