@@ -642,3 +642,5 @@ copied); panel c from the existing private `data/cold_shift_landscape.csv` (iden
   figure is consistent with the file, and only the lineage record was wrong.
 * Panel a bar (1.71927–2.67891) and panel b (65.36 / 21.42 / 13.23 % vs 86.94 / 0.00 / 13.06 %, median NO$_2$
   2.20911 → 2.20932 ppb) read from the diagnostics CSVs are identical to the hand-typed values.
+
+- O'Leary & Rust: year 2013 is the print year (vol. 54, issue 3, April 2013); CrossRef lists 2012-08-02 as online-first. Checked 2026-09-28.
