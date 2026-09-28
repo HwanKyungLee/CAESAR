@@ -8,8 +8,13 @@ Inputs
   panel a, points  benchmark/instrument_space/metrics_by_coordinate.csv (synthetic; copied to data/)
                    column b_scatter_ratio_detail -> every 'noise x*' entry is a white-noise point
                    (30 over 13 coordinates), every 'AR(1) 0.5' entry a correlated-noise point (13).
-  panel a, bar     diagnostics/sensitivity_sweep_2026-09/subsample_validation.csv, row full_8847
-                   (field-derived: read in place, not copied)
+  panel a, bar     data/amt_recompute_values.json (copy of artifact e27a3579, recomputation of 2026-09-28):
+                   multiples.new.total_rSD / total_SD = total uncertainty / fit-propagated sigma for the 8847
+                   clock-aligned budget records, g' = 0.9524, denominator 0.0541 ppb (field-derived, private data/).
+                   Cross-checked in checks() against data/production_budget_clockfixed.csv (joint term
+                   a_tri - g'*b_tri) and the JSON denominator.
+                   (Until 2026-09-28 the bar was read from diagnostics/sensitivity_sweep_2026-09/
+                   subsample_validation.csv row full_8847, which holds the superseded 1.72-2.68.)
   panel b          diagnostics/sensitivity_sweep_2026-09/termination_by_config.csv, rows base, steplimit_off
                    (field-derived: read in place)
   panel c          data/cold_shift_landscape.csv (field-derived, private data/ folder; identical to artifact
@@ -38,7 +43,8 @@ from make_figs_345 import style as _style          # house style used for Figs 2
 
 F_METRICS = D("instrument_space_metrics_by_coordinate.csv")
 F_METRICS_SRC = os.path.join(REPO, "benchmark", "instrument_space", "metrics_by_coordinate.csv")
-F_SUBSAMPLE = os.path.join(REPO, "diagnostics", "sensitivity_sweep_2026-09", "subsample_validation.csv")
+F_RECOMP = D("amt_recompute_values.json")
+F_BUDGET = D("production_budget_clockfixed.csv")
 F_TERM = os.path.join(REPO, "diagnostics", "sensitivity_sweep_2026-09", "termination_by_config.csv")
 F_LAND = D("cold_shift_landscape.csv")
 F_SPL = os.environ.get("FIG1_SPL_CSV", "")
@@ -65,8 +71,9 @@ def load_inputs():
     if not os.path.exists(F_METRICS):
         raise SystemExit(f"missing {F_METRICS}; copy it from {F_METRICS_SRC}")
     white, ar1, n_coord = instrument_space_points(F_METRICS)
-    sv = pd.read_csv(F_SUBSAMPLE).set_index("sample")
-    field_lo, field_hi = float(sv.loc["full_8847", "ratio_lo"]), float(sv.loc["full_8847", "ratio_hi"])
+    import json
+    rv = json.load(open(F_RECOMP, encoding="utf-8"))
+    field_lo, field_hi = float(rv["multiples"]["new"]["total_rSD"]), float(rv["multiples"]["new"]["total_SD"])
     tb = pd.read_csv(F_TERM).set_index("config_id")
     on, off = tb.loc["base"], tb.loc["steplimit_off"]
     ls = pd.read_csv(F_LAND)
@@ -188,6 +195,14 @@ def checks(inp):
     print(f"panel a bar: {inp['field_lo']:.5f}-{inp['field_hi']:.5f}; panel b: "
           f"{float(inp['on'].pct_converged)}/{float(inp['on'].pct_step_limited)}/{float(inp['on'].pct_at_bound)} vs "
           f"{float(inp['off'].pct_converged)}/{float(inp['off'].pct_step_limited)}/{float(inp['off'].pct_at_bound)}")
+    import json
+    rv = json.load(open(F_RECOMP, encoding="utf-8"))
+    g = float(rv["scale_budget_vs_product"]["g_prime_values"][0]); den = float(rv["denominator"]["window_matched_gprime"])
+    P = pd.read_csv(F_BUDGET); P = P[P.ok.astype(bool)]
+    j = P.a_tri - g * P.b_tri
+    r_ = 1.4826 * np.median(np.abs(j - np.median(j)))
+    print(f"cross-check from budget CSV (n={len(P)}, g'={g}, den={den}): "
+          f"{np.hypot(den, r_) / den:.4f}-{np.hypot(den, j.std()) / den:.4f}")
     print(f"panel c: threshold {thr:.5f}, {int(ivs.open.sum())}/{len(ivs)} open, median width {ivs.width.median():.2f} px")
     if F_SPL and os.path.exists(F_SPL):
         spl = pd.read_csv(F_SPL)

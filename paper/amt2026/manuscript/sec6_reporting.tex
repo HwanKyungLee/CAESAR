@@ -14,7 +14,8 @@ the campaign: the knot gate (Sect.~\ref{sec:6.3}) and the coverage fields
 part -- the termination state, the distance to the nearest knot and the identity of
 the reference file are exported, while the build time and time convention of each
 reference are specified for implementation -- and the question of block length in
-Sect.~\ref{sec:6.2} is left open by the measurements reported here.
+Sect.~\ref{sec:6.2} is left open by the measurements reported here. Section~\ref{sec:6.5} names the errors that none
+of these measures reaches.
 
 \subsection{Three numbers per retrieval, not one}
 \label{sec:6.1}
@@ -158,149 +159,17 @@ measured to increase the interpolation error from \fieldnum{0.87}\,\% to \fieldn
 shorter interval would buy little; in the 300\,$^{\circ}$C channel the interval carries curvature (Table~\ref{tab:splithalf_loo}),
 and shorter intervals would help.
 
-What does act on knot noise is the number of scans averaged into each
-calibration block. Splitting each block into contiguous quarters separates the
-two components that limit a block mean -- white scan noise $\sigma_s$, which
-averages down, and drift within the block at rate $g$, which does not:
-\begin{equation}
-\begin{split}
-\mathrm{scale}(Q_0-Q_1)^2 &= \frac{8\sigma_s^2}{N} + \Bigl(\frac{gT}{4}\Bigr)^2,\\
-\mathrm{scale}\Bigl(\tfrac{Q_0+Q_1}{2}-\tfrac{Q_2+Q_3}{2}\Bigr)^2
- &= \frac{4\sigma_s^2}{N} + \Bigl(\frac{gT}{2}\Bigr)^2 .
-\end{split}
-\label{eq:18}
-\end{equation}
-
-Sub-blocks must be cut contiguously for this, because an interleaved
-(even/odd) split distributes neighbouring scans across both halves and
-cancels whatever they share. The interleaved split is kept as a control: the
-ratio between the two, at the same number of scans, measures how much of the
-block's scatter is common to neighbouring scans rather than independent.
-
-The operational block is $N = 34$ scans spanning $T = 32.0$\,s, in both
-channels and for both reference gases. Within it, averaging does not behave as
-white noise (Table~\ref{tab:subblock_scaling}).
-
-\begin{table}[t]
-\caption{Scatter of contiguous sub-block contrasts within the operational calibration block ($N = 34$, $T = 32.0$\,s) in the two heated channels, the averaging exponent they imply, and the ratio of contiguous to interleaved scatter at the same number of scans $m$, with the values expected for white noise.}
-\label{tab:subblock_scaling}
-\begin{tabular}{llll}
-\tophline
- & hot ANs & hot PNs & white noise \\
-\middlehline
-contiguous quarters (8 scans) & $\fieldnum{2.506\times10^{-4}}$ & $\fieldnum{1.095\times10^{-4}}$ & \\
-contiguous halves (16 scans) & $\fieldnum{2.332\times10^{-4}}$ & $\fieldnum{0.820\times10^{-4}}$ & \\
-\textbf{averaging exponent} & \textbf{\fieldnum{0.104}} & \textbf{\fieldnum{0.416}} & 0.500 \\
-contiguous / interleaved, same $m$ & \textbf{\fieldnum{2.26}} & \textbf{\fieldnum{1.22}} & 1.03 \\
-\bottomhline
-\end{tabular}
-\end{table}
-
-Doubling the number of scans averaged reduces the scatter by \fieldnum{7}\,\% in the ANs
-channel, against the 29\,\% that independent scans would give. Most of what a
-block mean contains is therefore not independent between scans, and the last
-row says so directly: cutting the same block contiguously rather than in
-alternation more than doubles its apparent scatter in ANs. These are spectral-domain statistics: in the
-NO$_2$ amount, contiguous and interleaved halves give similar knot noise (Sect.~\ref{sec:4.2}), so most of this
-correlated structure is evidently absorbed by the baseline polynomial before it reaches the gas columns. A monotonic trend
-across the 32\,s is present in both channels but explains little of this -- see
-below.
-
-Two conclusions follow, and the second is a limitation. Within the range that
-can be measured, lengthening the averaging window is worth much less than the
-$N^{-1/2}$ a reader would assume, and how much less depends on the channel.
-And the range that can be measured is entirely below the operational block
-length: subdividing $N$ scans says nothing about $2N$ or $4N$. The evidence
-available is therefore not neutral but mildly unfavourable, and the
-measurement that would settle it -- operating one longer block -- has not been
-made.
-
-The duty cycle is not what stands in the way. Calibration occupies 1.2\,\% of
-the measurement time (Sect.~\ref{sec:6.4}), and a fourfold zero-air block would take it to
-3.9\,\% (Table~\ref{tab:duty_blocks}).
-
-\begin{table}[t]
-\caption{Calibration duty cycle for the operational zero-air block and for blocks two and four times longer.}
-\label{tab:duty_blocks}
-\begin{tabular}{llll}
-\tophline
-zero-air block & $N$ & zero-air duty & total calibration duty \\
-\middlehline
-operational & 34 & 0.90\,\% & 1.20\,\% \\
-$\times 2$ & 68 & 1.79\,\% & 2.10\,\% \\
-$\times 4$ & 136 & 3.58\,\% & 3.89\,\% \\
-\bottomhline
-\end{tabular}
-\end{table}
-
-Even under the white-noise assumption the return would be modest, and it is
-worth stating why before anyone spends duty cycle on it. Halving the zero-air
-knot noise removes three quarters of the $I_0$ variance, but that term carries
-\fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
-\fieldnum{0.1236} to \fieldnum{0.1008}\,ppb -- \fieldnum{18.5}\,\%, not half. The measured exponents put even that
-out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
-
-\begin{table}[t]
-\caption{Best attainable $\Sigma$ANs structural uncertainty (standard deviation) under each remedy, as a fraction of the operational value, and the assumption each row rests on. These are ceilings, not forecasts.}
-\label{tab:ceilings}
-\begin{tabular}{l>{\raggedright\arraybackslash}p{0.28\textwidth}l>{\raggedright\arraybackslash}p{0.3\textwidth}}
-\tophline
- & $\Sigma$ANs structural (SD), best attainable & of operational & status \\
-\middlehline
-operational & \fieldnum{0.1236}\,ppb & 1.00 & measured \\
-$\times 4$ blocks only & \fieldnum{0.1008} & \fieldnum{0.82} & assumes $N^{-1/2}$; not supported below $N$ \\
-flag bad $R$ intervals only & \fieldnum{0.0901} & \fieldnum{0.73} & assumes a perfect detector \\
-\textbf{both} & \textbf{\fieldnum{0.0547}} & \textbf{\fieldnum{0.44}} & both assumptions \\
-\bottomhline
-\end{tabular}
-\end{table}
-
-These are ceilings, not forecasts, and the way they are computed needs stating
-because Sect.~\ref{sec:4.3} forbids the obvious method. Removing a term's contribution from a
-total is a quadrature operation, and the joint propagation is not a quadrature
-sum -- here it exceeds one by \fieldnum{7.6}\,\%, \fieldnum{0.1236}\,ppb against \fieldnum{0.1149}. The rows are
-therefore evaluated in quadrature space and rescaled by that measured ratio,
-which makes the operational row reproduce the measured joint exactly and
-applies the same correction to the others. The residual assumption is that the
-ratio survives shrinking a term, which it will not do exactly, because the
-ratio depends on the covariance and interaction of the terms (Sect.~\ref{sec:4.3}), and shrinking one
-term changes them.
-
-The ratio column is unaffected by any of this: the rescaling factor cancels,
-so the relative ordering is the same whether the calculation is done in
-quadrature space or after rescaling. The section uses only the ordering.
-
-Flagging outranks averaging here, and it does so under every basis we have
-checked -- record space as well as hourly, and quadrature space as well as
-rescaled. The flagging row assumes a detector that
-removes the tail and nothing else, reducing the $R$ term to its present robust
-scale; a real flag will fall short. The block row assumes an averaging
-behaviour the measurements of Sect.~\ref{sec:6.2} do not support.
-
-A linear trend across the block is part of the explanation but not all of it.
-It accounts for \fieldnum{40}\,\% of the within-block variance in the ANs channel and \fieldnum{34}\,\%
-in PNs, inflating the apparent sub-block scatter by \fieldnum{1.29} and \fieldnum{1.23}. Whether
-removing it restores white averaging cannot be tested by detrending and
-re-measuring: the contrast comparing contiguous halves and the least-squares
-slope over four sub-blocks have a cosine of $-0.894$, so subtracting the line
-subtracts most of the quantity being measured. Measured instead on a contrast
-orthogonal to the trend, the residual scatter is still \fieldnum{1.88} times white in ANs
-and \fieldnum{1.17} in PNs. Detrending is a partial remedy; what limits averaging is a
-correlation that outlives the removal of its linear part.
-
-What does not depend on either assumption is the ordering. The reflectivity
-term is concentrated in a few episodes and does not average down; the zero-air
-term is distributed and averages at least partly. Flagging comes first
-whatever the detector achieves and whatever the block scaling turns out to be.
-
-One observation from the same measurement is worth recording. Both channels
-show a monotonic trend across the 32\,s block, of opposite sign -- \fieldnum{$+248$} to
-\fieldnum{$-314$}\,ppm in ANs against \fieldnum{$-261$} to \fieldnum{$+235$}\,ppm in PNs. Two adjacent windows
-moving in opposite directions is a change of spectral slope rather than of
-intensity, which points at the source or at the bandpass separating the
-channels rather than at the gas fill. Removing the linear trend by contrast
-does not reduce the excess scatter, so this trend is not what limits
-averaging; the correlation between neighbouring scans is.
+The other lever is the number of scans averaged into each calibration block, and the evidence on it is not
+conclusive (Appendix~\ref{app:C}). Within the operational block ($N = 34$ scans, $T = 32$\,s), doubling the number of
+scans averaged reduces the scatter of contiguous sub-blocks by \fieldnum{7}\,\% in the ANs channel, against the 29\,\% that
+independent scans would give; but the range that can be measured this way lies entirely below the operational block
+length, so it is mildly unfavourable rather than decisive, and the measurement that would settle it -- operating one
+longer block -- has not been made. Even with white averaging the return would be modest: the zero-air term carries
+\fieldnum{45}\,\% of the $\Sigma$ANs variance, so a fourfold block, which would raise the calibration duty from 1.20 to 3.89\,\%,
+would lower the structural budget from \fieldnum{0.1236} to \fieldnum{0.1008}\,ppb (\fieldnum{18.5}\,\%), whereas flagging the few
+defective reflectivity intervals would lower it to \fieldnum{0.0901}\,ppb. That ordering -- flagging before averaging --
+holds whatever the block scaling turns out to be, because the reflectivity term is concentrated in a few episodes and
+the zero-air term is not (Sect.~\ref{sec:6.1a}).
 
 \subsection{Gating defective knots}
 \label{sec:6.3}
@@ -345,91 +214,57 @@ apart. The hot channel has \fieldnum{3.76}\,\% of the first and \fieldnum{1.23}\
 the campaign; the cold channel \fieldnum{2.89}\,\% and \fieldnum{11.03}\,\%. Zero air has neither
 (\fieldnum{0.08}\,\% and \fieldnum{0.07}\,\%), so the constraint is entirely on the reflectivity.
 
-Two causes lie behind the numbers that survive, and they cost different things
-to remove (Table~\ref{tab:coverage_causes}).
+Two causes lie behind the deficit that survives clock alignment, and they cost different things to remove. The first
+is bookkeeping and the cheapest fix in this paper: reflectivity generation stopped at 07-09, which produces the hot
+channel's trailing extrapolation and is removed by re-running over files that already exist. The second is clustered
+rejection of calibration pairs, \fieldnum{11.3}\,\% of cold pairs, which explains the cold gaps (\fieldnum{11.03}\,\% over the campaign and
+\fieldnum{18.31}\,\% in the cold window); its remedy is to restore the light level or, failing that, redundancy. Only this
+second cause is about how often the instrument calibrates, and even there the average rate is not the problem.
+Independent rejection at the measured rate would leave \fieldnum{3.5}\,\% of cold records in gaps longer than two hours,
+against \fieldnum{11.03}\,\% observed. The rejections arrive in runs: the worst cold gap, \fieldnum{11.8}\,h, is eleven consecutive
+rejected pairs, which even at a 40\,\% independent rejection rate would be expected 0.03 times in the campaign. This
+is the episodic structure Sect.~\ref{sec:6.1a} found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying
+90\,\% of it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the calibration side.
 
-\begin{table}[t]
-\caption{The two causes of the reflectivity coverage deficit that remains after clock alignment, what each explains, and the remedy and its cost.}
-\label{tab:coverage_causes}
-\begin{tabular}{>{\raggedright\arraybackslash}p{0.28\textwidth}p{0.3\textwidth}p{0.24\textwidth}p{0.08\textwidth}}
-\tophline
- & what it explains & remedy & cost \\
-\middlehline
-reflectivity generation stopped at 07-09 & the hot channel's trailing extrapolation & re-run over files that already exist & none \\
-clustered pair rejection, \fieldnum{11.3}\,\% of cold pairs & cold gaps, \fieldnum{11.03}\,\% campaign and \fieldnum{18.31}\,\% in the cold window & restore the light level; failing that, redundancy & see below \\
-\bottomhline
-\end{tabular}
-\end{table}
+It also locates the cost of quality control. The three gates the reflectivity already passes cost the hot channel
+\fieldnum{0.24}\,\% of its pairs and the cold channel \fieldnum{11.3}\,\%; in the cold channel the gates are, correctly, the proximate
+cause of the coverage deficit. This cuts against the argument of Sect.~\ref{sec:6.3}, which asks for a gate that zero
+air does not yet have: gates remove variance and they remove coverage, and a pipeline that gates without also
+reporting what the gating cost has moved the error somewhere it is harder to see. The context flag of
+Sect.~\ref{sec:6.1} closes that loop. The same caution applies to the budget: the reflectivity contribution of
+Sect.~\ref{sec:4} is measured by removing a knot and re-interpolating, so its magnitude scales with how far apart the
+knots already are, and a sparse reference presents itself as a dominant term partly because it is sparse -- which is
+why the remedy belongs to the schedule and to reprocessing rather than to the retrieval. Records in gaps are not
+covered by the budget at all, since a perturbation experiment needs a knot to perturb; they are reported with the
+context flag set and excluded from any statistic that assumes a characterised uncertainty.
 
-The first is bookkeeping and the cheapest fix in this paper. Only the second is
-about how often the instrument calibrates, and even there the average rate is
-not the problem. Independent rejection at the measured rate would leave \fieldnum{3.5}\,\%
-of cold records in gaps longer than two hours, against \fieldnum{11.03}\,\% observed. The
-rejections arrive in runs: the worst cold gap, \fieldnum{11.8}\,h, is eleven consecutive
-rejected pairs, which even at a 40\,\% independent rejection rate would be
-expected 0.03 times in the campaign. This is the episodic structure Sect.~\ref{sec:6.1a}
-found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying 90\,\% of
-it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the
-calibration side.
+In the heated channels zero air is measured every hour and helium every three, and each reflectivity knot pairs a
+zero-air block with the most recent helium block that passed the quality gates (Appendix~\ref{app:A},
+Table~\ref{tab:cal_schedule}), so the knots are hourly while their helium half is up to three hours old, and older when a
+helium block is rejected. A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected
+helium block removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the
+helium cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
+helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are rejected,
+which in the cold channel is mainly the light level. The case for it is redundancy against runs of rejection and
+contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only weakly on interval
+length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much more accurate. At
+1.2\,\% of the measurement time, calibration is the binding constraint on none of these remedies.
 
-That changes what denser helium blocks buy. The argument for them is not
-precision: it is \emph{redundancy against runs of rejection}. A reference measured
-more often than it is needed survives losing a stretch of blocks; one measured
-exactly as often as it is needed does not.
+\subsection{Errors that neither the fit report nor the proposed fields detect}
+\label{sec:6.5}
 
-It also locates the cost of quality control. The three gates the reflectivity
-already passes cost the hot channel \fieldnum{0.24}\,\% of its pairs and the cold channel
-\fieldnum{11.3}\,\%. In the cold channel the gates are, correctly, the proximate cause of
-the coverage deficit: the pairs they reject are the ones whose absence doubles
-the gaps. This is worth stating plainly because it cuts against the argument
-of Sect.~\ref{sec:6.3}, which asks for a gate that zero air does not yet have. Gates remove
-variance and they remove coverage, and a pipeline that gates without also
-reporting what the gating cost has simply moved the error somewhere it is
-harder to see. The context flag of Sect.~\ref{sec:6.1} is what closes that loop.
+The convention of Sect.~\ref{sec:6.1} makes visible what the pipeline already knows. It cannot make visible what the
+pipeline does not know, and two such errors appear in this record.
 
-A caution on the last link in the chain. The reflectivity contribution in Sect.~\ref{sec:4}
-is measured by removing a knot and re-interpolating, so its magnitude scales
-with how far apart the knots already are. A sparse reference will present
-itself as a dominant error term partly because it is sparse. The budget does
-not discover that reflectivity is the cold channel's problem so much as
-inherit it from the schedule -- which is why the remedy belongs to the
-schedule and to reprocessing rather than to the retrieval.
+The first is a multiplicative gain error. Against a co-located NIER analyser the heated-channel NO$_2$ reads low by a
+factor of about \fieldnum{0.6} while the ambient-temperature channel agrees (Sect.~\ref{sec:3.6}). A gain leaves the residual, the
+reported uncertainty, the termination state and every distance and provenance field unchanged, and the zero-air test
+of Sect.~\ref{sec:7.2} is blind to it because a gain applied to zero is zero. Only a comparison with an independent
+measurement of the same quantity -- a reference analyser, a cylinder, or a channel that should agree -- reveals it,
+and such a comparison does not by itself identify the cause.
 
-These records are not covered by the budget of Sect.~\ref{sec:4} -- a perturbation experiment
-needs a knot to perturb -- and interpolating across such a gap is not
-equivalent to interpolating across an hour. They are therefore reported with
-the context flag of Sect.~\ref{sec:6.1} set, and excluded from any statistic that assumes a
-characterised uncertainty.
-
-In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is
-measured every hour and helium only every three (Table~\ref{tab:cal_schedule}). Each reflectivity knot is formed from
-one zero-air block and the most recent helium block that passed the quality gates, so the knots are hourly --
-\fieldnum{1261} over the deployment, at a median spacing of \fieldnum{1.00}\,h -- while their helium half is up to three hours
-old, and older when a helium block is rejected.
-
-\begin{table}[t]
-\caption{Calibration schedule of the heated channels in the budget window (18--24 May): number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
-\label{tab:cal_schedule}
-\begin{tabular}{lllll}
-\tophline
- & blocks & per block & cadence & duty \\
-\middlehline
-zero air & \fieldnum{157} & 34 scans / 32\,s & 1.00\,h & 0.90\,\% \\
-helium & \fieldnum{54} & 34 scans / 32\,s & 3.00\,h & 0.31\,\% \\
- & & & & \textbf{1.20\,\%} \\
-\bottomhline
-\end{tabular}
-\end{table}
-
-A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected helium block
-removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the helium
-cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
-helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are
-rejected, which in the cold channel is mainly the light level (Table~\ref{tab:coverage_causes}). The case for it is
-redundancy and contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only
-weakly on interval length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much
-more accurate.
-
-More generally, 1.2\,\% is a small fraction of the measurement time to spend on
-knowing the instrument, and it is the binding constraint on none of the
-remedies above.
+The second is the raw light level. All six ambient-temperature excursions of Sect.~\ref{sec:7.3} coincide with spectra
+that fell below 30\,\% of their usual count at 460\,nm; the residual finds them, and the reference context is abnormal
+in five of them, but none of the proposed fields names the cause. The light level of each spectrum, and the helium and
+zero-air intensities of each calibration block rather than only their ratio, are known when they are recorded and
+could travel with the product as further context; we have not evaluated them for the heated channels.

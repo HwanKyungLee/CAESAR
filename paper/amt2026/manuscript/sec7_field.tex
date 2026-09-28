@@ -5,37 +5,22 @@
 \subsection{Instrument and deployment}
 \label{sec:7.1}
 
-The retrieval is applied here to a thermal-dissociation broadband
-cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a cell held at
-180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl
-nitrates dissociate as well; a third cell at ambient temperature measures NO$_2$
-directly. Each channel measures the extinction of the same cavity geometry,
-$d = 51.8$\,cm with $R_L = 1.0$ (assumed, not measured; since $\alpha \propto R_L$ it enters as a
-multiplicative factor), so the three differ in what has been converted
-to NO$_2$ upstream rather than in how the spectrum is formed. The sums of peroxy
-and alkyl nitrates follow as channel differences.
+The field case is a thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
+ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a
+cell held at 180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl nitrates
+dissociate as well; a third cell at ambient temperature measures NO$_2$ directly. The three differ in what has been
+converted to NO$_2$ upstream rather than in how the spectrum is formed, and the sums of peroxy and alkyl nitrates
+follow as channel differences, $\Sigma$ANs with the inter-channel factor $g'$ of Sect.~\ref{sec:4.4}. The retrieval
+configuration of each channel -- window, baseline, references, shift and squeeze settings, wavelength calibration,
+line shape, cavity constants and calibration schedule -- is given in Appendix~\ref{app:A}.
 
-The instrument was deployed at Suncheon Shindae (SDD) from 2026-05-18 to
-07-10 as part of a multi-institution intensive campaign. Zero-air blocks of 34
-scans over 32\,s run hourly and helium blocks of the same specification every
-three hours, a combined calibration duty cycle of 1.20\,\%. Spectra are
-retrieved in 444.118--470.562\,nm with a third-order Chebyshev baseline for the
-180\,$^{\circ}$C channel and 430--462\,nm with a fourth-order baseline for the 300\,$^{\circ}$C
-channel; the ambient-temperature channel uses 438.420--475.741\,nm and a
-fourth-order baseline. The dispersion is 0.0481\,nm\,px$^{-1}$ and the
-instrument line shape of the heated channels has a full width at half maximum of 0.683\,nm (0.765--0.785\,nm in
-the ambient-temperature channel, Sect.~\ref{sec:4.1}). The field numbers of this paper were checked against a
-reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by $\pm$\fieldnum{0.25}\,\%, and are
-reported as first computed.
+The instrument was deployed at Suncheon Shindae (SDD) from 2026-05-18 to 07-10 as part of a multi-institution
+intensive campaign. Two properties belong to this deployment rather than to the configuration: the median fitted shift
+in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px, inside its bound of $-10$\,px, and the field numbers of this paper
+were checked against a reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by
+$\pm$\fieldnum{0.25}\,\%, and are reported as first computed. The instrument itself, its inlet and its conversion
+efficiencies are characterised elsewhere.
 
-The three channels also sit at different offsets from their wavelength
-calibrations: the operational shift bounds are $-10$ to $0.5$\,px for the
-300\,$^{\circ}$C channel and $-5$ to $5$\,px for the 180\,$^{\circ}$C channel; in the
-ambient-temperature channel the shift is fixed at $-0.5$\,px and the squeeze at
-its identity value, i.e. no stretch (Sect.~\ref{sec:5.1}). The median fitted shift in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px.
-
-Only the properties the retrieval depends on are given here. The instrument
-itself, its inlet and its conversion efficiencies are characterised elsewhere.
 
 \subsection{Noise floor of the product record}
 \label{sec:7.2}
@@ -142,9 +127,8 @@ In each of these cases the fit either reports an ordinary residual and
 uncertainty for a displaced amount, or reports an abnormal one without saying
 why. For the displacement and for the bound episode, one of the context quantities -- distance to the
 nearest reference, termination state, or reference provenance -- supplies what is missing. For the cold
-excursions the proximate cause, the raw light level, is not among the proposed fields. And the heated-channel
-NO$_2$ scale, low against the co-located NIER analyser by a factor of about \fieldnum{0.6} (Sect.~\ref{sec:3.6}), is invisible to
-the fit report and to every proposed field. The fields narrow the gap between what a fit reports and what is
+excursions the proximate cause, the raw light level, is not among the proposed fields, and the heated-channel NO$_2$
+scale of Sect.~\ref{sec:3.6} is invisible to all of them (Sect.~\ref{sec:6.5}). The fields narrow the gap between what a fit reports and what is
 known about the record; they do not close it.
 
 \begin{figure*}[p]

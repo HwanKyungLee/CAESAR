@@ -140,7 +140,10 @@ within the noise, the parameter should be fixed, said to be fixed, and the cost
 of fixing it carried in the uncertainty of every amount that depends on it.
 Reporting \fieldnum{$-2.014 \pm 0.03$}\,px for a quantity the data locate only to \fieldnum{$\pm 2$}\,px
 is the failure this subsection describes, and for this channel the resulting
-term is larger than any in Table~\ref{tab:2}.
+term is larger than any in Table~\ref{tab:2}. Because the shift belongs to the spectrograph rather than to the air,
+it could instead be fitted jointly across the spectra of a calibration block -- a separable problem with common
+nonlinear parameters; this is not implemented here, and it would need an absorber in the block, as in the
+laboratory spectrum of Fig.~\ref{fig:5}b.
 
 \subsection{Termination at a bound is a routine outcome}
 \label{sec:5.2}
@@ -149,7 +152,7 @@ Bound termination is usually treated as a failure to be logged. In this
 instrument it is the normal state of one channel and a systematic response to
 perturbation in another.
 
-The operational configuration allows the shift different freedom in each
+The operational configuration (Appendix~\ref{app:A}) allows the shift different freedom in each
 channel -- $[-10, +0.5]$\,px in hot ANs and $[-5, +5]$\,px in hot PNs -- and fixes it at $-0.5$\,px in the cold
 channel. In a sensitivity run that instead bounded the cold shift to $[-1, +1]$\,px, every one of the \fieldnum{22}
 base fits returned exactly \fieldnum{$-1.000$}\,px, the bound itself, and was reported as converged. In

@@ -33,7 +33,7 @@ are time series, measured intermittently and interpolated to every
 measurement, and the error they contribute to a given record depends on where
 that record sits relative to the nearest calibration. A campaign-mean
 calibration uncertainty, of the kind reported for the effective path length in
-this instrument's predecessors \citep{Min_2016,Nam_2022}, does not
+earlier instruments of the design used here \citep{Min_2016,Nam_2022}, does not
 describe it.
 
 Intercomparison campaigns approach the question from the other side. By
@@ -62,12 +62,14 @@ concentration is computed and is discarded between one step and the next. It
 costs nothing to keep, and keeping it turns a silent failure into a flagged
 one.
 
-We present Augur, an open retrieval applied here to a
-thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
-ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates, and built so
-that both kinds of question can be asked cheaply enough to ask routinely. The
-retrieval is posed in the extinction domain as a separable nonlinear
-least-squares problem and solved by variable projection. We verify it against
+We present Augur, an open retrieval built so that both kinds of question can be asked cheaply enough to ask
+routinely. The retrieval is posed in the extinction domain as a separable nonlinear
+least-squares problem and solved by variable projection. It is not written for one instrument: the layout of the
+raw data, the calibration flags and the fit configuration are read from instrument and campaign profiles
+(Appendix~\ref{app:A}), and the same code runs other configurations through such profiles. The diagnostics are
+demonstrated here on one field case, a thermal-dissociation broadband cavity-enhanced absorption spectrometer
+with two heated and one ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl
+nitrates over 53 days in 2026; other configurations are not evaluated in this paper. We verify it against
 synthetic truth and against an independent DOAS implementation, measure the
 structural terms it cannot report -- which together exceed the sigma it
 reports by a factor of \fieldnum{1.6} to \fieldnum{2.5} in the best-calibrated week -- map the identifiability of its
@@ -81,7 +83,7 @@ reprocessing and whose provenance fields, once implemented, would name its cause
 and release a synthetic benchmark with which any DOAS implementation can
 measure the same quantities on the same cases.
 
-The evidence is one instrument over one campaign, which bounds what can be
+The evidence is one field case -- one instrument over one campaign -- which bounds what can be
 concluded about instruments in general. Two things are intended to carry
 beyond it. The benchmark of Sect.~\ref{sec:3.4} is built from cross sections and a wavelength
 calibration but contains no retrieval code and no field data, so the measurements it supports do not depend on any retrieval implementation, Augur included; its cross sections, fitting windows and wavelength grid are those of one instrument, and carrying it to another requires that instrument's own. And
@@ -94,8 +96,10 @@ term, the behaviour of the cold channel -- we say so.
 Figure~\ref{fig:1} previews the argument: what a converged fit reports, against what the data support.
 Section~\ref{sec:2} sets out the retrieval and what the implementation exposes. Section~\ref{sec:3}
 verifies it. Sections~\ref{sec:4} and \ref{sec:5} take the two kinds of failure in turn, and
-Section~\ref{sec:6} draws the reporting convention out of them. Section~\ref{sec:7} demonstrates
-the retrieval on field measurements.
+Section~\ref{sec:6} draws the reporting convention out of them and names what it cannot reach. Section~\ref{sec:7}
+demonstrates the retrieval on the field case, and Sect.~\ref{sec:8} concludes. Appendix~\ref{app:A} collects the
+instrument and retrieval configuration, Appendix~\ref{app:B} the projected Jacobian and joint covariance, and
+Appendix~\ref{app:C} the measurements on calibration-block length.
 
 \begin{figure*}[t]
 \includegraphics[width=\textwidth]{figures/fig01.pdf}
@@ -105,7 +109,7 @@ divided by the uncertainty the fit reports. Grey points: white noise on syntheti
 dispersions of 0.7--1.4 times, signal-to-noise over a factor of 32 and fitted polynomial orders 2--6. Orange points:
 the same instruments with correlated (AR(1), $\rho = 0.5$) noise. Bar: the field record, for which the
 calibration-chain budget of Sect.~\ref{sec:4} gives a total uncertainty \fieldnum{1.63} (robust scale) to \fieldnum{2.50} (standard
-deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s; the bar in the panel is drawn at the superseded values 1.72--2.68 and awaits re-rendering). \textbf{(b)} Termination state of \fieldnum{8446} operational
+deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s). \textbf{(b)} Termination state of \fieldnum{8446} operational
 scans with the optimiser's step limit on, as operated, and off; the median retrieved NO$_2$ of the same scans is
 given below the bars. \textbf{(c)} 95\,\% profile-likelihood intervals of the wavelength shift for 12 spectra in the cold
 configuration, from the profiled objective scanned over $\pm6$\,px (shaded), with $\mathrm{RSS}/\mathrm{RSS}_{\min} \le 1 + F_{0.95}(1, n-P)/(n-P)$

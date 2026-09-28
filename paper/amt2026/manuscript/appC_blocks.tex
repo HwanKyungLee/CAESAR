@@ -1,0 +1,151 @@
+%% Appendix C -- calibration-block length and duty cycle (Phase 3, 2026-09-28): moved verbatim from Sect. 6.2,
+%% with three self-references adjusted. Numbers unchanged.
+\section{Calibration-block length and duty cycle}
+\label{app:C}
+
+This appendix gives the measurements behind the second paragraph of Sect.~\ref{sec:6.2}. They are not conclusive, for the
+reason stated below, and are recorded so that the measurement that would settle the question can be designed.
+
+What acts on knot noise is the number of scans averaged into each
+calibration block. Splitting each block into contiguous quarters separates the
+two components that limit a block mean -- white scan noise $\sigma_s$, which
+averages down, and drift within the block at rate $g$, which does not:
+\begin{equation}
+\begin{split}
+\mathrm{scale}(Q_0-Q_1)^2 &= \frac{8\sigma_s^2}{N} + \Bigl(\frac{gT}{4}\Bigr)^2,\\
+\mathrm{scale}\Bigl(\tfrac{Q_0+Q_1}{2}-\tfrac{Q_2+Q_3}{2}\Bigr)^2
+ &= \frac{4\sigma_s^2}{N} + \Bigl(\frac{gT}{2}\Bigr)^2 .
+\end{split}
+\label{eq:18}
+\end{equation}
+
+Sub-blocks must be cut contiguously for this, because an interleaved
+(even/odd) split distributes neighbouring scans across both halves and
+cancels whatever they share. The interleaved split is kept as a control: the
+ratio between the two, at the same number of scans, measures how much of the
+block's scatter is common to neighbouring scans rather than independent.
+
+The operational block is $N = 34$ scans spanning $T = 32.0$\,s, in both
+channels and for both reference gases. Within it, averaging does not behave as
+white noise (Table~\ref{tab:subblock_scaling}).
+
+\begin{table}[t]
+\caption{Scatter of contiguous sub-block contrasts within the operational calibration block ($N = 34$, $T = 32.0$\,s) in the two heated channels, the averaging exponent they imply, and the ratio of contiguous to interleaved scatter at the same number of scans $m$, with the values expected for white noise.}
+\label{tab:subblock_scaling}
+\begin{tabular}{llll}
+\tophline
+ & hot ANs & hot PNs & white noise \\
+\middlehline
+contiguous quarters (8 scans) & $\fieldnum{2.506\times10^{-4}}$ & $\fieldnum{1.095\times10^{-4}}$ & \\
+contiguous halves (16 scans) & $\fieldnum{2.332\times10^{-4}}$ & $\fieldnum{0.820\times10^{-4}}$ & \\
+\textbf{averaging exponent} & \textbf{\fieldnum{0.104}} & \textbf{\fieldnum{0.416}} & 0.500 \\
+contiguous / interleaved, same $m$ & \textbf{\fieldnum{2.26}} & \textbf{\fieldnum{1.22}} & 1.03 \\
+\bottomhline
+\end{tabular}
+\end{table}
+
+Doubling the number of scans averaged reduces the scatter by \fieldnum{7}\,\% in the ANs
+channel, against the 29\,\% that independent scans would give. Most of what a
+block mean contains is therefore not independent between scans, and the last
+row says so directly: cutting the same block contiguously rather than in
+alternation more than doubles its apparent scatter in ANs. These are spectral-domain statistics: in the
+NO$_2$ amount, contiguous and interleaved halves give similar knot noise (Sect.~\ref{sec:4.2}), so most of this
+correlated structure is evidently absorbed by the baseline polynomial before it reaches the gas columns. A monotonic trend
+across the 32\,s is present in both channels but explains little of this -- see
+below.
+
+Two conclusions follow, and the second is a limitation. Within the range that
+can be measured, lengthening the averaging window is worth much less than the
+$N^{-1/2}$ a reader would assume, and how much less depends on the channel.
+And the range that can be measured is entirely below the operational block
+length: subdividing $N$ scans says nothing about $2N$ or $4N$. The evidence
+available is therefore not neutral but mildly unfavourable, and the
+measurement that would settle it -- operating one longer block -- has not been
+made.
+
+The duty cycle is not what stands in the way. Calibration occupies 1.2\,\% of
+the measurement time (Sect.~\ref{sec:6.4}), and a fourfold zero-air block would take it to
+3.9\,\% (Table~\ref{tab:duty_blocks}).
+
+\begin{table}[t]
+\caption{Calibration duty cycle for the operational zero-air block and for blocks two and four times longer.}
+\label{tab:duty_blocks}
+\begin{tabular}{llll}
+\tophline
+zero-air block & $N$ & zero-air duty & total calibration duty \\
+\middlehline
+operational & 34 & 0.90\,\% & 1.20\,\% \\
+$\times 2$ & 68 & 1.79\,\% & 2.10\,\% \\
+$\times 4$ & 136 & 3.58\,\% & 3.89\,\% \\
+\bottomhline
+\end{tabular}
+\end{table}
+
+Even under the white-noise assumption the return would be modest, and it is
+worth stating why before anyone spends duty cycle on it. Halving the zero-air
+knot noise removes three quarters of the $I_0$ variance, but that term carries
+\fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
+\fieldnum{0.1236} to \fieldnum{0.1008}\,ppb -- \fieldnum{18.5}\,\%, not half. The measured exponents put even that
+out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
+
+\begin{table}[t]
+\caption{Best attainable $\Sigma$ANs structural uncertainty (standard deviation) under each remedy, as a fraction of the operational value, and the assumption each row rests on. These are ceilings, not forecasts.}
+\label{tab:ceilings}
+\begin{tabular}{l>{\raggedright\arraybackslash}p{0.28\textwidth}l>{\raggedright\arraybackslash}p{0.3\textwidth}}
+\tophline
+ & $\Sigma$ANs structural (SD), best attainable & of operational & status \\
+\middlehline
+operational & \fieldnum{0.1236}\,ppb & 1.00 & measured \\
+$\times 4$ blocks only & \fieldnum{0.1008} & \fieldnum{0.82} & assumes $N^{-1/2}$; not supported below $N$ \\
+flag bad $R$ intervals only & \fieldnum{0.0901} & \fieldnum{0.73} & assumes a perfect detector \\
+\textbf{both} & \textbf{\fieldnum{0.0547}} & \textbf{\fieldnum{0.44}} & both assumptions \\
+\bottomhline
+\end{tabular}
+\end{table}
+
+These are ceilings, not forecasts, and the way they are computed needs stating
+because Sect.~\ref{sec:4.3} forbids the obvious method. Removing a term's contribution from a
+total is a quadrature operation, and the joint propagation is not a quadrature
+sum -- here it exceeds one by \fieldnum{7.6}\,\%, \fieldnum{0.1236}\,ppb against \fieldnum{0.1149}. The rows are
+therefore evaluated in quadrature space and rescaled by that measured ratio,
+which makes the operational row reproduce the measured joint exactly and
+applies the same correction to the others. The residual assumption is that the
+ratio survives shrinking a term, which it will not do exactly, because the
+ratio depends on the covariance and interaction of the terms (Sect.~\ref{sec:4.3}), and shrinking one
+term changes them.
+
+The ratio column is unaffected by any of this: the rescaling factor cancels,
+so the relative ordering is the same whether the calculation is done in
+quadrature space or after rescaling. Section~\ref{sec:6.2} uses only the ordering.
+
+Flagging outranks averaging here, and it does so under every basis we have
+checked -- record space as well as hourly, and quadrature space as well as
+rescaled. The flagging row assumes a detector that
+removes the tail and nothing else, reducing the $R$ term to its present robust
+scale; a real flag will fall short. The block row assumes an averaging
+behaviour the measurements of this appendix do not support.
+
+A linear trend across the block is part of the explanation but not all of it.
+It accounts for \fieldnum{40}\,\% of the within-block variance in the ANs channel and \fieldnum{34}\,\%
+in PNs, inflating the apparent sub-block scatter by \fieldnum{1.29} and \fieldnum{1.23}. Whether
+removing it restores white averaging cannot be tested by detrending and
+re-measuring: the contrast comparing contiguous halves and the least-squares
+slope over four sub-blocks have a cosine of $-0.894$, so subtracting the line
+subtracts most of the quantity being measured. Measured instead on a contrast
+orthogonal to the trend, the residual scatter is still \fieldnum{1.88} times white in ANs
+and \fieldnum{1.17} in PNs. Detrending is a partial remedy; what limits averaging is a
+correlation that outlives the removal of its linear part.
+
+What does not depend on either assumption is the ordering. The reflectivity
+term is concentrated in a few episodes and does not average down; the zero-air
+term is distributed and averages at least partly. Flagging comes first
+whatever the detector achieves and whatever the block scaling turns out to be.
+
+One observation from the same measurement is worth recording. Both channels
+show a monotonic trend across the 32\,s block, of opposite sign -- \fieldnum{$+248$} to
+\fieldnum{$-314$}\,ppm in ANs against \fieldnum{$-261$} to \fieldnum{$+235$}\,ppm in PNs. Two adjacent windows
+moving in opposite directions is a change of spectral slope rather than of
+intensity, which points at the source or at the bandpass separating the
+channels rather than at the gas fill. Removing the linear trend by contrast
+does not reduce the excess scatter, so this trend is not what limits
+averaging; the correlation between neighbouring scans is.

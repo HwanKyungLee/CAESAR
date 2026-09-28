@@ -1,0 +1,790 @@
+--- a/abstract.tex
++++ b/abstract.tex
+@@ -5,7 +5,7 @@
+ can assert more than the fit knows, and the gap is invisible from inside the
+-fit report. We present Augur, an open retrieval, applied here to a
+-thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
+-ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
+-\citep{Min_2016,Nam_2022}, and use it to measure that gap on 53 days of field
+-measurements.
++fit report. We present Augur, an open retrieval for broadband
++absorption spectra that is configured by instrument and campaign profiles rather than written for one instrument,
++and use one field case to measure that gap: 53 days of measurements in 2026 with a thermal-dissociation broadband
++cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, measuring NO$_2$, total
++peroxy nitrates and total alkyl nitrates \citep{Min_2016,Nam_2022}.
+ 
+--- a/sec1_intro.tex
++++ b/sec1_intro.tex
+@@ -35,3 +35,3 @@
+ calibration uncertainty, of the kind reported for the effective path length in
+-this instrument's predecessors \citep{Min_2016,Nam_2022}, does not
++earlier instruments of the design used here \citep{Min_2016,Nam_2022}, does not
+ describe it.
+@@ -64,8 +64,10 @@
+ 
+-We present Augur, an open retrieval applied here to a
+-thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
+-ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates, and built so
+-that both kinds of question can be asked cheaply enough to ask routinely. The
+-retrieval is posed in the extinction domain as a separable nonlinear
+-least-squares problem and solved by variable projection. We verify it against
++We present Augur, an open retrieval built so that both kinds of question can be asked cheaply enough to ask
++routinely. The retrieval is posed in the extinction domain as a separable nonlinear
++least-squares problem and solved by variable projection. It is not written for one instrument: the layout of the
++raw data, the calibration flags and the fit configuration are read from instrument and campaign profiles
++(Appendix~\ref{app:A}), and the same code runs other configurations through such profiles. The diagnostics are
++demonstrated here on one field case, a thermal-dissociation broadband cavity-enhanced absorption spectrometer
++with two heated and one ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl
++nitrates over 53 days in 2026; other configurations are not evaluated in this paper. We verify it against
+ synthetic truth and against an independent DOAS implementation, measure the
+@@ -83,3 +85,3 @@
+ 
+-The evidence is one instrument over one campaign, which bounds what can be
++The evidence is one field case -- one instrument over one campaign -- which bounds what can be
+ concluded about instruments in general. Two things are intended to carry
+@@ -96,4 +98,6 @@
+ verifies it. Sections~\ref{sec:4} and \ref{sec:5} take the two kinds of failure in turn, and
+-Section~\ref{sec:6} draws the reporting convention out of them. Section~\ref{sec:7} demonstrates
+-the retrieval on field measurements.
++Section~\ref{sec:6} draws the reporting convention out of them and names what it cannot reach. Section~\ref{sec:7}
++demonstrates the retrieval on the field case, and Sect.~\ref{sec:8} concludes. Appendix~\ref{app:A} collects the
++instrument and retrieval configuration, Appendix~\ref{app:B} the projected Jacobian and joint covariance, and
++Appendix~\ref{app:C} the measurements on calibration-block length.
+ 
+@@ -107,3 +111,3 @@
+ calibration-chain budget of Sect.~\ref{sec:4} gives a total uncertainty \fieldnum{1.63} (robust scale) to \fieldnum{2.50} (standard
+-deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s; the bar in the panel is drawn at the superseded values 1.72--2.68 and awaits re-rendering). \textbf{(b)} Termination state of \fieldnum{8446} operational
++deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s). \textbf{(b)} Termination state of \fieldnum{8446} operational
+ scans with the optimiser's step limit on, as operated, and off; the median retrieved NO$_2$ of the same scans is
+--- a/sec3_verification.tex
++++ b/sec3_verification.tex
+@@ -14,6 +14,6 @@
+ Results in Sects.~\ref{sec:3}--\ref{sec:6} are reported for three retrieval configurations taken
+-from the instrument of Sect.~\ref{sec:7.1} and labelled by the cells they come from. What
++from the field case of Sect.~\ref{sec:7} and labelled by the cells they come from. What
+ distinguishes them for the retrieval is listed in Table~\ref{tab:1}: the fitting window,
+ the order of the baseline polynomial, the permitted shift range and the light
+-level. None of the results in Sects.~\ref{sec:3}--\ref{sec:6} depends on the chemistry the cells
++level; the full configuration is in Appendix~\ref{app:A}. None of the results in Sects.~\ref{sec:3}--\ref{sec:6} depends on the chemistry the cells
+ measure; where a result depends on a property of a configuration, that property
+@@ -22,3 +22,3 @@
+ \begin{table}[t]
+-\caption{Retrieval configurations used in Sects.~\ref{sec:3}--\ref{sec:6}.}
++\caption{Retrieval configurations used in Sects.~\ref{sec:3}--\ref{sec:6}, in short form; windows are rounded to the nanometre, and the full configuration, including the exact window bounds, is in Table~\ref{tab:config}.}
+ \label{tab:1}
+@@ -29,4 +29,4 @@
+ hot ANs & 300\,$^{\circ}$C & 430--462 & 4th order & $-10$ to $0.5$ & nominal \\
+-hot PNs & 180\,$^{\circ}$C & 444.118--470.562 & 3rd order & $-5$ to $5$ & nominal \\
+-cold & ambient & 438.420--475.741 & 4th order & fixed at $-0.5$ & reduced \\
++hot PNs & 180\,$^{\circ}$C & 444--471 & 3rd order & $-5$ to $5$ & nominal \\
++cold & ambient & 438--476 & 4th order & fixed at $-0.5$ & reduced \\
+ \bottomhline
+--- a/sec4_budget.tex
++++ b/sec4_budget.tex
+@@ -193,4 +193,3 @@
+ \textbf{(c)} The reflectivity term record by record (points) and as an hourly RMS (steps); shaded, the five hours
+-that carry \fieldnum{57}\,\% of its variance. The legend values and the dotted line in panel (a) are still drawn at the values before the
+-clock-aligned recomputation and await re-rendering; Table~\ref{tab:2} gives the current values.}
++that carry \fieldnum{57}\,\% of its variance. $\Sigma$ANs responses are formed with $g' = \fieldnum{0.9524}$, as in Table~\ref{tab:2}.}
+ \label{fig:4}
+@@ -356,2 +355,4 @@
+ and whether the reference it used was still valid -- which the pipeline can
+-supply without any new measurement.
++supply without any new measurement. A further step, not attempted here, would treat the zero-air reference and the
++reflectivity as measured quantities with their own covariance and propagate the structural term inside the fit
++rather than afterwards.
+--- a/sec5_pipeline.tex
++++ b/sec5_pipeline.tex
+@@ -142,3 +142,6 @@
+ is the failure this subsection describes, and for this channel the resulting
+-term is larger than any in Table~\ref{tab:2}.
++term is larger than any in Table~\ref{tab:2}. Because the shift belongs to the spectrograph rather than to the air,
++it could instead be fitted jointly across the spectra of a calibration block -- a separable problem with common
++nonlinear parameters; this is not implemented here, and it would need an absorber in the block, as in the
++laboratory spectrum of Fig.~\ref{fig:5}b.
+ 
+@@ -151,3 +154,3 @@
+ 
+-The operational configuration allows the shift different freedom in each
++The operational configuration (Appendix~\ref{app:A}) allows the shift different freedom in each
+ channel -- $[-10, +0.5]$\,px in hot ANs and $[-5, +5]$\,px in hot PNs -- and fixes it at $-0.5$\,px in the cold
+--- a/sec6_reporting.tex
++++ b/sec6_reporting.tex
+@@ -16,3 +16,4 @@
+ reference are specified for implementation -- and the question of block length in
+-Sect.~\ref{sec:6.2} is left open by the measurements reported here.
++Sect.~\ref{sec:6.2} is left open by the measurements reported here. Section~\ref{sec:6.5} names the errors that none
++of these measures reaches.
+ 
+@@ -160,145 +161,13 @@
+ 
+-What does act on knot noise is the number of scans averaged into each
+-calibration block. Splitting each block into contiguous quarters separates the
+-two components that limit a block mean -- white scan noise $\sigma_s$, which
+-averages down, and drift within the block at rate $g$, which does not:
+-\begin{equation}
+-\begin{split}
+-\mathrm{scale}(Q_0-Q_1)^2 &= \frac{8\sigma_s^2}{N} + \Bigl(\frac{gT}{4}\Bigr)^2,\\
+-\mathrm{scale}\Bigl(\tfrac{Q_0+Q_1}{2}-\tfrac{Q_2+Q_3}{2}\Bigr)^2
+- &= \frac{4\sigma_s^2}{N} + \Bigl(\frac{gT}{2}\Bigr)^2 .
+-\end{split}
+-\label{eq:18}
+-\end{equation}
+-
+-Sub-blocks must be cut contiguously for this, because an interleaved
+-(even/odd) split distributes neighbouring scans across both halves and
+-cancels whatever they share. The interleaved split is kept as a control: the
+-ratio between the two, at the same number of scans, measures how much of the
+-block's scatter is common to neighbouring scans rather than independent.
+-
+-The operational block is $N = 34$ scans spanning $T = 32.0$\,s, in both
+-channels and for both reference gases. Within it, averaging does not behave as
+-white noise (Table~\ref{tab:subblock_scaling}).
+-
+-\begin{table}[t]
+-\caption{Scatter of contiguous sub-block contrasts within the operational calibration block ($N = 34$, $T = 32.0$\,s) in the two heated channels, the averaging exponent they imply, and the ratio of contiguous to interleaved scatter at the same number of scans $m$, with the values expected for white noise.}
+-\label{tab:subblock_scaling}
+-\begin{tabular}{llll}
+-\tophline
+- & hot ANs & hot PNs & white noise \\
+-\middlehline
+-contiguous quarters (8 scans) & $\fieldnum{2.506\times10^{-4}}$ & $\fieldnum{1.095\times10^{-4}}$ & \\
+-contiguous halves (16 scans) & $\fieldnum{2.332\times10^{-4}}$ & $\fieldnum{0.820\times10^{-4}}$ & \\
+-\textbf{averaging exponent} & \textbf{\fieldnum{0.104}} & \textbf{\fieldnum{0.416}} & 0.500 \\
+-contiguous / interleaved, same $m$ & \textbf{\fieldnum{2.26}} & \textbf{\fieldnum{1.22}} & 1.03 \\
+-\bottomhline
+-\end{tabular}
+-\end{table}
+-
+-Doubling the number of scans averaged reduces the scatter by \fieldnum{7}\,\% in the ANs
+-channel, against the 29\,\% that independent scans would give. Most of what a
+-block mean contains is therefore not independent between scans, and the last
+-row says so directly: cutting the same block contiguously rather than in
+-alternation more than doubles its apparent scatter in ANs. These are spectral-domain statistics: in the
+-NO$_2$ amount, contiguous and interleaved halves give similar knot noise (Sect.~\ref{sec:4.2}), so most of this
+-correlated structure is evidently absorbed by the baseline polynomial before it reaches the gas columns. A monotonic trend
+-across the 32\,s is present in both channels but explains little of this -- see
+-below.
+-
+-Two conclusions follow, and the second is a limitation. Within the range that
+-can be measured, lengthening the averaging window is worth much less than the
+-$N^{-1/2}$ a reader would assume, and how much less depends on the channel.
+-And the range that can be measured is entirely below the operational block
+-length: subdividing $N$ scans says nothing about $2N$ or $4N$. The evidence
+-available is therefore not neutral but mildly unfavourable, and the
+-measurement that would settle it -- operating one longer block -- has not been
+-made.
+-
+-The duty cycle is not what stands in the way. Calibration occupies 1.2\,\% of
+-the measurement time (Sect.~\ref{sec:6.4}), and a fourfold zero-air block would take it to
+-3.9\,\% (Table~\ref{tab:duty_blocks}).
+-
+-\begin{table}[t]
+-\caption{Calibration duty cycle for the operational zero-air block and for blocks two and four times longer.}
+-\label{tab:duty_blocks}
+-\begin{tabular}{llll}
+-\tophline
+-zero-air block & $N$ & zero-air duty & total calibration duty \\
+-\middlehline
+-operational & 34 & 0.90\,\% & 1.20\,\% \\
+-$\times 2$ & 68 & 1.79\,\% & 2.10\,\% \\
+-$\times 4$ & 136 & 3.58\,\% & 3.89\,\% \\
+-\bottomhline
+-\end{tabular}
+-\end{table}
+-
+-Even under the white-noise assumption the return would be modest, and it is
+-worth stating why before anyone spends duty cycle on it. Halving the zero-air
+-knot noise removes three quarters of the $I_0$ variance, but that term carries
+-\fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
+-\fieldnum{0.1236} to \fieldnum{0.1008}\,ppb -- \fieldnum{18.5}\,\%, not half. The measured exponents put even that
+-out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
+-
+-\begin{table}[t]
+-\caption{Best attainable $\Sigma$ANs structural uncertainty (standard deviation) under each remedy, as a fraction of the operational value, and the assumption each row rests on. These are ceilings, not forecasts.}
+-\label{tab:ceilings}
+-\begin{tabular}{l>{\raggedright\arraybackslash}p{0.28\textwidth}l>{\raggedright\arraybackslash}p{0.3\textwidth}}
+-\tophline
+- & $\Sigma$ANs structural (SD), best attainable & of operational & status \\
+-\middlehline
+-operational & \fieldnum{0.1236}\,ppb & 1.00 & measured \\
+-$\times 4$ blocks only & \fieldnum{0.1008} & \fieldnum{0.82} & assumes $N^{-1/2}$; not supported below $N$ \\
+-flag bad $R$ intervals only & \fieldnum{0.0901} & \fieldnum{0.73} & assumes a perfect detector \\
+-\textbf{both} & \textbf{\fieldnum{0.0547}} & \textbf{\fieldnum{0.44}} & both assumptions \\
+-\bottomhline
+-\end{tabular}
+-\end{table}
+-
+-These are ceilings, not forecasts, and the way they are computed needs stating
+-because Sect.~\ref{sec:4.3} forbids the obvious method. Removing a term's contribution from a
+-total is a quadrature operation, and the joint propagation is not a quadrature
+-sum -- here it exceeds one by \fieldnum{7.6}\,\%, \fieldnum{0.1236}\,ppb against \fieldnum{0.1149}. The rows are
+-therefore evaluated in quadrature space and rescaled by that measured ratio,
+-which makes the operational row reproduce the measured joint exactly and
+-applies the same correction to the others. The residual assumption is that the
+-ratio survives shrinking a term, which it will not do exactly, because the
+-ratio depends on the covariance and interaction of the terms (Sect.~\ref{sec:4.3}), and shrinking one
+-term changes them.
+-
+-The ratio column is unaffected by any of this: the rescaling factor cancels,
+-so the relative ordering is the same whether the calculation is done in
+-quadrature space or after rescaling. The section uses only the ordering.
+-
+-Flagging outranks averaging here, and it does so under every basis we have
+-checked -- record space as well as hourly, and quadrature space as well as
+-rescaled. The flagging row assumes a detector that
+-removes the tail and nothing else, reducing the $R$ term to its present robust
+-scale; a real flag will fall short. The block row assumes an averaging
+-behaviour the measurements of Sect.~\ref{sec:6.2} do not support.
+-
+-A linear trend across the block is part of the explanation but not all of it.
+-It accounts for \fieldnum{40}\,\% of the within-block variance in the ANs channel and \fieldnum{34}\,\%
+-in PNs, inflating the apparent sub-block scatter by \fieldnum{1.29} and \fieldnum{1.23}. Whether
+-removing it restores white averaging cannot be tested by detrending and
+-re-measuring: the contrast comparing contiguous halves and the least-squares
+-slope over four sub-blocks have a cosine of $-0.894$, so subtracting the line
+-subtracts most of the quantity being measured. Measured instead on a contrast
+-orthogonal to the trend, the residual scatter is still \fieldnum{1.88} times white in ANs
+-and \fieldnum{1.17} in PNs. Detrending is a partial remedy; what limits averaging is a
+-correlation that outlives the removal of its linear part.
+-
+-What does not depend on either assumption is the ordering. The reflectivity
+-term is concentrated in a few episodes and does not average down; the zero-air
+-term is distributed and averages at least partly. Flagging comes first
+-whatever the detector achieves and whatever the block scaling turns out to be.
+-
+-One observation from the same measurement is worth recording. Both channels
+-show a monotonic trend across the 32\,s block, of opposite sign -- \fieldnum{$+248$} to
+-\fieldnum{$-314$}\,ppm in ANs against \fieldnum{$-261$} to \fieldnum{$+235$}\,ppm in PNs. Two adjacent windows
+-moving in opposite directions is a change of spectral slope rather than of
+-intensity, which points at the source or at the bandpass separating the
+-channels rather than at the gas fill. Removing the linear trend by contrast
+-does not reduce the excess scatter, so this trend is not what limits
+-averaging; the correlation between neighbouring scans is.
++The other lever is the number of scans averaged into each calibration block, and the evidence on it is not
++conclusive (Appendix~\ref{app:C}). Within the operational block ($N = 34$ scans, $T = 32$\,s), doubling the number of
++scans averaged reduces the scatter of contiguous sub-blocks by \fieldnum{7}\,\% in the ANs channel, against the 29\,\% that
++independent scans would give; but the range that can be measured this way lies entirely below the operational block
++length, so it is mildly unfavourable rather than decisive, and the measurement that would settle it -- operating one
++longer block -- has not been made. Even with white averaging the return would be modest: the zero-air term carries
++\fieldnum{45}\,\% of the $\Sigma$ANs variance, so a fourfold block, which would raise the calibration duty from 1.20 to 3.89\,\%,
++would lower the structural budget from \fieldnum{0.1236} to \fieldnum{0.1008}\,ppb (\fieldnum{18.5}\,\%), whereas flagging the few
++defective reflectivity intervals would lower it to \fieldnum{0.0901}\,ppb. That ordering -- flagging before averaging --
++holds whatever the block scaling turns out to be, because the reflectivity term is concentrated in a few episodes and
++the zero-air term is not (Sect.~\ref{sec:6.1a}).
+ 
+@@ -347,89 +216,55 @@
+ 
+-Two causes lie behind the numbers that survive, and they cost different things
+-to remove (Table~\ref{tab:coverage_causes}).
+-
+-\begin{table}[t]
+-\caption{The two causes of the reflectivity coverage deficit that remains after clock alignment, what each explains, and the remedy and its cost.}
+-\label{tab:coverage_causes}
+-\begin{tabular}{>{\raggedright\arraybackslash}p{0.28\textwidth}p{0.3\textwidth}p{0.24\textwidth}p{0.08\textwidth}}
+-\tophline
+- & what it explains & remedy & cost \\
+-\middlehline
+-reflectivity generation stopped at 07-09 & the hot channel's trailing extrapolation & re-run over files that already exist & none \\
+-clustered pair rejection, \fieldnum{11.3}\,\% of cold pairs & cold gaps, \fieldnum{11.03}\,\% campaign and \fieldnum{18.31}\,\% in the cold window & restore the light level; failing that, redundancy & see below \\
+-\bottomhline
+-\end{tabular}
+-\end{table}
+-
+-The first is bookkeeping and the cheapest fix in this paper. Only the second is
+-about how often the instrument calibrates, and even there the average rate is
+-not the problem. Independent rejection at the measured rate would leave \fieldnum{3.5}\,\%
+-of cold records in gaps longer than two hours, against \fieldnum{11.03}\,\% observed. The
+-rejections arrive in runs: the worst cold gap, \fieldnum{11.8}\,h, is eleven consecutive
+-rejected pairs, which even at a 40\,\% independent rejection rate would be
+-expected 0.03 times in the campaign. This is the episodic structure Sect.~\ref{sec:6.1a}
+-found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying 90\,\% of
+-it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the
+-calibration side.
+-
+-That changes what denser helium blocks buy. The argument for them is not
+-precision: it is \emph{redundancy against runs of rejection}. A reference measured
+-more often than it is needed survives losing a stretch of blocks; one measured
+-exactly as often as it is needed does not.
+-
+-It also locates the cost of quality control. The three gates the reflectivity
+-already passes cost the hot channel \fieldnum{0.24}\,\% of its pairs and the cold channel
+-\fieldnum{11.3}\,\%. In the cold channel the gates are, correctly, the proximate cause of
+-the coverage deficit: the pairs they reject are the ones whose absence doubles
+-the gaps. This is worth stating plainly because it cuts against the argument
+-of Sect.~\ref{sec:6.3}, which asks for a gate that zero air does not yet have. Gates remove
+-variance and they remove coverage, and a pipeline that gates without also
+-reporting what the gating cost has simply moved the error somewhere it is
+-harder to see. The context flag of Sect.~\ref{sec:6.1} is what closes that loop.
+-
+-A caution on the last link in the chain. The reflectivity contribution in Sect.~\ref{sec:4}
+-is measured by removing a knot and re-interpolating, so its magnitude scales
+-with how far apart the knots already are. A sparse reference will present
+-itself as a dominant error term partly because it is sparse. The budget does
+-not discover that reflectivity is the cold channel's problem so much as
+-inherit it from the schedule -- which is why the remedy belongs to the
+-schedule and to reprocessing rather than to the retrieval.
+-
+-These records are not covered by the budget of Sect.~\ref{sec:4} -- a perturbation experiment
+-needs a knot to perturb -- and interpolating across such a gap is not
+-equivalent to interpolating across an hour. They are therefore reported with
+-the context flag of Sect.~\ref{sec:6.1} set, and excluded from any statistic that assumes a
+-characterised uncertainty.
+-
+-In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is
+-measured every hour and helium only every three (Table~\ref{tab:cal_schedule}). Each reflectivity knot is formed from
+-one zero-air block and the most recent helium block that passed the quality gates, so the knots are hourly --
+-\fieldnum{1261} over the deployment, at a median spacing of \fieldnum{1.00}\,h -- while their helium half is up to three hours
+-old, and older when a helium block is rejected.
+-
+-\begin{table}[t]
+-\caption{Calibration schedule of the heated channels in the budget window (18--24 May): number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
+-\label{tab:cal_schedule}
+-\begin{tabular}{lllll}
+-\tophline
+- & blocks & per block & cadence & duty \\
+-\middlehline
+-zero air & \fieldnum{157} & 34 scans / 32\,s & 1.00\,h & 0.90\,\% \\
+-helium & \fieldnum{54} & 34 scans / 32\,s & 3.00\,h & 0.31\,\% \\
+- & & & & \textbf{1.20\,\%} \\
+-\bottomhline
+-\end{tabular}
+-\end{table}
+-
+-A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected helium block
+-removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the helium
+-cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
+-helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are
+-rejected, which in the cold channel is mainly the light level (Table~\ref{tab:coverage_causes}). The case for it is
+-redundancy and contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only
+-weakly on interval length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much
+-more accurate.
+-
+-More generally, 1.2\,\% is a small fraction of the measurement time to spend on
+-knowing the instrument, and it is the binding constraint on none of the
+-remedies above.
++Two causes lie behind the deficit that survives clock alignment, and they cost different things to remove. The first
++is bookkeeping and the cheapest fix in this paper: reflectivity generation stopped at 07-09, which produces the hot
++channel's trailing extrapolation and is removed by re-running over files that already exist. The second is clustered
++rejection of calibration pairs, \fieldnum{11.3}\,\% of cold pairs, which explains the cold gaps (\fieldnum{11.03}\,\% over the campaign and
++\fieldnum{18.31}\,\% in the cold window); its remedy is to restore the light level or, failing that, redundancy. Only this
++second cause is about how often the instrument calibrates, and even there the average rate is not the problem.
++Independent rejection at the measured rate would leave \fieldnum{3.5}\,\% of cold records in gaps longer than two hours,
++against \fieldnum{11.03}\,\% observed. The rejections arrive in runs: the worst cold gap, \fieldnum{11.8}\,h, is eleven consecutive
++rejected pairs, which even at a 40\,\% independent rejection rate would be expected 0.03 times in the campaign. This
++is the episodic structure Sect.~\ref{sec:6.1a} found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying
++90\,\% of it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the calibration side.
++
++It also locates the cost of quality control. The three gates the reflectivity already passes cost the hot channel
++\fieldnum{0.24}\,\% of its pairs and the cold channel \fieldnum{11.3}\,\%; in the cold channel the gates are, correctly, the proximate
++cause of the coverage deficit. This cuts against the argument of Sect.~\ref{sec:6.3}, which asks for a gate that zero
++air does not yet have: gates remove variance and they remove coverage, and a pipeline that gates without also
++reporting what the gating cost has moved the error somewhere it is harder to see. The context flag of
++Sect.~\ref{sec:6.1} closes that loop. The same caution applies to the budget: the reflectivity contribution of
++Sect.~\ref{sec:4} is measured by removing a knot and re-interpolating, so its magnitude scales with how far apart the
++knots already are, and a sparse reference presents itself as a dominant term partly because it is sparse -- which is
++why the remedy belongs to the schedule and to reprocessing rather than to the retrieval. Records in gaps are not
++covered by the budget at all, since a perturbation experiment needs a knot to perturb; they are reported with the
++context flag set and excluded from any statistic that assumes a characterised uncertainty.
++
++In the heated channels zero air is measured every hour and helium every three, and each reflectivity knot pairs a
++zero-air block with the most recent helium block that passed the quality gates (Appendix~\ref{app:A},
++Table~\ref{tab:cal_schedule}), so the knots are hourly while their helium half is up to three hours old, and older when a
++helium block is rejected. A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected
++helium block removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the
++helium cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
++helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are rejected,
++which in the cold channel is mainly the light level. The case for it is redundancy against runs of rejection and
++contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only weakly on interval
++length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much more accurate. At
++1.2\,\% of the measurement time, calibration is the binding constraint on none of these remedies.
++
++\subsection{Errors that neither the fit report nor the proposed fields detect}
++\label{sec:6.5}
++
++The convention of Sect.~\ref{sec:6.1} makes visible what the pipeline already knows. It cannot make visible what the
++pipeline does not know, and two such errors appear in this record.
++
++The first is a multiplicative gain error. Against a co-located NIER analyser the heated-channel NO$_2$ reads low by a
++factor of about \fieldnum{0.6} while the ambient-temperature channel agrees (Sect.~\ref{sec:3.6}). A gain leaves the residual, the
++reported uncertainty, the termination state and every distance and provenance field unchanged, and the zero-air test
++of Sect.~\ref{sec:7.2} is blind to it because a gain applied to zero is zero. Only a comparison with an independent
++measurement of the same quantity -- a reference analyser, a cylinder, or a channel that should agree -- reveals it,
++and such a comparison does not by itself identify the cause.
++
++The second is the raw light level. All six ambient-temperature excursions of Sect.~\ref{sec:7.3} coincide with spectra
++that fell below 30\,\% of their usual count at 460\,nm; the residual finds them, and the reference context is abnormal
++in five of them, but none of the proposed fields names the cause. The light level of each spectrum, and the helium and
++zero-air intensities of each calibration block rather than only their ratio, are known when they are recorded and
++could travel with the product as further context; we have not evaluated them for the heated channels.
+--- a/sec7_field.tex
++++ b/sec7_field.tex
+@@ -7,33 +7,18 @@
+ 
+-The retrieval is applied here to a thermal-dissociation broadband
+-cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a cell held at
+-180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl
+-nitrates dissociate as well; a third cell at ambient temperature measures NO$_2$
+-directly. Each channel measures the extinction of the same cavity geometry,
+-$d = 51.8$\,cm with $R_L = 1.0$ (assumed, not measured; since $\alpha \propto R_L$ it enters as a
+-multiplicative factor), so the three differ in what has been converted
+-to NO$_2$ upstream rather than in how the spectrum is formed. The sums of peroxy
+-and alkyl nitrates follow as channel differences.
++The field case is a thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
++ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a
++cell held at 180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl nitrates
++dissociate as well; a third cell at ambient temperature measures NO$_2$ directly. The three differ in what has been
++converted to NO$_2$ upstream rather than in how the spectrum is formed, and the sums of peroxy and alkyl nitrates
++follow as channel differences, $\Sigma$ANs with the inter-channel factor $g'$ of Sect.~\ref{sec:4.4}. The retrieval
++configuration of each channel -- window, baseline, references, shift and squeeze settings, wavelength calibration,
++line shape, cavity constants and calibration schedule -- is given in Appendix~\ref{app:A}.
+ 
+-The instrument was deployed at Suncheon Shindae (SDD) from 2026-05-18 to
+-07-10 as part of a multi-institution intensive campaign. Zero-air blocks of 34
+-scans over 32\,s run hourly and helium blocks of the same specification every
+-three hours, a combined calibration duty cycle of 1.20\,\%. Spectra are
+-retrieved in 444.118--470.562\,nm with a third-order Chebyshev baseline for the
+-180\,$^{\circ}$C channel and 430--462\,nm with a fourth-order baseline for the 300\,$^{\circ}$C
+-channel; the ambient-temperature channel uses 438.420--475.741\,nm and a
+-fourth-order baseline. The dispersion is 0.0481\,nm\,px$^{-1}$ and the
+-instrument line shape of the heated channels has a full width at half maximum of 0.683\,nm (0.765--0.785\,nm in
+-the ambient-temperature channel, Sect.~\ref{sec:4.1}). The field numbers of this paper were checked against a
+-reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by $\pm$\fieldnum{0.25}\,\%, and are
+-reported as first computed.
++The instrument was deployed at Suncheon Shindae (SDD) from 2026-05-18 to 07-10 as part of a multi-institution
++intensive campaign. Two properties belong to this deployment rather than to the configuration: the median fitted shift
++in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px, inside its bound of $-10$\,px, and the field numbers of this paper
++were checked against a reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by
++$\pm$\fieldnum{0.25}\,\%, and are reported as first computed. The instrument itself, its inlet and its conversion
++efficiencies are characterised elsewhere.
+ 
+-The three channels also sit at different offsets from their wavelength
+-calibrations: the operational shift bounds are $-10$ to $0.5$\,px for the
+-300\,$^{\circ}$C channel and $-5$ to $5$\,px for the 180\,$^{\circ}$C channel; in the
+-ambient-temperature channel the shift is fixed at $-0.5$\,px and the squeeze at
+-its identity value, i.e. no stretch (Sect.~\ref{sec:5.1}). The median fitted shift in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px.
+-
+-Only the properties the retrieval depends on are given here. The instrument
+-itself, its inlet and its conversion efficiencies are characterised elsewhere.
+ 
+@@ -144,5 +129,4 @@
+ nearest reference, termination state, or reference provenance -- supplies what is missing. For the cold
+-excursions the proximate cause, the raw light level, is not among the proposed fields. And the heated-channel
+-NO$_2$ scale, low against the co-located NIER analyser by a factor of about \fieldnum{0.6} (Sect.~\ref{sec:3.6}), is invisible to
+-the fit report and to every proposed field. The fields narrow the gap between what a fit reports and what is
++excursions the proximate cause, the raw light level, is not among the proposed fields, and the heated-channel NO$_2$
++scale of Sect.~\ref{sec:3.6} is invisible to all of them (Sect.~\ref{sec:6.5}). The fields narrow the gap between what a fit reports and what is
+ known about the record; they do not close it.
+--- a/sec8_conclusions.tex
++++ b/sec8_conclusions.tex
+@@ -5,5 +5,6 @@
+ 
+-We have presented Augur, an open retrieval applied here to a thermal-dissociation
+-broadband cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, posed in the extinction domain
+-as a separable nonlinear least-squares problem and solved by variable projection.
++We have presented Augur, an open retrieval posed in the extinction domain as a separable nonlinear least-squares
++problem and solved by variable projection, configured by instrument and campaign profiles rather than written for one
++instrument, and demonstrated its diagnostics on one field case: a thermal-dissociation broadband cavity-enhanced
++absorption spectrometer with two heated and one ambient-temperature cavity.
+ The formulation is not the contribution. The implementation makes three things
+@@ -38,5 +39,4 @@
+ \fieldnum{187} of \fieldnum{9034} records were excluded because a fit, unperturbed or perturbed, terminated at a bound; all were
+-recorded as converged. The rate depends on the search box
+-and step limit and is not comparable across implementations, but the state is
+-computed and then discarded. In one window the projected objective varies by about one per cent across four pixels of shift,
++recorded as converged. The rate depends on the step limit (Fig.~\ref{fig:1}b) and
++differs between implementations (Sect.~\ref{sec:5.1}), but the state is computed and then discarded. In one window the projected objective varies by about one per cent across four pixels of shift,
+ in another over five orders of magnitude, and both are reported as converged. And
+@@ -45,3 +45,3 @@
+ the reported uncertainty by two parts in a thousand. Neither the fit report nor the proposed fields see the
+-largest error in this record: against a co-located NIER analyser the heated-channel NO$_2$ reads low by a
++largest error in this record (Sect.~\ref{sec:6.5}): against a co-located NIER analyser the heated-channel NO$_2$ reads low by a
+ factor of about \fieldnum{0.6} while the ambient-temperature channel agrees, a multiplicative discrepancy whose cause is
+@@ -60,6 +60,6 @@
+ within-block evidence of Sect.~\ref{sec:6.2} is unfavourable and the decisive measurement has not been made. And quality gates should be
+-assessed as variance-removal devices, not classifiers, and reported with the
+-coverage they cost.
++reported with the coverage they cost, because they remove coverage as well as variance (Sect.~\ref{sec:6.4}).
+ 
+-The evidence is one instrument over one campaign. Two things should carry beyond
++The evidence is one field case, one instrument over one campaign. The code is not tied to that instrument
++(Appendix~\ref{app:A}), but its behaviour on other configurations is not shown here. Two things should carry beyond
+ it: the reporting convention, which asks for quantities every implementation
+@@ -73,4 +73,4 @@
+ Three directions follow. The wavelength shift belongs to the spectrograph, not the
+-air, so fitting one shift jointly across the spectra of a calibration block -- a separable problem with common nonlinear parameters -- should
+-remove the indeterminacy this paper only diagnoses; a laboratory spectrum with a
++air, so fitting one shift jointly across the spectra of a calibration block -- a separable problem with common nonlinear parameters -- could
++remove the indeterminacy this paper only diagnoses (Sect.~\ref{sec:5.1}); a laboratory spectrum with a
+ few ppb of added NO$_2$ already locates the ambient-temperature channel's shift to
+@@ -79,7 +79,7 @@
+ reflectivity as measured quantities with their own covariance, not exact inputs,
+-would propagate the structural term inside the fit rather than afterwards.
++would propagate the structural term inside the fit rather than afterwards (Sect.~\ref{sec:4.6}).
+ 
+-Third, the raw light level of each spectrum -- which alone accounts for all six ambient-temperature
++Third, the raw light level of each spectrum -- the proximate cause of all six ambient-temperature
+ excursions of Sect.~\ref{sec:7.3} -- and the helium and zero-air intensities of each calibration block, not only
+-their ratio, should travel with the product, so that multiplicative steps in the calibration record can be seen
+-where they happen instead of being inferred afterwards from the product.
++their ratio, should travel with the product (Sect.~\ref{sec:6.5}), so that changes in the light reaching the detector
++can be seen where they happen instead of being inferred afterwards from the product.
+--- a/appA_config.tex
++++ b/appA_config.tex
+@@ -0,0 +1,86 @@
++%% Appendix A -- instrument and retrieval configuration (Phase 3, 2026-09-28).
++%% Sources: operational fit-setting file
++%%   C:\GHL\2026 yeosu\Output\fit setting\FitSet_ANs[430-462nm_P4]_PNs[444-471nm_P3]_cold[438-476nm_P4]_Std.json
++%% (windows, orders, references, shift/squeeze settings, step limit, d, R_L, temperature coefficients),
++%% the wavelength-calibration files it names (dispersion, FWHM of the heated channels), and the existing text
++%% (cold FWHM, Sect. 4.1; R(t) knots, Sect. 6.4; calibration schedule, formerly Table 18).
++\section{Instrument and retrieval configuration}
++\label{app:A}
++
++Augur reads the layout of the raw files -- which columns hold which channel's spectrum, which state flag marks an
++ambient, zero-air or helium scan, and where the housekeeping values sit -- from a JSON instrument and campaign
++profile, and the fit configuration from a separate fit-setting file. The retrieval logic keys on the structure these
++files declare, not on channel names, so the same code is configured for another instrument or deployment by writing
++new files rather than by changing it. This appendix collects the configuration of the field case of
++Sect.~\ref{sec:7} in one place. Table~\ref{tab:config} is transcribed from the operational fit-setting file of the
++campaign and the wavelength-calibration files it names; Table~\ref{tab:1} is its short form.
++
++\begin{table*}[t]
++\caption{Operational retrieval configuration of the three channels. ``Linked'' parameters take the value of the NO$_2$
++parameter. The squeeze is stored as the departure from unity of $s_i$ in Eq.~(\ref{eq:3}), so 0 means no stretch.
++Dispersion is the median over the fitting window of the wavelength-calibration file; the line-shape width of the
++heated channels is the value recorded in that file (mean of four Hg lines), that of the ambient-temperature channel is
++the pair of measurements discussed in Sect.~\ref{sec:4.1}.}
++\label{tab:config}
++\begin{tabular}{>{\raggedright\arraybackslash}p{0.27\textwidth}>{\raggedright\arraybackslash}p{0.2\textwidth}>{\raggedright\arraybackslash}p{0.2\textwidth}>{\raggedright\arraybackslash}p{0.22\textwidth}}
++\tophline
++ & 300\,$^{\circ}$C & 180\,$^{\circ}$C & ambient temperature \\
++\middlehline
++label in Sects.~\ref{sec:3}--\ref{sec:6} & hot ANs & hot PNs & cold \\
++raw spectrum block & 2053 & 4101 & (cold file) \\
++fitting window (nm) & 429.5--461.9 & 444.1--470.6 & 438.4--475.8 \\
++baseline & Chebyshev, order 4 & Chebyshev, order 3 & Chebyshev, order 4 \\
++absorbers fitted & NO$_2$, CHOCHO, H$_2$O & NO$_2$, CHOCHO, H$_2$O & NO$_2$, CHOCHO, H$_2$O \\
++NO$_2$ shift (px) & bounded, $-10$ to $+0.5$ & bounded, $-5$ to $+5$ & fixed, $-0.5$ \\
++NO$_2$ squeeze, $s-1$ & bounded, $\pm 0.005$ & bounded, $\pm 0.005$ & fixed, 0 \\
++CHOCHO, H$_2$O shift and squeeze & linked & linked & linked \\
++cross-section temperature coefficient $\kappa_i$ & 0 (not applied) & 0 (not applied) & 0 (not applied) \\
++negative amounts & allowed & allowed & allowed \\
++optimiser step limit & on (0.5) & on (0.5) & on (0.5) \\
++wavelength calibration & Hg, 19 June 2026, quadratic & Hg, 19 June 2026, quadratic & Hg (four lines), 23 May 2026, quadratic \\
++dispersion (nm\,px$^{-1}$) & 0.0484 & 0.0481 & 0.0482 \\
++line-shape FWHM (nm) & 0.681 & 0.683 & 0.765--0.785 \\
++\bottomhline
++\end{tabular}
++\end{table*}
++
++\strong{References.} The cross sections are NO$_2$ \citep{Vandaele_2002}, CHOCHO \citep{Volkamer_2005} and H$_2$O from
++HITRAN line data \citep{Gordon_2022}, each convolved with the line shape of its channel before the fit; O$_4$ is not
++fitted in the operational configuration. No robust weighting, regularisation or non-negativity constraint is applied
++(Sect.~\ref{sec:2.8}).
++
++\strong{Wavelength calibration.} Each channel has its own Hg-lamp calibration with a quadratic pixel-to-wavelength
++polynomial. Two calibrations of the 300\,$^{\circ}$C spectral region exist, one per region of interest on the
++detector; the operational fit setting uses the second, the two differ by about 0.6\,px (0.034\,nm), and which of the
++two belongs to block 2053 is not settled. The difference is within the shift range of that channel and is absorbed
++by the fitted shift.
++
++\strong{Temperature and pressure.} Sample temperature and pressure are recorded with every spectrum and enter the
++Rayleigh correction of Eq.~(\ref{eq:1}) and the conversion from number density to mixing ratio; their interpolation
++contributes below \fieldnum{0.1}\,\% (Sect.~\ref{sec:4.1}). The temperature scaling $\tau_i(T)$ of Eq.~(\ref{eq:2}) is not
++used ($\kappa_i = 0$).
++
++\strong{Cavity.} All three cavities have $d = 51.8$\,cm and $R_L = 1.0$. $R_L$ is assumed, not measured; since
++$\alpha \propto R_L$ it enters as a multiplicative factor (Sect.~\ref{sec:3.6}).
++
++\strong{Calibration references.} Zero-air and helium blocks are identical, 34 scans over 32\,s; zero air is measured
++every hour and helium every three hours (Table~\ref{tab:cal_schedule}). The zero-air reference $I_0$ is interpolated
++to the time of each spectrum from the neighbouring zero-air blocks, and the etalon frequency is held fixed
++(Sect.~\ref{sec:4.1}). Each reflectivity knot is formed from one zero-air block and the most recent helium block that
++passed the quality gates, so the knots of the heated channels are hourly -- \fieldnum{1261} over the deployment at a median
++spacing of \fieldnum{1.00}\,h -- while the helium half of a knot is up to three hours old; $R(\lambda,t)$ is the monotone
++piecewise-cubic interpolation of Sect.~\ref{sec:2.4} through these knots, after the knot gate of Sect.~\ref{sec:6.3}.
++
++\begin{table}[t]
++\caption{Calibration schedule of the heated channels, with block counts for the budget window (18--24 May): number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
++\label{tab:cal_schedule}
++\begin{tabular}{lllll}
++\tophline
++ & blocks & per block & cadence & duty \\
++\middlehline
++zero air & \fieldnum{157} & 34 scans / 32\,s & 1.00\,h & 0.90\,\% \\
++helium & \fieldnum{54} & 34 scans / 32\,s & 3.00\,h & 0.31\,\% \\
++ & & & & \textbf{1.20\,\%} \\
++\bottomhline
++\end{tabular}
++\end{table}
+--- a/appB.tex
++++ b/appB.tex
+@@ -1,4 +1,3 @@
+ %% Appendix B -- from augur_AMT_부록B draft v1 (2026-09-22). Synthetic / algebraic only: no \fieldnum.
+-%% Appendices A (fit settings, cross sections) and C (synthetic validation suite) of the outline are not drafted yet;
+-%% this appendix is therefore typeset as the first appendix section and labelled app:B.
++%% Phase 3: typeset as Appendix B, between Appendix A (configuration) and Appendix C (calibration-block length).
+ \section{The projected Jacobian, column scaling and the joint covariance}
+--- a/appC_blocks.tex
++++ b/appC_blocks.tex
+@@ -0,0 +1,151 @@
++%% Appendix C -- calibration-block length and duty cycle (Phase 3, 2026-09-28): moved verbatim from Sect. 6.2,
++%% with three self-references adjusted. Numbers unchanged.
++\section{Calibration-block length and duty cycle}
++\label{app:C}
++
++This appendix gives the measurements behind the second paragraph of Sect.~\ref{sec:6.2}. They are not conclusive, for the
++reason stated below, and are recorded so that the measurement that would settle the question can be designed.
++
++What acts on knot noise is the number of scans averaged into each
++calibration block. Splitting each block into contiguous quarters separates the
++two components that limit a block mean -- white scan noise $\sigma_s$, which
++averages down, and drift within the block at rate $g$, which does not:
++\begin{equation}
++\begin{split}
++\mathrm{scale}(Q_0-Q_1)^2 &= \frac{8\sigma_s^2}{N} + \Bigl(\frac{gT}{4}\Bigr)^2,\\
++\mathrm{scale}\Bigl(\tfrac{Q_0+Q_1}{2}-\tfrac{Q_2+Q_3}{2}\Bigr)^2
++ &= \frac{4\sigma_s^2}{N} + \Bigl(\frac{gT}{2}\Bigr)^2 .
++\end{split}
++\label{eq:18}
++\end{equation}
++
++Sub-blocks must be cut contiguously for this, because an interleaved
++(even/odd) split distributes neighbouring scans across both halves and
++cancels whatever they share. The interleaved split is kept as a control: the
++ratio between the two, at the same number of scans, measures how much of the
++block's scatter is common to neighbouring scans rather than independent.
++
++The operational block is $N = 34$ scans spanning $T = 32.0$\,s, in both
++channels and for both reference gases. Within it, averaging does not behave as
++white noise (Table~\ref{tab:subblock_scaling}).
++
++\begin{table}[t]
++\caption{Scatter of contiguous sub-block contrasts within the operational calibration block ($N = 34$, $T = 32.0$\,s) in the two heated channels, the averaging exponent they imply, and the ratio of contiguous to interleaved scatter at the same number of scans $m$, with the values expected for white noise.}
++\label{tab:subblock_scaling}
++\begin{tabular}{llll}
++\tophline
++ & hot ANs & hot PNs & white noise \\
++\middlehline
++contiguous quarters (8 scans) & $\fieldnum{2.506\times10^{-4}}$ & $\fieldnum{1.095\times10^{-4}}$ & \\
++contiguous halves (16 scans) & $\fieldnum{2.332\times10^{-4}}$ & $\fieldnum{0.820\times10^{-4}}$ & \\
++\textbf{averaging exponent} & \textbf{\fieldnum{0.104}} & \textbf{\fieldnum{0.416}} & 0.500 \\
++contiguous / interleaved, same $m$ & \textbf{\fieldnum{2.26}} & \textbf{\fieldnum{1.22}} & 1.03 \\
++\bottomhline
++\end{tabular}
++\end{table}
++
++Doubling the number of scans averaged reduces the scatter by \fieldnum{7}\,\% in the ANs
++channel, against the 29\,\% that independent scans would give. Most of what a
++block mean contains is therefore not independent between scans, and the last
++row says so directly: cutting the same block contiguously rather than in
++alternation more than doubles its apparent scatter in ANs. These are spectral-domain statistics: in the
++NO$_2$ amount, contiguous and interleaved halves give similar knot noise (Sect.~\ref{sec:4.2}), so most of this
++correlated structure is evidently absorbed by the baseline polynomial before it reaches the gas columns. A monotonic trend
++across the 32\,s is present in both channels but explains little of this -- see
++below.
++
++Two conclusions follow, and the second is a limitation. Within the range that
++can be measured, lengthening the averaging window is worth much less than the
++$N^{-1/2}$ a reader would assume, and how much less depends on the channel.
++And the range that can be measured is entirely below the operational block
++length: subdividing $N$ scans says nothing about $2N$ or $4N$. The evidence
++available is therefore not neutral but mildly unfavourable, and the
++measurement that would settle it -- operating one longer block -- has not been
++made.
++
++The duty cycle is not what stands in the way. Calibration occupies 1.2\,\% of
++the measurement time (Sect.~\ref{sec:6.4}), and a fourfold zero-air block would take it to
++3.9\,\% (Table~\ref{tab:duty_blocks}).
++
++\begin{table}[t]
++\caption{Calibration duty cycle for the operational zero-air block and for blocks two and four times longer.}
++\label{tab:duty_blocks}
++\begin{tabular}{llll}
++\tophline
++zero-air block & $N$ & zero-air duty & total calibration duty \\
++\middlehline
++operational & 34 & 0.90\,\% & 1.20\,\% \\
++$\times 2$ & 68 & 1.79\,\% & 2.10\,\% \\
++$\times 4$ & 136 & 3.58\,\% & 3.89\,\% \\
++\bottomhline
++\end{tabular}
++\end{table}
++
++Even under the white-noise assumption the return would be modest, and it is
++worth stating why before anyone spends duty cycle on it. Halving the zero-air
++knot noise removes three quarters of the $I_0$ variance, but that term carries
++\fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
++\fieldnum{0.1236} to \fieldnum{0.1008}\,ppb -- \fieldnum{18.5}\,\%, not half. The measured exponents put even that
++out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
++
++\begin{table}[t]
++\caption{Best attainable $\Sigma$ANs structural uncertainty (standard deviation) under each remedy, as a fraction of the operational value, and the assumption each row rests on. These are ceilings, not forecasts.}
++\label{tab:ceilings}
++\begin{tabular}{l>{\raggedright\arraybackslash}p{0.28\textwidth}l>{\raggedright\arraybackslash}p{0.3\textwidth}}
++\tophline
++ & $\Sigma$ANs structural (SD), best attainable & of operational & status \\
++\middlehline
++operational & \fieldnum{0.1236}\,ppb & 1.00 & measured \\
++$\times 4$ blocks only & \fieldnum{0.1008} & \fieldnum{0.82} & assumes $N^{-1/2}$; not supported below $N$ \\
++flag bad $R$ intervals only & \fieldnum{0.0901} & \fieldnum{0.73} & assumes a perfect detector \\
++\textbf{both} & \textbf{\fieldnum{0.0547}} & \textbf{\fieldnum{0.44}} & both assumptions \\
++\bottomhline
++\end{tabular}
++\end{table}
++
++These are ceilings, not forecasts, and the way they are computed needs stating
++because Sect.~\ref{sec:4.3} forbids the obvious method. Removing a term's contribution from a
++total is a quadrature operation, and the joint propagation is not a quadrature
++sum -- here it exceeds one by \fieldnum{7.6}\,\%, \fieldnum{0.1236}\,ppb against \fieldnum{0.1149}. The rows are
++therefore evaluated in quadrature space and rescaled by that measured ratio,
++which makes the operational row reproduce the measured joint exactly and
++applies the same correction to the others. The residual assumption is that the
++ratio survives shrinking a term, which it will not do exactly, because the
++ratio depends on the covariance and interaction of the terms (Sect.~\ref{sec:4.3}), and shrinking one
++term changes them.
++
++The ratio column is unaffected by any of this: the rescaling factor cancels,
++so the relative ordering is the same whether the calculation is done in
++quadrature space or after rescaling. Section~\ref{sec:6.2} uses only the ordering.
++
++Flagging outranks averaging here, and it does so under every basis we have
++checked -- record space as well as hourly, and quadrature space as well as
++rescaled. The flagging row assumes a detector that
++removes the tail and nothing else, reducing the $R$ term to its present robust
++scale; a real flag will fall short. The block row assumes an averaging
++behaviour the measurements of this appendix do not support.
++
++A linear trend across the block is part of the explanation but not all of it.
++It accounts for \fieldnum{40}\,\% of the within-block variance in the ANs channel and \fieldnum{34}\,\%
++in PNs, inflating the apparent sub-block scatter by \fieldnum{1.29} and \fieldnum{1.23}. Whether
++removing it restores white averaging cannot be tested by detrending and
++re-measuring: the contrast comparing contiguous halves and the least-squares
++slope over four sub-blocks have a cosine of $-0.894$, so subtracting the line
++subtracts most of the quantity being measured. Measured instead on a contrast
++orthogonal to the trend, the residual scatter is still \fieldnum{1.88} times white in ANs
++and \fieldnum{1.17} in PNs. Detrending is a partial remedy; what limits averaging is a
++correlation that outlives the removal of its linear part.
++
++What does not depend on either assumption is the ordering. The reflectivity
++term is concentrated in a few episodes and does not average down; the zero-air
++term is distributed and averages at least partly. Flagging comes first
++whatever the detector achieves and whatever the block scaling turns out to be.
++
++One observation from the same measurement is worth recording. Both channels
++show a monotonic trend across the 32\,s block, of opposite sign -- \fieldnum{$+248$} to
++\fieldnum{$-314$}\,ppm in ANs against \fieldnum{$-261$} to \fieldnum{$+235$}\,ppm in PNs. Two adjacent windows
++moving in opposite directions is a change of spectral slope rather than of
++intensity, which points at the source or at the bandpass separating the
++channels rather than at the gas fill. Removing the linear trend by contrast
++does not reduce the excess scatter, so this trend is not what limits
++averaging; the correlation between neighbouring scans is.
+--- a/main.tex
++++ b/main.tex
+@@ -57,3 +57,5 @@
+ \appendix
++\input{appA_config}
+ \input{appB}
++\input{appC_blocks}
+ \noappendix

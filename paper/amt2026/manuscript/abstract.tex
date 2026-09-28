@@ -3,11 +3,11 @@
 A DOAS fit reports a residual, a chi-square, an uncertainty and a convergence
 flag, and these are read as a description of how well the retrieval did. Each
 can assert more than the fit knows, and the gap is invisible from inside the
-fit report. We present Augur, an open retrieval, applied here to a
-thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
-ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
-\citep{Min_2016,Nam_2022}, and use it to measure that gap on 53 days of field
-measurements.
+fit report. We present Augur, an open retrieval for broadband
+absorption spectra that is configured by instrument and campaign profiles rather than written for one instrument,
+and use one field case to measure that gap: 53 days of measurements in 2026 with a thermal-dissociation broadband
+cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, measuring NO$_2$, total
+peroxy nitrates and total alkyl nitrates \citep{Min_2016,Nam_2022}.
 
 Augur poses the retrieval in the extinction domain as a separable nonlinear
 least-squares problem and solves it by variable projection with an analytic

@@ -191,8 +191,7 @@ perturbed together; the legend gives the robust scale and standard deviation of 
 line is the uncertainty the fit reports for one scan. \textbf{(b)} Hour-to-hour variation of $\Sigma$ANs predicted by the
 jointly propagated budget, against the variation observed in the matched hours and over the whole campaign.
 \textbf{(c)} The reflectivity term record by record (points) and as an hourly RMS (steps); shaded, the five hours
-that carry \fieldnum{57}\,\% of its variance. The legend values and the dotted line in panel (a) are still drawn at the values before the
-clock-aligned recomputation and await re-rendering; Table~\ref{tab:2} gives the current values.}
+that carry \fieldnum{57}\,\% of its variance. $\Sigma$ANs responses are formed with $g' = \fieldnum{0.9524}$, as in Table~\ref{tab:2}.}
 \label{fig:4}
 \end{figure*}
 
@@ -354,4 +353,6 @@ uniform -- the $R$ term carries the smallest shape statistic in Table~\ref{tab:2
 its variance. Section~\ref{sec:6} specifies all three and states which are implemented. Sections~\ref{sec:5.3} and \ref{sec:5.4} add two
 further fields of the same kind -- how far the record is from its calibration,
 and whether the reference it used was still valid -- which the pipeline can
-supply without any new measurement.
+supply without any new measurement. A further step, not attempted here, would treat the zero-air reference and the
+reflectivity as measured quantities with their own covariance and propagate the structural term inside the fit
+rather than afterwards.

@@ -2,6 +2,9 @@
 
 Standalone: reads only ./data/*.csv next to this file and writes ./out/amt_fig{3,4,5}_*.{png,pdf}.
 Values not stored in a CSV are taken from the manuscript text and marked TEXT below.
+Fig 4 (2026-09-28): the Sigma-ANs responses are formed as a_* - g' b_* (300 C minus g' x 180 C, g' read from
+data/amt_recompute_values.json, copy of artifact e27a3579); the fit-sigma line and panel (b) values are read from
+the same JSON (denominator.window_matched_gprime, sec45.*). Previously s_* (unit gain) and TEXT values were used.
 
     python paper/amt2026/make_figs_345.py
 """
@@ -103,10 +106,14 @@ def fig3():
     plt.close(fig)
 
 def fig4():
+    import json
+    rv = json.load(open(D("amt_recompute_values.json"), encoding="utf-8"))
+    g = float(rv["scale_budget_vs_product"]["g_prime_values"][0]); den = float(rv["denominator"]["window_matched_gprime"]); h = rv["sec45"]
     P = pd.read_csv(D("production_budget_clockfixed.csv")); P = P[P.ok.astype(bool)].copy()
+    for k in ("i0", "rt", "ef", "tri"): P["g_" + k] = P["a_" + k] - g * P["b_" + k]          # Sigma-ANs response (300 C minus g' x 180 C)
     P["t"] = pd.Timestamp("2026-01-01") + pd.to_timedelta(P.sec, unit="s") + pd.Timedelta("9h")   # sec axis is UTC -> KST
-    terms = [("s_i0", "zero-air ($I_0$) interpolation", cAu, "-"), ("s_rt", "reflectivity ($R$) interpolation", cOr, "-"),
-             ("s_ef", "etalon frequency", cQd, "-"), ("s_tri", "joint", "k", "--")]
+    terms = [("g_i0", "zero-air ($I_0$) interpolation", cAu, "-"), ("g_rt", "reflectivity ($R$) interpolation", cOr, "-"),
+             ("g_ef", "etalon frequency", cQd, "-"), ("g_tri", "joint", "k", "--")]
     fig = plt.figure(figsize=(7.2, 5.4))
     gs = fig.add_gridspec(2, 2, width_ratios=[1.6, 1], height_ratios=[1.15, 1], hspace=0.55, wspace=0.32, left=0.08, right=0.985, top=0.94, bottom=0.09)
     a = fig.add_subplot(gs[0, 0])
@@ -114,24 +121,26 @@ def fig4():
         x = np.sort(P[k].abs().values); y = 1 - np.arange(1, len(x) + 1) / len(x)
         a.plot(x, y, color=c_, lw=1.3 if ls == "-" else 1.0, ls=ls, label="%s  (rSD %.3f, SD %.3f)" % (lab, rsd(P[k]), P[k].std()))
     a.set_xscale("log"); a.set_yscale("log"); a.set_xlim(1e-4, 1); a.set_ylim(1e-4, 1.05)
-    a.axvline(0.0501, color="0.3", lw=0.8, ls=":")                                                   # TEXT §4.4
-    a.text(0.046, 0.02, "σ the fit reports\nper scan, 0.0501 ppb →", fontsize=6, color="0.3", ha="right", va="center")
+    a.axvline(den, color="0.3", lw=0.8, ls=":")                                                      # JSON denominator
+    a.text(den * 0.92, 0.02, "σ the fit reports\nper scan, %.4f ppb →" % den, fontsize=6, color="0.3", ha="right", va="center")
     a.set_xlabel("|ΔΣANs| per 60 s record (ppb)"); a.set_ylabel("fraction of records exceeding")
     a.legend(loc="lower left", fontsize=5.8, handlelength=1.8, borderaxespad=0.2)
     fmt = mpl.ticker.FuncFormatter(lambda v, _: "%g" % v); a.xaxis.set_major_formatter(fmt); a.yaxis.set_major_formatter(fmt)
     a.set_title("reflectivity: smallest typical term, heaviest tail", fontsize=7.5); letter(a, "a")
     b = fig.add_subplot(gs[0, 1])
-    items = [("observed, campaign\n(1201 h)", 0.0832, "0.55"), ("observed, matched\nhours (107 h)", 0.0727, cQd), ("budget, jointly\npropagated", 0.0618, cAu)]   # TEXT §4.5
+    items = [("observed, campaign\n(%d h)" % h["obs_campaign_hours"], h["obs_campaign"], "0.55"),
+             ("observed, matched\nhours (%d h)" % h["obs_matched_hours"], h["obs_matched"], cQd),
+             ("budget, jointly\npropagated", h["budget_gate"], cAu)]                                # JSON sec45
     for i, (lab, v, c_) in enumerate(items):
-        b.plot([0, v], [i, i], color="0.85", lw=1.2, zorder=1); b.scatter(v, i, s=45, color=c_, zorder=3); b.text(v + 0.002, i + 0.18, "%.4f" % v, fontsize=6, va="bottom")
+        b.plot([0, v], [i, i], color="0.85", lw=1.2, zorder=1); b.scatter(v, i, s=45, color=c_, zorder=3); b.text(v + 0.002, i + 0.18, ("%.4f" if i == 2 else "%.3f") % v, fontsize=6, va="bottom")
     b.set_yticks(range(3)); b.set_yticklabels([x[0] for x in items], fontsize=6); b.set_xlim(0, 0.1); b.set_ylim(-0.6, 2.7)
-    b.text(0.02, 0.5, "budget = 0.85 × matched", fontsize=6.5, color=cAu)
+    b.text(0.02, 0.5, "budget = %.2f × matched" % h["ratio_hourly"], fontsize=6.5, color=cAu)
     b.set_xlabel("hour-to-hour variation of ΣANs (ppb)"); b.set_title("budget stays under what the data show", fontsize=7.5); letter(b, "b")
     c = fig.add_subplot(gs[1, :])
-    c.scatter(P.t, P.s_rt, s=0.8, color=cOr, alpha=0.45, lw=0)
-    hr = P.set_index("t").s_rt.pow(2).resample("1h").mean().pow(0.5)
+    c.scatter(P.t, P.g_rt, s=0.8, color=cOr, alpha=0.45, lw=0)
+    hr = P.set_index("t").g_rt.pow(2).resample("1h").mean().pow(0.5)
     c.plot(hr.index, hr.values, color="k", lw=0.8, drawstyle="steps-mid", label="hourly RMS"); c.plot(hr.index, -hr.values, color="k", lw=0.8, drawstyle="steps-mid")
-    hs = P.set_index("t").s_rt.pow(2).resample("1h").sum().sort_values(ascending=False)
+    hs = P.set_index("t").g_rt.pow(2).resample("1h").sum().sort_values(ascending=False)
     for t_ in hs.index[:5]: c.axvspan(t_, t_ + pd.Timedelta("1h"), color=cOr, alpha=0.18, lw=0)
     c.axhline(0, color="0.6", lw=0.4); c.set_ylim(-0.65, 0.65); c.set_ylabel("ΔΣANs from\nreflectivity (ppb)")
     c.text(0.995, 0.95, "5 of %d hours (shaded) carry %.0f %% of the reflectivity variance" % (hr.notna().sum(), hs.iloc[:5].sum() / hs.sum() * 100),

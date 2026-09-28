@@ -1,0 +1,86 @@
+%% Appendix A -- instrument and retrieval configuration (Phase 3, 2026-09-28).
+%% Sources: operational fit-setting file
+%%   C:\GHL\2026 yeosu\Output\fit setting\FitSet_ANs[430-462nm_P4]_PNs[444-471nm_P3]_cold[438-476nm_P4]_Std.json
+%% (windows, orders, references, shift/squeeze settings, step limit, d, R_L, temperature coefficients),
+%% the wavelength-calibration files it names (dispersion, FWHM of the heated channels), and the existing text
+%% (cold FWHM, Sect. 4.1; R(t) knots, Sect. 6.4; calibration schedule, formerly Table 18).
+\section{Instrument and retrieval configuration}
+\label{app:A}
+
+Augur reads the layout of the raw files -- which columns hold which channel's spectrum, which state flag marks an
+ambient, zero-air or helium scan, and where the housekeeping values sit -- from a JSON instrument and campaign
+profile, and the fit configuration from a separate fit-setting file. The retrieval logic keys on the structure these
+files declare, not on channel names, so the same code is configured for another instrument or deployment by writing
+new files rather than by changing it. This appendix collects the configuration of the field case of
+Sect.~\ref{sec:7} in one place. Table~\ref{tab:config} is transcribed from the operational fit-setting file of the
+campaign and the wavelength-calibration files it names; Table~\ref{tab:1} is its short form.
+
+\begin{table*}[t]
+\caption{Operational retrieval configuration of the three channels. ``Linked'' parameters take the value of the NO$_2$
+parameter. The squeeze is stored as the departure from unity of $s_i$ in Eq.~(\ref{eq:3}), so 0 means no stretch.
+Dispersion is the median over the fitting window of the wavelength-calibration file; the line-shape width of the
+heated channels is the value recorded in that file (mean of four Hg lines), that of the ambient-temperature channel is
+the pair of measurements discussed in Sect.~\ref{sec:4.1}.}
+\label{tab:config}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.27\textwidth}>{\raggedright\arraybackslash}p{0.2\textwidth}>{\raggedright\arraybackslash}p{0.2\textwidth}>{\raggedright\arraybackslash}p{0.22\textwidth}}
+\tophline
+ & 300\,$^{\circ}$C & 180\,$^{\circ}$C & ambient temperature \\
+\middlehline
+label in Sects.~\ref{sec:3}--\ref{sec:6} & hot ANs & hot PNs & cold \\
+raw spectrum block & 2053 & 4101 & (cold file) \\
+fitting window (nm) & 429.5--461.9 & 444.1--470.6 & 438.4--475.8 \\
+baseline & Chebyshev, order 4 & Chebyshev, order 3 & Chebyshev, order 4 \\
+absorbers fitted & NO$_2$, CHOCHO, H$_2$O & NO$_2$, CHOCHO, H$_2$O & NO$_2$, CHOCHO, H$_2$O \\
+NO$_2$ shift (px) & bounded, $-10$ to $+0.5$ & bounded, $-5$ to $+5$ & fixed, $-0.5$ \\
+NO$_2$ squeeze, $s-1$ & bounded, $\pm 0.005$ & bounded, $\pm 0.005$ & fixed, 0 \\
+CHOCHO, H$_2$O shift and squeeze & linked & linked & linked \\
+cross-section temperature coefficient $\kappa_i$ & 0 (not applied) & 0 (not applied) & 0 (not applied) \\
+negative amounts & allowed & allowed & allowed \\
+optimiser step limit & on (0.5) & on (0.5) & on (0.5) \\
+wavelength calibration & Hg, 19 June 2026, quadratic & Hg, 19 June 2026, quadratic & Hg (four lines), 23 May 2026, quadratic \\
+dispersion (nm\,px$^{-1}$) & 0.0484 & 0.0481 & 0.0482 \\
+line-shape FWHM (nm) & 0.681 & 0.683 & 0.765--0.785 \\
+\bottomhline
+\end{tabular}
+\end{table*}
+
+\strong{References.} The cross sections are NO$_2$ \citep{Vandaele_2002}, CHOCHO \citep{Volkamer_2005} and H$_2$O from
+HITRAN line data \citep{Gordon_2022}, each convolved with the line shape of its channel before the fit; O$_4$ is not
+fitted in the operational configuration. No robust weighting, regularisation or non-negativity constraint is applied
+(Sect.~\ref{sec:2.8}).
+
+\strong{Wavelength calibration.} Each channel has its own Hg-lamp calibration with a quadratic pixel-to-wavelength
+polynomial. Two calibrations of the 300\,$^{\circ}$C spectral region exist, one per region of interest on the
+detector; the operational fit setting uses the second, the two differ by about 0.6\,px (0.034\,nm), and which of the
+two belongs to block 2053 is not settled. The difference is within the shift range of that channel and is absorbed
+by the fitted shift.
+
+\strong{Temperature and pressure.} Sample temperature and pressure are recorded with every spectrum and enter the
+Rayleigh correction of Eq.~(\ref{eq:1}) and the conversion from number density to mixing ratio; their interpolation
+contributes below \fieldnum{0.1}\,\% (Sect.~\ref{sec:4.1}). The temperature scaling $\tau_i(T)$ of Eq.~(\ref{eq:2}) is not
+used ($\kappa_i = 0$).
+
+\strong{Cavity.} All three cavities have $d = 51.8$\,cm and $R_L = 1.0$. $R_L$ is assumed, not measured; since
+$\alpha \propto R_L$ it enters as a multiplicative factor (Sect.~\ref{sec:3.6}).
+
+\strong{Calibration references.} Zero-air and helium blocks are identical, 34 scans over 32\,s; zero air is measured
+every hour and helium every three hours (Table~\ref{tab:cal_schedule}). The zero-air reference $I_0$ is interpolated
+to the time of each spectrum from the neighbouring zero-air blocks, and the etalon frequency is held fixed
+(Sect.~\ref{sec:4.1}). Each reflectivity knot is formed from one zero-air block and the most recent helium block that
+passed the quality gates, so the knots of the heated channels are hourly -- \fieldnum{1261} over the deployment at a median
+spacing of \fieldnum{1.00}\,h -- while the helium half of a knot is up to three hours old; $R(\lambda,t)$ is the monotone
+piecewise-cubic interpolation of Sect.~\ref{sec:2.4} through these knots, after the knot gate of Sect.~\ref{sec:6.3}.
+
+\begin{table}[t]
+\caption{Calibration schedule of the heated channels, with block counts for the budget window (18--24 May): number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
+\label{tab:cal_schedule}
+\begin{tabular}{lllll}
+\tophline
+ & blocks & per block & cadence & duty \\
+\middlehline
+zero air & \fieldnum{157} & 34 scans / 32\,s & 1.00\,h & 0.90\,\% \\
+helium & \fieldnum{54} & 34 scans / 32\,s & 3.00\,h & 0.31\,\% \\
+ & & & & \textbf{1.20\,\%} \\
+\bottomhline
+\end{tabular}
+\end{table}
