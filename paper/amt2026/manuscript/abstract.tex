@@ -3,9 +3,9 @@
 A DOAS fit reports a residual, a chi-square, an uncertainty and a convergence
 flag, and these are read as a description of how well the retrieval did. Each
 can assert more than the fit knows, and the gap is invisible from inside the
-fit report. We present Augur, an open retrieval for a two-channel
-thermal-dissociation broadband cavity-enhanced absorption spectrometer
-measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
+fit report. We present Augur, an open retrieval, applied here to a
+thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
+ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
 \citep{Min_2016,Nam_2022}, and use it to measure that gap on 53 days of field
 measurements.
 
@@ -17,34 +17,33 @@ than numerical. The time-resolved references enter as data, so a
 leave-one-out perturbation of the calibration record is a loop over knots
 rather than a reprocessing campaign; and the projected objective is available
 as a function of the nonlinear parameters, so the shape of the minimum can be
-mapped rather than inferred from a converged point. The retrieval underneath
-is not in dispute -- an independent DOAS code reproduces Augur to within its
-output resolution -- but neither of these questions can be put to a
+mapped rather than inferred from a converged point. On synthetic spectra an
+independent DOAS code reproduces Augur to within its output resolution; on the field record the
+two agree in NO$_2$ with $r^2 \ge \fieldnum{0.990}$ but differ in scale by up to \fieldnum{6}\,\% (Sect.~\ref{sec:3.3}). Neither of these questions can be put to a
 conventional implementation without reprocessing the campaign once per
 answer.
 
 Asking them changes what the uncertainty means. For the product the instrument
 reports, formed as the difference of two retrievals, leave-one-out perturbation of
-the zero-air, reflectivity and etalon references gives a structural
-uncertainty \fieldnum{1.4} to \fieldnum{2.5} times the sigma the fit reports for the same 60\,s
-record, so the total is \fieldnum{1.7} to \fieldnum{2.7} times what is reported. The uncertainty
+the zero-air, reflectivity and etalon references in the best-calibrated week of the deployment gives a structural
+uncertainty \fieldnum{1.3} to \fieldnum{2.3} times the sigma the fit reports for the same 60\,s
+records, so the total is \fieldnum{1.6} to \fieldnum{2.5} times what is reported. The uncertainty
 column delivered with the product is not that quantity at all but a gain
 systematic proportional to NO$_2$, and carries none of this. On synthetic spectra with
-known truth the reported sigma tracks the scatter to within about 10\,\% for
-white photon noise, but omitted companion absorbers bias
-the retrieval by a fixed extinction offset independent of analyte amount, and
-the same truth fitted in two windows disagrees by as much as the combined
-reported uncertainty. None of these enlarge the residual.
+known truth the realised scatter is 0.91 to 1.32 times the reported sigma under white noise (within 10\,\% in
+15 of 30 cases; 1.22 to 1.32 in 9 of 13 synthetic instruments at nominal noise, where the free wavelength shift
+adds scatter the covariance does not carry) and 1.42 to 2.05 times under autocorrelated noise. None of the
+calibration-chain terms enlarges the residual.
 
 Two failures are of a different kind, because the information existed upstream
 and was discarded. Wavelength shift is identifiable in one window and not in
-another -- the profiled objective varies by a median \fieldnum{1.2}\,\% over $\pm4$\,px where
+another -- the profiled objective of twelve ambient spectra varies by a median \fieldnum{1.2}\,\% over $\pm4$\,px where
 the other window spans five orders of magnitude -- yet both are reported as
 converged, and under matched settings \fieldnum{85.5}\,\% of them terminate at a parameter
 bound; a laboratory spectrum with added NO$_2$ locates the same shift to a tenth of
 a pixel, two pixels from where the ambient fit converged. And a nine-hour misalignment between the reflectivity time base and the
 spectra, present in twelve days of the operational product, displaced the
-retrieved alkyl nitrates by \fieldnum{0.0999}\,ppb, \fieldnum{1.43} times the entire structural
+retrieved alkyl nitrates by \fieldnum{0.100}\,ppb, \fieldnum{1.44} times the entire structural
 budget, while moving the fitted wavelength shift by \fieldnum{0.005}\,px and changing the
 residual and the reported uncertainty by two parts in a thousand.
 

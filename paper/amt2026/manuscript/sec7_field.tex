@@ -5,12 +5,13 @@
 \subsection{Instrument and deployment}
 \label{sec:7.1}
 
-The retrieval was developed for a two-channel thermal-dissociation broadband
-cavity-enhanced absorption spectrometer of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a cell held at
+The retrieval is applied here to a thermal-dissociation broadband
+cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a cell held at
 180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl
 nitrates dissociate as well; a third cell at ambient temperature measures NO$_2$
 directly. Each channel measures the extinction of the same cavity geometry,
-$d = 51.8$\,cm with $R_L = 1.0$, so the three differ in what has been converted
+$d = 51.8$\,cm with $R_L = 1.0$ (assumed, not measured; since $\alpha \propto R_L$ it enters as a
+multiplicative factor), so the three differ in what has been converted
 to NO$_2$ upstream rather than in how the spectrum is formed. The sums of peroxy
 and alkyl nitrates follow as channel differences.
 
@@ -22,13 +23,16 @@ retrieved in 444.118--470.562\,nm with a third-order Chebyshev baseline for the
 180\,$^{\circ}$C channel and 430--462\,nm with a fourth-order baseline for the 300\,$^{\circ}$C
 channel; the ambient-temperature channel uses 438.420--475.741\,nm and a
 fourth-order baseline. The dispersion is 0.0481\,nm\,px$^{-1}$ and the
-instrument line shape has a full width at half maximum of 0.683\,nm.
+instrument line shape of the heated channels has a full width at half maximum of 0.683\,nm (0.765--0.785\,nm in
+the ambient-temperature channel, Sect.~\ref{sec:4.1}). The field numbers of this paper were checked against a
+reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by $\pm$\fieldnum{0.25}\,\%, and are
+reported as first computed.
 
 The three channels also sit at different offsets from their wavelength
 calibrations: the operational shift bounds are $-10$ to $0.5$\,px for the
 300\,$^{\circ}$C channel and $-5$ to $5$\,px for the 180\,$^{\circ}$C channel; in the
 ambient-temperature channel the shift is fixed at $-0.5$\,px and the squeeze at
-zero (Sect.~\ref{sec:5.1}). The median fitted shift in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px.
+its identity value, i.e. no stretch (Sect.~\ref{sec:5.1}). The median fitted shift in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px.
 
 Only the properties the retrieval depends on are given here. The instrument
 itself, its inlet and its conversion efficiencies are characterised elsewhere.
@@ -45,22 +49,22 @@ channels in quadrature would assume an independence that there is no reason
 to expect.
 
 \begin{table}[t]
-\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product.}
+\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product. Standard-deviation values are approximate, recombined from the channel values with $g' = \fieldnum{0.9524}$; robust-scale values are from the earlier evaluation with a channel factor of 0.82 and were not recomputed.}
 \label{tab:noise_floor}
 \begin{tabular}{lll}
 \tophline
  & robust scale & standard deviation \\
 \middlehline
-measured 1$\sigma$ & \fieldnum{0.0676} & \fieldnum{0.0811}\,ppb \\
-\textbf{detection limit, 3$\sigma$} & \textbf{\fieldnum{0.203}} & \textbf{\fieldnum{0.243}\,ppb} \\
+measured 1$\sigma$ & \fieldnum{0.0676} & $\approx$\fieldnum{0.086}\,ppb \\
+\textbf{detection limit, 3$\sigma$} & \textbf{\fieldnum{0.203}} & \textbf{$\approx$\fieldnum{0.257}\,ppb} \\
 median value at a true zero & \fieldnum{$+0.0054$}\,ppb & \fieldnum{$+0.0054$}\,ppb \\
-against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & \fieldnum{1.01} \\
+against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & $\approx$\fieldnum{1.06} \\
 \bottomhline
 \end{tabular}
 \end{table}
 
 The channels turn out to be nearly uncorrelated, $r = \fieldnum{-0.093}$, so the
-quadrature assembly would have come within \fieldnum{4.3}\,\% of the measured value. That
+quadrature assembly would have come within about \fieldnum{4}\,\% of the measured value. That
 is a result of the measurement rather than a licence to skip it: the same
 comparison on an instrument whose channels shared a drift would not be so
 forgiving, and nothing in the fit report distinguishes the two cases.
@@ -69,19 +73,20 @@ The median at a true zero is \fieldnum{$+0.0054$}\,ppb, and it is the same at th
 level and in the difference. A product assembled through zero-air
 interpolation, a Rayleigh correction, a time-interpolated reflectivity, a
 spectral fit and a channel subtraction returns zero when the truth is zero,
-to a twentieth of its own detection limit. This closes the chain end to end
-and belongs with the verification of Sect.~\ref{sec:3.1} as much as here.
+to a twentieth of its own detection limit. This closes the additive chain end to end
+and belongs with the verification of Sect.~\ref{sec:3.1} as much as here; a zero test is blind to gain errors, such as
+the scale discrepancy of Sect.~\ref{sec:3.6}.
 
-Read against the uncertainty column shipped with the product, the product's noise floor is covered:
-\fieldnum{0.84} to \fieldnum{1.01} times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This is
+Read against the uncertainty column shipped with the product, the product's noise floor is roughly covered:
+\fieldnum{0.84} to about \fieldnum{1.06} times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This is
 not in tension with Sect.~\ref{sec:4}, and the distinction matters enough to state. What is
 measured here is a zero-air floor -- the same references, minutes apart, no
 atmosphere and no elapsed time for a reference to go stale. What Sect.~\ref{sec:4} measures
 is what happens when a reference is wrong, and that is a different question
-with a different answer: \fieldnum{1.33} to \fieldnum{1.84} times the same product-column figure of
-\fieldnum{0.0806}\,ppb (Sect.~\ref{sec:4.4}), and for \fieldnum{42}\,\% of records larger than it. (Against the
-fit-propagated $\sigma$ of \fieldnum{0.0501}\,ppb, the denominator of Sect.~\ref{sec:4.4}, the total is
-\fieldnum{1.72} to \fieldnum{2.68} times that value.) A reported uncertainty can describe the
+with a different answer: \fieldnum{1.32} to \fieldnum{1.83} times the same product-column figure of
+\fieldnum{0.0806}\,ppb (Sect.~\ref{sec:4.4}). (Against the fit-propagated $\sigma$ of \fieldnum{0.0541}\,ppb, the denominator of
+Sect.~\ref{sec:4.4}, the total is \fieldnum{1.63} to \fieldnum{2.50} times that value, and in \fieldnum{46.1}\,\% of the \fieldnum{8832} budget records
+the structural change exceeds that record's own fit-propagated $\sigma$.) A reported uncertainty can describe the
 photon noise of a product faithfully and still say nothing about the
 references the product was built from.
 
@@ -95,19 +100,19 @@ against this column.
 \subsection{The reporting convention in operation}
 \label{sec:7.3}
 
-The three quantities Sect.~\ref{sec:6.1} asks for are not hypothetical additions. Applied to
-this deployment, in the heated and the ambient-temperature channels alike,
-they separate what the fit report catches from what it does not (Fig.~\ref{fig:6}).
+Applied retrospectively to this deployment, in the heated and the ambient-temperature channels alike, the
+quantities Sect.~\ref{sec:6.1} asks for separate what the fit report catches from what it does not
+(Fig.~\ref{fig:6}); the provenance fields among them are specified, not yet implemented.
 
 One episode is not caught by the fit report at all: the reference-convention
 displacement of Sect.~\ref{sec:5.4}. From 18 to 30 May the heated channels were retrieved with
 a reflectivity displaced by nine hours; the alkyl nitrate product moved by
-\fieldnum{0.0999}\,ppb while the residual and the reported uncertainty changed by two parts
+\fieldnum{0.100}\,ppb while the residual and the reported uncertainty changed by two parts
 in a thousand. Across the deployment the reported uncertainty of the ANs
 channel is a near-constant multiple of the residual RMS ($r = \fieldnum{+0.999}$ over
 all \fieldnum{74\,667} records; the ratio varies by \fieldnum{2.8}\,\% between its 5th and 95th
-percentiles), so the two are one witness, not two. Only the
-reference-provenance field distinguishes these records.
+percentiles), so the two are one witness, not two. Among the proposed fields, the distance and in-range fields flag
+these records (Sect.~\ref{sec:6.1}) and only the provenance fields would name the cause.
 
 The ambient-temperature channel supplies the opposite case. Its six excursions
 below $-5$\,ppb (\fieldnum{19} hourly medians between 19 May and 2 June) are all visible in
@@ -123,7 +128,8 @@ cause that none of these fields names: the raw light level. In each, the
 ambient or the zero-air spectrum, or both, fell below 30\,\% of its usual count
 at 460\,nm, in four of them to within a few hundred counts of the detector dark
 level; on 2 June only the ambient path lost light (\fieldnum{22}\,\% of the zero-air level),
-which is why the reference stayed ordinary (Fig.~\ref{fig:6}).
+which is why the reference stayed ordinary (Fig.~\ref{fig:6}). The misfit threshold ($\chi^2 > 1.5$) is itself
+signal-dependent (Sect.~\ref{sec:4.1}); these excursions exceed it by an order of magnitude or more.
 
 In the heated channels no hourly median falls below $-0.5$\,ppb over the
 deployment. The termination-state field flags one episode: for eleven minutes
@@ -134,9 +140,12 @@ what.
 
 In each of these cases the fit either reports an ordinary residual and
 uncertainty for a displaced amount, or reports an abnormal one without saying
-why; one of the three context quantities -- termination state, distance to the
-nearest reference, or reference provenance -- supplies what is missing. That
-is the claim of this paper, applied to the product it was developed for.
+why. For the displacement and for the bound episode, one of the context quantities -- distance to the
+nearest reference, termination state, or reference provenance -- supplies what is missing. For the cold
+excursions the proximate cause, the raw light level, is not among the proposed fields. And the heated-channel
+NO$_2$ scale, low against the co-located NIER analyser by a factor of about \fieldnum{0.6} (Sect.~\ref{sec:3.6}), is invisible to
+the fit report and to every proposed field. The fields narrow the gap between what a fit reports and what is
+known about the record; they do not close it.
 
 \begin{figure*}[p]
 \includegraphics[width=\textwidth,height=0.62\textheight,keepaspectratio]{figures/fig06.pdf}

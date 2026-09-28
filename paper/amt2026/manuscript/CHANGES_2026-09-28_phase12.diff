@@ -1,0 +1,1053 @@
+--- a/abstract.tex
++++ b/abstract.tex
+@@ -5,5 +5,5 @@
+ can assert more than the fit knows, and the gap is invisible from inside the
+-fit report. We present Augur, an open retrieval for a two-channel
+-thermal-dissociation broadband cavity-enhanced absorption spectrometer
+-measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
++fit report. We present Augur, an open retrieval, applied here to a
++thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
++ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
+ \citep{Min_2016,Nam_2022}, and use it to measure that gap on 53 days of field
+@@ -19,5 +19,5 @@
+ as a function of the nonlinear parameters, so the shape of the minimum can be
+-mapped rather than inferred from a converged point. The retrieval underneath
+-is not in dispute -- an independent DOAS code reproduces Augur to within its
+-output resolution -- but neither of these questions can be put to a
++mapped rather than inferred from a converged point. On synthetic spectra an
++independent DOAS code reproduces Augur to within its output resolution; on the field record the
++two agree in NO$_2$ with $r^2 \ge \fieldnum{0.990}$ but differ in scale by up to \fieldnum{6}\,\% (Sect.~\ref{sec:3.3}). Neither of these questions can be put to a
+ conventional implementation without reprocessing the campaign once per
+@@ -27,12 +27,11 @@
+ reports, formed as the difference of two retrievals, leave-one-out perturbation of
+-the zero-air, reflectivity and etalon references gives a structural
+-uncertainty \fieldnum{1.4} to \fieldnum{2.5} times the sigma the fit reports for the same 60\,s
+-record, so the total is \fieldnum{1.7} to \fieldnum{2.7} times what is reported. The uncertainty
++the zero-air, reflectivity and etalon references in the best-calibrated week of the deployment gives a structural
++uncertainty \fieldnum{1.3} to \fieldnum{2.3} times the sigma the fit reports for the same 60\,s
++records, so the total is \fieldnum{1.6} to \fieldnum{2.5} times what is reported. The uncertainty
+ column delivered with the product is not that quantity at all but a gain
+ systematic proportional to NO$_2$, and carries none of this. On synthetic spectra with
+-known truth the reported sigma tracks the scatter to within about 10\,\% for
+-white photon noise, but omitted companion absorbers bias
+-the retrieval by a fixed extinction offset independent of analyte amount, and
+-the same truth fitted in two windows disagrees by as much as the combined
+-reported uncertainty. None of these enlarge the residual.
++known truth the realised scatter is 0.91 to 1.32 times the reported sigma under white noise (within 10\,\% in
++15 of 30 cases; 1.22 to 1.32 in 9 of 13 synthetic instruments at nominal noise, where the free wavelength shift
++adds scatter the covariance does not carry) and 1.42 to 2.05 times under autocorrelated noise. None of the
++calibration-chain terms enlarges the residual.
+ 
+@@ -40,3 +39,3 @@
+ and was discarded. Wavelength shift is identifiable in one window and not in
+-another -- the profiled objective varies by a median \fieldnum{1.2}\,\% over $\pm4$\,px where
++another -- the profiled objective of twelve ambient spectra varies by a median \fieldnum{1.2}\,\% over $\pm4$\,px where
+ the other window spans five orders of magnitude -- yet both are reported as
+@@ -46,3 +45,3 @@
+ spectra, present in twelve days of the operational product, displaced the
+-retrieved alkyl nitrates by \fieldnum{0.0999}\,ppb, \fieldnum{1.43} times the entire structural
++retrieved alkyl nitrates by \fieldnum{0.100}\,ppb, \fieldnum{1.44} times the entire structural
+ budget, while moving the fitted wavelength shift by \fieldnum{0.005}\,px and changing the
+--- a/appB.tex
++++ b/appB.tex
+@@ -115,4 +115,5 @@
+ not small when $\theta$ is poorly determined. Augur forms the full
+-$(J^{\top}J)^{-1}$ and reports both blocks; the identifiability statistics of
+-Sect.~\ref{sec:5} are read from the $\theta$ block, which is available at no extra cost once
+-the projected Jacobian of Appendix~\ref{app:B2} has been formed.
++$(J^{\top}J)^{-1}$ and reports both blocks; the $\theta$ block is available at no extra cost once
++the projected Jacobian of Appendix~\ref{app:B2} has been formed. It describes only the local curvature at the
++solution, which is why the identifiability statistics of Sect.~\ref{sec:5} are taken from profile scans of the
++projected objective rather than from this block.
+--- a/sec1_intro.tex
++++ b/sec1_intro.tex
+@@ -64,5 +64,5 @@
+ 
+-We present Augur, an open retrieval written for a two-channel
+-thermal-dissociation broadband cavity-enhanced absorption spectrometer
+-measuring NO$_2$, total peroxy nitrates and total alkyl nitrates, and built so
++We present Augur, an open retrieval applied here to a
++thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
++ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates, and built so
+ that both kinds of question can be asked cheaply enough to ask routinely. The
+@@ -72,10 +72,10 @@
+ structural terms it cannot report -- which together exceed the sigma it
+-reports by a factor of \fieldnum{1.7} to \fieldnum{2.7} -- map the identifiability of its
++reports by a factor of \fieldnum{1.6} to \fieldnum{2.5} in the best-calibrated week -- map the identifiability of its
+ nonlinear parameters, and describe twelve days of
+ operational product built from a calibration reference that a later correction
+-had made stale, an error \fieldnum{1.43} times that budget which changed the residual and the reported
+-uncertainty by two parts in a thousand while moving the concentration by two
++had made stale, an error \fieldnum{1.44} times that budget which changed the residual and the reported
++uncertainty by two parts in a thousand while moving the 300\,$^{\circ}$C channel's concentration by two
+ reported standard deviations. We
+-propose a small reporting convention that would have surfaced it at the first
+-reprocessing and named its cause,
++propose a small reporting convention whose distance fields would have flagged it at the first
++reprocessing and whose provenance fields, once implemented, would name its cause,
+ and release a synthetic benchmark with which any DOAS implementation can
+@@ -88,3 +88,4 @@
+ the reporting convention of Sect.~\ref{sec:6} asks for quantities that every implementation
+-already computes, so adopting it requires no change of algorithm. Where a
++already computes, apart from the build time and time convention of each reference, which must be recorded when the
++reference is built; adopting it requires no change of algorithm. Where a
+ result does depend on this instrument -- the magnitude of the reflectivity
+@@ -105,4 +106,4 @@
+ the same instruments with correlated (AR(1), $\rho = 0.5$) noise. Bar: the field record, for which the
+-calibration-chain budget of Sect.~\ref{sec:4} gives a total uncertainty \fieldnum{1.72} (robust scale) to \fieldnum{2.68} (standard
+-deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s). \textbf{(b)} Termination state of \fieldnum{8446} operational
++calibration-chain budget of Sect.~\ref{sec:4} gives a total uncertainty \fieldnum{1.63} (robust scale) to \fieldnum{2.50} (standard
++deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s; the bar in the panel is drawn at the superseded values 1.72--2.68 and awaits re-rendering). \textbf{(b)} Termination state of \fieldnum{8446} operational
+ scans with the optimiser's step limit on, as operated, and off; the median retrieved NO$_2$ of the same scans is
+--- a/sec2_retrieval.tex
++++ b/sec2_retrieval.tex
+@@ -131,6 +131,8 @@
+ 
+-Retaining the second term matters for two reasons. It is what makes Eq.~(\ref{eq:6}) the exact
+-derivative rather than the \citet{Kaufman_1975} approximation, and -- because it is exact -- it
+-can be checked against finite differences to the level of round-off, which turns the
+-Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.2}).
++Retaining the second term makes Eq.~(\ref{eq:6}) the exact
++derivative rather than the \citet{Kaufman_1975} approximation. The gradient of the objective is the same
++under both, because $\mathbf{A}^{+}\mathbf{r} = 0$; what the second term adds is the exact curvature and,
++because the derivative is exact, a check against finite differences to the level of round-off, which turns the
++Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.2}). We have not compared convergence
++rates of the two forms.
+ 
+@@ -190,4 +192,5 @@
+ \end{equation}
+-and take the gas block \citep{OLeary_2013}. Because Eq.~(\ref{eq:8}) is the Schur
+-complement of the gas block of Eq.~(\ref{eq:9}), the joint standard errors are never smaller
++and take the gas block \citep{OLeary_2013}. Because the inverse of the gas block of Eq.~(\ref{eq:9}) is the Schur complement
++$\mathbf{A}_{\mathbf{W}}^{\top}\mathbf{A}_{\mathbf{W}} - \mathbf{A}_{\mathbf{W}}^{\top}\mathbf{V}(\mathbf{V}^{\top}\mathbf{V})^{-1}\mathbf{V}^{\top}\mathbf{A}_{\mathbf{W}}$,
++which is never larger than the matrix inverted in Eq.~(\ref{eq:8}), the joint standard errors are never smaller
+ than the conditional ones. Note that $\mathbf{V}$ holds $\mathbf{c}$ fixed and is
+@@ -221,5 +224,4 @@
+ of order $10^{-7}\,\mathrm{cm^{-1}}$, so residuals and gradients are of order
+-$10^{-15}$, while the step and gradient tolerances of a general-purpose least-squares
+-routine default to $10^{-8}$ and are applied as absolute thresholds. The convergence
+-test is then satisfied at the starting point: the solver returns after a single
++$10^{-15}$, while the default termination tolerances of a general-purpose least-squares
++routine are of order $10^{-8}$. On unscaled $\alpha$ the termination test can then be satisfied at the starting point: the solver returns after a single
+ function evaluation, having moved the shift by nothing, and reports success. In one
+@@ -249,3 +251,4 @@
+ The formulation of Sects.~\ref{sec:2.1}--\ref{sec:2.8} is not unusual, and Sect.~\ref{sec:3.3} shows that a conventional
+-implementation solving the same problem returns the same concentrations. What
++implementation solving the same problem returns the same concentrations on synthetic spectra,
++and on the field record NO$_2$ amounts that agree closely but not exactly in scale. What
+ differs is what can be asked of the retrieval afterwards, and the difference
+@@ -256,3 +259,3 @@
+ Sect.~\ref{sec:4} removes one zero-air knot, one reflectivity knot or one etalon component at
+-a time and re-runs the retrieval over \fieldnum{8847} product records, once per knot and
++a time and re-runs the retrieval over the \fieldnum{9034} records of the budget window that have a reflectivity knot within 1\,h (\fieldnum{8847} after bound-terminated fits are excluded), once per knot and
+ then for the pairwise and triple combinations. The second is what the
+@@ -278,3 +281,3 @@
+ that obtaining them has to be cheap enough to do by default, because the
+-finding of Sect.~\ref{sec:5.4} -- a nine-hour error in a reference time base, invisible in
+-the residual -- was not found by looking for it.
++error of Sect.~\ref{sec:5.4} -- a nine-hour error in a reference time base, invisible in
++the residual -- could be measured only by re-running the retrieval with the time base changed.
+--- a/sec3_verification.tex
++++ b/sec3_verification.tex
+@@ -72,5 +72,8 @@
+ spectrum the scatter of the retrieved NO$_2$ is 0.88 to 0.91 times the reported
+-1$\sigma$ at order 2 and above. For white photon noise and a correct model, the
++1$\sigma$ at order 2 and above. For this configuration, with white photon noise and a correct model, the
+ reported uncertainty is accurate to about ten per cent -- which is the
+-baseline against which the structural terms of Sect.~\ref{sec:4} should be read (Fig.~\ref{fig:3}a, b).
++baseline against which the structural terms of Sect.~\ref{sec:4} should be read (Fig.~\ref{fig:3}a, b). It is a
++statement about one configuration: across the 13 synthetic instruments of Fig.~\ref{fig:1}a the white-noise ratio
++ranges from 0.91 to 1.32, and at nominal noise it lies between 1.22 and 1.32 in 9 of them, where the free
++wavelength shift adds scatter the covariance does not carry (Sect.~\ref{sec:3.4}).
+ 
+@@ -164,4 +167,33 @@
+ root-mean-square relative errors of 0.0042 and 0.0045 against the same truth,
+-and differ from each other by at most $5.7\times10^{-3}$ relative in NO$_2$. On field data,
+-three channels over 53 days, the two agree with $r^2$ above \fieldnum{0.99}. In a
++and differ from each other by at most $5.7\times10^{-3}$ relative in NO$_2$. On the field record (53 days), with each spectrum's measured temperature and pressure used
++for the unit conversion and records selected by an NO$_2$-conditional $\chi^2$ envelope, the NO$_2$ amounts of the
++two codes agree with $r^2 \ge \fieldnum{0.990}$ in all three configurations (Table~\ref{tab:qdoas_field}). The agreement is
++not a scale identity: the Deming slope QDOAS/Augur is \fieldnum{1.039} in the cold configuration and \fieldnum{1.063} and
++\fieldnum{1.043} in the 180 and 300\,$^{\circ}$C configurations, where $r^2 = \fieldnum{1.000}$, so the two codes differ in the
++heated-channel NO$_2$ scale by \fieldnum{4}--\fieldnum{6}\,\% for a reason we have not identified. The weak absorbers agree less
++well (CHOCHO $r^2$ \fieldnum{0.889}--\fieldnum{0.959}, slope \fieldnum{0.81}--\fieldnum{1.19}; H$_2$O slope \fieldnum{1.04}--\fieldnum{1.38}).
++
++\begin{table}[t]
++\caption{Agreement of QDOAS with Augur on the field record, per retrieval configuration and species: number of
++records $n$ in the NO$_2$-conditional $\chi^2$ envelope, Deming slope QDOAS/Augur ($\lambda = 1$) and $r^2$. The
++unit conversion uses each spectrum's measured temperature and pressure.}
++\label{tab:qdoas_field}
++\begin{tabular}{lllll}
++\tophline
++configuration & species & $n$ & Deming slope & $r^2$ \\
++\middlehline
++cold & NO$_2$ & \fieldnum{36\,241} & \fieldnum{1.039} & \fieldnum{0.990} \\
++cold & CHOCHO & \fieldnum{36\,241} & \fieldnum{0.807} & \fieldnum{0.889} \\
++cold & H$_2$O & \fieldnum{36\,241} & \fieldnum{1.377} & \fieldnum{0.887} \\
++hot PNs (180\,$^{\circ}$C) & NO$_2$ & \fieldnum{73\,916} & \fieldnum{1.063} & \fieldnum{1.000} \\
++hot PNs (180\,$^{\circ}$C) & CHOCHO & \fieldnum{73\,916} & \fieldnum{1.195} & \fieldnum{0.914} \\
++hot PNs (180\,$^{\circ}$C) & H$_2$O & \fieldnum{73\,916} & \fieldnum{1.042} & \fieldnum{0.974} \\
++hot ANs (300\,$^{\circ}$C) & NO$_2$ & \fieldnum{74\,539} & \fieldnum{1.043} & \fieldnum{1.000} \\
++hot ANs (300\,$^{\circ}$C) & CHOCHO & \fieldnum{74\,539} & \fieldnum{1.054} & \fieldnum{0.959} \\
++hot ANs (300\,$^{\circ}$C) & H$_2$O & \fieldnum{74\,539} & \fieldnum{1.038} & \fieldnum{0.981} \\
++\bottomhline
++\end{tabular}
++\end{table}
++
++In a
+ larger test with 300 realisations in each of three noise conditions, the
+@@ -173,7 +205,7 @@
+ 
+-The conclusion drawn from this in Sect.~\ref{sec:2.9} is the one that matters for the rest of
+-the paper: the retrieved concentrations are not in dispute. Where the two
+-codes diverge -- the wavelength shift in the cold window, Sect.~\ref{sec:5.1} -- they diverge
+-because the data do not determine the quantity, not because one of them is
+-wrong.
++The conclusion drawn from this in Sect.~\ref{sec:2.9} is therefore narrower than identity: on
++synthetic spectra the two codes return the same concentrations, and on field spectra they agree in NO$_2$
++to within a scale difference of a few per cent. Where they diverge most -- the wavelength shift in the cold
++window, and with it the weak absorbers there (Sect.~\ref{sec:5.1}) -- the data do not determine the shift, so
++neither code's value is established by its fit.
+ 
+@@ -226,20 +258,17 @@
+ 
+-%% AUTHOR CHECK (2026-09-28): 14.75/11.97 = 1.2322 and 71.57/58.16 = 1.2306, not 1.2278/1.2276 as stated;
+-%% the 0.02 % agreement and 1/1.2277 = 0.8145 depend on the stated ratios. Transcribed unchanged from the draft -- see README.
+ The alkyl nitrate product is a difference between two channels, so their
+-relative scale enters it directly. NO$_2$ was injected into both channels at two
+-concentration levels on 2026-08-10/11. At the lower plateau the channels read
+-14.75 and 11.97\,ppb and at the higher 71.57 and 58.16\,ppb, ratios of 1.2278
+-and 1.2276 -- agreement to 0.02\,\% across a fivefold change in concentration.
+-A regression over all 419 records of the experiment gives a slope of 0.81666
+-with $r^2$ 0.9998, against $1/1.2277 = 0.8145$ from the plateau ratios.
+-
+-This establishes that the relative scale is a constant over the range tested,
+-which is what the difference product requires. It does not establish the
+-absolute recovery of either channel: the mapping from the mass-flow setting to
+-the delivered concentration is not resolved, and the two plateaus imply
+-recovery multipliers differing by a factor of 2.4. The cause of the offset
+-between the channels -- optical and geometric, or an artefact of the heated
+-cells -- is also not separated by this experiment, because both cells were at
+-their operating temperatures throughout.
++relative scale enters it directly. NO$_2$ was injected into both heated channels, with both ovens at their
++operating temperatures, at two concentration steps on 2026-08-10/11. The steps did not equilibrate (the
++delivery line was still passivating), so only the ratio between the channels is used. In the original
++processing the median of the per-record ratios was 1.2278 at the lower step and 1.2276 at the higher (the
++median channel readings were 14.75 and 11.97\,ppb, and 71.57 and 58.16\,ppb; ratios of these medians are 1.2322
++and 1.2306), and an origin regression over the 58 one-minute means of one file gives a slope of 0.81666
++with $r^2$ 0.9998. Reprocessed with the current code, block 2053 reads 1.239 times block 4101
++(interquartile range 1.231--1.255, $n = 41$ records with block 4101 above 20\,ppb).
++
++This establishes that the relative scale is constant over the range tested. It does not give the scale
++used in the campaign product: the laboratory ratio describes the calibration state of August, and the
++product uses $g' = \fieldnum{0.952}$ for 18 May--5 June, from a field injection. Nor does it establish the absolute
++recovery of either channel, or separate optical from thermal causes of the offset between the channels,
++because both cells were at their operating temperatures throughout.
+ 
+@@ -248,5 +277,12 @@
+ 
+-No comparison against a co-located reference instrument is presented; the AMT
+-scope is the retrieval, and the instrument intercomparison belongs with the
+-science analysis. No absolute accuracy is claimed. The verification of Sects.~\ref{sec:3.1}
++A comparison with a co-located reference analyser exists, and it bounds what this paper can claim.
++Against the NIER air-quality-monitoring NO$_2$ analyser at the site (molybdenum-converter type), the
++operational NO$_2$ of the heated channels has ordinary-least-squares gains of \fieldnum{0.57} (180\,$^{\circ}$C) and \fieldnum{0.65}
++(300\,$^{\circ}$C), while the ambient-temperature channel has \fieldnum{0.92}--\fieldnum{1.00}; the median ratio of heated to
++ambient-temperature NO$_2$ is \fieldnum{0.72}, although the heated channels measure NO$_2$ plus thermally produced NO$_2$
++and should read at least as high. A laboratory injection with the ovens at 300 and 180\,$^{\circ}$C gave a block-2053
++sensitivity of at least 1.08 relative to the cylinder, so oven temperature alone does not explain the
++discrepancy, and its cause is unresolved. It is a multiplicative error that leaves the residual, the reported
++uncertainty and every context field proposed in Sect.~\ref{sec:6} unchanged -- an instance of the class of error
++this paper is about, not a property of the spectral fit. No absolute accuracy is claimed. The verification of Sects.~\ref{sec:3.1}
+ and \ref{sec:3.3} is of the retrieval against its own forward model and against another
+--- a/sec4_budget.tex
++++ b/sec4_budget.tex
+@@ -22,10 +22,12 @@
+ 
+-Two further inputs were tested and found not to matter. The instrument line
+-shape is resampled onto the detector grid with a kernel radius of
+-$\lfloor 4\sigma \rfloor + 1$ pixels, so a mismatch below about 0.25\,px does
+-not change the kernel at all; at the mismatch measured in the ambient-temperature channel (FWHM 0.765 against 0.785\,nm) the retrieved amount
+-moves by $\sim 10^{-5}$\,\%. Sample temperature and pressure, interpolated the
+-same way as $I_0$, contribute below \fieldnum{0.1}\,\%. Both are reported as verified
+-negligible rather than omitted, because ``not in the budget'' and ``measured to
+-be small'' are different statements.
++Two further inputs were tested. Sample temperature and pressure, interpolated the
++same way as $I_0$, contribute below \fieldnum{0.1}\,\%. For the instrument line shape the test is weaker than
++it looks. The kernel is resampled onto the detector grid with a radius of
++$\lfloor 4\sigma \rfloor + 1$ pixels, and at the mismatch measured in the ambient-temperature channel
++(FWHM 0.765 against 0.785\,nm) the retrieved amount moved by $\sim 10^{-5}$\,\%; this shows that the test did
++not carry a width change of that size into the forward model, not that the retrieval is insensitive to it.
++A test with a continuously resampled kernel has not been made, and no mismatch was measured for the heated
++channels. The residual does carry a signal-proportional model error: the median reduced $\chi^2$ of the
++300\,$^{\circ}$C channel rises from \fieldnum{1.05} at NO$_2$(180\,$^{\circ}$C) below 1\,ppb to \fieldnum{1.57} at 10--20\,ppb. That error is
++not in the budget below; the cross sections and the line shape are candidates.
+ 
+@@ -43,4 +45,4 @@
+ 
+-\strong{Split-half.} Each calibration block is split into even and odd scans and two
+-independent block means are formed. Their difference measures the noise on a
++\strong{Split-half.} Each calibration block is split into two halves -- contiguous (first and second
++half) or interleaved (even and odd scans) -- and two independent block means are formed. Their difference measures the noise on a
+ knot with no change of interval, and therefore requires no extrapolation back
+@@ -53,11 +55,14 @@
+ \begin{table}[t]
+-\caption{Reference-interpolation error per channel from the split-half estimate of knot noise and from leave-one-out (LOO) knot removal (per cent), and the ratio split-half/LOO.}
++\caption{Zero-air reference-interpolation error in the channel NO$_2$ amount (per cent) from the split-half estimate
++of knot noise, with contiguous and interleaved halves, and from leave-one-out (LOO) knot removal, and the ratio
++split-half/LOO. Hot channels: the 157 zero-air knots of 18--24 May, current fit settings and clock-aligned
++reflectivity. Cold: an earlier run with different settings, not recomputed on this basis.}
+ \label{tab:splithalf_loo}
+-\begin{tabular}{llll}
++\begin{tabular}{lllll}
+ \tophline
+-channel & knot noise (split-half) & LOO & ratio \\
++channel & split-half, contiguous & split-half, interleaved & LOO & ratio \\
+ \middlehline
+-hot PNs & \fieldnum{2.073}\,\% & \fieldnum{2.19}\,\% & \textbf{\fieldnum{0.95}} \\
+-hot ANs & \fieldnum{1.122}\,\% & \fieldnum{2.29}\,\% & \textbf{\fieldnum{0.49}} \\
+-cold & \fieldnum{2.391}\,\% & \fieldnum{3.95}\,\% & \textbf{\fieldnum{0.61}} \\
++hot PNs & \fieldnum{1.437}\,\% & \fieldnum{1.782}\,\% & \fieldnum{1.95}\,\% & \textbf{\fieldnum{0.74}--\fieldnum{0.91}} \\
++hot ANs & \fieldnum{0.90}\,\% & \fieldnum{0.97}\,\% & \fieldnum{2.25}\,\% & \textbf{\fieldnum{0.40}--\fieldnum{0.43}} \\
++cold (earlier run) & -- & \fieldnum{2.391}\,\% & \fieldnum{3.95}\,\% & \fieldnum{0.61} \\
+ \bottomhline
+@@ -73,7 +78,9 @@
+ 
+-This has a practical consequence that answers a recommendation made
+-qualitatively by \citet{Washenfelder_2008}. For the hot channels the
+-interpolation error is noise-limited, not curvature-limited: measuring the
+-references \emph{more often} does not reduce it, whereas increasing the number of
+-scans averaged per calibration block does.
++This bears on a recommendation made
++qualitatively by \citet{Washenfelder_2008}. For the 180\,$^{\circ}$C channel the
++interpolation error is mostly knot noise (ratio \fieldnum{0.74}--\fieldnum{0.91}): measuring the
++references \emph{more often} would reduce it little, and averaging more scans per calibration block is the
++lever that could. For the 300\,$^{\circ}$C channel (\fieldnum{0.40}--\fieldnum{0.43}) the interval carries curvature, and
++shorter intervals would help. Contiguous and interleaved halves give similar knot noise in the NO$_2$
++amount (the contiguous estimate is \fieldnum{7}--\fieldnum{19}\,\% smaller), so the interleaved split does not understate it.
+ 
+@@ -97,13 +104,14 @@
+ 
+-\strong{Variances add; robust scales do not.} Summarising each term by a
++\strong{Neither variances nor robust scales add.} Summarising each term by a
+ median-based scale and combining those in quadrature misses the directly
+-measured joint scale by \fieldnum{$+13.3$}\,\% (hot ANs), \fieldnum{$-8.1$}\,\% (hot PNs) and \fieldnum{$+6.5$}\,\%
++measured joint scale by \fieldnum{$+13.3$}\,\% (hot ANs), \fieldnum{$-8.1$}\,\% (hot PNs) and \fieldnum{$+6.9$}\,\%
+ ($\Sigma$ANs). Performing the identical combination on standard deviations
+ does not repair it: the joint exceeds the quadrature sum by \fieldnum{15.5}\,\% for the ANs
+-channel and \fieldnum{7.1}\,\% for $\Sigma$ANs, and falls \fieldnum{2.5}\,\% below it for PNs. Neither space is additive, and neither
++channel and \fieldnum{7.6}\,\% for $\Sigma$ANs, and falls \fieldnum{2.5}\,\% below it for PNs. Neither space is additive, and neither
+ discrepancy has a predictable sign.
+ 
+-The cause is not correlation -- four estimators of the pairwise correlation
+-(Pearson, Spearman, Kendall, winsorised) all return $|r| < \fieldnum{0.4}$, where the
+-quadrature formula would need $r \approx 0.9$ -- but distribution shape. Write
++For variances the failure has two measured parts. The single-term responses of $\Sigma$ANs are correlated
++(pairwise $r = \fieldnum{0.25}$, \fieldnum{0.18} and \fieldnum{0.03}), which adds \fieldnum{28.7}\,\% to the sum of their variances, and the terms
++do not superpose -- the etalon interaction above -- which removes \fieldnum{12.9}\,\%, leaving the joint variance
++\fieldnum{15.8}\,\% above the sum. Robust scales fail in addition through distribution shape. Write
+ $s$ for the normalised shape statistic $1.4826\,\mathrm{MAD}/\mathrm{SD}$,
+@@ -114,3 +122,3 @@
+ joint series has a fourth shape again ($s = \fieldnum{0.56}$). A variance is indifferent
+-to shape, which is why it adds.
++to shape, so for variances the discrepancy is covariance and interaction alone.
+ 
+@@ -119,5 +127,5 @@
+ another, and moving to variances neither removes it nor changes its sign --
+-\fieldnum{$+15.5$}\,\%, \fieldnum{$-2.5$}\,\% and \fieldnum{$+7.1$}\,\% for the same three series -- so it cannot be
++\fieldnum{$+15.5$}\,\%, \fieldnum{$-2.5$}\,\% and \fieldnum{$+7.6$}\,\% for the same three series -- so it cannot be
+ absorbed into a correction factor: knowing the factor
+-requires knowing the shape of the joint distribution, and that is available
++requires knowing the covariance, interaction and shape of the joint response, and that is available
+ only after the joint propagation has been performed. Quadrature of robust
+@@ -140,6 +148,7 @@
+ \begin{table*}[t]
+-\caption{Structural error budget, ppb, from a single propagation over all
+-\fieldnum{8847} product records over 2026-05-18..05-24, on the clock-aligned reflectivity
+-reference (Sect.~\ref{sec:5.4}; bound-terminated fits excluded, Sect.~\ref{sec:5.2}). A record is one 60\,s
+-ambient bin, and the population is the bins in which both channels converged. Columns $I_0$, $R$,
++\caption{Structural error budget, ppb, from a single propagation over the 60\,s ambient records of
++2026-05-18..05-24 on the clock-aligned reflectivity reference (Sect.~\ref{sec:5.4}): of the \fieldnum{9034} records with a
++reflectivity knot within 1\,h, the \fieldnum{187} in which a fit of either channel terminated at a bound are excluded
++(Sect.~\ref{sec:5.2}), leaving \fieldnum{8847}. $\Sigma$ANs is formed as in the product, 300\,$^{\circ}$C minus $g'$ times
++180\,$^{\circ}$C with $g' = \fieldnum{0.9524}$ for this period. Columns $I_0$, $R$,
+ $f$ are single-term responses, shown for diagnosis; \emph{joint} is the measured
+@@ -160,4 +169,4 @@
+  & $s$ & \fieldnum{0.97} & \fieldnum{0.33} & \fieldnum{0.99} & \fieldnum{0.74} \\
+-$\Sigma$ANs & rSD & \fieldnum{0.0567} & \fieldnum{0.0268} & \fieldnum{0.0200} & \textbf{\fieldnum{0.0701}} \\
+- & SD & \fieldnum{0.0781} & \fieldnum{0.0836} & \fieldnum{0.0203} & \textbf{\fieldnum{0.1245}} \\
++$\Sigma$ANs & rSD & \fieldnum{0.0558} & \fieldnum{0.0269} & \fieldnum{0.0191} & \textbf{\fieldnum{0.0693}} \\
++ & SD & \fieldnum{0.0768} & \fieldnum{0.0831} & \fieldnum{0.0195} & \textbf{\fieldnum{0.1236}} \\
+  & $s$ & \fieldnum{0.73} & \fieldnum{0.32} & \fieldnum{0.98} & \fieldnum{0.56} \\
+@@ -168,3 +177,3 @@
+ Which term dominates depends on which scale is read, and the two answers are
+-opposite. Of the $\Sigma$ANs variance, $I_0$ carries \fieldnum{74}\,\% on the robust scale
++opposite. Of the single-term quadrature sum for $\Sigma$ANs, $I_0$ carries \fieldnum{74}\,\% on the robust scale
+ but \fieldnum{45}\,\% in standard deviation, while $R$ carries \fieldnum{17}\,\% and \fieldnum{52}\,\%. The
+@@ -184,3 +193,4 @@
+ \textbf{(c)} The reflectivity term record by record (points) and as an hourly RMS (steps); shaded, the five hours
+-that carry \fieldnum{57}\,\% of its variance.}
++that carry \fieldnum{57}\,\% of its variance. The legend values and the dotted line in panel (a) are still drawn at the values before the
++clock-aligned recomputation and await re-rendering; Table~\ref{tab:2} gives the current values.}
+ \label{fig:4}
+@@ -216,7 +226,9 @@
+ ambient bin, which at the operational scan rate is one scan, and the median
+-fit-propagated $\Sigma$ANs uncertainty at that resolution is \fieldnum{0.0501}\,ppb. The
+-structural contribution alone is therefore \fieldnum{1.40} times the reported sigma on
+-the robust scale and \fieldnum{2.49} times it in standard deviation, and the total
+-uncertainty is \strong{\fieldnum{1.72} to \fieldnum{2.68} times what the fit reports}, the range spanning
+-the two scales rather than any doubt about the measurement.
++fit-propagated $\Sigma$ANs uncertainty at that resolution, over the same records, is \fieldnum{0.0541}\,ppb. The
++structural contribution alone is therefore \fieldnum{1.28} times the reported sigma on
++the robust scale and \fieldnum{2.29} times it in standard deviation, and the total
++uncertainty is \strong{\fieldnum{1.63} to \fieldnum{2.50} times what the fit reports}, the range spanning
++the two scales rather than any doubt about the measurement. Because leave-one-out doubles the
++interpolation interval (Sect.~\ref{sec:4.2}) and the window is the best-calibrated week of the deployment,
++these are upper-bound estimates for a well-calibrated period.
+ 
+@@ -226,3 +238,3 @@
+ \begin{table}[t]
+-\caption{Candidate denominators for the ratio of total to reported $\Sigma$ANs uncertainty: value (ppb), time resolution, and the ratio of the total uncertainty (Table~\ref{tab:2}, robust scale to standard deviation) to each. Bold: the denominator used.}
++\caption{Candidate denominators for the ratio of total to reported $\Sigma$ANs uncertainty: value (ppb), time resolution, and the ratio of the total uncertainty (Table~\ref{tab:2}, robust scale to standard deviation) to each. Bold: the denominator used. The zero-air value is approximate (Sect.~\ref{sec:7.2}).}
+ \label{tab:denominators}
+@@ -232,6 +244,6 @@
+ \middlehline
+-\textbf{fit-propagated $\sigma$, per scan} & \textbf{\fieldnum{0.0501}} & \textbf{60\,s = 1 scan} & \textbf{\fieldnum{1.72}--\fieldnum{2.68}} \\
+-uncertainty column shipped with the product & \fieldnum{0.0806} & 5\,min, systematic & \fieldnum{1.33}--\fieldnum{1.84} \\
+-fit-propagated $\sigma$, 5\,min bin & \fieldnum{0.0224} & 5\,min & not comparable \\
+-zero-air scatter, SD & \fieldnum{0.0811} & 34-scan block means & not comparable \\
++\textbf{fit-propagated $\sigma$, per scan} & \textbf{\fieldnum{0.0541}} & \textbf{60\,s = 1 scan} & \textbf{\fieldnum{1.63}--\fieldnum{2.50}} \\
++uncertainty column shipped with the product & \fieldnum{0.0806} & 5\,min, systematic & \fieldnum{1.32}--\fieldnum{1.83} \\
++fit-propagated $\sigma$, 5\,min bin & \fieldnum{0.025} & 5\,min & not comparable \\
++zero-air scatter, SD & $\approx$\fieldnum{0.086} & 34-scan block means & not comparable \\
+ \bottomhline
+@@ -244,8 +256,8 @@
+ the product header states that it covers day-to-day inter-channel gain only
+-and must not be used alone to assess detection significance. Comparing the
++and must not be used alone to assess detection significance; it does not bound the absolute scale either
++(Sect.~\ref{sec:3.6}). Comparing the
+ structural budget against it is a defensible sentence, but a different one:
+ it asks whether structure is comparable to the gain term, not whether it
+-exceeds the precision the retrieval claims. The 5\,min row is the same fit
+-uncertainty averaged over five scans -- it is $\fieldnum{0.0501}/\sqrt{5}$ to three
+-figures -- and dividing it into a structural scale measured at 60\,s would mix
++exceeds the precision the retrieval claims. The 5\,min row is the fit
++uncertainty averaged over five scans -- over the deployment it is $\fieldnum{0.0558}/\sqrt{5}$ -- and dividing it into a structural scale measured at 60\,s would mix
+ resolutions in the opposite direction. The zero-air scatter is the honest
+@@ -254,8 +266,7 @@
+ different scan count with reference-interpolation error and is not a
+-single-scan quantity. The per-scan fit uncertainty is the median over the
+-\fieldnum{14\,974} five-minute records paired with the submitted product, each record's
+-mean single-scan uncertainty propagated through the channel difference; it is
+-taken over the deployment rather than the budget window, which matters little
+-because the fit uncertainty is nearly constant (\fieldnum{0.0198}--\fieldnum{0.0296}\,ppb between the
+-5th and 95th percentiles at five-minute resolution).
++single-scan quantity. The per-scan fit uncertainty is the median, over \fieldnum{8832} of the budget records, of the NO$_2$ uncertainty
++written by the operational fit of each channel propagated through the channel difference,
++$\sqrt{\sigma_{300}^2 + g'^2\sigma_{180}^2}$. Over the whole deployment, with the $g'$ of each calibration state, the
++same median is \fieldnum{0.0558}\,ppb (total \fieldnum{1.59}--\fieldnum{2.43} times), and at five-minute resolution the fit uncertainty
++lies between \fieldnum{0.0217} and \fieldnum{0.0326}\,ppb (5th and 95th percentiles).
+ 
+@@ -282,4 +293,4 @@
+ series and the observed series have opposite temporal correlation. Their
+-measured lag-1 autocorrelations are \fieldnum{$-0.50$} to \fieldnum{$-0.62$} for the budget and
+-\fieldnum{$+0.68$} to \fieldnum{$+0.76$} for the observation. The negative value is a property of
++measured lag-1 autocorrelations are \fieldnum{$-0.60$} for the budget and
++\fieldnum{$+0.73$} for the observation in the matched hours. The negative value is a property of
+ the experiment, not of the instrument: removing a knot pins the interpolant at
+@@ -293,3 +304,4 @@
+ \begin{table}[t]
+-\caption{Hour-to-hour variation of hourly $\Sigma$ANs, summarised by $1.4826\,\mathrm{median}|\Delta|/\sqrt{2}$ (ppb), observed and predicted by the budget, and the ratio of the budget to the observed statistic in the matched hours.}
++\caption{Hour-to-hour variation of hourly $\Sigma$ANs, summarised by $1.4826\,\mathrm{median}|\Delta|/\sqrt{2}$ (ppb), observed and predicted by the budget, and the ratio of the budget to the observed statistic in the matched hours.
++Observed: the clock-aligned $\Sigma$ANs product (quality flag below 2), hourly means of at least 8 records.}
+ \label{tab:hourly_check}
+@@ -299,6 +311,6 @@
+ \middlehline
+-observed, campaign (\fieldnum{1201}\,h) & \fieldnum{0.0832} & -- \\
+-observed, hours matched to the budget (\fieldnum{107}\,h) & \fieldnum{0.0727} & -- \\
+-\textbf{budget, hourly, jointly propagated, matched hours} & \textbf{\fieldnum{0.0618}} & \textbf{\fieldnum{0.85}} \\
+-budget, at record resolution & \fieldnum{0.0701} & \fieldnum{0.96} \\
++observed, campaign (\fieldnum{1258}\,h) & \fieldnum{0.081} & -- \\
++observed, hours matched to the budget (\fieldnum{154}\,h) & \fieldnum{0.082} & -- \\
++\textbf{budget, hourly, jointly propagated, matched hours} & \textbf{\fieldnum{0.0618}} & \textbf{\fieldnum{0.75}} \\
++budget, at record resolution & \fieldnum{0.0693} & \fieldnum{0.84} \\
+ \bottomhline
+@@ -309,8 +321,7 @@
+ that choice; both ratios in the column are taken against the same matched
+-denominator, \fieldnum{0.0727}\,ppb. Both the numerator and the denominator of the ratio quoted here
+-are evaluated on the same \fieldnum{107} matched hours and \fieldnum{106} consecutive pairs; the
+-campaign-wide denominator gives \fieldnum{0.74} and is not used, because the matched
+-hours are quieter than the campaign as a whole.
+-
+-The budget predicts \strong{\fieldnum{0.85} times} the observed hour-to-hour variation (Fig.~\ref{fig:4}b). It
++denominator, \fieldnum{0.082}\,ppb. Both the numerator and the denominator of the ratio quoted here
++are evaluated on the same \fieldnum{154} matched hours and \fieldnum{153} consecutive pairs; the
++campaign-wide denominator gives almost the same ratio, \fieldnum{0.76}.
++
++The budget predicts \strong{\fieldnum{0.75} times} the observed hour-to-hour variation (Fig.~\ref{fig:4}b). It
+ does not exceed it, as it must not, and it is not far below it either, which
+@@ -322,7 +333,4 @@
+ measurement error from atmospheric variability, and the upper bound doubles
+-the interpolation interval by construction. Successive refinements of the
+-comparison -- matching the estimator, matching the operator, matching the
+-sample, and measuring the correlation -- moved the ratio within \fieldnum{0.87}--\fieldnum{1.39} and
+-did not converge further. That range is the resolution of the method, and it
+-is reported as such rather than collapsed to a single figure.
++the interpolation interval by construction. The choice of operator alone moves the ratio from \fieldnum{0.75}
++to \fieldnum{0.84} (Table~\ref{tab:hourly_check}); differences of that size are the resolution of the method.
+ 
+@@ -332,3 +340,3 @@
+ increment statistic for $\rho$ returns the standard deviation of the observed
+-series itself -- \fieldnum{0.379}\,ppb for the hourly $\Sigma$ANs, i.e. the full
++series itself -- \fieldnum{0.366}\,ppb for the hourly $\Sigma$ANs, i.e. the full
+ geophysical variability. Comparing a structural budget against that number is
+--- a/sec5_pipeline.tex
++++ b/sec5_pipeline.tex
+@@ -36,5 +36,5 @@
+ 
+-In the cold channel the objective is flat. Across the whole $\pm 4$\,px range
++In the cold channel the objective is flat. For twelve ambient spectra scanned across $\pm 4$\,px,
+ the ratio of the largest to the smallest profiled residual sum of squares has
+-a median of \fieldnum{1.0120} and never exceeds \fieldnum{1.0611}; in a set of \fieldnum{165} spectra the
++a median of \fieldnum{1.0120} and never exceeds \fieldnum{1.0611}; in a larger set of \fieldnum{165} spectra the
+ minimum lies at an edge of the scanned range in \fieldnum{77}\,\% of cases, and evaluating
+@@ -63,6 +63,6 @@
+ 
+-What the retrieved amounts do with that freedom is the point. Regressing the
+-cold-channel retrievals against the hot-channel reference over \fieldnum{5364} spectra,
+-allowing the shift to float gives slopes of \fieldnum{0.940} (NO$_2$), \fieldnum{0.858} (CHOCHO) and
+-\fieldnum{1.027} (H$_2$O); fixing the shift at $-0.5$\,px gives \fieldnum{1.019}, \fieldnum{0.662} and \fieldnum{1.178}.
++What the retrieved amounts do with that freedom is the point. Comparing the cold-channel
++retrievals of this work with those of QDOAS on the same \fieldnum{5364} spectra, the regression slopes between the
++two codes are \fieldnum{0.940} (NO$_2$), \fieldnum{0.858} (CHOCHO) and \fieldnum{1.027} (H$_2$O) when Augur's shift floats, and \fieldnum{1.019},
++\fieldnum{0.662} and \fieldnum{1.178} when it is fixed at $-0.5$\,px.
+ The weakest absorber in the window moves by \fieldnum{23}\,\% according to a parameter the
+@@ -70,15 +70,12 @@
+ 
+-On the ambient spectra alone the external check does not settle which
+-treatment is right, and that is the substance of the problem rather than a gap
+-in it. For the two species that do
+-not dissociate in the heated cell, and whose slope against the reference
+-should therefore be unity, the fitted shift agrees better -- \fieldnum{0.858} against
+-\fieldnum{0.662} for CHOCHO, \fieldnum{1.027} against \fieldnum{1.178} for water; for NO$_2$ the fixed shift
+-does. A convention cannot be chosen on this evidence, and choosing one
+-silently is what current practice does. The laboratory spectrum answers what the
+-ambient ones cannot: the shift this channel supports is close to zero,
+-$-0.10$\,px, near neither the floated \fieldnum{$-2.0$}\,px nor the fixed $-0.5$\,px. Neither
+-treatment was right, and neither fit report could have said so. What locates
+-the parameter is a spectrum with enough absorber; what the product should carry
+-is the value such a spectrum gives, and where it came from.
++A code comparison cannot say which treatment is right. For two codes solving the same problem every
++species should give unity, and none does in either treatment; with the shift fixed, CHOCHO and water still
++differ between the codes by \fieldnum{34} and \fieldnum{18}\,\%, so the disagreement is not the shift alone. Choosing a
++convention silently is what current practice does. The laboratory spectrum answers what the
++ambient ones cannot: the shift this channel supports is close to zero, $-0.10$\,px. The operational fixed
++value is 0.4\,px from it, and replacing $-0.5$ by $-0.1$\,px changes the slopes against QDOAS by at most
++\fieldnum{2.2}\,\% (NO$_2$ \fieldnum{$-0.06$}\,\%, CHOCHO \fieldnum{$+2.2$}\,\%, H$_2$O \fieldnum{$-0.8$}\,\%); the floated value is 1.9\,px from it and moves
++CHOCHO by \fieldnum{23}\,\%. What divides the results is whether the shift is fixed, not the value it is fixed at, and
++neither fit report could have said so. What locates the parameter is a spectrum with enough absorber; what
++the product should carry is the value such a spectrum gives, and where it came from.
+ 
+@@ -88,3 +85,3 @@
+ and is determined by a laboratory spectrum with added NO$_2$. \textbf{(a)} Profiled residual sum of squares against
+-shift for twelve ambient spectra (the statistics quoted in Sect.~\ref{sec:5.1} are over \fieldnum{165}), each normalised to its own
++shift for twelve ambient spectra (the edge-minimum fraction quoted in Sect.~\ref{sec:5.1} is over \fieldnum{165}), each normalised to its own
+ minimum; shaded, the range the operational configuration allows; dashed, the value it fixes. \textbf{(b)} The same
+@@ -93,5 +90,5 @@
+ converged implementations under matched settings (with the fraction of fits at a bound), the operational
+-fixed value, and the profile minima of (b). \textbf{(d)} Slope of the cold-channel retrieval against the
+-hot-channel reference ($n = \fieldnum{5364}$) with the shift fitted and with it fixed; CHOCHO and H$_2$O do not dissociate
+-in the heated cell and should give unity.}
++fixed value, and the profile minima of (b). \textbf{(d)} Slope of the regression between the cold-channel retrievals of this work and of
++QDOAS on the same spectra ($n = \fieldnum{5364}$), with Augur's shift fitted and fixed; for two codes solving the same
++problem every species should give unity.}
+ \label{fig:5}
+@@ -105,3 +102,5 @@
+ \begin{table}[t]
+-\caption{Change in the fitted wavelength shift (px) when each structural term of Sect.~\ref{sec:4} is perturbed alone: median, 90th percentile and maximum.}
++\caption{Change in the fitted wavelength shift (px) when each structural term of Sect.~\ref{sec:4} is perturbed alone, and
++when all three are perturbed together: median, 90th percentile and maximum over the \fieldnum{8847} clock-aligned budget
++records of Table~\ref{tab:2} (for each $\Sigma$ANs record, the larger of the two channels' changes).}
+ \label{tab:shift_degeneracy}
+@@ -111,5 +110,6 @@
+ \middlehline
+-zero-air reference & \fieldnum{0.179}\,px & \fieldnum{0.743} & \fieldnum{4.755} \\
+-reflectivity & \textbf{\fieldnum{0.006}} & \textbf{\fieldnum{0.020}} & \textbf{\fieldnum{0.097}} \\
+-etalon frequency & \fieldnum{0.151} & \fieldnum{0.343} & \fieldnum{2.675} \\
++zero-air reference & \fieldnum{0.187}\,px & \fieldnum{0.826} & \fieldnum{4.388} \\
++reflectivity & \textbf{\fieldnum{0.006}} & \textbf{\fieldnum{0.027}} & \textbf{\fieldnum{0.285}} \\
++etalon frequency & \fieldnum{0.154} & \fieldnum{0.347} & \fieldnum{2.941} \\
++all three, joint & \fieldnum{0.243} & \fieldnum{0.766} & \fieldnum{4.276} \\
+ \bottomhline
+@@ -119,3 +119,4 @@
+ An error in the reflectivity changes the magnitude of the extinction and
+-essentially nothing else -- it never moves the shift by a tenth of a pixel. An
++essentially nothing else -- it moves the shift by a median of \fieldnum{0.006}\,px (90th percentile \fieldnum{0.027}\,px),
++although the largest displacement reaches \fieldnum{0.285}\,px. An
+ error in the zero-air reference, or in the etalon frequency, changes the shape
+@@ -128,4 +129,4 @@
+ hopping. Records whose shift moved by more than a pixel under perturbation are
+-\fieldnum{6.2}\,\% of the total and carry \fieldnum{4.8}\,\% of the variance, and removing them raises
+-the budget rather than lowering it. The large-shift records are
++\fieldnum{6.2}\,\% of the total and carry \fieldnum{5.0}\,\% of the variance, and removing them raises
++the budget rather than lowering it (rSD \fieldnum{0.0693} to \fieldnum{0.0706}\,ppb, SD \fieldnum{0.1236} to \fieldnum{0.1244}\,ppb). The large-shift records are
+ the low-amplification ones, where the absorption is deep and the retrieval is
+@@ -151,7 +152,7 @@
+ The operational configuration allows the shift different freedom in each
+-channel -- $[-10, +0.5]$\,px in hot ANs, $[-5, +5]$\,px in hot PNs, $[-1, +1]$\,px
+-in cold -- and in the cold channel every one of the \fieldnum{22} base fits returns
+-exactly \fieldnum{$-1.000$}\,px, the bound itself. The fits are reported as converged. In
+-the production propagation of Sect.~\ref{sec:4} the cold shift is held fixed rather than
+-bounded, and moves by exactly zero in every record, which confirms the
++channel -- $[-10, +0.5]$\,px in hot ANs and $[-5, +5]$\,px in hot PNs -- and fixes it at $-0.5$\,px in the cold
++channel. In a sensitivity run that instead bounded the cold shift to $[-1, +1]$\,px, every one of the \fieldnum{22}
++base fits returned exactly \fieldnum{$-1.000$}\,px, the bound itself, and was reported as converged. In
++the production propagation of Sect.~\ref{sec:4} the cold shift is held fixed, as in operation, and moves by
++exactly zero in every record, which confirms the
+ configuration but also means the channel contributes no information about the
+@@ -159,6 +160,8 @@
+ 
+-In hot PNs, \fieldnum{123} records terminate at a bound under perturbation, and \fieldnum{121} of
+-those are the zero-air perturbation; only \fieldnum{4} are unperturbed fits. The hot ANs
+-channel has none. The operational fit is therefore well inside its feasible
+-region, and it is the structural perturbation that drives it out -- which is to
++On the clock-aligned basis of Table~\ref{tab:2}, \fieldnum{187} of the \fieldnum{9034} $\Sigma$ANs records are excluded
++because a fit of either channel, unperturbed or perturbed, terminated at a bound. The split by
++perturbation was recorded only for the earlier run on the unaligned reference: there, in hot PNs, the
++zero-air perturbation accounted for \fieldnum{121} bound-terminated records against \fieldnum{4} for the unperturbed fits (the
++categories overlap), and the hot ANs channel had none. In that run the operational fit was well inside its
++feasible region, and it was the structural perturbation that drove it out -- which is to
+ say that the margin between the operational solution and the edge of
+@@ -194,3 +197,4 @@
+ \begin{table}[t]
+-\caption{Calibration coverage of the retrieved records, from calibration blocks extracted directly from the raw files: number of records $n$; percentage of records outside the knot range and inside a knot gap longer than 2\,h, for the zero-air ($I_0$) and reflectivity ($R$) references; and the longest reflectivity gap.}
++\caption{Calibration coverage of the retrieved records, from calibration blocks extracted directly from the raw files: number of records $n$; percentage of records outside the knot range and inside a knot gap longer than 2\,h (counts from the coverage
++extractor; the retrieval itself has \fieldnum{9149} ambient records per heated channel in the budget window), for the zero-air ($I_0$) and reflectivity ($R$) references; and the longest reflectivity gap.}
+ \label{tab:coverage}
+@@ -258,3 +262,3 @@
+ and what the fit report says about it. The retrieval was run over all \fieldnum{9\,132}
+-records of the window twice, changing nothing but the knot time base
++records of the window common to both heated channels twice, changing nothing but the knot time base
+ (Table~\ref{tab:clock_displacement}).
+@@ -262,3 +266,3 @@
+ \begin{table}[t]
+-\caption{Change in the retrieved amounts when the heated channels are retrieved with the clock-aligned instead of the nine-hour-displaced reflectivity knots, over the records of the budget window: robust scale (rSD) and standard deviation (SD) of the change (ppb), and the rSD of the change relative to the rSD of the $R$ term in Table~\ref{tab:2}.}
++\caption{Change in the retrieved amounts when the heated channels are retrieved with the clock-aligned instead of the nine-hour-displaced reflectivity knots, over the records of the budget window: robust scale (rSD) and standard deviation (SD) of the change (ppb), and the rSD of the change relative to the rSD of the $R$ term in Table~\ref{tab:2}. $\Sigma$ANs is formed with $g' = \fieldnum{0.9524}$ as in Table~\ref{tab:2}.}
+ \label{tab:clock_displacement}
+@@ -270,3 +274,3 @@
+ PNs channel & \fieldnum{0.0358} & \fieldnum{0.0563} & \fieldnum{2.8} \\
+-\textbf{$\Sigma$ANs} & \textbf{\fieldnum{0.0999}} & \fieldnum{0.1437} & \textbf{\fieldnum{3.7}} \\
++\textbf{$\Sigma$ANs} & \textbf{\fieldnum{0.100}} & \fieldnum{0.1418} & \textbf{\fieldnum{3.7}} \\
+ \bottomhline
+@@ -275,5 +279,6 @@
+ 
+-The displacement moves the alkyl nitrate product by \fieldnum{0.0999}\,ppb: between three
+-and four times the reflectivity term of the budget, and \fieldnum{1.43} times the whole
+-of it. It is the largest single term in this paper. It is not in Table~\ref{tab:2}
++The displacement moves the alkyl nitrate product by \fieldnum{0.100}\,ppb: between three
++and four times the reflectivity term of the budget, and \fieldnum{1.44} times the whole
++of it. It is the largest term we can quantify within the retrieval; the multiplicative scale discrepancy of
++Sect.~\ref{sec:3.6} is larger, but lies outside it. It is not in Table~\ref{tab:2}
+ because Table~\ref{tab:2} measures what a reference's own uncertainty costs, not what
+@@ -304,5 +309,5 @@
+ witnesses to its own quality. It is offering one, twice. The fitted wavelength shift moves by
+-\fieldnum{0.005}\,px, where the reference perturbations of Table~\ref{tab:2} move it by \fieldnum{0.23}\,px --
+-forty times less -- so the error is neither absorbed by the nonlinear
+-parameters nor revealed by the residual. The retrieved concentration moves by
++\fieldnum{0.005}\,px, where the reference perturbations of Table~\ref{tab:2} move it by \fieldnum{0.243}\,px (median) --
++about forty times less -- so the error is neither absorbed by the nonlinear
++parameters nor revealed by the residual. The retrieved concentration of the 300\,$^{\circ}$C channel moves by
+ two reported standard deviations. Every quantity a fit report offers as
+@@ -311,8 +316,9 @@
+ Correcting it did not simply reduce the budget, and the way it did not is
+-informative. The robust scale of the $\Sigma$ANs budget fell by \fieldnum{7.5}\,\%
+-(\fieldnum{0.0758} to \fieldnum{0.0701}\,ppb) while its standard deviation rose by \fieldnum{5.2}\,\% (\fieldnum{0.1184} to
+-\fieldnum{0.1245}), so the total uncertainty relative to what is reported widened at both
+-ends, from \fieldnum{1.81}--\fieldnum{2.57} to \fieldnum{1.72}--\fieldnum{2.68} times against the sigma the fit reports
++informative. The robust scale of the $\Sigma$ANs budget fell by \fieldnum{7.0}\,\%
++(\fieldnum{0.0745} to \fieldnum{0.0693}\,ppb) while its standard deviation rose by \fieldnum{4.5}\,\% (\fieldnum{0.1183} to
++\fieldnum{0.1236}), so the total uncertainty relative to what is reported widened at both
++ends, from \fieldnum{1.70}--\fieldnum{2.41} to \fieldnum{1.63}--\fieldnum{2.50} times against the same fit-reported sigma
+ (Sect.~\ref{sec:4.4}). Two things were working in opposite
+-directions. Coverage improved, from \fieldnum{93.0}\,\% to \fieldnum{98.7}\,\% of the window's records,
++directions. Coverage improved, from \fieldnum{8505} to \fieldnum{9034} of the window's \fieldnum{9149} ambient records
++(\fieldnum{93.0} to \fieldnum{98.7}\,\%),
+ because the misaligned knots had been falling outside the one-hour window that
+@@ -327,3 +333,3 @@
+ measuring it. Across the boundary where the clock was corrected, the affected
+-side gives \fieldnum{0.0600}\,ppb against \fieldnum{0.0000}\,ppb on the unaffected side -- the latter a
++side gives \fieldnum{0.0622}\,ppb against \fieldnum{0.0000}\,ppb on the unaffected side -- the latter a
+ check that the realignment touched only the intended knots -- so the
+@@ -332,3 +338,3 @@
+ moving at the time, and it moves fastest early in the deployment. The
+-budget-window figure of \fieldnum{0.0999}\,ppb is the value to quote; \fieldnum{0.0600}\,ppb is range
++budget-window figure of \fieldnum{0.100}\,ppb is the value to quote; \fieldnum{0.0622}\,ppb is range
+ information, not a worst case.
+@@ -336,4 +342,4 @@
+ \strong{What the pipeline could report instead.} The failure here is not that the
+-clock was wrong -- that was a hardware fact, caught by an external reference and
+-corrected. It is that a derived cache went stale and nothing noticed. The
++heated-channel clock ran on local time until 29 May -- a property of the raw record, identified against an
++external time reference and corrected in the reader. It is that a derived cache went stale and nothing noticed. The
+ reflectivity file was written on 2026-07-10; the correction to the reader that
+--- a/sec6_reporting.tex
++++ b/sec6_reporting.tex
+@@ -15,4 +15,4 @@
+ the reference file are exported, while the build time and time convention of each
+-reference are specified for implementation -- and the block recommendation of
+-Sect.~\ref{sec:6.2} follows from a measurement reported here.
++reference are specified for implementation -- and the question of block length in
++Sect.~\ref{sec:6.2} is left open by the measurements reported here.
+ 
+@@ -53,4 +53,5 @@
+ The last field is there because of Sect.~\ref{sec:5.4}, and it is worth being exact about
+-what it would and would not have caught. The instrument's clock was wrong by
+-nine hours for twelve days of the campaign; that is a hardware fact, and no
++what it would and would not have caught. The heated-channel clock ran on local time until 29 May
++and on UTC thereafter, so for twelve days of the campaign the raw time stamps were nine hours off the
++convention of the time axis; that is a property of the raw record, and no
+ provenance field detects it. It was detected the way such things are detected
+@@ -119,6 +120,6 @@
+ This is not an interpretation of $s$ but a prediction from it, and it can be
+-checked. Ordering the \fieldnum{146} hours by their contribution to each term's variance gives Table~\ref{tab:shape_remedy}.
+-
+-\begin{table}[t]
+-\caption{Concentration in time of each structural term over the hours of the budget window: shape statistic $s$; number (and fraction) of hours holding 90\,\% of the term's variance; the number of contiguous runs those hours form, with the number expected for the same count of hours drawn at random; share of the variance on the standard-deviation basis; and the remedy the shape indicates.}
++checked. Ordering the \fieldnum{155} hours of the budget window by their contribution to each term's variance gives Table~\ref{tab:shape_remedy}.
++
++\begin{table}[t]
++\caption{Concentration in time of each structural term over the hours of the budget window (clock-aligned basis of Table~\ref{tab:2}): shape statistic $s$; number (and fraction) of hours holding 90\,\% of the term's variance; the number of contiguous runs those hours form, with the number expected for the same count of hours drawn at random; share of the variance on the standard-deviation basis; and the remedy the shape indicates.}
+ \label{tab:shape_remedy}
+@@ -128,5 +129,5 @@
+ \middlehline
+-$I_0$ & \fieldnum{0.73} & \fieldnum{60} (\fieldnum{41}\,\%) & \fieldnum{23} (\fieldnum{36}) & \fieldnum{41}\,\% & longer calibration blocks (Sect.~\ref{sec:6.2}) \\
+-$R$ & \textbf{\fieldnum{0.27}} & \textbf{\fieldnum{21} (\fieldnum{14}\,\%)} & \textbf{\fieldnum{8} (\fieldnum{18})} & \textbf{\fieldnum{56}\,\%} & detect and flag intervals (Sect.~\ref{sec:6.3}) \\
+-etalon $f$ & \fieldnum{0.97} & \fieldnum{112} (\fieldnum{77}\,\%) & \fieldnum{23} (\fieldnum{27}) & \fieldnum{3}\,\% & fit $f$ per scan, or model it \\
++$I_0$ & \fieldnum{0.73} & \fieldnum{63} (\fieldnum{41}\,\%) & \fieldnum{24} (\fieldnum{38}) & \fieldnum{45}\,\% & longer calibration blocks (untested, Sect.~\ref{sec:6.2}) \\
++$R$ & \textbf{\fieldnum{0.32}} & \textbf{\fieldnum{26} (\fieldnum{17}\,\%)} & \textbf{\fieldnum{12} (\fieldnum{22})} & \textbf{\fieldnum{52}\,\%} & detect and flag intervals (Sect.~\ref{sec:6.3}) \\
++etalon $f$ & \fieldnum{0.98} & \fieldnum{118} (\fieldnum{76}\,\%) & \fieldnum{26} (\fieldnum{29}) & \fieldnum{3}\,\% & fit $f$ per scan, or model it \\
+ \bottomhline
+@@ -136,3 +137,3 @@
+ The ordering by $s$ is the ordering by concentration, and the two-hour
+-interval 05-20 13--14 UTC alone holds \fieldnum{40}\,\% of the reflectivity term's variance.
++interval from 23:00 UTC on 18 May to 01:00 UTC on 19 May alone holds \fieldnum{37}\,\% of the reflectivity term's variance.
+ The contiguous-run counts separate concentration from clumping: the
+@@ -141,8 +142,6 @@
+ address them. The etalon hours are indistinguishable from random, which is
+-the signature of a term no flag will help. On the cold channel the same
+-pattern is sharper still: five hours hold 90\,\% of the reflectivity variance
+-and $s = \fieldnum{0.05}$.
++the signature of a term no flag will help.
+ 
+ Read on the robust scale the ordering of the first two reverses -- $I_0$
+-carries \fieldnum{76}\,\% of the variance and $R$ only \fieldnum{15}\,\% -- which is why the two scales
++carries \fieldnum{74}\,\% of the single-term quadrature sum and $R$ only \fieldnum{17}\,\% -- which is why the two scales
+ are reported side by side in Table~\ref{tab:2}. A term that is small for a typical
+@@ -151,3 +150,3 @@
+ 
+-\subsection{Calibration blocks: more scans, not more blocks}
++\subsection{Calibration blocks: interval length and scans per block}
+ \label{sec:6.2}
+@@ -155,8 +154,7 @@
+ The natural response to an interpolation error is to interpolate over shorter
+-intervals. For this instrument that is the wrong lever. The reflectivity interpolation error depends only weakly on gap length:
+-tripling the interval from 2 to 6\,h was measured to increase the error from
+-\fieldnum{0.87}\,\% to \fieldnum{1.00}\,\% in hot PNs and from \fieldnum{2.05}\,\% to \fieldnum{2.73}\,\% in hot ANs.
+-The error is not set by the curvature the interpolant fails to
+-follow; it is set by the noise on the knots themselves. Halving the interval
+-buys almost nothing, at the cost of halving the ambient duty cycle.
++intervals. How much that buys depends on the channel. Tripling the reflectivity interval from 2 to 6\,h was
++measured to increase the interpolation error from \fieldnum{0.87}\,\% to \fieldnum{1.00}\,\% in hot PNs and from \fieldnum{2.05}\,\% to
++\fieldnum{2.73}\,\% in hot ANs. In the 180\,$^{\circ}$C channel the error is set mostly by the noise on the knots, and a
++shorter interval would buy little; in the 300\,$^{\circ}$C channel the interval carries curvature (Table~\ref{tab:splithalf_loo}),
++and shorter intervals would help.
+ 
+@@ -204,3 +202,5 @@
+ row says so directly: cutting the same block contiguously rather than in
+-alternation more than doubles its apparent scatter in ANs. A monotonic trend
++alternation more than doubles its apparent scatter in ANs. These are spectral-domain statistics: in the
++NO$_2$ amount, contiguous and interleaved halves give similar knot noise (Sect.~\ref{sec:4.2}), so most of this
++correlated structure is evidently absorbed by the baseline polynomial before it reaches the gas columns. A monotonic trend
+ across the 32\,s is present in both channels but explains little of this -- see
+@@ -239,3 +239,3 @@
+ \fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
+-\fieldnum{0.1245} to \fieldnum{0.1012}\,ppb -- \fieldnum{19}\,\%, not half. The measured exponents put even that
++\fieldnum{0.1236} to \fieldnum{0.1008}\,ppb -- \fieldnum{18.5}\,\%, not half. The measured exponents put even that
+ out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
+@@ -249,6 +249,6 @@
+ \middlehline
+-operational & \fieldnum{0.1245}\,ppb & 1.00 & measured \\
+-$\times 4$ blocks only & \fieldnum{0.1012} & \fieldnum{0.81} & assumes $N^{-1/2}$; not supported below $N$ \\
+-flag bad $R$ intervals only & \fieldnum{0.0911} & \fieldnum{0.73} & assumes a perfect detector \\
+-\textbf{both} & \textbf{\fieldnum{0.0552}} & \textbf{\fieldnum{0.44}} & both assumptions \\
++operational & \fieldnum{0.1236}\,ppb & 1.00 & measured \\
++$\times 4$ blocks only & \fieldnum{0.1008} & \fieldnum{0.82} & assumes $N^{-1/2}$; not supported below $N$ \\
++flag bad $R$ intervals only & \fieldnum{0.0901} & \fieldnum{0.73} & assumes a perfect detector \\
++\textbf{both} & \textbf{\fieldnum{0.0547}} & \textbf{\fieldnum{0.44}} & both assumptions \\
+ \bottomhline
+@@ -260,3 +260,3 @@
+ total is a quadrature operation, and the joint propagation is not a quadrature
+-sum -- here it exceeds one by \fieldnum{7.1}\,\%, \fieldnum{0.1245}\,ppb against \fieldnum{0.1162}. The rows are
++sum -- here it exceeds one by \fieldnum{7.6}\,\%, \fieldnum{0.1236}\,ppb against \fieldnum{0.1149}. The rows are
+ therefore evaluated in quadrature space and rescaled by that measured ratio,
+@@ -265,4 +265,4 @@
+ ratio survives shrinking a term, which it will not do exactly, because the
+-ratio is a property of the mixture of distribution shapes and shrinking one
+-term changes the mixture.
++ratio depends on the covariance and interaction of the terms (Sect.~\ref{sec:4.3}), and shrinking one
++term changes them.
+ 
+@@ -370,4 +370,4 @@
+ expected 0.03 times in the campaign. This is the episodic structure Sect.~\ref{sec:6.1a}
+-found in the reflectivity variance itself -- \fieldnum{21} of \fieldnum{146} hours carrying 90\,\% of
+-it, in \fieldnum{8} contiguous runs where \fieldnum{18} would be expected at random -- seen from the
++found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying 90\,\% of
++it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the
+ calibration side.
+@@ -403,7 +403,10 @@
+ 
+-The cause is in the schedule rather than in the instrument. In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is measured
+-every hour and helium only every three (Table~\ref{tab:cal_schedule}).
+-
+-\begin{table}[t]
+-\caption{Calibration schedule of the heated channels over the deployment: number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
++In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is
++measured every hour and helium only every three (Table~\ref{tab:cal_schedule}). Each reflectivity knot is formed from
++one zero-air block and the most recent helium block that passed the quality gates, so the knots are hourly --
++\fieldnum{1261} over the deployment, at a median spacing of \fieldnum{1.00}\,h -- while their helium half is up to three hours
++old, and older when a helium block is rejected.
++
++\begin{table}[t]
++\caption{Calibration schedule of the heated channels in the budget window (18--24 May): number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
+ \label{tab:cal_schedule}
+@@ -420,11 +423,10 @@
+ 
+-A single missed zero-air block leaves a two-hour gap; a single missed helium
+-block leaves six. That asymmetry, not any difference in the measurements
+-themselves, is why the reflectivity is the reference that goes missing.
+-Matching the helium cadence to the zero-air cadence would bring the total
+-calibration duty from 1.20\,\% to 1.79\,\% and remove most of the uncharacterised
+-fraction. The case for it is coverage, not precision: Sect.~\ref{sec:6.2} showed that the
+-reflectivity error barely depends on gap length, so more frequent helium does
+-not make a well-covered record more accurate -- it makes an uncovered record
+-exist less often.
++A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected helium block
++removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the helium
++cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
++helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are
++rejected, which in the cold channel is mainly the light level (Table~\ref{tab:coverage_causes}). The case for it is
++redundancy and contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only
++weakly on interval length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much
++more accurate.
+ 
+--- a/sec7_field.tex
++++ b/sec7_field.tex
+@@ -7,4 +7,4 @@
+ 
+-The retrieval was developed for a two-channel thermal-dissociation broadband
+-cavity-enhanced absorption spectrometer of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a cell held at
++The retrieval is applied here to a thermal-dissociation broadband
++cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a cell held at
+ 180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl
+@@ -12,3 +12,4 @@
+ directly. Each channel measures the extinction of the same cavity geometry,
+-$d = 51.8$\,cm with $R_L = 1.0$, so the three differ in what has been converted
++$d = 51.8$\,cm with $R_L = 1.0$ (assumed, not measured; since $\alpha \propto R_L$ it enters as a
++multiplicative factor), so the three differ in what has been converted
+ to NO$_2$ upstream rather than in how the spectrum is formed. The sums of peroxy
+@@ -24,3 +25,6 @@
+ fourth-order baseline. The dispersion is 0.0481\,nm\,px$^{-1}$ and the
+-instrument line shape has a full width at half maximum of 0.683\,nm.
++instrument line shape of the heated channels has a full width at half maximum of 0.683\,nm (0.765--0.785\,nm in
++the ambient-temperature channel, Sect.~\ref{sec:4.1}). The field numbers of this paper were checked against a
++reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by $\pm$\fieldnum{0.25}\,\%, and are
++reported as first computed.
+ 
+@@ -30,3 +34,3 @@
+ ambient-temperature channel the shift is fixed at $-0.5$\,px and the squeeze at
+-zero (Sect.~\ref{sec:5.1}). The median fitted shift in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px.
++its identity value, i.e. no stretch (Sect.~\ref{sec:5.1}). The median fitted shift in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px.
+ 
+@@ -47,3 +51,3 @@
+ \begin{table}[t]
+-\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product.}
++\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product. Standard-deviation values are approximate, recombined from the channel values with $g' = \fieldnum{0.9524}$; robust-scale values are from the earlier evaluation with a channel factor of 0.82 and were not recomputed.}
+ \label{tab:noise_floor}
+@@ -53,6 +57,6 @@
+ \middlehline
+-measured 1$\sigma$ & \fieldnum{0.0676} & \fieldnum{0.0811}\,ppb \\
+-\textbf{detection limit, 3$\sigma$} & \textbf{\fieldnum{0.203}} & \textbf{\fieldnum{0.243}\,ppb} \\
++measured 1$\sigma$ & \fieldnum{0.0676} & $\approx$\fieldnum{0.086}\,ppb \\
++\textbf{detection limit, 3$\sigma$} & \textbf{\fieldnum{0.203}} & \textbf{$\approx$\fieldnum{0.257}\,ppb} \\
+ median value at a true zero & \fieldnum{$+0.0054$}\,ppb & \fieldnum{$+0.0054$}\,ppb \\
+-against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & \fieldnum{1.01} \\
++against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & $\approx$\fieldnum{1.06} \\
+ \bottomhline
+@@ -62,3 +66,3 @@
+ The channels turn out to be nearly uncorrelated, $r = \fieldnum{-0.093}$, so the
+-quadrature assembly would have come within \fieldnum{4.3}\,\% of the measured value. That
++quadrature assembly would have come within about \fieldnum{4}\,\% of the measured value. That
+ is a result of the measurement rather than a licence to skip it: the same
+@@ -71,7 +75,8 @@
+ spectral fit and a channel subtraction returns zero when the truth is zero,
+-to a twentieth of its own detection limit. This closes the chain end to end
+-and belongs with the verification of Sect.~\ref{sec:3.1} as much as here.
++to a twentieth of its own detection limit. This closes the additive chain end to end
++and belongs with the verification of Sect.~\ref{sec:3.1} as much as here; a zero test is blind to gain errors, such as
++the scale discrepancy of Sect.~\ref{sec:3.6}.
+ 
+-Read against the uncertainty column shipped with the product, the product's noise floor is covered:
+-\fieldnum{0.84} to \fieldnum{1.01} times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This is
++Read against the uncertainty column shipped with the product, the product's noise floor is roughly covered:
++\fieldnum{0.84} to about \fieldnum{1.06} times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This is
+ not in tension with Sect.~\ref{sec:4}, and the distinction matters enough to state. What is
+@@ -80,6 +85,6 @@
+ is what happens when a reference is wrong, and that is a different question
+-with a different answer: \fieldnum{1.33} to \fieldnum{1.84} times the same product-column figure of
+-\fieldnum{0.0806}\,ppb (Sect.~\ref{sec:4.4}), and for \fieldnum{42}\,\% of records larger than it. (Against the
+-fit-propagated $\sigma$ of \fieldnum{0.0501}\,ppb, the denominator of Sect.~\ref{sec:4.4}, the total is
+-\fieldnum{1.72} to \fieldnum{2.68} times that value.) A reported uncertainty can describe the
++with a different answer: \fieldnum{1.32} to \fieldnum{1.83} times the same product-column figure of
++\fieldnum{0.0806}\,ppb (Sect.~\ref{sec:4.4}). (Against the fit-propagated $\sigma$ of \fieldnum{0.0541}\,ppb, the denominator of
++Sect.~\ref{sec:4.4}, the total is \fieldnum{1.63} to \fieldnum{2.50} times that value, and in \fieldnum{46.1}\,\% of the \fieldnum{8832} budget records
++the structural change exceeds that record's own fit-propagated $\sigma$.) A reported uncertainty can describe the
+ photon noise of a product faithfully and still say nothing about the
+@@ -97,5 +102,5 @@
+ 
+-The three quantities Sect.~\ref{sec:6.1} asks for are not hypothetical additions. Applied to
+-this deployment, in the heated and the ambient-temperature channels alike,
+-they separate what the fit report catches from what it does not (Fig.~\ref{fig:6}).
++Applied retrospectively to this deployment, in the heated and the ambient-temperature channels alike, the
++quantities Sect.~\ref{sec:6.1} asks for separate what the fit report catches from what it does not
++(Fig.~\ref{fig:6}); the provenance fields among them are specified, not yet implemented.
+ 
+@@ -104,3 +109,3 @@
+ a reflectivity displaced by nine hours; the alkyl nitrate product moved by
+-\fieldnum{0.0999}\,ppb while the residual and the reported uncertainty changed by two parts
++\fieldnum{0.100}\,ppb while the residual and the reported uncertainty changed by two parts
+ in a thousand. Across the deployment the reported uncertainty of the ANs
+@@ -108,4 +113,4 @@
+ all \fieldnum{74\,667} records; the ratio varies by \fieldnum{2.8}\,\% between its 5th and 95th
+-percentiles), so the two are one witness, not two. Only the
+-reference-provenance field distinguishes these records.
++percentiles), so the two are one witness, not two. Among the proposed fields, the distance and in-range fields flag
++these records (Sect.~\ref{sec:6.1}) and only the provenance fields would name the cause.
+ 
+@@ -125,3 +130,4 @@
+ level; on 2 June only the ambient path lost light (\fieldnum{22}\,\% of the zero-air level),
+-which is why the reference stayed ordinary (Fig.~\ref{fig:6}).
++which is why the reference stayed ordinary (Fig.~\ref{fig:6}). The misfit threshold ($\chi^2 > 1.5$) is itself
++signal-dependent (Sect.~\ref{sec:4.1}); these excursions exceed it by an order of magnitude or more.
+ 
+@@ -136,5 +142,8 @@
+ uncertainty for a displaced amount, or reports an abnormal one without saying
+-why; one of the three context quantities -- termination state, distance to the
+-nearest reference, or reference provenance -- supplies what is missing. That
+-is the claim of this paper, applied to the product it was developed for.
++why. For the displacement and for the bound episode, one of the context quantities -- distance to the
++nearest reference, termination state, or reference provenance -- supplies what is missing. For the cold
++excursions the proximate cause, the raw light level, is not among the proposed fields. And the heated-channel
++NO$_2$ scale, low against the co-located NIER analyser by a factor of about \fieldnum{0.6} (Sect.~\ref{sec:3.6}), is invisible to
++the fit report and to every proposed field. The fields narrow the gap between what a fit reports and what is
++known about the record; they do not close it.
+ 
+--- a/sec8_conclusions.tex
++++ b/sec8_conclusions.tex
+@@ -5,4 +5,4 @@
+ 
+-We have presented Augur, an open retrieval for a two-channel thermal-dissociation
+-broadband cavity-enhanced absorption spectrometer, posed in the extinction domain
++We have presented Augur, an open retrieval applied here to a thermal-dissociation
++broadband cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, posed in the extinction domain
+ as a separable nonlinear least-squares problem and solved by variable projection.
+@@ -19,14 +19,15 @@
+ projected Jacobian agrees with finite differences, and Augur and QDOAS agree to
+-within the single-scan reported uncertainty -- where the fit can see. On the deployment the full chain returns \fieldnum{$+0.0054$}\,ppb
+-at a true zero, a twentieth of the product's three-sigma detection limit of
+-\fieldnum{0.203} to \fieldnum{0.243}\,ppb.
++within the single-scan reported uncertainty; on field spectra the two codes agree in NO$_2$ with
++$r^2 \ge \fieldnum{0.990}$ but differ in the heated-channel scale by \fieldnum{4}--\fieldnum{6}\,\%. On the deployment the full chain returns
++\fieldnum{$+0.0054$}\,ppb at a true zero, a twentieth of the product's three-sigma detection limit of
++\fieldnum{0.203} to about \fieldnum{0.257}\,ppb -- a test of the additive chain only.
+ 
+-The uncertainty a fit reports is correct where its model is: with white noise and
+-a complete forward model the reported sigma tracks the synthetic scatter to within
+-about ten per cent. Against the calibration chain it does not. For the
++The uncertainty a fit reports is correct where its model is: with white noise,
++a complete forward model and a well-identified shift the reported sigma tracks the synthetic scatter to within
++about ten per cent, and with a free shift the ratio reaches 1.32. Against the calibration chain it does not. For the
+ channel-difference product, perturbing the zero-air reference, the reflectivity and
+-the etalon as the operational pipeline builds them gives a structural contribution of \fieldnum{1.40} (robust scale) to
+-\fieldnum{2.49} (standard deviation) times the reported sigma, and a total uncertainty
+-\fieldnum{1.72} to \fieldnum{2.68} times what the fit reports for the same 60\,s record. None
+-of it enlarges the residual. The magnitudes are this instrument's; the mechanism,
++the etalon as the operational pipeline builds them gives, in the best-calibrated week, a structural contribution of \fieldnum{1.28} (robust scale) to
++\fieldnum{2.29} (standard deviation) times the reported sigma, and a total uncertainty
++\fieldnum{1.63} to \fieldnum{2.50} times what the fit reports for the same 60\,s records. None
++of the calibration-chain terms enlarges the residual. The magnitudes are this instrument's; the mechanism,
+ an intermittently measured reference interpolated to every record, is general.
+@@ -34,6 +35,6 @@
+ A second class of shortfall needs no new measurement, because the pipeline already
+-holds the information. Every operational base fit
+-of the ambient-temperature channel returns its shift at the bound, and in one
+-heated channel \fieldnum{123} records terminate at a bound once the zero-air reference
+-is perturbed; all were recorded as converged. The rate depends on the search box
++holds the information. With the cold shift bounded to $\pm 1$\,px in a sensitivity run, every base fit
++of the ambient-temperature channel returned its shift at the bound, and in the budget propagation
++\fieldnum{187} of \fieldnum{9034} records were excluded because a fit, unperturbed or perturbed, terminated at a bound; all were
++recorded as converged. The rate depends on the search box
+ and step limit and is not comparable across implementations, but the state is
+@@ -42,4 +43,7 @@
+ a reflectivity reference on a superseded time convention displaced the alkyl
+-nitrates by \fieldnum{1.43} times the structural budget while moving the residual and
+-the reported uncertainty by two parts in a thousand.
++nitrates by \fieldnum{1.44} times the structural budget while moving the residual and
++the reported uncertainty by two parts in a thousand. Neither the fit report nor the proposed fields see the
++largest error in this record: against a co-located NIER analyser the heated-channel NO$_2$ reads low by a
++factor of about \fieldnum{0.6} while the ambient-temperature channel agrees, a multiplicative discrepancy whose cause is
++unresolved (Sect.~\ref{sec:3.6}).
+ 
+@@ -47,10 +51,11 @@
+ fit uncertainty; the structural term for that record's own calibration context
+-rather than a campaign constant; and a context flag carrying the signed distance
+-to the nearest knot, the bracketing-interval length, an in-range flag, the number
++rather than a campaign constant; and a context flag carrying the distance
++to the nearest knot and its side, the bracketing-interval length, an in-range flag, the number
+ of adjacent blocks the quality gates rejected, and each reference's identity,
+ build time and time convention. Every
+-implementation already computes these, so no change of algorithm is needed. Two
+-operational recommendations follow. Because the reflectivity interpolation error
+-depends only weakly on gap length, knot noise is reduced by averaging more scans per
+-calibration block, not by running blocks more often. And quality gates should be
++implementation already computes all of these except the build time and time convention of a reference,
++which must be recorded when the reference is built; no change of algorithm is needed. Two
++operational points follow. Where the interpolation error is set by knot noise, as in the 180\,$^{\circ}$C channel,
++averaging more scans per calibration block rather than running blocks more often is the lever to test; the
++within-block evidence of Sect.~\ref{sec:6.2} is unfavourable and the decisive measurement has not been made. And quality gates should be
+ assessed as variance-removal devices, not classifiers, and reported with the
+@@ -59,4 +64,4 @@
+ The evidence is one instrument over one campaign. Two things should carry beyond
+-it: the reporting convention, which asks only for quantities every implementation
+-has, and the synthetic benchmark of 261 cases, which contains no retrieval code
++it: the reporting convention, which asks for quantities every implementation
++has or can record when a reference is built, and the synthetic benchmark of 261 cases, which contains no retrieval code
+ and no field data and so favours no implementation -- though its cross sections
+@@ -67,3 +72,3 @@
+ 
+-Two directions follow. The wavelength shift belongs to the spectrograph, not the
++Three directions follow. The wavelength shift belongs to the spectrograph, not the
+ air, so fitting one shift jointly across the spectra of a calibration block -- a separable problem with common nonlinear parameters -- should
+@@ -76,9 +81,5 @@
+ 
+-Third, at two interventions during the deployment the helium/zero-air contrast
+-changed by about \fieldnum{5} and \fieldnum{20}\,\% while ambient absorption did not; only
+-the helium-filled intensity moved, a multiplicative error the fit report cannot
+-see. Carrying the helium and zero-air intensities of each calibration block,
+-not only their ratio, and the raw light level of each spectrum -- which alone
+-accounts for all six ambient-temperature excursions of Sect.~\ref{sec:7.3} -- would
+-show such steps where they happen instead of leaving them to be inferred from the
+-product.
++Third, the raw light level of each spectrum -- which alone accounts for all six ambient-temperature
++excursions of Sect.~\ref{sec:7.3} -- and the helium and zero-air intensities of each calibration block, not only
++their ratio, should travel with the product, so that multiplicative steps in the calibration record can be seen
++where they happen instead of being inferred afterwards from the product.

@@ -129,10 +129,12 @@ $\theta$ and contribute nothing. Both terms of Eq.~(\ref{eq:6}) cost one triangu
 one multiplication by $\mathbf{Q}$; the derivation and the invariance of Eq.~(\ref{eq:6}) under
 the column scaling $\mathbf{S}$ are given in Appendix~\ref{app:B}.
 
-Retaining the second term matters for two reasons. It is what makes Eq.~(\ref{eq:6}) the exact
-derivative rather than the \citet{Kaufman_1975} approximation, and -- because it is exact -- it
-can be checked against finite differences to the level of round-off, which turns the
-Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.2}).
+Retaining the second term makes Eq.~(\ref{eq:6}) the exact
+derivative rather than the \citet{Kaufman_1975} approximation. The gradient of the objective is the same
+under both, because $\mathbf{A}^{+}\mathbf{r} = 0$; what the second term adds is the exact curvature and,
+because the derivative is exact, a check against finite differences to the level of round-off, which turns the
+Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.2}). We have not compared convergence
+rates of the two forms.
 
 \strong{Relation to existing DOAS implementations.} The separable structure is not new to
 DOAS; what is absent from the established treatments is the derivative of the linear
@@ -188,8 +190,9 @@ residual,
 \mathrm{Cov}(\mathbf{c},\theta)=\hat{\sigma}^2\,(\mathbf{J}^{\top}\mathbf{J})^{-1},
 \label{eq:9}
 \end{equation}
-and take the gas block \citep{OLeary_2013}. Because Eq.~(\ref{eq:8}) is the Schur
-complement of the gas block of Eq.~(\ref{eq:9}), the joint standard errors are never smaller
+and take the gas block \citep{OLeary_2013}. Because the inverse of the gas block of Eq.~(\ref{eq:9}) is the Schur complement
+$\mathbf{A}_{\mathbf{W}}^{\top}\mathbf{A}_{\mathbf{W}} - \mathbf{A}_{\mathbf{W}}^{\top}\mathbf{V}(\mathbf{V}^{\top}\mathbf{V})^{-1}\mathbf{V}^{\top}\mathbf{A}_{\mathbf{W}}$,
+which is never larger than the matrix inverted in Eq.~(\ref{eq:8}), the joint standard errors are never smaller
 than the conditional ones. Note that $\mathbf{V}$ holds $\mathbf{c}$ fixed and is
 therefore \emph{not} the projected Jacobian of Eq.~(\ref{eq:6}); using Eq.~(\ref{eq:6}) here would count the
 linear block twice. Both quantities are reported, never one overwriting the other, so
@@ -219,9 +222,8 @@ record admits, and that effect is large (Sects.~\ref{sec:5.2} and \ref{sec:7.3})
 Equation~(\ref{eq:4}) is solved on $\alpha$ scaled to order unity, and the linear coefficients
 are scaled back afterwards. This is not cosmetic. Ambient $\alpha$ in these windows is
 of order $10^{-7}\,\mathrm{cm^{-1}}$, so residuals and gradients are of order
-$10^{-15}$, while the step and gradient tolerances of a general-purpose least-squares
-routine default to $10^{-8}$ and are applied as absolute thresholds. The convergence
-test is then satisfied at the starting point: the solver returns after a single
+$10^{-15}$, while the default termination tolerances of a general-purpose least-squares
+routine are of order $10^{-8}$. On unscaled $\alpha$ the termination test can then be satisfied at the starting point: the solver returns after a single
 function evaluation, having moved the shift by nothing, and reports success. In one
 operational spectrum the unscaled fit exited with shift $+0.0000$\,px after
 $n_{\mathrm{fev}}=1$, while the same spectrum scaled by $10^{7}$ converged to
@@ -247,14 +249,15 @@ fitting is available and likewise unused here.
 \label{sec:2.9}
 
 The formulation of Sects.~\ref{sec:2.1}--\ref{sec:2.8} is not unusual, and Sect.~\ref{sec:3.3} shows that a conventional
-implementation solving the same problem returns the same concentrations. What
+implementation solving the same problem returns the same concentrations on synthetic spectra,
+and on the field record NO$_2$ amounts that agree closely but not exactly in scale. What
 differs is what can be asked of the retrieval afterwards, and the difference
 is one of cost rather than of possibility.
 
 Two questions are asked repeatedly in this paper. The first is what happens to
 the product when a calibration reference is changed: the structural budget of
 Sect.~\ref{sec:4} removes one zero-air knot, one reflectivity knot or one etalon component at
-a time and re-runs the retrieval over \fieldnum{8847} product records, once per knot and
+a time and re-runs the retrieval over the \fieldnum{9034} records of the budget window that have a reflectivity knot within 1\,h (\fieldnum{8847} after bound-terminated fits are excluded), once per knot and
 then for the pairwise and triple combinations. The second is what the
 objective looks like away from the converged point: the identifiability map of
 Sect.~\ref{sec:5} evaluates the projected objective on a grid of 160 points in the wavelength
@@ -276,5 +279,5 @@ thousand for the budget, one hundred and sixty per spectrum for the map.
 This is the sense in which the contribution of the software is architectural.
 It is not that the quantities in Sects.~\ref{sec:4} and \ref{sec:5} cannot be obtained elsewhere. It is
 that obtaining them has to be cheap enough to do by default, because the
-finding of Sect.~\ref{sec:5.4} -- a nine-hour error in a reference time base, invisible in
-the residual -- was not found by looking for it.
+error of Sect.~\ref{sec:5.4} -- a nine-hour error in a reference time base, invisible in
+the residual -- could be measured only by re-running the retrieval with the time base changed.

@@ -70,9 +70,12 @@ fourth-order baseline, the retrieved NO$_2$ is in error by 27\,\% at order 0 and
 normalised condition number rises from 14.9 to 33.8 across the sweep and the
 degrees of freedom fall from 543 to 535. On noisy realisations of the same
 spectrum the scatter of the retrieved NO$_2$ is 0.88 to 0.91 times the reported
-1$\sigma$ at order 2 and above. For white photon noise and a correct model, the
+1$\sigma$ at order 2 and above. For this configuration, with white photon noise and a correct model, the
 reported uncertainty is accurate to about ten per cent -- which is the
-baseline against which the structural terms of Sect.~\ref{sec:4} should be read (Fig.~\ref{fig:3}a, b).
+baseline against which the structural terms of Sect.~\ref{sec:4} should be read (Fig.~\ref{fig:3}a, b). It is a
+statement about one configuration: across the 13 synthetic instruments of Fig.~\ref{fig:1}a the white-noise ratio
+ranges from 0.91 to 1.32, and at nominal noise it lies between 1.22 and 1.32 in 9 of them, where the free
+wavelength shift adds scatter the covariance does not carry (Sect.~\ref{sec:3.4}).
 
 \begin{figure*}[t]
 \includegraphics[width=\textwidth]{figures/fig03.pdf}
@@ -162,8 +165,37 @@ recovers NO$_2$ to $9.5\times10^{-13}$ relative and QDOAS to $5.0\times10^{-3}$,
 its output resolution rather than by its algorithm; QDOAS recovers the shift
 to within 0.0042\,px. On 30 noisy realisations the two codes have
 root-mean-square relative errors of 0.0042 and 0.0045 against the same truth,
-and differ from each other by at most $5.7\times10^{-3}$ relative in NO$_2$. On field data,
-three channels over 53 days, the two agree with $r^2$ above \fieldnum{0.99}. In a
+and differ from each other by at most $5.7\times10^{-3}$ relative in NO$_2$. On the field record (53 days), with each spectrum's measured temperature and pressure used
+for the unit conversion and records selected by an NO$_2$-conditional $\chi^2$ envelope, the NO$_2$ amounts of the
+two codes agree with $r^2 \ge \fieldnum{0.990}$ in all three configurations (Table~\ref{tab:qdoas_field}). The agreement is
+not a scale identity: the Deming slope QDOAS/Augur is \fieldnum{1.039} in the cold configuration and \fieldnum{1.063} and
+\fieldnum{1.043} in the 180 and 300\,$^{\circ}$C configurations, where $r^2 = \fieldnum{1.000}$, so the two codes differ in the
+heated-channel NO$_2$ scale by \fieldnum{4}--\fieldnum{6}\,\% for a reason we have not identified. The weak absorbers agree less
+well (CHOCHO $r^2$ \fieldnum{0.889}--\fieldnum{0.959}, slope \fieldnum{0.81}--\fieldnum{1.19}; H$_2$O slope \fieldnum{1.04}--\fieldnum{1.38}).
+
+\begin{table}[t]
+\caption{Agreement of QDOAS with Augur on the field record, per retrieval configuration and species: number of
+records $n$ in the NO$_2$-conditional $\chi^2$ envelope, Deming slope QDOAS/Augur ($\lambda = 1$) and $r^2$. The
+unit conversion uses each spectrum's measured temperature and pressure.}
+\label{tab:qdoas_field}
+\begin{tabular}{lllll}
+\tophline
+configuration & species & $n$ & Deming slope & $r^2$ \\
+\middlehline
+cold & NO$_2$ & \fieldnum{36\,241} & \fieldnum{1.039} & \fieldnum{0.990} \\
+cold & CHOCHO & \fieldnum{36\,241} & \fieldnum{0.807} & \fieldnum{0.889} \\
+cold & H$_2$O & \fieldnum{36\,241} & \fieldnum{1.377} & \fieldnum{0.887} \\
+hot PNs (180\,$^{\circ}$C) & NO$_2$ & \fieldnum{73\,916} & \fieldnum{1.063} & \fieldnum{1.000} \\
+hot PNs (180\,$^{\circ}$C) & CHOCHO & \fieldnum{73\,916} & \fieldnum{1.195} & \fieldnum{0.914} \\
+hot PNs (180\,$^{\circ}$C) & H$_2$O & \fieldnum{73\,916} & \fieldnum{1.042} & \fieldnum{0.974} \\
+hot ANs (300\,$^{\circ}$C) & NO$_2$ & \fieldnum{74\,539} & \fieldnum{1.043} & \fieldnum{1.000} \\
+hot ANs (300\,$^{\circ}$C) & CHOCHO & \fieldnum{74\,539} & \fieldnum{1.054} & \fieldnum{0.959} \\
+hot ANs (300\,$^{\circ}$C) & H$_2$O & \fieldnum{74\,539} & \fieldnum{1.038} & \fieldnum{0.981} \\
+\bottomhline
+\end{tabular}
+\end{table}
+
+In a
 larger test with 300 realisations in each of three noise conditions, the
 standard deviation of the error normalised by the reported uncertainty is 0.97
 to 1.05 for both codes when they fit the same model, and started from zero both
@@ -171,11 +203,11 @@ recover true shifts between $-7$ and $+7$\,px with no miss larger than a pixel
 (Fig.~\ref{fig:3}d, e). Switching on Augur's etalon terms in the narrow window doubles the
 scatter there -- a choice of model, not a property of the solver.
 
-The conclusion drawn from this in Sect.~\ref{sec:2.9} is the one that matters for the rest of
-the paper: the retrieved concentrations are not in dispute. Where the two
-codes diverge -- the wavelength shift in the cold window, Sect.~\ref{sec:5.1} -- they diverge
-because the data do not determine the quantity, not because one of them is
-wrong.
+The conclusion drawn from this in Sect.~\ref{sec:2.9} is therefore narrower than identity: on
+synthetic spectra the two codes return the same concentrations, and on field spectra they agree in NO$_2$
+to within a scale difference of a few per cent. Where they diverge most -- the wavelength shift in the cold
+window, and with it the weak absorbers there (Sect.~\ref{sec:5.1}) -- the data do not determine the shift, so
+neither code's value is established by its fit.
 
 \subsection{A benchmark that others can run}
 \label{sec:3.4}
@@ -224,31 +256,35 @@ measure is not one any implementation is expected to cover.
 \subsection{Relative scale between the two hot channels}
 \label{sec:3.5}
 
-%% AUTHOR CHECK (2026-09-28): 14.75/11.97 = 1.2322 and 71.57/58.16 = 1.2306, not 1.2278/1.2276 as stated;
-%% the 0.02 % agreement and 1/1.2277 = 0.8145 depend on the stated ratios. Transcribed unchanged from the draft -- see README.
 The alkyl nitrate product is a difference between two channels, so their
-relative scale enters it directly. NO$_2$ was injected into both channels at two
-concentration levels on 2026-08-10/11. At the lower plateau the channels read
-14.75 and 11.97\,ppb and at the higher 71.57 and 58.16\,ppb, ratios of 1.2278
-and 1.2276 -- agreement to 0.02\,\% across a fivefold change in concentration.
-A regression over all 419 records of the experiment gives a slope of 0.81666
-with $r^2$ 0.9998, against $1/1.2277 = 0.8145$ from the plateau ratios.
+relative scale enters it directly. NO$_2$ was injected into both heated channels, with both ovens at their
+operating temperatures, at two concentration steps on 2026-08-10/11. The steps did not equilibrate (the
+delivery line was still passivating), so only the ratio between the channels is used. In the original
+processing the median of the per-record ratios was 1.2278 at the lower step and 1.2276 at the higher (the
+median channel readings were 14.75 and 11.97\,ppb, and 71.57 and 58.16\,ppb; ratios of these medians are 1.2322
+and 1.2306), and an origin regression over the 58 one-minute means of one file gives a slope of 0.81666
+with $r^2$ 0.9998. Reprocessed with the current code, block 2053 reads 1.239 times block 4101
+(interquartile range 1.231--1.255, $n = 41$ records with block 4101 above 20\,ppb).
 
-This establishes that the relative scale is a constant over the range tested,
-which is what the difference product requires. It does not establish the
-absolute recovery of either channel: the mapping from the mass-flow setting to
-the delivered concentration is not resolved, and the two plateaus imply
-recovery multipliers differing by a factor of 2.4. The cause of the offset
-between the channels -- optical and geometric, or an artefact of the heated
-cells -- is also not separated by this experiment, because both cells were at
-their operating temperatures throughout.
+This establishes that the relative scale is constant over the range tested. It does not give the scale
+used in the campaign product: the laboratory ratio describes the calibration state of August, and the
+product uses $g' = \fieldnum{0.952}$ for 18 May--5 June, from a field injection. Nor does it establish the absolute
+recovery of either channel, or separate optical from thermal causes of the offset between the channels,
+because both cells were at their operating temperatures throughout.
 
 \subsection{What is not verified here}
 \label{sec:3.6}
 
-No comparison against a co-located reference instrument is presented; the AMT
-scope is the retrieval, and the instrument intercomparison belongs with the
-science analysis. No absolute accuracy is claimed. The verification of Sects.~\ref{sec:3.1}
+A comparison with a co-located reference analyser exists, and it bounds what this paper can claim.
+Against the NIER air-quality-monitoring NO$_2$ analyser at the site (molybdenum-converter type), the
+operational NO$_2$ of the heated channels has ordinary-least-squares gains of \fieldnum{0.57} (180\,$^{\circ}$C) and \fieldnum{0.65}
+(300\,$^{\circ}$C), while the ambient-temperature channel has \fieldnum{0.92}--\fieldnum{1.00}; the median ratio of heated to
+ambient-temperature NO$_2$ is \fieldnum{0.72}, although the heated channels measure NO$_2$ plus thermally produced NO$_2$
+and should read at least as high. A laboratory injection with the ovens at 300 and 180\,$^{\circ}$C gave a block-2053
+sensitivity of at least 1.08 relative to the cylinder, so oven temperature alone does not explain the
+discrepancy, and its cause is unresolved. It is a multiplicative error that leaves the residual, the reported
+uncertainty and every context field proposed in Sect.~\ref{sec:6} unchanged -- an instance of the class of error
+this paper is about, not a property of the spectral fit. No absolute accuracy is claimed. The verification of Sects.~\ref{sec:3.1}
 and \ref{sec:3.3} is of the retrieval against its own forward model and against another
 implementation of that model, which bounds implementation error but not model
 error -- and model error is precisely what Sect.~\ref{sec:3.4} measures on the benchmark.

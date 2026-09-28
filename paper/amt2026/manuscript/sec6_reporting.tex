@@ -13,8 +13,8 @@ the campaign: the knot gate (Sect.~\ref{sec:6.3}) and the coverage fields
 (Sect.~\ref{sec:6.4}). The reporting convention of Sect.~\ref{sec:6.1} is implemented in
 part -- the termination state, the distance to the nearest knot and the identity of
 the reference file are exported, while the build time and time convention of each
-reference are specified for implementation -- and the block recommendation of
-Sect.~\ref{sec:6.2} follows from a measurement reported here.
+reference are specified for implementation -- and the question of block length in
+Sect.~\ref{sec:6.2} is left open by the measurements reported here.
 
 \subsection{Three numbers per retrieval, not one}
 \label{sec:6.1}
@@ -51,8 +51,9 @@ the time convention the reference was built under & a correction applied upstrea
 \end{table}
 
 The last field is there because of Sect.~\ref{sec:5.4}, and it is worth being exact about
-what it would and would not have caught. The instrument's clock was wrong by
-nine hours for twelve days of the campaign; that is a hardware fact, and no
+what it would and would not have caught. The heated-channel clock ran on local time until 29 May
+and on UTC thereafter, so for twelve days of the campaign the raw time stamps were nine hours off the
+convention of the time axis; that is a property of the raw record, and no
 provenance field detects it. It was detected the way such things are detected
 -- against an external time reference -- and a correction was added to the
 raw-data reader two months after the deployment ended.
@@ -117,48 +118,45 @@ references and responds to averaging. A term with $s \ll 0.7$ is concentrated
 in a few records, where averaging is useless and detection is everything.
 
 This is not an interpretation of $s$ but a prediction from it, and it can be
-checked. Ordering the \fieldnum{146} hours by their contribution to each term's variance gives Table~\ref{tab:shape_remedy}.
+checked. Ordering the \fieldnum{155} hours of the budget window by their contribution to each term's variance gives Table~\ref{tab:shape_remedy}.
 
 \begin{table}[t]
-\caption{Concentration in time of each structural term over the hours of the budget window: shape statistic $s$; number (and fraction) of hours holding 90\,\% of the term's variance; the number of contiguous runs those hours form, with the number expected for the same count of hours drawn at random; share of the variance on the standard-deviation basis; and the remedy the shape indicates.}
+\caption{Concentration in time of each structural term over the hours of the budget window (clock-aligned basis of Table~\ref{tab:2}): shape statistic $s$; number (and fraction) of hours holding 90\,\% of the term's variance; the number of contiguous runs those hours form, with the number expected for the same count of hours drawn at random; share of the variance on the standard-deviation basis; and the remedy the shape indicates.}
 \label{tab:shape_remedy}
 \begin{tabular}{ll>{\raggedright\arraybackslash}p{0.17\textwidth}p{0.17\textwidth}p{0.12\textwidth}p{0.25\textwidth}}
 \tophline
 term & $s$ & hours holding 90\,\% of the variance & contiguous runs (random expectation) & share of variance (SD) & remedy \\
 \middlehline
-$I_0$ & \fieldnum{0.73} & \fieldnum{60} (\fieldnum{41}\,\%) & \fieldnum{23} (\fieldnum{36}) & \fieldnum{41}\,\% & longer calibration blocks (Sect.~\ref{sec:6.2}) \\
-$R$ & \textbf{\fieldnum{0.27}} & \textbf{\fieldnum{21} (\fieldnum{14}\,\%)} & \textbf{\fieldnum{8} (\fieldnum{18})} & \textbf{\fieldnum{56}\,\%} & detect and flag intervals (Sect.~\ref{sec:6.3}) \\
-etalon $f$ & \fieldnum{0.97} & \fieldnum{112} (\fieldnum{77}\,\%) & \fieldnum{23} (\fieldnum{27}) & \fieldnum{3}\,\% & fit $f$ per scan, or model it \\
+$I_0$ & \fieldnum{0.73} & \fieldnum{63} (\fieldnum{41}\,\%) & \fieldnum{24} (\fieldnum{38}) & \fieldnum{45}\,\% & longer calibration blocks (untested, Sect.~\ref{sec:6.2}) \\
+$R$ & \textbf{\fieldnum{0.32}} & \textbf{\fieldnum{26} (\fieldnum{17}\,\%)} & \textbf{\fieldnum{12} (\fieldnum{22})} & \textbf{\fieldnum{52}\,\%} & detect and flag intervals (Sect.~\ref{sec:6.3}) \\
+etalon $f$ & \fieldnum{0.98} & \fieldnum{118} (\fieldnum{76}\,\%) & \fieldnum{26} (\fieldnum{29}) & \fieldnum{3}\,\% & fit $f$ per scan, or model it \\
 \bottomhline
 \end{tabular}
 \end{table}
 
 The ordering by $s$ is the ordering by concentration, and the two-hour
-interval 05-20 13--14 UTC alone holds \fieldnum{40}\,\% of the reflectivity term's variance.
+interval from 23:00 UTC on 18 May to 01:00 UTC on 19 May alone holds \fieldnum{37}\,\% of the reflectivity term's variance.
 The contiguous-run counts separate concentration from clumping: the
 reflectivity hours form far fewer runs than the same number of hours drawn at
 random, so they are episodes rather than scattered outliers and a flag can
 address them. The etalon hours are indistinguishable from random, which is
-the signature of a term no flag will help. On the cold channel the same
-pattern is sharper still: five hours hold 90\,\% of the reflectivity variance
-and $s = \fieldnum{0.05}$.
+the signature of a term no flag will help.
 
 Read on the robust scale the ordering of the first two reverses -- $I_0$
-carries \fieldnum{76}\,\% of the variance and $R$ only \fieldnum{15}\,\% -- which is why the two scales
+carries \fieldnum{74}\,\% of the single-term quadrature sum and $R$ only \fieldnum{17}\,\% -- which is why the two scales
 are reported side by side in Table~\ref{tab:2}. A term that is small for a typical
 record and largest in total is exactly the one a campaign-mean uncertainty
 hides.
 
-\subsection{Calibration blocks: more scans, not more blocks}
+\subsection{Calibration blocks: interval length and scans per block}
 \label{sec:6.2}
 
 The natural response to an interpolation error is to interpolate over shorter
-intervals. For this instrument that is the wrong lever. The reflectivity interpolation error depends only weakly on gap length:
-tripling the interval from 2 to 6\,h was measured to increase the error from
-\fieldnum{0.87}\,\% to \fieldnum{1.00}\,\% in hot PNs and from \fieldnum{2.05}\,\% to \fieldnum{2.73}\,\% in hot ANs.
-The error is not set by the curvature the interpolant fails to
-follow; it is set by the noise on the knots themselves. Halving the interval
-buys almost nothing, at the cost of halving the ambient duty cycle.
+intervals. How much that buys depends on the channel. Tripling the reflectivity interval from 2 to 6\,h was
+measured to increase the interpolation error from \fieldnum{0.87}\,\% to \fieldnum{1.00}\,\% in hot PNs and from \fieldnum{2.05}\,\% to
+\fieldnum{2.73}\,\% in hot ANs. In the 180\,$^{\circ}$C channel the error is set mostly by the noise on the knots, and a
+shorter interval would buy little; in the 300\,$^{\circ}$C channel the interval carries curvature (Table~\ref{tab:splithalf_loo}),
+and shorter intervals would help.
 
 What does act on knot noise is the number of scans averaged into each
 calibration block. Splitting each block into contiguous quarters separates the
@@ -202,7 +200,9 @@ Doubling the number of scans averaged reduces the scatter by \fieldnum{7}\,\% in
 channel, against the 29\,\% that independent scans would give. Most of what a
 block mean contains is therefore not independent between scans, and the last
 row says so directly: cutting the same block contiguously rather than in
-alternation more than doubles its apparent scatter in ANs. A monotonic trend
+alternation more than doubles its apparent scatter in ANs. These are spectral-domain statistics: in the
+NO$_2$ amount, contiguous and interleaved halves give similar knot noise (Sect.~\ref{sec:4.2}), so most of this
+correlated structure is evidently absorbed by the baseline polynomial before it reaches the gas columns. A monotonic trend
 across the 32\,s is present in both channels but explains little of this -- see
 below.
 
@@ -237,7 +237,7 @@ Even under the white-noise assumption the return would be modest, and it is
 worth stating why before anyone spends duty cycle on it. Halving the zero-air
 knot noise removes three quarters of the $I_0$ variance, but that term carries
 \fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
-\fieldnum{0.1245} to \fieldnum{0.1012}\,ppb -- \fieldnum{19}\,\%, not half. The measured exponents put even that
+\fieldnum{0.1236} to \fieldnum{0.1008}\,ppb -- \fieldnum{18.5}\,\%, not half. The measured exponents put even that
 out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
 
 \begin{table}[t]
@@ -247,10 +247,10 @@ out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each
 \tophline
  & $\Sigma$ANs structural (SD), best attainable & of operational & status \\
 \middlehline
-operational & \fieldnum{0.1245}\,ppb & 1.00 & measured \\
-$\times 4$ blocks only & \fieldnum{0.1012} & \fieldnum{0.81} & assumes $N^{-1/2}$; not supported below $N$ \\
-flag bad $R$ intervals only & \fieldnum{0.0911} & \fieldnum{0.73} & assumes a perfect detector \\
-\textbf{both} & \textbf{\fieldnum{0.0552}} & \textbf{\fieldnum{0.44}} & both assumptions \\
+operational & \fieldnum{0.1236}\,ppb & 1.00 & measured \\
+$\times 4$ blocks only & \fieldnum{0.1008} & \fieldnum{0.82} & assumes $N^{-1/2}$; not supported below $N$ \\
+flag bad $R$ intervals only & \fieldnum{0.0901} & \fieldnum{0.73} & assumes a perfect detector \\
+\textbf{both} & \textbf{\fieldnum{0.0547}} & \textbf{\fieldnum{0.44}} & both assumptions \\
 \bottomhline
 \end{tabular}
 \end{table}
@@ -258,13 +258,13 @@ flag bad $R$ intervals only & \fieldnum{0.0911} & \fieldnum{0.73} & assumes a pe
 These are ceilings, not forecasts, and the way they are computed needs stating
 because Sect.~\ref{sec:4.3} forbids the obvious method. Removing a term's contribution from a
 total is a quadrature operation, and the joint propagation is not a quadrature
-sum -- here it exceeds one by \fieldnum{7.1}\,\%, \fieldnum{0.1245}\,ppb against \fieldnum{0.1162}. The rows are
+sum -- here it exceeds one by \fieldnum{7.6}\,\%, \fieldnum{0.1236}\,ppb against \fieldnum{0.1149}. The rows are
 therefore evaluated in quadrature space and rescaled by that measured ratio,
 which makes the operational row reproduce the measured joint exactly and
 applies the same correction to the others. The residual assumption is that the
 ratio survives shrinking a term, which it will not do exactly, because the
-ratio is a property of the mixture of distribution shapes and shrinking one
-term changes the mixture.
+ratio depends on the covariance and interaction of the terms (Sect.~\ref{sec:4.3}), and shrinking one
+term changes them.
 
 The ratio column is unaffected by any of this: the rescaling factor cancels,
 so the relative ordering is the same whether the calculation is done in
@@ -368,8 +368,8 @@ of cold records in gaps longer than two hours, against \fieldnum{11.03}\,\% obse
 rejections arrive in runs: the worst cold gap, \fieldnum{11.8}\,h, is eleven consecutive
 rejected pairs, which even at a 40\,\% independent rejection rate would be
 expected 0.03 times in the campaign. This is the episodic structure Sect.~\ref{sec:6.1a}
-found in the reflectivity variance itself -- \fieldnum{21} of \fieldnum{146} hours carrying 90\,\% of
-it, in \fieldnum{8} contiguous runs where \fieldnum{18} would be expected at random -- seen from the
+found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying 90\,\% of
+it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the
 calibration side.
 
 That changes what denser helium blocks buy. The argument for them is not
@@ -401,11 +401,14 @@ equivalent to interpolating across an hour. They are therefore reported with
 the context flag of Sect.~\ref{sec:6.1} set, and excluded from any statistic that assumes a
 characterised uncertainty.
 
-The cause is in the schedule rather than in the instrument. In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is measured
-every hour and helium only every three (Table~\ref{tab:cal_schedule}).
+In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is
+measured every hour and helium only every three (Table~\ref{tab:cal_schedule}). Each reflectivity knot is formed from
+one zero-air block and the most recent helium block that passed the quality gates, so the knots are hourly --
+\fieldnum{1261} over the deployment, at a median spacing of \fieldnum{1.00}\,h -- while their helium half is up to three hours
+old, and older when a helium block is rejected.
 
 \begin{table}[t]
-\caption{Calibration schedule of the heated channels over the deployment: number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
+\caption{Calibration schedule of the heated channels in the budget window (18--24 May): number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
 \label{tab:cal_schedule}
 \begin{tabular}{lllll}
 \tophline
@@ -418,15 +421,14 @@ helium & \fieldnum{54} & 34 scans / 32\,s & 3.00\,h & 0.31\,\% \\
 \end{tabular}
 \end{table}
 
-A single missed zero-air block leaves a two-hour gap; a single missed helium
-block leaves six. That asymmetry, not any difference in the measurements
-themselves, is why the reflectivity is the reference that goes missing.
-Matching the helium cadence to the zero-air cadence would bring the total
-calibration duty from 1.20\,\% to 1.79\,\% and remove most of the uncharacterised
-fraction. The case for it is coverage, not precision: Sect.~\ref{sec:6.2} showed that the
-reflectivity error barely depends on gap length, so more frequent helium does
-not make a well-covered record more accurate -- it makes an uncovered record
-exist less often.
+A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected helium block
+removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the helium
+cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
+helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are
+rejected, which in the cold channel is mainly the light level (Table~\ref{tab:coverage_causes}). The case for it is
+redundancy and contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only
+weakly on interval length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much
+more accurate.
 
 More generally, 1.2\,\% is a small fraction of the measurement time to spend on
 knowing the instrument, and it is the binding constraint on none of the

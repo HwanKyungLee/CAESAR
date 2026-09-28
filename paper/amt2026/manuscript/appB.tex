@@ -113,6 +113,7 @@ a retrieval which reports $\sigma^2(\Phi^{\top}\Phi)^{-1}$ -- the covariance of
 the linear parameters at a fixed $\theta$ -- is reporting a quantity that is
 correct only if $\theta$ was known rather than fitted, and the difference is
 not small when $\theta$ is poorly determined. Augur forms the full
-$(J^{\top}J)^{-1}$ and reports both blocks; the identifiability statistics of
-Sect.~\ref{sec:5} are read from the $\theta$ block, which is available at no extra cost once
-the projected Jacobian of Appendix~\ref{app:B2} has been formed.
+$(J^{\top}J)^{-1}$ and reports both blocks; the $\theta$ block is available at no extra cost once
+the projected Jacobian of Appendix~\ref{app:B2} has been formed. It describes only the local curvature at the
+solution, which is why the identifiability statistics of Sect.~\ref{sec:5} are taken from profile scans of the
+projected objective rather than from this block.

@@ -62,22 +62,22 @@ concentration is computed and is discarded between one step and the next. It
 costs nothing to keep, and keeping it turns a silent failure into a flagged
 one.
 
-We present Augur, an open retrieval written for a two-channel
-thermal-dissociation broadband cavity-enhanced absorption spectrometer
-measuring NO$_2$, total peroxy nitrates and total alkyl nitrates, and built so
+We present Augur, an open retrieval applied here to a
+thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
+ambient-temperature cavity measuring NO$_2$, total peroxy nitrates and total alkyl nitrates, and built so
 that both kinds of question can be asked cheaply enough to ask routinely. The
 retrieval is posed in the extinction domain as a separable nonlinear
 least-squares problem and solved by variable projection. We verify it against
 synthetic truth and against an independent DOAS implementation, measure the
 structural terms it cannot report -- which together exceed the sigma it
-reports by a factor of \fieldnum{1.7} to \fieldnum{2.7} -- map the identifiability of its
+reports by a factor of \fieldnum{1.6} to \fieldnum{2.5} in the best-calibrated week -- map the identifiability of its
 nonlinear parameters, and describe twelve days of
 operational product built from a calibration reference that a later correction
-had made stale, an error \fieldnum{1.43} times that budget which changed the residual and the reported
-uncertainty by two parts in a thousand while moving the concentration by two
+had made stale, an error \fieldnum{1.44} times that budget which changed the residual and the reported
+uncertainty by two parts in a thousand while moving the 300\,$^{\circ}$C channel's concentration by two
 reported standard deviations. We
-propose a small reporting convention that would have surfaced it at the first
-reprocessing and named its cause,
+propose a small reporting convention whose distance fields would have flagged it at the first
+reprocessing and whose provenance fields, once implemented, would name its cause,
 and release a synthetic benchmark with which any DOAS implementation can
 measure the same quantities on the same cases.
 
@@ -86,7 +86,8 @@ concluded about instruments in general. Two things are intended to carry
 beyond it. The benchmark of Sect.~\ref{sec:3.4} is built from cross sections and a wavelength
 calibration but contains no retrieval code and no field data, so the measurements it supports do not depend on any retrieval implementation, Augur included; its cross sections, fitting windows and wavelength grid are those of one instrument, and carrying it to another requires that instrument's own. And
 the reporting convention of Sect.~\ref{sec:6} asks for quantities that every implementation
-already computes, so adopting it requires no change of algorithm. Where a
+already computes, apart from the build time and time convention of each reference, which must be recorded when the
+reference is built; adopting it requires no change of algorithm. Where a
 result does depend on this instrument -- the magnitude of the reflectivity
 term, the behaviour of the cold channel -- we say so.
 
@@ -103,8 +104,8 @@ divided by the uncertainty the fit reports. Grey points: white noise on syntheti
 13 synthetic instruments spanning line-shape widths of 0.5--2 times nominal, windows of 0.7--1.3 times, pixel
 dispersions of 0.7--1.4 times, signal-to-noise over a factor of 32 and fitted polynomial orders 2--6. Orange points:
 the same instruments with correlated (AR(1), $\rho = 0.5$) noise. Bar: the field record, for which the
-calibration-chain budget of Sect.~\ref{sec:4} gives a total uncertainty \fieldnum{1.72} (robust scale) to \fieldnum{2.68} (standard
-deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s). \textbf{(b)} Termination state of \fieldnum{8446} operational
+calibration-chain budget of Sect.~\ref{sec:4} gives a total uncertainty \fieldnum{1.63} (robust scale) to \fieldnum{2.50} (standard
+deviation) times the fit-propagated $\sigma$ ($n = \fieldnum{8847}$ records of 60\,s; the bar in the panel is drawn at the superseded values 1.72--2.68 and awaits re-rendering). \textbf{(b)} Termination state of \fieldnum{8446} operational
 scans with the optimiser's step limit on, as operated, and off; the median retrieved NO$_2$ of the same scans is
 given below the bars. \textbf{(c)} 95\,\% profile-likelihood intervals of the wavelength shift for 12 spectra in the cold
 configuration, from the profiled objective scanned over $\pm6$\,px (shaded), with $\mathrm{RSS}/\mathrm{RSS}_{\min} \le 1 + F_{0.95}(1, n-P)/(n-P)$

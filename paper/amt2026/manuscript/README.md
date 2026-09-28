@@ -3,9 +3,11 @@
 *Augur: an α-domain variable-projection DOAS retrieval, and what its diagnostics reveal that standard fit reports do not*
 (Atmospheric Measurement Techniques, research article). Assembled 2026-09-28 from the section drafts listed below.
 
-**Status (2026-09-28, after the consistency pass).** All figures and tables are numbered, captioned and cited in order; all nine stale cross-reference items (the seven README entries, of which two covered two sites each) are fixed; implemented-vs-specified wording matches the code (Sect. 7). Four author decisions remain (Sect. 8).
+**Status (2026-09-28, after the Phase 1+2 revision).** Numbers were replaced and audit contradictions/overclaims fixed per the claim audit and recomputation report of 2026-09-28; every change is listed in `CHANGES_2026-09-28_phase12.md` (unresolved items in its Sect. 3). Phase 3 (restructuring) has not started.
 
-**Field numbers.** Field numbers were checked against the reprocessing on 2026-09-28 and did not change (check run by the lead session; report at the repository root, `C:\GHL\CAESAR\docs\재처리_점검_2026-09-28.md`, not part of this folder); all six previously missing references are now in `references.bib`, and `main.pdf` builds with no undefined citations or references.
+**Earlier status (2026-09-28, after the consistency pass).** All figures and tables are numbered, captioned and cited in order; all nine stale cross-reference items (the seven README entries, of which two covered two sites each) are fixed; implemented-vs-specified wording matches the code (Sect. 7). Four author decisions remain (Sect. 8).
+
+**Field numbers.** Field numbers were checked against the reprocessing on 2026-09-28 and did not change at that step; they were then revised in the Phase 1+2 revision (Sect. 4) (check run by the lead session; report at the repository root, `C:\GHL\CAESAR\docs\재처리_점검_2026-09-28.md`, not part of this folder); all six previously missing references are now in `references.bib`, and `main.pdf` builds with no undefined citations or references.
 
 ## 1. Template route
 
@@ -19,8 +21,8 @@ Copernicus LaTeX package 7.16, downloaded from `publications.copernicus.org/Cope
 latexmk -pdf main.tex          # or: pdflatex main; bibtex main; pdflatex main; pdflatex main
 ```
 `main.pdf` in this folder was built on 2026-09-28 with TinyTeX 2026.09 (pdfTeX + BibTeX): **0 errors, 0 undefined
-references or citations, 0 overfull boxes, 0 BibTeX warnings**. The only remaining warning is "Text page 11 contains only
-floats" (Fig. 2, a full-page float). 43 pages (rebuilt 2026-09-28 after the consistency pass of Sect. 7).
+references or citations, 0 overfull boxes, 0 BibTeX warnings**. The only remaining warning is "Text page 12 contains only
+floats" (Fig. 2, a full-page float). 46 pages (rebuilt 2026-09-28 after the Phase 1+2 revision; 43 before).
 
 copernicus.cls needs a few packages that a minimal TeX install lacks: `cancel`, `supertabular`, `newunicodechar`,
 `accents`, `subfloat`, `fontawesome5`, `fontawesome` (v4, for `fontawesomesymbols-*.tex`), `regexpatch`, and `t5enc.def`
@@ -38,8 +40,8 @@ from `vntex`. With TeX Live/MiKTeX: `tlmgr install cancel supertabular newunicod
 | `abstract.tex` | Abstract | 초록 v5 (2026-09-21, 09-27 edits) |
 | `sec1_intro.tex` | 1 Introduction (+ Fig. 1 float) | §1 v1 |
 | `sec2_retrieval.tex` | 2.1–2.8, 2.9 | §2 v1; §2.9 from §2.9+§3 v1 |
-| `sec3_verification.tex` | 3.1–3.6, Table 1 (+ Fig. 2, Fig. 3 floats) | §2.9+§3 v1 |
-| `sec4_budget.tex` | 4.1–4.6, Tables 3–6 (budget = Table 4, `tab:2`), Fig. 4 | §4 v16 |
+| `sec3_verification.tex` | 3.1–3.6, Tables 1–3 (Table 3 = new QDOAS field table, `tab:qdoas_field`) (+ Fig. 2, Fig. 3 floats) | §2.9+§3 v1 |
+| `sec4_budget.tex` | 4.1–4.6, Tables 4–7 (budget = Table 5, `tab:2`), Fig. 4 | §4 v16 |
 | `sec5_pipeline.tex` | 5.1–5.4, Fig. 5 | §5 v6 |
 | `sec6_reporting.tex` | 6.1, 6.1.1 (draft "6.1a"), 6.2–6.4 | §6 v1 |
 | `sec7_field.tex` | 7.1–7.3, Fig. 6 | §7 v1 |
@@ -47,176 +49,247 @@ from `vntex`. With TeX Live/MiKTeX: `tlmgr install cancel supertabular newunicod
 | `availability.tex` | Code and data availability | availability draft (2026-09-27) |
 | `appB.tex` | Appendix: projected Jacobian, column scaling, joint covariance | 부록 B v1 |
 | `references.bib` | bibliography | augur_AMT_references.bib (cleaned, see Sect. 6) |
+| `CHANGES_2026-09-28_phase12.md` / `.diff` | Phase 1+2 changelog (edit table, kept/removed numbers, unresolved) and unified diff against the pre-revision copy | — |
 | `figures/fig01.pdf … fig06.pdf` | copies of amt_fig1_thesis_v2, amt_fig2_representative_fits, amt_fig3_validation, amt_fig4_error_budget, amt_fig5_identifiability, amt_fig7_field_flags (= Fig. 6) | artifact store |
 
-## 4. Field numbers: frozen
+## 4. Field numbers: revised 2026-09-28 (Phase 1+2)
 
-The field-record values in the drafts were **checked on 2026-09-28 against the reprocessing (hot pressure-sensor pairing fix,
-cold R(t) without the three KRISS-injection knots) and did not change**: the pairing fix moves channel NO$_2$ by only
-−0.25 %/+0.25 % and the other checks are below the reported precision (see `docs/재처리_점검_2026-09-28.md`).
-All values below are therefore final as transcribed. The `\fieldnum{}` macro is kept (it prints its argument unchanged) so that
-any later update remains a search-and-replace.
+The field-record values were first checked on 2026-09-28 against the reprocessing (hot pressure-sensor pairing fix,
+cold R(t) without the three KRISS-injection knots), which moves channel NO$_2$ by only −0.25 %/+0.25 % (see `docs/재처리_점검_2026-09-28.md`).
+**They were then replaced where the claim audit and the recomputation report of 2026-09-28 gave new values** (clock-aligned R(t),
+g′ = 0.9524, the 9034/187/8847 budget population, denominator 0.0541 ppb). Every replacement, and every number kept with an explicit
+basis, weakened or removed, is listed in `CHANGES_2026-09-28_phase12.md` (full line diff: `CHANGES_2026-09-28_phase12.diff`).
+The `\fieldnum{}` macro is kept (it prints its argument unchanged; `\fielddrafttrue` colours it) so that any later update remains a search-and-replace.
 
 Wrapping rule used: every numeral that comes from the 2026 field record (ppb values, record/block/hour counts, percentages of
-records, budget-table (Table 4, draft "Table 2") / Fig. 4 values, ratios and shape statistics derived from them, slopes, correlation coefficients,
+records, budget-table (now Table 5, draft "Table 2") / Fig. 4 values, ratios and shape statistics derived from them, slopes, correlation coefficients,
 §5.4 and §7.3 statistics). **Not wrapped:** Sect. 3 synthetic and laboratory numbers (including the §3.5 injection
 experiment), Appendix B, the KRISS cylinder-injection results in §5.1 (−0.10/−0.15 px, 9.3/3.6 ppb, 39 %/7.5 %/2.0 %,
 0.06 px), instrument/configuration constants (windows, orders, bounds, N = 34, T = 32 s, cadences, duty cycles, d, R_L,
 dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and counts spelled out in words ("twelve days",
-"six excursions", "eleven of the thirteen"). The single field sentence in Sect. 3.3 (r² > 0.99) is wrapped.
+"six excursions", "eleven of the thirteen"). The Sect. 3.3 field comparison (text and Table 3) is wrapped.
 
-**443 `\fieldnum` sites** (line numbers as of 2026-09-28, after the consistency pass):
+**540 `\fieldnum` sites** (line numbers as of 2026-09-28, after the Phase 1+2 revision):
 
 | file | line | value |
 |---|---|---|
-| abstract.tex | 29 | `1.4` |
-| abstract.tex | 29 | `2.5` |
-| abstract.tex | 30 | `1.7` |
-| abstract.tex | 30 | `2.7` |
-| abstract.tex | 41 | `1.2` |
-| abstract.tex | 43 | `85.5` |
-| abstract.tex | 47 | `0.0999` |
-| abstract.tex | 47 | `1.43` |
-| abstract.tex | 48 | `0.005` |
-| sec1_intro.tex | 73 | `1.7` |
-| sec1_intro.tex | 73 | `2.7` |
-| sec1_intro.tex | 76 | `1.43` |
-| sec1_intro.tex | 106 | `1.72` |
-| sec1_intro.tex | 106 | `2.68` |
-| sec1_intro.tex | 107 | `8847` |
-| sec1_intro.tex | 107 | `8446` |
-| sec2_retrieval.tex | 255 | `8847` |
+| abstract.tex | 22 | `0.990` |
+| abstract.tex | 22 | `6` |
+| abstract.tex | 29 | `1.3` |
+| abstract.tex | 29 | `2.3` |
+| abstract.tex | 30 | `1.6` |
+| abstract.tex | 30 | `2.5` |
+| abstract.tex | 40 | `1.2` |
+| abstract.tex | 42 | `85.5` |
+| abstract.tex | 46 | `0.100` |
+| abstract.tex | 46 | `1.44` |
+| abstract.tex | 47 | `0.005` |
+| sec1_intro.tex | 73 | `1.6` |
+| sec1_intro.tex | 73 | `2.5` |
+| sec1_intro.tex | 76 | `1.44` |
+| sec1_intro.tex | 107 | `1.63` |
+| sec1_intro.tex | 107 | `2.50` |
+| sec1_intro.tex | 108 | `8847` |
+| sec1_intro.tex | 108 | `8446` |
+| sec2_retrieval.tex | 260 | `9034` |
+| sec2_retrieval.tex | 260 | `8847` |
 | sec3_verification.tex | 49 | `1397` |
 | sec3_verification.tex | 49 | `1399` |
 | sec3_verification.tex | 49 | `707` |
 | sec3_verification.tex | 51 | `49` |
 | sec3_verification.tex | 51 | `53` |
 | sec3_verification.tex | 51 | `81` |
-| sec3_verification.tex | 166 | `0.99` |
+| sec3_verification.tex | 170 | `0.990` |
+| sec3_verification.tex | 171 | `1.039` |
+| sec3_verification.tex | 171 | `1.063` |
+| sec3_verification.tex | 172 | `1.043` |
+| sec3_verification.tex | 172 | `1.000` |
+| sec3_verification.tex | 173 | `4` |
+| sec3_verification.tex | 173 | `6` |
+| sec3_verification.tex | 174 | `0.889` |
+| sec3_verification.tex | 174 | `0.959` |
+| sec3_verification.tex | 174 | `0.81` |
+| sec3_verification.tex | 174 | `1.19` |
+| sec3_verification.tex | 174 | `1.04` |
+| sec3_verification.tex | 174 | `1.38` |
+| sec3_verification.tex | 185 | `36\,241` |
+| sec3_verification.tex | 185 | `1.039` |
+| sec3_verification.tex | 185 | `0.990` |
+| sec3_verification.tex | 186 | `36\,241` |
+| sec3_verification.tex | 186 | `0.807` |
+| sec3_verification.tex | 186 | `0.889` |
+| sec3_verification.tex | 187 | `36\,241` |
+| sec3_verification.tex | 187 | `1.377` |
+| sec3_verification.tex | 187 | `0.887` |
+| sec3_verification.tex | 188 | `73\,916` |
+| sec3_verification.tex | 188 | `1.063` |
+| sec3_verification.tex | 188 | `1.000` |
+| sec3_verification.tex | 189 | `73\,916` |
+| sec3_verification.tex | 189 | `1.195` |
+| sec3_verification.tex | 189 | `0.914` |
+| sec3_verification.tex | 190 | `73\,916` |
+| sec3_verification.tex | 190 | `1.042` |
+| sec3_verification.tex | 190 | `0.974` |
+| sec3_verification.tex | 191 | `74\,539` |
+| sec3_verification.tex | 191 | `1.043` |
+| sec3_verification.tex | 191 | `1.000` |
+| sec3_verification.tex | 192 | `74\,539` |
+| sec3_verification.tex | 192 | `1.054` |
+| sec3_verification.tex | 192 | `0.959` |
+| sec3_verification.tex | 193 | `74\,539` |
+| sec3_verification.tex | 193 | `1.038` |
+| sec3_verification.tex | 193 | `0.981` |
+| sec3_verification.tex | 271 | `0.952` |
+| sec3_verification.tex | 280 | `0.57` |
+| sec3_verification.tex | 280 | `0.65` |
+| sec3_verification.tex | 281 | `0.92` |
+| sec3_verification.tex | 281 | `1.00` |
+| sec3_verification.tex | 282 | `0.72` |
 | sec4_budget.tex | 10 | `0.55` |
-| sec4_budget.tex | 28 | `0.1` |
-| sec4_budget.tex | 60 | `2.073` |
-| sec4_budget.tex | 60 | `2.19` |
-| sec4_budget.tex | 60 | `0.95` |
-| sec4_budget.tex | 61 | `1.122` |
-| sec4_budget.tex | 61 | `2.29` |
-| sec4_budget.tex | 61 | `0.49` |
-| sec4_budget.tex | 62 | `2.391` |
-| sec4_budget.tex | 62 | `3.95` |
-| sec4_budget.tex | 62 | `0.61` |
-| sec4_budget.tex | 72 | `15` |
-| sec4_budget.tex | 72 | `33` |
-| sec4_budget.tex | 90 | `0.8` |
-| sec4_budget.tex | 90 | `2.2` |
-| sec4_budget.tex | 94 | `8.3` |
-| sec4_budget.tex | 94 | `6.4` |
-| sec4_budget.tex | 94 | `$-0.2$` |
-| sec4_budget.tex | 100 | `$+13.3$` |
-| sec4_budget.tex | 100 | `$-8.1$` |
-| sec4_budget.tex | 100 | `$+6.5$` |
-| sec4_budget.tex | 102 | `15.5` |
-| sec4_budget.tex | 103 | `7.1` |
-| sec4_budget.tex | 103 | `2.5` |
-| sec4_budget.tex | 107 | `0.4` |
-| sec4_budget.tex | 111 | `0.73` |
-| sec4_budget.tex | 111 | `0.32` |
-| sec4_budget.tex | 111 | `0.98` |
-| sec4_budget.tex | 114 | `0.56` |
-| sec4_budget.tex | 118 | `$+13$` |
-| sec4_budget.tex | 118 | `$-8$` |
-| sec4_budget.tex | 120 | `$+15.5$` |
-| sec4_budget.tex | 120 | `$-2.5$` |
-| sec4_budget.tex | 120 | `$+7.1$` |
-| sec4_budget.tex | 142 | `8847` |
-| sec4_budget.tex | 155 | `0.0437` |
-| sec4_budget.tex | 155 | `0.0350` |
-| sec4_budget.tex | 155 | `0.0082` |
-| sec4_budget.tex | 155 | `0.0641` |
-| sec4_budget.tex | 156 | `0.0600` |
-| sec4_budget.tex | 156 | `0.0829` |
-| sec4_budget.tex | 156 | `0.0086` |
-| sec4_budget.tex | 156 | `0.1186` |
-| sec4_budget.tex | 157 | `0.73` |
-| sec4_budget.tex | 157 | `0.42` |
-| sec4_budget.tex | 157 | `0.95` |
-| sec4_budget.tex | 157 | `0.54` |
-| sec4_budget.tex | 158 | `0.0416` |
-| sec4_budget.tex | 158 | `0.0126` |
-| sec4_budget.tex | 158 | `0.0187` |
-| sec4_budget.tex | 158 | `0.0435` |
-| sec4_budget.tex | 159 | `0.0428` |
-| sec4_budget.tex | 159 | `0.0384` |
-| sec4_budget.tex | 159 | `0.0189` |
-| sec4_budget.tex | 159 | `0.0590` |
-| sec4_budget.tex | 160 | `0.97` |
-| sec4_budget.tex | 160 | `0.33` |
-| sec4_budget.tex | 160 | `0.99` |
-| sec4_budget.tex | 160 | `0.74` |
-| sec4_budget.tex | 161 | `0.0567` |
-| sec4_budget.tex | 161 | `0.0268` |
-| sec4_budget.tex | 161 | `0.0200` |
-| sec4_budget.tex | 161 | `0.0701` |
-| sec4_budget.tex | 162 | `0.0781` |
-| sec4_budget.tex | 162 | `0.0836` |
-| sec4_budget.tex | 162 | `0.0203` |
-| sec4_budget.tex | 162 | `0.1245` |
-| sec4_budget.tex | 163 | `0.73` |
-| sec4_budget.tex | 163 | `0.32` |
-| sec4_budget.tex | 163 | `0.98` |
-| sec4_budget.tex | 163 | `0.56` |
-| sec4_budget.tex | 169 | `74` |
-| sec4_budget.tex | 170 | `45` |
-| sec4_budget.tex | 170 | `17` |
-| sec4_budget.tex | 170 | `52` |
-| sec4_budget.tex | 172 | `155` |
-| sec4_budget.tex | 173 | `57` |
-| sec4_budget.tex | 179 | `8847` |
-| sec4_budget.tex | 185 | `57` |
-| sec4_budget.tex | 211 | `11.03` |
-| sec4_budget.tex | 217 | `0.0501` |
-| sec4_budget.tex | 218 | `1.40` |
-| sec4_budget.tex | 219 | `2.49` |
-| sec4_budget.tex | 220 | `1.72` |
-| sec4_budget.tex | 220 | `2.68` |
-| sec4_budget.tex | 233 | `0.0501` |
-| sec4_budget.tex | 233 | `1.72` |
-| sec4_budget.tex | 233 | `2.68` |
-| sec4_budget.tex | 234 | `0.0806` |
-| sec4_budget.tex | 234 | `1.33` |
-| sec4_budget.tex | 234 | `1.84` |
-| sec4_budget.tex | 235 | `0.0224` |
-| sec4_budget.tex | 236 | `0.0811` |
-| sec4_budget.tex | 242 | `14\,974` |
-| sec4_budget.tex | 243 | `0.04209` |
-| sec4_budget.tex | 243 | `0.00025` |
-| sec4_budget.tex | 243 | `+0.9997` |
-| sec4_budget.tex | 249 | `0.0501` |
-| sec4_budget.tex | 256 | `14\,974` |
-| sec4_budget.tex | 259 | `0.0198` |
-| sec4_budget.tex | 259 | `0.0296` |
-| sec4_budget.tex | 278 | `1.00` |
-| sec4_budget.tex | 278 | `1.03` |
-| sec4_budget.tex | 283 | `$-0.50$` |
-| sec4_budget.tex | 283 | `$-0.62$` |
-| sec4_budget.tex | 284 | `$+0.68$` |
-| sec4_budget.tex | 284 | `$+0.76$` |
-| sec4_budget.tex | 300 | `1201` |
-| sec4_budget.tex | 300 | `0.0832` |
-| sec4_budget.tex | 301 | `107` |
-| sec4_budget.tex | 301 | `0.0727` |
-| sec4_budget.tex | 302 | `0.0618` |
-| sec4_budget.tex | 302 | `0.85` |
-| sec4_budget.tex | 303 | `0.0701` |
-| sec4_budget.tex | 303 | `0.96` |
-| sec4_budget.tex | 310 | `0.0727` |
-| sec4_budget.tex | 311 | `107` |
-| sec4_budget.tex | 311 | `106` |
-| sec4_budget.tex | 312 | `0.74` |
-| sec4_budget.tex | 315 | `0.85` |
-| sec4_budget.tex | 325 | `0.87` |
-| sec4_budget.tex | 325 | `1.39` |
-| sec4_budget.tex | 333 | `0.379` |
-| sec4_budget.tex | 345 | `0.32` |
+| sec4_budget.tex | 24 | `0.1` |
+| sec4_budget.tex | 31 | `1.05` |
+| sec4_budget.tex | 31 | `1.57` |
+| sec4_budget.tex | 65 | `1.437` |
+| sec4_budget.tex | 65 | `1.782` |
+| sec4_budget.tex | 65 | `1.95` |
+| sec4_budget.tex | 65 | `0.74` |
+| sec4_budget.tex | 65 | `0.91` |
+| sec4_budget.tex | 66 | `0.90` |
+| sec4_budget.tex | 66 | `0.97` |
+| sec4_budget.tex | 66 | `2.25` |
+| sec4_budget.tex | 66 | `0.40` |
+| sec4_budget.tex | 66 | `0.43` |
+| sec4_budget.tex | 67 | `2.391` |
+| sec4_budget.tex | 67 | `3.95` |
+| sec4_budget.tex | 67 | `0.61` |
+| sec4_budget.tex | 77 | `15` |
+| sec4_budget.tex | 77 | `33` |
+| sec4_budget.tex | 81 | `0.74` |
+| sec4_budget.tex | 81 | `0.91` |
+| sec4_budget.tex | 83 | `0.40` |
+| sec4_budget.tex | 83 | `0.43` |
+| sec4_budget.tex | 85 | `7` |
+| sec4_budget.tex | 85 | `19` |
+| sec4_budget.tex | 97 | `0.8` |
+| sec4_budget.tex | 97 | `2.2` |
+| sec4_budget.tex | 101 | `8.3` |
+| sec4_budget.tex | 101 | `6.4` |
+| sec4_budget.tex | 101 | `$-0.2$` |
+| sec4_budget.tex | 107 | `$+13.3$` |
+| sec4_budget.tex | 107 | `$-8.1$` |
+| sec4_budget.tex | 107 | `$+6.9$` |
+| sec4_budget.tex | 109 | `15.5` |
+| sec4_budget.tex | 110 | `7.6` |
+| sec4_budget.tex | 110 | `2.5` |
+| sec4_budget.tex | 114 | `0.25` |
+| sec4_budget.tex | 114 | `0.18` |
+| sec4_budget.tex | 114 | `0.03` |
+| sec4_budget.tex | 114 | `28.7` |
+| sec4_budget.tex | 115 | `12.9` |
+| sec4_budget.tex | 116 | `15.8` |
+| sec4_budget.tex | 119 | `0.73` |
+| sec4_budget.tex | 119 | `0.32` |
+| sec4_budget.tex | 119 | `0.98` |
+| sec4_budget.tex | 122 | `0.56` |
+| sec4_budget.tex | 126 | `$+13$` |
+| sec4_budget.tex | 126 | `$-8$` |
+| sec4_budget.tex | 128 | `$+15.5$` |
+| sec4_budget.tex | 128 | `$-2.5$` |
+| sec4_budget.tex | 128 | `$+7.6$` |
+| sec4_budget.tex | 150 | `9034` |
+| sec4_budget.tex | 151 | `187` |
+| sec4_budget.tex | 152 | `8847` |
+| sec4_budget.tex | 153 | `0.9524` |
+| sec4_budget.tex | 164 | `0.0437` |
+| sec4_budget.tex | 164 | `0.0350` |
+| sec4_budget.tex | 164 | `0.0082` |
+| sec4_budget.tex | 164 | `0.0641` |
+| sec4_budget.tex | 165 | `0.0600` |
+| sec4_budget.tex | 165 | `0.0829` |
+| sec4_budget.tex | 165 | `0.0086` |
+| sec4_budget.tex | 165 | `0.1186` |
+| sec4_budget.tex | 166 | `0.73` |
+| sec4_budget.tex | 166 | `0.42` |
+| sec4_budget.tex | 166 | `0.95` |
+| sec4_budget.tex | 166 | `0.54` |
+| sec4_budget.tex | 167 | `0.0416` |
+| sec4_budget.tex | 167 | `0.0126` |
+| sec4_budget.tex | 167 | `0.0187` |
+| sec4_budget.tex | 167 | `0.0435` |
+| sec4_budget.tex | 168 | `0.0428` |
+| sec4_budget.tex | 168 | `0.0384` |
+| sec4_budget.tex | 168 | `0.0189` |
+| sec4_budget.tex | 168 | `0.0590` |
+| sec4_budget.tex | 169 | `0.97` |
+| sec4_budget.tex | 169 | `0.33` |
+| sec4_budget.tex | 169 | `0.99` |
+| sec4_budget.tex | 169 | `0.74` |
+| sec4_budget.tex | 170 | `0.0558` |
+| sec4_budget.tex | 170 | `0.0269` |
+| sec4_budget.tex | 170 | `0.0191` |
+| sec4_budget.tex | 170 | `0.0693` |
+| sec4_budget.tex | 171 | `0.0768` |
+| sec4_budget.tex | 171 | `0.0831` |
+| sec4_budget.tex | 171 | `0.0195` |
+| sec4_budget.tex | 171 | `0.1236` |
+| sec4_budget.tex | 172 | `0.73` |
+| sec4_budget.tex | 172 | `0.32` |
+| sec4_budget.tex | 172 | `0.98` |
+| sec4_budget.tex | 172 | `0.56` |
+| sec4_budget.tex | 178 | `74` |
+| sec4_budget.tex | 179 | `45` |
+| sec4_budget.tex | 179 | `17` |
+| sec4_budget.tex | 179 | `52` |
+| sec4_budget.tex | 181 | `155` |
+| sec4_budget.tex | 182 | `57` |
+| sec4_budget.tex | 188 | `8847` |
+| sec4_budget.tex | 194 | `57` |
+| sec4_budget.tex | 221 | `11.03` |
+| sec4_budget.tex | 227 | `0.0541` |
+| sec4_budget.tex | 228 | `1.28` |
+| sec4_budget.tex | 229 | `2.29` |
+| sec4_budget.tex | 230 | `1.63` |
+| sec4_budget.tex | 230 | `2.50` |
+| sec4_budget.tex | 245 | `0.0541` |
+| sec4_budget.tex | 245 | `1.63` |
+| sec4_budget.tex | 245 | `2.50` |
+| sec4_budget.tex | 246 | `0.0806` |
+| sec4_budget.tex | 246 | `1.32` |
+| sec4_budget.tex | 246 | `1.83` |
+| sec4_budget.tex | 247 | `0.025` |
+| sec4_budget.tex | 248 | `0.086` |
+| sec4_budget.tex | 254 | `14\,974` |
+| sec4_budget.tex | 255 | `0.04209` |
+| sec4_budget.tex | 255 | `0.00025` |
+| sec4_budget.tex | 255 | `+0.9997` |
+| sec4_budget.tex | 262 | `0.0558` |
+| sec4_budget.tex | 267 | `8832` |
+| sec4_budget.tex | 270 | `0.0558` |
+| sec4_budget.tex | 270 | `1.59` |
+| sec4_budget.tex | 270 | `2.43` |
+| sec4_budget.tex | 271 | `0.0217` |
+| sec4_budget.tex | 271 | `0.0326` |
+| sec4_budget.tex | 289 | `1.00` |
+| sec4_budget.tex | 289 | `1.03` |
+| sec4_budget.tex | 294 | `$-0.60$` |
+| sec4_budget.tex | 295 | `$+0.73$` |
+| sec4_budget.tex | 312 | `1258` |
+| sec4_budget.tex | 312 | `0.081` |
+| sec4_budget.tex | 313 | `154` |
+| sec4_budget.tex | 313 | `0.082` |
+| sec4_budget.tex | 314 | `0.0618` |
+| sec4_budget.tex | 314 | `0.75` |
+| sec4_budget.tex | 315 | `0.0693` |
+| sec4_budget.tex | 315 | `0.84` |
+| sec4_budget.tex | 322 | `0.082` |
+| sec4_budget.tex | 323 | `154` |
+| sec4_budget.tex | 323 | `153` |
+| sec4_budget.tex | 324 | `0.76` |
+| sec4_budget.tex | 326 | `0.75` |
+| sec4_budget.tex | 334 | `0.75` |
+| sec4_budget.tex | 335 | `0.84` |
+| sec4_budget.tex | 341 | `0.366` |
+| sec4_budget.tex | 353 | `0.32` |
 | sec5_pipeline.tex | 39 | `1.0120` |
 | sec5_pipeline.tex | 39 | `1.0611` |
 | sec5_pipeline.tex | 39 | `165` |
@@ -231,186 +304,204 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec5_pipeline.tex | 65 | `5364` |
 | sec5_pipeline.tex | 66 | `0.940` |
 | sec5_pipeline.tex | 66 | `0.858` |
-| sec5_pipeline.tex | 67 | `1.027` |
-| sec5_pipeline.tex | 67 | `1.019` |
+| sec5_pipeline.tex | 66 | `1.027` |
+| sec5_pipeline.tex | 66 | `1.019` |
 | sec5_pipeline.tex | 67 | `0.662` |
 | sec5_pipeline.tex | 67 | `1.178` |
 | sec5_pipeline.tex | 68 | `23` |
-| sec5_pipeline.tex | 75 | `0.858` |
-| sec5_pipeline.tex | 76 | `0.662` |
-| sec5_pipeline.tex | 76 | `1.027` |
-| sec5_pipeline.tex | 76 | `1.178` |
-| sec5_pipeline.tex | 80 | `$-2.0$` |
-| sec5_pipeline.tex | 89 | `165` |
-| sec5_pipeline.tex | 95 | `5364` |
-| sec5_pipeline.tex | 112 | `0.179` |
-| sec5_pipeline.tex | 112 | `0.743` |
-| sec5_pipeline.tex | 112 | `4.755` |
-| sec5_pipeline.tex | 113 | `0.006` |
-| sec5_pipeline.tex | 113 | `0.020` |
-| sec5_pipeline.tex | 113 | `0.097` |
-| sec5_pipeline.tex | 114 | `0.151` |
-| sec5_pipeline.tex | 114 | `0.343` |
-| sec5_pipeline.tex | 114 | `2.675` |
-| sec5_pipeline.tex | 129 | `6.2` |
-| sec5_pipeline.tex | 129 | `4.8` |
-| sec5_pipeline.tex | 140 | `$-2.014 \pm 0.03$` |
-| sec5_pipeline.tex | 140 | `$\pm 2$` |
-| sec5_pipeline.tex | 153 | `22` |
-| sec5_pipeline.tex | 154 | `$-1.000$` |
-| sec5_pipeline.tex | 160 | `123` |
-| sec5_pipeline.tex | 160 | `121` |
-| sec5_pipeline.tex | 161 | `4` |
-| sec5_pipeline.tex | 184 | `11.8` |
-| sec5_pipeline.tex | 189 | `157` |
-| sec5_pipeline.tex | 189 | `157` |
-| sec5_pipeline.tex | 189 | `164` |
-| sec5_pipeline.tex | 189 | `164` |
-| sec5_pipeline.tex | 190 | `1313` |
-| sec5_pipeline.tex | 201 | `76\,282` |
-| sec5_pipeline.tex | 201 | `0.08` |
-| sec5_pipeline.tex | 201 | `0.07` |
-| sec5_pipeline.tex | 201 | `3.76` |
-| sec5_pipeline.tex | 201 | `1.23` |
-| sec5_pipeline.tex | 201 | `10.6` |
-| sec5_pipeline.tex | 202 | `9\,088` |
-| sec5_pipeline.tex | 202 | `0.01` |
-| sec5_pipeline.tex | 202 | `0.00` |
-| sec5_pipeline.tex | 202 | `0.00` |
-| sec5_pipeline.tex | 202 | `0.00` |
-| sec5_pipeline.tex | 202 | `1.3` |
-| sec5_pipeline.tex | 203 | `43\,259` |
-| sec5_pipeline.tex | 203 | `0.13` |
-| sec5_pipeline.tex | 203 | `0.34` |
-| sec5_pipeline.tex | 203 | `2.89` |
-| sec5_pipeline.tex | 203 | `11.03` |
-| sec5_pipeline.tex | 203 | `11.8` |
-| sec5_pipeline.tex | 204 | `7\,069` |
-| sec5_pipeline.tex | 204 | `0.42` |
-| sec5_pipeline.tex | 204 | `0.00` |
-| sec5_pipeline.tex | 204 | `17.32` |
-| sec5_pipeline.tex | 204 | `18.31` |
-| sec5_pipeline.tex | 204 | `11.8` |
-| sec5_pipeline.tex | 209 | `0.08` |
-| sec5_pipeline.tex | 210 | `0.07` |
-| sec5_pipeline.tex | 211 | `922` |
-| sec5_pipeline.tex | 217 | `11.3` |
-| sec5_pipeline.tex | 217 | `0.24` |
-| sec5_pipeline.tex | 217 | `3` |
-| sec5_pipeline.tex | 217 | `1\,264` |
-| sec5_pipeline.tex | 218 | `75` |
-| sec5_pipeline.tex | 218 | `743` |
-| sec5_pipeline.tex | 218 | `10.1` |
-| sec5_pipeline.tex | 219 | `11.3` |
-| sec5_pipeline.tex | 219 | `3.5` |
-| sec5_pipeline.tex | 220 | `11.03` |
-| sec5_pipeline.tex | 221 | `11.8` |
-| sec5_pipeline.tex | 232 | `2.8` |
-| sec5_pipeline.tex | 232 | `5.8` |
-| sec5_pipeline.tex | 240 | `0.00` |
-| sec5_pipeline.tex | 241 | `18.31` |
-| sec5_pipeline.tex | 257 | `9\,132` |
-| sec5_pipeline.tex | 268 | `0.1048` |
-| sec5_pipeline.tex | 268 | `0.1627` |
-| sec5_pipeline.tex | 268 | `3.0` |
-| sec5_pipeline.tex | 269 | `0.0358` |
-| sec5_pipeline.tex | 269 | `0.0563` |
-| sec5_pipeline.tex | 269 | `2.8` |
-| sec5_pipeline.tex | 270 | `0.0999` |
-| sec5_pipeline.tex | 270 | `0.1437` |
-| sec5_pipeline.tex | 270 | `3.7` |
-| sec5_pipeline.tex | 275 | `0.0999` |
-| sec5_pipeline.tex | 276 | `1.43` |
-| sec5_pipeline.tex | 290 | `3.37\times10^{-9}` |
-| sec5_pipeline.tex | 290 | `1.0020` |
-| sec5_pipeline.tex | 290 | `1.0022` |
-| sec5_pipeline.tex | 290 | `1.99` |
-| sec5_pipeline.tex | 290 | `0.0053` |
-| sec5_pipeline.tex | 291 | `1.53\times10^{-8}` |
-| sec5_pipeline.tex | 291 | `1.0016` |
-| sec5_pipeline.tex | 291 | `1.0016` |
-| sec5_pipeline.tex | 291 | `0.55` |
-| sec5_pipeline.tex | 291 | `0.0065` |
-| sec5_pipeline.tex | 297 | `6.16\times10^{-9}` |
-| sec5_pipeline.tex | 300 | `+0.999` |
-| sec5_pipeline.tex | 300 | `2.8` |
-| sec5_pipeline.tex | 304 | `0.005` |
-| sec5_pipeline.tex | 304 | `0.23` |
-| sec5_pipeline.tex | 311 | `7.5` |
-| sec5_pipeline.tex | 312 | `0.0758` |
-| sec5_pipeline.tex | 312 | `0.0701` |
-| sec5_pipeline.tex | 312 | `5.2` |
-| sec5_pipeline.tex | 312 | `0.1184` |
-| sec5_pipeline.tex | 313 | `0.1245` |
-| sec5_pipeline.tex | 314 | `1.81` |
-| sec5_pipeline.tex | 314 | `2.57` |
-| sec5_pipeline.tex | 314 | `1.72` |
-| sec5_pipeline.tex | 314 | `2.68` |
-| sec5_pipeline.tex | 316 | `93.0` |
-| sec5_pipeline.tex | 316 | `98.7` |
-| sec5_pipeline.tex | 319 | `$+0.412$` |
-| sec5_pipeline.tex | 319 | `$+0.146$` |
-| sec5_pipeline.tex | 327 | `0.0600` |
-| sec5_pipeline.tex | 327 | `0.0000` |
-| sec5_pipeline.tex | 332 | `0.0999` |
-| sec5_pipeline.tex | 332 | `0.0600` |
-| sec6_reporting.tex | 72 | `42.3` |
-| sec6_reporting.tex | 94 | `0.0` |
-| sec6_reporting.tex | 94 | `9` |
-| sec6_reporting.tex | 98 | `0.80` |
-| sec6_reporting.tex | 98 | `1.09` |
-| sec6_reporting.tex | 99 | `0.83` |
-| sec6_reporting.tex | 99 | `1.11` |
-| sec6_reporting.tex | 120 | `146` |
-| sec6_reporting.tex | 129 | `0.73` |
-| sec6_reporting.tex | 129 | `60` |
-| sec6_reporting.tex | 129 | `41` |
-| sec6_reporting.tex | 129 | `23` |
-| sec6_reporting.tex | 129 | `36` |
-| sec6_reporting.tex | 129 | `41` |
-| sec6_reporting.tex | 130 | `0.27` |
-| sec6_reporting.tex | 130 | `21` |
-| sec6_reporting.tex | 130 | `14` |
-| sec6_reporting.tex | 130 | `8` |
-| sec6_reporting.tex | 130 | `18` |
-| sec6_reporting.tex | 130 | `56` |
-| sec6_reporting.tex | 131 | `0.97` |
-| sec6_reporting.tex | 131 | `112` |
-| sec6_reporting.tex | 131 | `77` |
-| sec6_reporting.tex | 131 | `23` |
-| sec6_reporting.tex | 131 | `27` |
-| sec6_reporting.tex | 131 | `3` |
-| sec6_reporting.tex | 137 | `40` |
-| sec6_reporting.tex | 144 | `0.05` |
-| sec6_reporting.tex | 147 | `76` |
-| sec6_reporting.tex | 147 | `15` |
-| sec6_reporting.tex | 158 | `0.87` |
-| sec6_reporting.tex | 158 | `1.00` |
-| sec6_reporting.tex | 158 | `2.05` |
-| sec6_reporting.tex | 158 | `2.73` |
-| sec6_reporting.tex | 193 | `2.506\times10^{-4}` |
-| sec6_reporting.tex | 193 | `1.095\times10^{-4}` |
-| sec6_reporting.tex | 194 | `2.332\times10^{-4}` |
-| sec6_reporting.tex | 194 | `0.820\times10^{-4}` |
-| sec6_reporting.tex | 195 | `0.104` |
-| sec6_reporting.tex | 195 | `0.416` |
-| sec6_reporting.tex | 196 | `2.26` |
-| sec6_reporting.tex | 196 | `1.22` |
-| sec6_reporting.tex | 201 | `7` |
+| sec5_pipeline.tex | 73 | `34` |
+| sec5_pipeline.tex | 73 | `18` |
+| sec5_pipeline.tex | 77 | `2.2` |
+| sec5_pipeline.tex | 77 | `$-0.06$` |
+| sec5_pipeline.tex | 77 | `$+2.2$` |
+| sec5_pipeline.tex | 77 | `$-0.8$` |
+| sec5_pipeline.tex | 78 | `23` |
+| sec5_pipeline.tex | 86 | `165` |
+| sec5_pipeline.tex | 92 | `5364` |
+| sec5_pipeline.tex | 104 | `8847` |
+| sec5_pipeline.tex | 111 | `0.187` |
+| sec5_pipeline.tex | 111 | `0.826` |
+| sec5_pipeline.tex | 111 | `4.388` |
+| sec5_pipeline.tex | 112 | `0.006` |
+| sec5_pipeline.tex | 112 | `0.027` |
+| sec5_pipeline.tex | 112 | `0.285` |
+| sec5_pipeline.tex | 113 | `0.154` |
+| sec5_pipeline.tex | 113 | `0.347` |
+| sec5_pipeline.tex | 113 | `2.941` |
+| sec5_pipeline.tex | 114 | `0.243` |
+| sec5_pipeline.tex | 114 | `0.766` |
+| sec5_pipeline.tex | 114 | `4.276` |
+| sec5_pipeline.tex | 120 | `0.006` |
+| sec5_pipeline.tex | 120 | `0.027` |
+| sec5_pipeline.tex | 121 | `0.285` |
+| sec5_pipeline.tex | 130 | `6.2` |
+| sec5_pipeline.tex | 130 | `5.0` |
+| sec5_pipeline.tex | 131 | `0.0693` |
+| sec5_pipeline.tex | 131 | `0.0706` |
+| sec5_pipeline.tex | 131 | `0.1236` |
+| sec5_pipeline.tex | 131 | `0.1244` |
+| sec5_pipeline.tex | 141 | `$-2.014 \pm 0.03$` |
+| sec5_pipeline.tex | 141 | `$\pm 2$` |
+| sec5_pipeline.tex | 154 | `22` |
+| sec5_pipeline.tex | 155 | `$-1.000$` |
+| sec5_pipeline.tex | 161 | `187` |
+| sec5_pipeline.tex | 161 | `9034` |
+| sec5_pipeline.tex | 164 | `121` |
+| sec5_pipeline.tex | 164 | `4` |
+| sec5_pipeline.tex | 188 | `11.8` |
+| sec5_pipeline.tex | 193 | `157` |
+| sec5_pipeline.tex | 193 | `157` |
+| sec5_pipeline.tex | 193 | `164` |
+| sec5_pipeline.tex | 193 | `164` |
+| sec5_pipeline.tex | 194 | `1313` |
+| sec5_pipeline.tex | 199 | `9149` |
+| sec5_pipeline.tex | 206 | `76\,282` |
+| sec5_pipeline.tex | 206 | `0.08` |
+| sec5_pipeline.tex | 206 | `0.07` |
+| sec5_pipeline.tex | 206 | `3.76` |
+| sec5_pipeline.tex | 206 | `1.23` |
+| sec5_pipeline.tex | 206 | `10.6` |
+| sec5_pipeline.tex | 207 | `9\,088` |
+| sec5_pipeline.tex | 207 | `0.01` |
+| sec5_pipeline.tex | 207 | `0.00` |
+| sec5_pipeline.tex | 207 | `0.00` |
+| sec5_pipeline.tex | 207 | `0.00` |
+| sec5_pipeline.tex | 207 | `1.3` |
+| sec5_pipeline.tex | 208 | `43\,259` |
+| sec5_pipeline.tex | 208 | `0.13` |
+| sec5_pipeline.tex | 208 | `0.34` |
+| sec5_pipeline.tex | 208 | `2.89` |
+| sec5_pipeline.tex | 208 | `11.03` |
+| sec5_pipeline.tex | 208 | `11.8` |
+| sec5_pipeline.tex | 209 | `7\,069` |
+| sec5_pipeline.tex | 209 | `0.42` |
+| sec5_pipeline.tex | 209 | `0.00` |
+| sec5_pipeline.tex | 209 | `17.32` |
+| sec5_pipeline.tex | 209 | `18.31` |
+| sec5_pipeline.tex | 209 | `11.8` |
+| sec5_pipeline.tex | 214 | `0.08` |
+| sec5_pipeline.tex | 215 | `0.07` |
+| sec5_pipeline.tex | 216 | `922` |
+| sec5_pipeline.tex | 222 | `11.3` |
+| sec5_pipeline.tex | 222 | `0.24` |
+| sec5_pipeline.tex | 222 | `3` |
+| sec5_pipeline.tex | 222 | `1\,264` |
+| sec5_pipeline.tex | 223 | `75` |
+| sec5_pipeline.tex | 223 | `743` |
+| sec5_pipeline.tex | 223 | `10.1` |
+| sec5_pipeline.tex | 224 | `11.3` |
+| sec5_pipeline.tex | 224 | `3.5` |
+| sec5_pipeline.tex | 225 | `11.03` |
+| sec5_pipeline.tex | 226 | `11.8` |
+| sec5_pipeline.tex | 237 | `2.8` |
+| sec5_pipeline.tex | 237 | `5.8` |
+| sec5_pipeline.tex | 245 | `0.00` |
+| sec5_pipeline.tex | 246 | `18.31` |
+| sec5_pipeline.tex | 262 | `9\,132` |
+| sec5_pipeline.tex | 267 | `0.9524` |
+| sec5_pipeline.tex | 273 | `0.1048` |
+| sec5_pipeline.tex | 273 | `0.1627` |
+| sec5_pipeline.tex | 273 | `3.0` |
+| sec5_pipeline.tex | 274 | `0.0358` |
+| sec5_pipeline.tex | 274 | `0.0563` |
+| sec5_pipeline.tex | 274 | `2.8` |
+| sec5_pipeline.tex | 275 | `0.100` |
+| sec5_pipeline.tex | 275 | `0.1418` |
+| sec5_pipeline.tex | 275 | `3.7` |
+| sec5_pipeline.tex | 280 | `0.100` |
+| sec5_pipeline.tex | 281 | `1.44` |
+| sec5_pipeline.tex | 296 | `3.37\times10^{-9}` |
+| sec5_pipeline.tex | 296 | `1.0020` |
+| sec5_pipeline.tex | 296 | `1.0022` |
+| sec5_pipeline.tex | 296 | `1.99` |
+| sec5_pipeline.tex | 296 | `0.0053` |
+| sec5_pipeline.tex | 297 | `1.53\times10^{-8}` |
+| sec5_pipeline.tex | 297 | `1.0016` |
+| sec5_pipeline.tex | 297 | `1.0016` |
+| sec5_pipeline.tex | 297 | `0.55` |
+| sec5_pipeline.tex | 297 | `0.0065` |
+| sec5_pipeline.tex | 303 | `6.16\times10^{-9}` |
+| sec5_pipeline.tex | 306 | `+0.999` |
+| sec5_pipeline.tex | 306 | `2.8` |
+| sec5_pipeline.tex | 310 | `0.005` |
+| sec5_pipeline.tex | 310 | `0.243` |
+| sec5_pipeline.tex | 317 | `7.0` |
+| sec5_pipeline.tex | 318 | `0.0745` |
+| sec5_pipeline.tex | 318 | `0.0693` |
+| sec5_pipeline.tex | 318 | `4.5` |
+| sec5_pipeline.tex | 318 | `0.1183` |
+| sec5_pipeline.tex | 319 | `0.1236` |
+| sec5_pipeline.tex | 320 | `1.70` |
+| sec5_pipeline.tex | 320 | `2.41` |
+| sec5_pipeline.tex | 320 | `1.63` |
+| sec5_pipeline.tex | 320 | `2.50` |
+| sec5_pipeline.tex | 322 | `8505` |
+| sec5_pipeline.tex | 322 | `9034` |
+| sec5_pipeline.tex | 322 | `9149` |
+| sec5_pipeline.tex | 323 | `93.0` |
+| sec5_pipeline.tex | 323 | `98.7` |
+| sec5_pipeline.tex | 326 | `$+0.412$` |
+| sec5_pipeline.tex | 326 | `$+0.146$` |
+| sec5_pipeline.tex | 334 | `0.0622` |
+| sec5_pipeline.tex | 334 | `0.0000` |
+| sec5_pipeline.tex | 339 | `0.100` |
+| sec5_pipeline.tex | 339 | `0.0622` |
+| sec6_reporting.tex | 73 | `42.3` |
+| sec6_reporting.tex | 95 | `0.0` |
+| sec6_reporting.tex | 95 | `9` |
+| sec6_reporting.tex | 99 | `0.80` |
+| sec6_reporting.tex | 99 | `1.09` |
+| sec6_reporting.tex | 100 | `0.83` |
+| sec6_reporting.tex | 100 | `1.11` |
+| sec6_reporting.tex | 121 | `155` |
+| sec6_reporting.tex | 130 | `0.73` |
+| sec6_reporting.tex | 130 | `63` |
+| sec6_reporting.tex | 130 | `41` |
+| sec6_reporting.tex | 130 | `24` |
+| sec6_reporting.tex | 130 | `38` |
+| sec6_reporting.tex | 130 | `45` |
+| sec6_reporting.tex | 131 | `0.32` |
+| sec6_reporting.tex | 131 | `26` |
+| sec6_reporting.tex | 131 | `17` |
+| sec6_reporting.tex | 131 | `12` |
+| sec6_reporting.tex | 131 | `22` |
+| sec6_reporting.tex | 131 | `52` |
+| sec6_reporting.tex | 132 | `0.98` |
+| sec6_reporting.tex | 132 | `118` |
+| sec6_reporting.tex | 132 | `76` |
+| sec6_reporting.tex | 132 | `26` |
+| sec6_reporting.tex | 132 | `29` |
+| sec6_reporting.tex | 132 | `3` |
+| sec6_reporting.tex | 138 | `37` |
+| sec6_reporting.tex | 146 | `74` |
+| sec6_reporting.tex | 146 | `17` |
+| sec6_reporting.tex | 156 | `0.87` |
+| sec6_reporting.tex | 156 | `1.00` |
+| sec6_reporting.tex | 156 | `2.05` |
+| sec6_reporting.tex | 157 | `2.73` |
+| sec6_reporting.tex | 191 | `2.506\times10^{-4}` |
+| sec6_reporting.tex | 191 | `1.095\times10^{-4}` |
+| sec6_reporting.tex | 192 | `2.332\times10^{-4}` |
+| sec6_reporting.tex | 192 | `0.820\times10^{-4}` |
+| sec6_reporting.tex | 193 | `0.104` |
+| sec6_reporting.tex | 193 | `0.416` |
+| sec6_reporting.tex | 194 | `2.26` |
+| sec6_reporting.tex | 194 | `1.22` |
+| sec6_reporting.tex | 199 | `7` |
 | sec6_reporting.tex | 239 | `45` |
-| sec6_reporting.tex | 240 | `0.1245` |
-| sec6_reporting.tex | 240 | `0.1012` |
-| sec6_reporting.tex | 240 | `19` |
-| sec6_reporting.tex | 250 | `0.1245` |
-| sec6_reporting.tex | 251 | `0.1012` |
-| sec6_reporting.tex | 251 | `0.81` |
-| sec6_reporting.tex | 252 | `0.0911` |
+| sec6_reporting.tex | 240 | `0.1236` |
+| sec6_reporting.tex | 240 | `0.1008` |
+| sec6_reporting.tex | 240 | `18.5` |
+| sec6_reporting.tex | 250 | `0.1236` |
+| sec6_reporting.tex | 251 | `0.1008` |
+| sec6_reporting.tex | 251 | `0.82` |
+| sec6_reporting.tex | 252 | `0.0901` |
 | sec6_reporting.tex | 252 | `0.73` |
-| sec6_reporting.tex | 253 | `0.0552` |
+| sec6_reporting.tex | 253 | `0.0547` |
 | sec6_reporting.tex | 253 | `0.44` |
-| sec6_reporting.tex | 261 | `7.1` |
-| sec6_reporting.tex | 261 | `0.1245` |
-| sec6_reporting.tex | 261 | `0.1162` |
+| sec6_reporting.tex | 261 | `7.6` |
+| sec6_reporting.tex | 261 | `0.1236` |
+| sec6_reporting.tex | 261 | `0.1149` |
 | sec6_reporting.tex | 281 | `40` |
 | sec6_reporting.tex | 281 | `34` |
 | sec6_reporting.tex | 282 | `1.29` |
@@ -446,72 +537,82 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec6_reporting.tex | 366 | `3.5` |
 | sec6_reporting.tex | 367 | `11.03` |
 | sec6_reporting.tex | 368 | `11.8` |
-| sec6_reporting.tex | 371 | `21` |
-| sec6_reporting.tex | 371 | `146` |
-| sec6_reporting.tex | 372 | `8` |
-| sec6_reporting.tex | 372 | `18` |
+| sec6_reporting.tex | 371 | `26` |
+| sec6_reporting.tex | 371 | `155` |
+| sec6_reporting.tex | 372 | `12` |
+| sec6_reporting.tex | 372 | `22` |
 | sec6_reporting.tex | 381 | `0.24` |
 | sec6_reporting.tex | 382 | `11.3` |
-| sec6_reporting.tex | 414 | `157` |
-| sec6_reporting.tex | 415 | `54` |
-| sec7_field.tex | 31 | `$-6.12$` |
-| sec7_field.tex | 42 | `155` |
-| sec7_field.tex | 54 | `0.0676` |
-| sec7_field.tex | 54 | `0.0811` |
-| sec7_field.tex | 55 | `0.203` |
-| sec7_field.tex | 55 | `0.243` |
-| sec7_field.tex | 56 | `$+0.0054$` |
-| sec7_field.tex | 56 | `$+0.0054$` |
-| sec7_field.tex | 57 | `0.0806` |
-| sec7_field.tex | 57 | `0.84` |
-| sec7_field.tex | 57 | `1.01` |
-| sec7_field.tex | 62 | `-0.093` |
-| sec7_field.tex | 63 | `4.3` |
-| sec7_field.tex | 68 | `$+0.0054$` |
-| sec7_field.tex | 76 | `0.84` |
-| sec7_field.tex | 76 | `1.01` |
-| sec7_field.tex | 76 | `0.0806` |
-| sec7_field.tex | 81 | `1.33` |
-| sec7_field.tex | 81 | `1.84` |
-| sec7_field.tex | 82 | `0.0806` |
-| sec7_field.tex | 82 | `42` |
-| sec7_field.tex | 83 | `0.0501` |
-| sec7_field.tex | 84 | `1.72` |
-| sec7_field.tex | 84 | `2.68` |
-| sec7_field.tex | 89 | `1.48` |
-| sec7_field.tex | 89 | `0.0806` |
-| sec7_field.tex | 89 | `0.0543` |
-| sec7_field.tex | 105 | `0.0999` |
-| sec7_field.tex | 107 | `+0.999` |
-| sec7_field.tex | 108 | `74\,667` |
-| sec7_field.tex | 108 | `2.8` |
-| sec7_field.tex | 113 | `19` |
-| sec7_field.tex | 114 | `8` |
-| sec7_field.tex | 114 | `600` |
-| sec7_field.tex | 115 | `5.6` |
-| sec7_field.tex | 115 | `91` |
-| sec7_field.tex | 115 | `1.2` |
-| sec7_field.tex | 117 | `2.6` |
-| sec7_field.tex | 117 | `9.0` |
-| sec7_field.tex | 118 | `66` |
-| sec7_field.tex | 118 | `300` |
-| sec7_field.tex | 118 | `10` |
-| sec7_field.tex | 125 | `22` |
-| sec7_field.tex | 131 | `4.7` |
-| sec7_field.tex | 131 | `5.5` |
-| sec7_field.tex | 153 | `9.0` |
-| sec7_field.tex | 153 | `4.7` |
-| sec8_conclusions.tex | 20 | `$+0.0054$` |
-| sec8_conclusions.tex | 22 | `0.203` |
-| sec8_conclusions.tex | 22 | `0.243` |
-| sec8_conclusions.tex | 28 | `1.40` |
-| sec8_conclusions.tex | 29 | `2.49` |
-| sec8_conclusions.tex | 30 | `1.72` |
-| sec8_conclusions.tex | 30 | `2.68` |
-| sec8_conclusions.tex | 37 | `123` |
-| sec8_conclusions.tex | 43 | `1.43` |
-| sec8_conclusions.tex | 78 | `5` |
-| sec8_conclusions.tex | 78 | `20` |
+| sec6_reporting.tex | 407 | `1261` |
+| sec6_reporting.tex | 407 | `1.00` |
+| sec6_reporting.tex | 417 | `157` |
+| sec6_reporting.tex | 418 | `54` |
+| sec7_field.tex | 28 | `0.25` |
+| sec7_field.tex | 35 | `$-6.12$` |
+| sec7_field.tex | 46 | `155` |
+| sec7_field.tex | 52 | `0.9524` |
+| sec7_field.tex | 58 | `0.0676` |
+| sec7_field.tex | 58 | `0.086` |
+| sec7_field.tex | 59 | `0.203` |
+| sec7_field.tex | 59 | `0.257` |
+| sec7_field.tex | 60 | `$+0.0054$` |
+| sec7_field.tex | 60 | `$+0.0054$` |
+| sec7_field.tex | 61 | `0.0806` |
+| sec7_field.tex | 61 | `0.84` |
+| sec7_field.tex | 61 | `1.06` |
+| sec7_field.tex | 66 | `-0.093` |
+| sec7_field.tex | 67 | `4` |
+| sec7_field.tex | 72 | `$+0.0054$` |
+| sec7_field.tex | 81 | `0.84` |
+| sec7_field.tex | 81 | `1.06` |
+| sec7_field.tex | 81 | `0.0806` |
+| sec7_field.tex | 86 | `1.32` |
+| sec7_field.tex | 86 | `1.83` |
+| sec7_field.tex | 87 | `0.0806` |
+| sec7_field.tex | 87 | `0.0541` |
+| sec7_field.tex | 88 | `1.63` |
+| sec7_field.tex | 88 | `2.50` |
+| sec7_field.tex | 88 | `46.1` |
+| sec7_field.tex | 88 | `8832` |
+| sec7_field.tex | 94 | `1.48` |
+| sec7_field.tex | 94 | `0.0806` |
+| sec7_field.tex | 94 | `0.0543` |
+| sec7_field.tex | 110 | `0.100` |
+| sec7_field.tex | 112 | `+0.999` |
+| sec7_field.tex | 113 | `74\,667` |
+| sec7_field.tex | 113 | `2.8` |
+| sec7_field.tex | 118 | `19` |
+| sec7_field.tex | 119 | `8` |
+| sec7_field.tex | 119 | `600` |
+| sec7_field.tex | 120 | `5.6` |
+| sec7_field.tex | 120 | `91` |
+| sec7_field.tex | 120 | `1.2` |
+| sec7_field.tex | 122 | `2.6` |
+| sec7_field.tex | 122 | `9.0` |
+| sec7_field.tex | 123 | `66` |
+| sec7_field.tex | 123 | `300` |
+| sec7_field.tex | 123 | `10` |
+| sec7_field.tex | 130 | `22` |
+| sec7_field.tex | 137 | `4.7` |
+| sec7_field.tex | 137 | `5.5` |
+| sec7_field.tex | 146 | `0.6` |
+| sec7_field.tex | 162 | `9.0` |
+| sec7_field.tex | 162 | `4.7` |
+| sec8_conclusions.tex | 21 | `0.990` |
+| sec8_conclusions.tex | 21 | `4` |
+| sec8_conclusions.tex | 21 | `6` |
+| sec8_conclusions.tex | 22 | `$+0.0054$` |
+| sec8_conclusions.tex | 23 | `0.203` |
+| sec8_conclusions.tex | 23 | `0.257` |
+| sec8_conclusions.tex | 29 | `1.28` |
+| sec8_conclusions.tex | 30 | `2.29` |
+| sec8_conclusions.tex | 31 | `1.63` |
+| sec8_conclusions.tex | 31 | `2.50` |
+| sec8_conclusions.tex | 38 | `187` |
+| sec8_conclusions.tex | 38 | `9034` |
+| sec8_conclusions.tex | 44 | `1.44` |
+| sec8_conclusions.tex | 47 | `0.6` |
+| main.tex | 10 | `...` |
 
 ## 5. §8 Conclusions — trimmed
 
@@ -624,9 +725,8 @@ Golub & LeVeque (1979) is listed in the format notes for §8 but is not cited in
 
 ## 8. Remaining author decisions and inconsistencies (not changed)
 
-* **(a) §3.5 plateau ratios** — AUTHOR CHECK kept: 14.75/11.97 = 1.2322 and 71.57/58.16 = 1.2306, not 1.2278/1.2276.
-* **(b) Cold shift** — §5.2 "[−1, +1] px … all 22 base fits return −1.000 px" vs Table 1, §7.1 and the Fig. 1/5 captions
-  (fixed at −0.5 px). Left unchanged.
+* ~~(a) §3.5 plateau ratios~~ — resolved in Phase 1+2: 1.2278/1.2276 are medians of per-record ratios (ratios of medians 1.2322/1.2306); §3.5 rewritten, AUTHOR CHECK removed.
+* ~~(b) Cold shift~~ — resolved in Phase 1+2: operational cold shift is fixed at −0.5 px; the [−1, +1] px run is described as a sensitivity run (§5.2, §8).
 * **(c) Appendices A and C** are not drafted; Appendix B is therefore printed as "Appendix A".
 * **(d) References to confirm**: `Kraus_2006` (`note={verify}` prints in the reference list) and `Danckaert_2017` (year 2017
   is a placeholder for the QDOAS manual version used).
@@ -653,12 +753,12 @@ Golub & LeVeque (1979) is listed in the format notes for §8 but is not cited in
 - §4: cold 저광량 ZA knot 게이팅 적용 전후 값(§6 첫 처방 사례) 미산출.
 - §4: Table 2의 백분율 판본은 이전 CSV와 섞지 말고 같은 실행에서 재생성.
 - §5.1 KRISS: QDOAS shift 부호가 Augur와 같다는 전제 확인 필요.
-- §5.1 KRISS: 운영 cold를 −0.1 px로 고정한 재처리 결과 없음 — 기울기 0.940/0.858/1.027이 어떻게 바뀌는지 미확인.
+- ~~§5.1 KRISS: −0.1 px 고정 재처리 없음~~ → Phase 1+2에서 해소: −0.1 vs −0.5 px 고정의 차이는 NO₂ −0.06 %, CHOCHO +2.2 %, H₂O −0.8 %(§5.1에 기재).
 - §5.1 / Fig 1c / Fig 5a: 12개 스펙트럼이 165개의 부분집합인지 미확인(지도 열 이름 spec0…spec494).
 - §5.1의 곡률 사전점검은 미구현 — 미구현이면 "제안"으로 표기.
 - §5.2: 분모(cold 고정 shift 레코드 수, hot PNs 경계 종료 분모)는 Table 2와 같은 실행·기저(8,847)에서 다시 받은 뒤에만 복원.
 - §5.4: 캠페인 제출본(`..._20260831_v4.xlsx`)은 알파–병합 사이 어느 단계에서 시각 보정이 적용됐는지 미특정 — 제출본은 제출본으로 고정(TBD-G2 범위 밖).
-- §6: 예산표(Table 4, 초고의 Table 2) 하한(split-half)은 짝/홀 인터리브로 측정돼 약 5 % 과소 — 연속 기저로 재계산하거나 각주로 명시.
+- ~~§6: 예산표 하한(split-half) 짝/홀 인터리브 기저~~ → Phase 1+2에서 해소: Table 4에 연속·인터리브 두 기저를 함께 싣고 LOO와 같은 기저로 교체(hot 두 채널; cold 행은 이전 실행 기저로 유지).
 - ~~§6.1: `low_light`는 스캔만 플래그~~ → 2026-09-28 코드 확인으로 해소: `low_light_knots()`가 I₀ knot 선택에서 ZA 블록을 뺀다(기본 꺼짐) — §6.3 서술과 일치.
 - §6.2: 마지막 열(상한)은 예측값 — "predicted" 성격 유지.
 - §6.4: cold 블록당 스캔 수는 29(hot 34) — cold raw가 E:(exFAT)에만 있어 재추출 불가, 본문은 'heated channels'로 한정(TBD-A3 범위 밖).
