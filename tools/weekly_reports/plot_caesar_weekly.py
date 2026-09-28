@@ -99,7 +99,7 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
     """CAESAR fit 리포트(Time + 가스컬럼 + RMS + Status) → DataFrame(index=Time).
     결과뷰어 _load_fit_table 포맷과 동일. 사후 QC(핏 재실행 X):
       · 항상 Skip/QC-* 행 제외
-      · ok_only=True  → Status!=OK(예: Unstable) 행 제외
+      · ok_only=True  → 환산 χ² > 1.5 행 제외(Chi2 열이 없을 때만 Status!=OK로 대체)
       · qc_k>0        → RMS robust 임계 초과 행 제외  thr=10^(median(log10 RMS)+K·MAD)
                         (core.result_io.robust_rms_thresholds 호출 = GUI _apply_auto_qc와 **같은 함수**.
                          cold 은 K=4 쓰지 말 것 — 과제거)"""
@@ -111,11 +111,18 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
         st = df["Status"].astype(str)
         drop = st.str.startswith("QC") | st.str.startswith("Skip")
         if ok_only:
-            # Status 는 자유형식이다 — 품질 라벨 뒤에 직교하는 노트가 붙는다
-            # (`OK · AT_BOUND`, `OK · MISFIT` …). 정확 일치로 비교하면 노트가
-            # 붙었다는 이유만으로 멀쩡한 행을 버린다(실측 autosave 23,583 행 중
-            # 2,135 행 = 9.1 %). 라벨만 본다.
-            drop |= ~st.str.startswith("OK")
+            # 2026-09-28: 품질 판정은 환산 χ²(> 1.5 = MISFIT)로 한다. 2026-09-18 이전에
+            # 만든 결과 파일의 Status 라벨은 신호 대비 RMS 기준이라 NO2가 낮은(한낮)
+            # 행을 핏 품질과 무관하게 'Unstable'로 만든다 — 그 라벨로 거르면 저농도
+            # 구간이 체계적으로 빠진다. Chi2 열이 있으면 그것만 쓰고, 없을 때만
+            # Status 라벨(접두 'OK')로 되돌아간다.
+            if "Chi2" in df.columns:
+                chi = pd.to_numeric(df["Chi2"], errors="coerce")
+                drop |= ~(chi <= 1.5)
+            else:
+                # Status 는 자유형식이다 — 품질 라벨 뒤에 직교하는 노트가 붙는다
+                # (`OK · AT_BOUND`, `OK · MISFIT` …). 라벨만 본다.
+                drop |= ~st.str.startswith("OK")
         df = df.loc[~drop]
     for g in ("NO2", "CHOCHO", "H2O"):
         if g in df.columns:
