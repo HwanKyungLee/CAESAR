@@ -99,7 +99,7 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
     """CAESAR fit 리포트(Time + 가스컬럼 + RMS + Status) → DataFrame(index=Time).
     결과뷰어 _load_fit_table 포맷과 동일. 사후 QC(핏 재실행 X):
       · 항상 Skip/QC-* 행 제외
-      · ok_only=True  → 환산 χ² > 1.5 행 제외(Chi2 열이 없을 때만 Status!=OK로 대체)
+      · ok_only=True  → NO2 조건부 χ² 포락선 밖(ln χ² > 구간 중앙값 + 5σ) 또는 χ² > 10 행 제외(Chi2 열이 없을 때만 Status!=OK로 대체)
       · qc_k>0        → RMS robust 임계 초과 행 제외  thr=10^(median(log10 RMS)+K·MAD)
                         (core.result_io.robust_rms_thresholds 호출 = GUI _apply_auto_qc와 **같은 함수**.
                          cold 은 K=4 쓰지 말 것 — 과제거)"""
@@ -117,8 +117,18 @@ def read_fit_report(path: str, ok_only: bool = True, qc_k: float = 6.0) -> pd.Da
             # 구간이 체계적으로 빠진다. Chi2 열이 있으면 그것만 쓰고, 없을 때만
             # Status 라벨(접두 'OK')로 되돌아간다.
             if "Chi2" in df.columns:
+                # 고정 χ² 임계(1.5)도 쓰지 않는다: 모형오차가 신호에 비례해 NO2가 높을수록
+                # χ²가 오르므로(여수 300 °C: 1 ppb 1.05 → 10–20 ppb 1.57) 고농도 구간을 버린다.
+                # NO2 구간별 ln χ²의 중앙값 + 5·robust σ 위(포락선 밖)와 χ² > 10만 버린다.
                 chi = pd.to_numeric(df["Chi2"], errors="coerce")
-                drop |= ~(chi <= 1.5)
+                sig = pd.to_numeric(df["NO2"], errors="coerce") if "NO2" in df.columns else pd.Series(0.0, index=df.index)
+                edges = [-np.inf, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 30, np.inf]
+                lc = np.log(chi.where(chi > 0))
+                grp = pd.cut(sig.fillna(0.0), edges)
+                med = lc.groupby(grp, observed=True).transform("median")
+                mad = lc.groupby(grp, observed=True).transform(lambda v: (v - v.median()).abs().median() * 1.4826)
+                bad = (lc > med + 5.0 * mad) | chi.isna() | (chi > 10)
+                drop |= bad.fillna(True)
             else:
                 # Status 는 자유형식이다 — 품질 라벨 뒤에 직교하는 노트가 붙는다
                 # (`OK · AT_BOUND`, `OK · MISFIT` …). 라벨만 본다.
