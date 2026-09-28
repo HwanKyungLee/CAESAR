@@ -5,7 +5,7 @@
 \subsection{What the fit reports, and what it cannot report}
 \label{sec:4.1}
 
-The covariance returned by the fit (Sect.~\ref{sec:2.6}) propagates one thing: the residual
+The covariance returned by the fit (Sect.~\ref{sec:2.5}) propagates one thing: the residual
 scatter of the spectrum being fitted. For the operational configuration this
 gives a single-scan reported uncertainty of \fieldnum{0.55}\,\% on the channel NO$_2$
 amount, and it is the number that appears in the data product.
@@ -48,9 +48,11 @@ to the operational spacing. With $n/2$ scans per half the difference carries a
 factor of two relative to the full-block knot noise, which is divided out.
 
 The two disagree by a channel-dependent factor, and that disagreement is itself
-the result:
+the result (Table~\ref{tab:splithalf_loo}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Reference-interpolation error per channel from the split-half estimate of knot noise and from leave-one-out (LOO) knot removal (per cent), and the ratio split-half/LOO.}
+\label{tab:splithalf_loo}
 \begin{tabular}{llll}
 \tophline
 channel & knot noise (split-half) & LOO & ratio \\
@@ -60,7 +62,7 @@ hot ANs & \fieldnum{1.122}\,\% & \fieldnum{2.29}\,\% & \textbf{\fieldnum{0.49}} 
 cold & \fieldnum{2.391}\,\% & \fieldnum{3.95}\,\% & \textbf{\fieldnum{0.61}} \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 A ratio near unity means the LOO error is entirely knot noise -- the interpolant
 is not being asked to bridge any real curvature, and halving the reference
@@ -219,9 +221,11 @@ uncertainty is \strong{\fieldnum{1.72} to \fieldnum{2.68} times what the fit rep
 the two scales rather than any doubt about the measurement.
 
 The denominator has to be argued for, because three other quantities are
-available and none of them answers this question:
+available and none of them answers this question (Table~\ref{tab:denominators}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Candidate denominators for the ratio of total to reported $\Sigma$ANs uncertainty: value (ppb), time resolution, and the ratio of the total uncertainty (Table~\ref{tab:2}, robust scale to standard deviation) to each. Bold: the denominator used.}
+\label{tab:denominators}
 \begin{tabular}{llll}
 \tophline
 denominator & ppb & resolution & total / denominator \\
@@ -232,7 +236,7 @@ fit-propagated $\sigma$, 5\,min bin & \fieldnum{0.0224} & 5\,min & not comparabl
 zero-air scatter, SD & \fieldnum{0.0811} & 34-scan block means & not comparable \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The column shipped with the product is not a measurement uncertainty. It is a
 gain systematic: regressed against the channel NO$_2$ amount over \fieldnum{14\,974}
@@ -284,9 +288,11 @@ perturbation response alternates in sign from hour to hour. The positive value
 is atmospheric persistence.
 
 The comparison is made at the resolution at which the observed bound is
-defined -- hourly means, differenced -- and against the same hours:
+defined -- hourly means, differenced -- and against the same hours (Table~\ref{tab:hourly_check}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Hour-to-hour variation of hourly $\Sigma$ANs, summarised by $1.4826\,\mathrm{median}|\Delta|/\sqrt{2}$ (ppb), observed and predicted by the budget, and the ratio of the budget to the observed statistic in the matched hours.}
+\label{tab:hourly_check}
 \begin{tabular}{lll}
 \tophline
  & gate statistic (ppb) & ratio \\
@@ -297,7 +303,7 @@ observed, hours matched to the budget (\fieldnum{107}\,h) & \fieldnum{0.0727} & 
 budget, at record resolution & \fieldnum{0.0701} & \fieldnum{0.96} \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The last row uses a different operator and is given only to show the size of
 that choice; both ratios in the column are taken against the same matched
@@ -337,7 +343,7 @@ calibration context; and a flag identifying scans whose calibration knots are
 themselves suspect. The third matters because the structural error is not
 uniform -- the $R$ term carries the smallest shape statistic in Table~\ref{tab:2}
 ($s = \fieldnum{0.32}$ for $\Sigma$ANs), meaning a small number of intervals carry most of
-its variance. Section~\ref{sec:6} implements all three. Sections~\ref{sec:5.3} and \ref{sec:5.4} add two
+its variance. Section~\ref{sec:6} specifies all three and states which are implemented. Sections~\ref{sec:5.3} and \ref{sec:5.4} add two
 further fields of the same kind -- how far the record is from its calibration,
 and whether the reference it used was still valid -- which the pipeline can
 supply without any new measurement.

@@ -9,8 +9,9 @@ as a separable nonlinear least-squares problem and solved by variable projection
 The formulation is not the contribution. The implementation makes three things
 cheap: substituting a calibration reference and re-running the retrieval without
 reprocessing the campaign, evaluating the projected objective anywhere in the
-nonlinear parameters, and carrying the state in which the optimiser stopped and
-the provenance of every reference a record depends on to the product. That turns
+nonlinear parameters, and carrying to the product the state in which the optimiser
+stopped and the distance to each calibration reference; recording each reference's
+build time and time convention is specified here but not yet implemented. That turns
 reliability questions from studies into routine measurements.
 
 The code solves the problem it states: on noise-free synthetic spectra with

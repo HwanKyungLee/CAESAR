@@ -40,11 +40,13 @@ The quantity the product reports is a channel difference, so its noise floor
 has to be measured on the difference and not assembled from the channels. The
 two hot channels share a light source, a cavity and a clock, and their
 zero-air blocks coincide in time, so \fieldnum{155} blocks pair exactly and the
-difference can be formed record by record. Assembling the floor from the
+difference can be formed record by record (Table~\ref{tab:noise_floor}). Assembling the floor from the
 channels in quadrature would assume an independence that there is no reason
 to expect.
 
-\begin{center}
+\begin{table}[t]
+\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product.}
+\label{tab:noise_floor}
 \begin{tabular}{lll}
 \tophline
  & robust scale & standard deviation \\
@@ -52,10 +54,10 @@ to expect.
 measured 1$\sigma$ & \fieldnum{0.0676} & \fieldnum{0.0811}\,ppb \\
 \textbf{detection limit, 3$\sigma$} & \textbf{\fieldnum{0.203}} & \textbf{\fieldnum{0.243}\,ppb} \\
 median value at a true zero & \fieldnum{$+0.0054$}\,ppb & \fieldnum{$+0.0054$}\,ppb \\
-against the reported \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & \fieldnum{1.01} \\
+against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & \fieldnum{1.01} \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The channels turn out to be nearly uncorrelated, $r = \fieldnum{-0.093}$, so the
 quadrature assembly would have come within \fieldnum{4.3}\,\% of the measured value. That
@@ -70,14 +72,16 @@ spectral fit and a channel subtraction returns zero when the truth is zero,
 to a twentieth of its own detection limit. This closes the chain end to end
 and belongs with the verification of Sect.~\ref{sec:3.1} as much as here.
 
-Read against the reported uncertainty, the product's noise floor is covered:
-\fieldnum{0.84} to \fieldnum{1.01} times the reported \fieldnum{0.0806}\,ppb, depending on the scale. This is
+Read against the uncertainty column shipped with the product, the product's noise floor is covered:
+\fieldnum{0.84} to \fieldnum{1.01} times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This is
 not in tension with Sect.~\ref{sec:4}, and the distinction matters enough to state. What is
 measured here is a zero-air floor -- the same references, minutes apart, no
 atmosphere and no elapsed time for a reference to go stale. What Sect.~\ref{sec:4} measures
 is what happens when a reference is wrong, and that is a different question
-with a different answer: \fieldnum{1.33} to \fieldnum{1.84} times the same reported figure, and for
-\fieldnum{42}\,\% of records larger than it. A reported uncertainty can describe the
+with a different answer: \fieldnum{1.33} to \fieldnum{1.84} times the same product-column figure of
+\fieldnum{0.0806}\,ppb (Sect.~\ref{sec:4.4}), and for \fieldnum{42}\,\% of records larger than it. (Against the
+fit-propagated $\sigma$ of \fieldnum{0.0501}\,ppb, the denominator of Sect.~\ref{sec:4.4}, the total is
+\fieldnum{1.72} to \fieldnum{2.68} times that value.) A reported uncertainty can describe the
 photon noise of a product faithfully and still say nothing about the
 references the product was built from.
 

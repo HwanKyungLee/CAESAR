@@ -132,7 +132,7 @@ the column scaling $\mathbf{S}$ are given in Appendix~\ref{app:B}.
 Retaining the second term matters for two reasons. It is what makes Eq.~(\ref{eq:6}) the exact
 derivative rather than the \citet{Kaufman_1975} approximation, and -- because it is exact -- it
 can be checked against finite differences to the level of round-off, which turns the
-Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.1}).
+Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.2}).
 
 \strong{Relation to existing DOAS implementations.} The separable structure is not new to
 DOAS; what is absent from the established treatments is the derivative of the linear
@@ -193,7 +193,7 @@ complement of the gas block of Eq.~(\ref{eq:9}), the joint standard errors are n
 than the conditional ones. Note that $\mathbf{V}$ holds $\mathbf{c}$ fixed and is
 therefore \emph{not} the projected Jacobian of Eq.~(\ref{eq:6}); using Eq.~(\ref{eq:6}) here would count the
 linear block twice. Both quantities are reported, never one overwriting the other, so
-that the size of the difference can be read directly (Sect.~\ref{sec:4.5}).
+that the size of the difference can be read directly (Appendix~\ref{app:B4} gives it for a small test problem).
 
 When $n-P\le 0$ the variance estimate is not defined and is reported as missing rather
 than as a finite number; the scan is flagged as underdetermined and retained.
@@ -207,9 +207,11 @@ tell them apart. We therefore classify and export the termination state of the
 nonlinear stage separately from the solver's own success flag: CONVERGED, AT\_BOUND
 (a nonlinear parameter rests on its box constraint at exit), STEP\_LIMITED (the
 trust-region step was capped), MAX\_NFEV, and FAILED. The classifier is deliberately
-conservative -- it prefers to flag a fit that in fact reached the optimum over passing
-one that did not (Sect.~\ref{sec:3.2}) -- and it changes no retrieved value. Its effect is on what the
-record admits, and that effect is large (Sect.~\ref{sec:6.3}).
+conservative by construction: a nonlinear parameter within a small tolerance of its box
+constraint (relative to the box width) is flagged even if the optimum happens to lie there,
+and across the solves of one record the least favourable state is kept. It changes no
+retrieved value. Its effect is on what the
+record admits, and that effect is large (Sects.~\ref{sec:5.2} and \ref{sec:7.3}).
 
 \subsection{Implementation note: scaling of the fitted quantity}
 \label{sec:2.7}

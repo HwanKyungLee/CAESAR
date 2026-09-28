@@ -8,8 +8,13 @@ several times larger than itself, and Sect.~\ref{sec:5} that convergence does no
 imply identifiability. Neither finding requires a new retrieval algorithm to
 act on. This section states what a DOAS product should carry instead of a
 single uncertainty, and what in the measurement schedule is worth changing.
-Three of the four recommendations are implemented in Augur and evaluated
-against the campaign; the fourth follows from a measurement reported here.
+Of the four recommendations, two are implemented in Augur and evaluated against
+the campaign: the knot gate (Sect.~\ref{sec:6.3}) and the coverage fields
+(Sect.~\ref{sec:6.4}). The reporting convention of Sect.~\ref{sec:6.1} is implemented in
+part -- the termination state, the distance to the nearest knot and the identity of
+the reference file are exported, while the build time and time convention of each
+reference are specified for implementation -- and the block recommendation of
+Sect.~\ref{sec:6.2} follows from a measurement reported here.
 
 \subsection{Three numbers per retrieval, not one}
 \label{sec:6.1}
@@ -17,7 +22,7 @@ against the campaign; the fourth follows from a measurement reported here.
 Every retrieved amount is reported with
 \begin{enumerate}
 \item the \strong{fit uncertainty}, from the covariance of the projected problem
-   (Sect.~\ref{sec:2.6}) -- what the residual supports, and nothing more;
+   (Sect.~\ref{sec:2.5}) -- what the residual supports, and nothing more;
 \item the \strong{structural term}, evaluated for that scan's own calibration
    context rather than as a campaign constant; and
 \item a \strong{context flag} recording the state of the references the scan depends
@@ -26,22 +31,24 @@ Every retrieved amount is reported with
 
 The third item is the one that has to be specified rather than gestured at,
 because its value is entirely in which fields it carries. We report, per
-record and per reference type (zero air, reflectivity):
+record and per reference type (zero air, reflectivity), the fields of Table~\ref{tab:context_fields}.
 
-\begin{center}
-\begin{tabular}{p{0.38\textwidth}p{0.55\textwidth}}
+\begin{table}[t]
+\caption{Fields of the context flag, reported per record and per reference type (zero air, reflectivity), and the reason for each.}
+\label{tab:context_fields}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.38\textwidth}p{0.55\textwidth}}
 \tophline
 field & why \\
 \middlehline
-signed seconds to the nearest knot & sign distinguishes interpolation from extrapolation \\
+seconds to the nearest knot, with the side (before/after) & the side distinguishes interpolation from extrapolation \\
 length of the bracketing interval & an eleven-hour gap and a fifteen-minute one are not the same interpolation \\
 in-range flag & extrapolation is a different operation and should be nameable in a filter \\
-number of adjacent calibration blocks rejected by the quality gates & the gates' cost, which Sect.~\ref{sec:6.2} argues must be reported wherever the gates are applied \\
+number of adjacent calibration blocks rejected by the quality gates & the gates' cost, which Sect.~\ref{sec:6.4} argues must be reported wherever the gates are applied \\
 identifier of the reference file, and when it was built & two products made from different calibration vintages are not comparable \\
 the time convention the reference was built under & a correction applied upstream makes every earlier derived product stale \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The last field is there because of Sect.~\ref{sec:5.4}, and it is worth being exact about
 what it would and would not have caught. The instrument's clock was wrong by
@@ -63,7 +70,7 @@ record the convention they were built under cannot tell that it has happened.
 The mismatch was not silent in the data. It surfaced as a nine-hour run of
 out-of-range records at the very start of the deployment -- the first
 zero-air block at 02:42, the first reflectivity knot at 11:40 -- and \fieldnum{42.3}\,\% of
-that day extrapolated. The signed-distance and in-range fields would have
+that day extrapolated. The distance and in-range fields would have
 carried that anomaly into the product on the first run after the correction,
 rather than two months later. They would not have explained it: identifying
 the cause needed the build time of the reflectivity file and the convention it
@@ -110,10 +117,12 @@ references and responds to averaging. A term with $s \ll 0.7$ is concentrated
 in a few records, where averaging is useless and detection is everything.
 
 This is not an interpretation of $s$ but a prediction from it, and it can be
-checked. Ordering the \fieldnum{146} hours by their contribution to each term's variance:
+checked. Ordering the \fieldnum{146} hours by their contribution to each term's variance gives Table~\ref{tab:shape_remedy}.
 
-\begin{center}
-\begin{tabular}{llp{0.17\textwidth}p{0.17\textwidth}p{0.12\textwidth}p{0.25\textwidth}}
+\begin{table}[t]
+\caption{Concentration in time of each structural term over the hours of the budget window: shape statistic $s$; number (and fraction) of hours holding 90\,\% of the term's variance; the number of contiguous runs those hours form, with the number expected for the same count of hours drawn at random; share of the variance on the standard-deviation basis; and the remedy the shape indicates.}
+\label{tab:shape_remedy}
+\begin{tabular}{ll>{\raggedright\arraybackslash}p{0.17\textwidth}p{0.17\textwidth}p{0.12\textwidth}p{0.25\textwidth}}
 \tophline
 term & $s$ & hours holding 90\,\% of the variance & contiguous runs (random expectation) & share of variance (SD) & remedy \\
 \middlehline
@@ -122,7 +131,7 @@ $R$ & \textbf{\fieldnum{0.27}} & \textbf{\fieldnum{21} (\fieldnum{14}\,\%)} & \t
 etalon $f$ & \fieldnum{0.97} & \fieldnum{112} (\fieldnum{77}\,\%) & \fieldnum{23} (\fieldnum{27}) & \fieldnum{3}\,\% & fit $f$ per scan, or model it \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The ordering by $s$ is the ordering by concentration, and the two-hour
 interval 05-20 13--14 UTC alone holds \fieldnum{40}\,\% of the reflectivity term's variance.
@@ -172,9 +181,11 @@ block's scatter is common to neighbouring scans rather than independent.
 
 The operational block is $N = 34$ scans spanning $T = 32.0$\,s, in both
 channels and for both reference gases. Within it, averaging does not behave as
-white noise.
+white noise (Table~\ref{tab:subblock_scaling}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Scatter of contiguous sub-block contrasts within the operational calibration block ($N = 34$, $T = 32.0$\,s) in the two heated channels, the averaging exponent they imply, and the ratio of contiguous to interleaved scatter at the same number of scans $m$, with the values expected for white noise.}
+\label{tab:subblock_scaling}
 \begin{tabular}{llll}
 \tophline
  & hot ANs & hot PNs & white noise \\
@@ -185,7 +196,7 @@ contiguous halves (16 scans) & $\fieldnum{2.332\times10^{-4}}$ & $\fieldnum{0.82
 contiguous / interleaved, same $m$ & \textbf{\fieldnum{2.26}} & \textbf{\fieldnum{1.22}} & 1.03 \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 Doubling the number of scans averaged reduces the scatter by \fieldnum{7}\,\% in the ANs
 channel, against the 29\,\% that independent scans would give. Most of what a
@@ -206,9 +217,11 @@ made.
 
 The duty cycle is not what stands in the way. Calibration occupies 1.2\,\% of
 the measurement time (Sect.~\ref{sec:6.4}), and a fourfold zero-air block would take it to
-3.9\,\%:
+3.9\,\% (Table~\ref{tab:duty_blocks}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Calibration duty cycle for the operational zero-air block and for blocks two and four times longer.}
+\label{tab:duty_blocks}
 \begin{tabular}{llll}
 \tophline
 zero-air block & $N$ & zero-air duty & total calibration duty \\
@@ -218,17 +231,19 @@ $\times 2$ & 68 & 1.79\,\% & 2.10\,\% \\
 $\times 4$ & 136 & 3.58\,\% & 3.89\,\% \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 Even under the white-noise assumption the return would be modest, and it is
 worth stating why before anyone spends duty cycle on it. Halving the zero-air
 knot noise removes three quarters of the $I_0$ variance, but that term carries
 \fieldnum{45}\,\% of the $\Sigma$ANs variance, so the structural budget would fall from
 \fieldnum{0.1245} to \fieldnum{0.1012}\,ppb -- \fieldnum{19}\,\%, not half. The measured exponents put even that
-out of reach in one channel.
+out of reach in one channel; Table~\ref{tab:ceilings} gives the ceiling for each remedy.
 
-\begin{center}
-\begin{tabular}{lp{0.28\textwidth}lp{0.3\textwidth}}
+\begin{table}[t]
+\caption{Best attainable $\Sigma$ANs structural uncertainty (standard deviation) under each remedy, as a fraction of the operational value, and the assumption each row rests on. These are ceilings, not forecasts.}
+\label{tab:ceilings}
+\begin{tabular}{l>{\raggedright\arraybackslash}p{0.28\textwidth}l>{\raggedright\arraybackslash}p{0.3\textwidth}}
 \tophline
  & $\Sigma$ANs structural (SD), best attainable & of operational & status \\
 \middlehline
@@ -238,7 +253,7 @@ flag bad $R$ intervals only & \fieldnum{0.0911} & \fieldnum{0.73} & assumes a pe
 \textbf{both} & \textbf{\fieldnum{0.0552}} & \textbf{\fieldnum{0.44}} & both assumptions \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 These are ceilings, not forecasts, and the way they are computed needs stating
 because Sect.~\ref{sec:4.3} forbids the obvious method. Removing a term's contribution from a
@@ -323,20 +338,20 @@ existing product is an explicit choice rather than a silent change.
 \subsection{Coverage: say when the reference is far away}
 \label{sec:6.4}
 
-%% AUTHOR CHECK (2026-09-28): hot 4.45 % / 0.53 % below contradicts the Sect. 5.3 table (clock-aligned 3.76 % / 1.23 %);
-%% the draft's own note gives the aligned values as 3.76 / 1.23. Transcribed unchanged -- see README.
 Two things are missing, and conflating them produces the wrong prescription.
 One is \emph{extrapolation}: records outside the range spanned by the reflectivity
 knots. The other is a \emph{gap}: records between two knots more than two hours
-apart. The hot channel has \fieldnum{4.45}\,\% of the first and \fieldnum{0.53}\,\% of the second over
+apart. The hot channel has \fieldnum{3.76}\,\% of the first and \fieldnum{1.23}\,\% of the second over
 the campaign; the cold channel \fieldnum{2.89}\,\% and \fieldnum{11.03}\,\%. Zero air has neither
 (\fieldnum{0.08}\,\% and \fieldnum{0.07}\,\%), so the constraint is entirely on the reflectivity.
 
 Two causes lie behind the numbers that survive, and they cost different things
-to remove.
+to remove (Table~\ref{tab:coverage_causes}).
 
-\begin{center}
-\begin{tabular}{p{0.28\textwidth}p{0.3\textwidth}p{0.24\textwidth}p{0.08\textwidth}}
+\begin{table}[t]
+\caption{The two causes of the reflectivity coverage deficit that remains after clock alignment, what each explains, and the remedy and its cost.}
+\label{tab:coverage_causes}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.28\textwidth}p{0.3\textwidth}p{0.24\textwidth}p{0.08\textwidth}}
 \tophline
  & what it explains & remedy & cost \\
 \middlehline
@@ -344,7 +359,7 @@ reflectivity generation stopped at 07-09 & the hot channel's trailing extrapolat
 clustered pair rejection, \fieldnum{11.3}\,\% of cold pairs & cold gaps, \fieldnum{11.03}\,\% campaign and \fieldnum{18.31}\,\% in the cold window & restore the light level; failing that, redundancy & see below \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The first is bookkeeping and the cheapest fix in this paper. Only the second is
 about how often the instrument calibrates, and even there the average rate is
@@ -387,9 +402,11 @@ the context flag of Sect.~\ref{sec:6.1} set, and excluded from any statistic tha
 characterised uncertainty.
 
 The cause is in the schedule rather than in the instrument. In the heated channels zero air and helium blocks are identical -- 34 scans over 32\,s -- but zero air is measured
-every hour and helium only every three:
+every hour and helium only every three (Table~\ref{tab:cal_schedule}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Calibration schedule of the heated channels over the deployment: number of blocks, scans and duration per block, cadence and duty cycle, for zero air and helium.}
+\label{tab:cal_schedule}
 \begin{tabular}{lllll}
 \tophline
  & blocks & per block & cadence & duty \\
@@ -399,7 +416,7 @@ helium & \fieldnum{54} & 34 scans / 32\,s & 3.00\,h & 0.31\,\% \\
  & & & & \textbf{1.20\,\%} \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 A single missed zero-air block leaves a two-hour gap; a single missed helium
 block leaves six. That asymmetry, not any difference in the measurements

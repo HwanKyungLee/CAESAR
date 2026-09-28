@@ -99,9 +99,12 @@ in the heated cell and should give unity.}
 
 \strong{What is degenerate with what.} Not every input error threatens the same
 parameter. Propagating the three structural terms of Sect.~\ref{sec:4} separately and
-recording how far each moves the wavelength shift separates them cleanly:
+recording how far each moves the wavelength shift separates them cleanly
+(Table~\ref{tab:shift_degeneracy}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Change in the fitted wavelength shift (px) when each structural term of Sect.~\ref{sec:4} is perturbed alone: median, 90th percentile and maximum.}
+\label{tab:shift_degeneracy}
 \begin{tabular}{llll}
 \tophline
 perturbation & median & $p_{90}$ & max \\
@@ -111,7 +114,7 @@ reflectivity & \textbf{\fieldnum{0.006}} & \textbf{\fieldnum{0.020}} & \textbf{\
 etalon frequency & \fieldnum{0.151} & \fieldnum{0.343} & \fieldnum{2.675} \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 An error in the reflectivity changes the magnitude of the extinction and
 essentially nothing else -- it never moves the shift by a tenth of a pixel. An
@@ -166,8 +169,9 @@ anything.
 
 \strong{What the pipeline could report instead.} The optimiser distinguishes a fit
 stopped by the gradient from one stopped by a step limit or at a parameter
-bound, and Augur computes these as distinct states internally. They are not
-carried into the product alongside the retrieved amount. Collapsing
+bound, and Augur computes these as distinct states internally. In the delivered campaign product they were not
+carried alongside the retrieved amount; the current version exports them as
+separate columns (Sect.~\ref{sec:2.6}). Collapsing
 them into ``converged'' is what allows a bound-pinned shift to be published as a
 measurement.
 
@@ -185,9 +189,11 @@ Coverage was measured over the whole campaign by extracting the calibration
 blocks directly from the raw files, independently of the retrieval, and
 verified against the production knot cache (\fieldnum{157}/\fieldnum{157} hot and \fieldnum{164}/\fieldnum{164} cold knots
 at 0.000000\,s) and against the alpha header's own \texttt{ZA\_count=}\fieldnum{1313}. Two
-distinct deficits appear, and they are not the same quantity:
+distinct deficits appear, and they are not the same quantity (Table~\ref{tab:coverage}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Calibration coverage of the retrieved records, from calibration blocks extracted directly from the raw files: number of records $n$; percentage of records outside the knot range and inside a knot gap longer than 2\,h, for the zero-air ($I_0$) and reflectivity ($R$) references; and the longest reflectivity gap.}
+\label{tab:coverage}
 \small\setlength{\tabcolsep}{3pt}
 \begin{tabular}{llllllll}
 \tophline
@@ -199,7 +205,7 @@ cold & campaign & \fieldnum{43\,259} & \fieldnum{0.13}\,\% & \fieldnum{0.34}\,\%
 cold & cold window 06-10..16 & \fieldnum{7\,069} & \fieldnum{0.42}\,\% & \fieldnum{0.00}\,\% & \fieldnum{17.32}\,\% & \fieldnum{18.31}\,\% & \fieldnum{11.8}\,h \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 For the zero-air reference the word ``interpolation'' is accurate: \fieldnum{0.08}\,\% of hot
 records lie outside the knot range and \fieldnum{0.07}\,\% inside a gap longer than two
@@ -250,9 +256,12 @@ the correction does not apply to.
 
 This makes it possible to measure directly what using a wrong reference costs,
 and what the fit report says about it. The retrieval was run over all \fieldnum{9\,132}
-records of the window twice, changing nothing but the knot time base.
+records of the window twice, changing nothing but the knot time base
+(Table~\ref{tab:clock_displacement}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Change in the retrieved amounts when the heated channels are retrieved with the clock-aligned instead of the nine-hour-displaced reflectivity knots, over the records of the budget window: robust scale (rSD) and standard deviation (SD) of the change (ppb), and the rSD of the change relative to the rSD of the $R$ term in Table~\ref{tab:2}.}
+\label{tab:clock_displacement}
 \begin{tabular}{llll}
 \tophline
 series & delta rSD (ppb) & delta SD (ppb) & vs the $R$ term of Table~\ref{tab:2} \\
@@ -262,7 +271,7 @@ PNs channel & \fieldnum{0.0358} & \fieldnum{0.0563} & \fieldnum{2.8} \\
 \textbf{$\Sigma$ANs} & \textbf{\fieldnum{0.0999}} & \fieldnum{0.1437} & \textbf{\fieldnum{3.7}} \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The displacement moves the alkyl nitrate product by \fieldnum{0.0999}\,ppb: between three
 and four times the reflectivity term of the budget, and \fieldnum{1.43} times the whole
@@ -270,9 +279,11 @@ of it. It is the largest single term in this paper. It is not in Table~\ref{tab:
 because Table~\ref{tab:2} measures what a reference's own uncertainty costs, not what
 using the wrong reference costs.
 
-What the fit reports about it is the point of the section.
+What the fit reports about it (Table~\ref{tab:clock_fitreport}) is the point of the section.
 
-\begin{center}
+\begin{table}[t]
+\caption{What the fit report shows for the displacement of Table~\ref{tab:clock_displacement}: RMS change of the extinction spectrum (cm$^{-1}$), ratio of the residual and of the reported $\sigma$ between the two retrievals, change in the retrieved amount in units of the reported $\sigma$, and change in the fitted shift.}
+\label{tab:clock_fitreport}
 \begin{tabular}{llllll}
 \tophline
  & $\alpha$ RMS change & residual ratio & reported $\sigma$ ratio & $|\delta c| / \sigma$ & $|\delta\,\mathrm{shift}|$ \\
@@ -281,7 +292,7 @@ ANs & $\fieldnum{3.37\times10^{-9}}$ & \fieldnum{1.0020} & \fieldnum{1.0022} & \
 PNs & $\fieldnum{1.53\times10^{-8}}$ & \fieldnum{1.0016} & \fieldnum{1.0016} & \fieldnum{0.55} & \fieldnum{0.0065}\,px \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 The extinction spectrum changes by an amount comparable to the single-scan
 noise floor of $\fieldnum{6.16\times10^{-9}}$. The residual and the reported uncertainty

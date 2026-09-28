@@ -62,9 +62,11 @@ inversely, so the retrieved amounts are unchanged.
 
 That is the algebra. The arithmetic is not invariant, and the failure is
 abrupt rather than gradual, because $\Phi^{+}$ is computed with a rank
-tolerance:
+tolerance (Table~\ref{tab:colscaling}).
 
-\begin{center}
+\begin{table}[t]
+\caption{Effect of rescaling one column of the small test problem of Appendix~\ref{app:B2} on the condition number $\kappa$, on the projector $P^{\perp}$ and on the derivative $\partial r/\partial\theta$.}
+\label{tab:colscaling}
 \begin{tabular}{llll}
 \tophline
 column scaling & $\kappa(\Phi D)$ & $\lVert\Delta P^{\perp}\rVert$ & relative change in $\partial r/\partial\theta$ \\
@@ -76,7 +78,7 @@ $10^{-12}$ & $7.7\times10^{15}$ & $1.00$ & $0.48$ \\
 $10^{-19}$ & $2.1\times10^{16}$ & $1.00$ & $0.48$ \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 Once the scaling drives the condition number past the tolerance the
 pseudo-inverse discards the column, the projector is onto a different

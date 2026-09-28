@@ -17,7 +17,7 @@ distinguishes them for the retrieval is listed in Table~\ref{tab:1}: the fitting
 the order of the baseline polynomial, the permitted shift range and the light
 level. None of the results in Sects.~\ref{sec:3}--\ref{sec:6} depends on the chemistry the cells
 measure; where a result depends on a property of a configuration, that property
-is named.
+is named. Figure~\ref{fig:2} shows one record retrieved in all three configurations.
 
 \begin{table}[t]
 \caption{Retrieval configurations used in Sects.~\ref{sec:3}--\ref{sec:6}.}
@@ -33,7 +33,6 @@ cold & ambient & 438.420--475.741 & 4th order & fixed at $-0.5$ & reduced \\
 \end{tabular}
 \end{table}
 
-%% Fig. 2 is not cited anywhere in the draft text (see README). Placed here provisionally, after Table 1.
 \begin{figure*}[p]
 \includegraphics[width=\textwidth,height=0.66\textheight,keepaspectratio]{figures/fig02.pdf}
 \caption{One record (1 June 2026, 10:35 KST; cold channel 10:34:34) retrieved in the three
@@ -102,10 +101,11 @@ rather than on a constructed test function: the optimiser call is intercepted
 and the analytic Jacobian it was handed is differenced against the residual it
 was minimising. An invariant check of this form runs on every fit in the test
 suite at the solver's default step; what is reported here is the step-size
-sweep, which is what turns a passing check into a measurement.
+sweep (Table~\ref{tab:jacobian_steps}), which is what turns a passing check into a measurement.
 
-%% Unnumbered, uncaptioned in the draft (see README: Copernicus requires numbered, captioned tables).
-\begin{center}
+\begin{table}[t]
+\caption{Difference between the analytic Golub--Pereyra Jacobian and a central finite difference of the projected residual, evaluated inside a real fit, against the finite-difference step $h$, for the shift (px) and the squeeze. Bold: the minimum of each column.}
+\label{tab:jacobian_steps}
 \begin{tabular}{lll}
 \tophline
 step $h$ & shift (px) & squeeze \\
@@ -121,7 +121,7 @@ $10^{-8}$ & $6.95\times10^{-6}$ & $2.87\times10^{-8}$ \\
 $10^{-9}$ & $1.09\times10^{-5}$ & $2.70\times10^{-7}$ \\
 \bottomhline
 \end{tabular}
-\end{center}
+\end{table}
 
 Both parameters give the expected V (Fig.~\ref{fig:3}c). The truncation branch falls with a fitted
 slope of $+2.001$ in each, which is the $h^2$ of a central difference, and the
@@ -251,4 +251,4 @@ scope is the retrieval, and the instrument intercomparison belongs with the
 science analysis. No absolute accuracy is claimed. The verification of Sects.~\ref{sec:3.1}
 and \ref{sec:3.3} is of the retrieval against its own forward model and against another
 implementation of that model, which bounds implementation error but not model
-error -- and model error is precisely what Sect.~\ref{sec:4.3} measures on the benchmark.
+error -- and model error is precisely what Sect.~\ref{sec:3.4} measures on the benchmark.
