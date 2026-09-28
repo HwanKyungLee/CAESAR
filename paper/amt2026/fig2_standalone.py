@@ -103,7 +103,7 @@ for j,(k,let,name,sub,ledhm) in enumerate(cfg):
         if j>0: AX[(rr_,j)].tick_params(labelleft=False)
     # ---- row 5: the day
     ax=fig.add_subplot(go[2,j]); AX[(5,j)]=ax
-    d=R[k]; d=d[d.Status=="OK"]; tk=d.t+pd.Timedelta(hours=9)
+    d=R[k]; d=d[d.Chi2<=1.5]; tk=d.t+pd.Timedelta(hours=9)  # 2026-09-28: chi2 rule (old Status label is signal-relative RMS, not fit quality)
     ax.scatter(tk,d.NO2,s=1.2,color=C_NO2,alpha=0.45,lw=0)
     tr=pd.Timestamp(t0[k])+pd.Timedelta(hours=9)
     ax.scatter([tr],[r["NO2"]],marker="*",s=70,color="#e8a020",edgecolor="k",lw=0.5,zorder=5)

@@ -86,12 +86,12 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec1_intro.tex | 107 | `8847` |
 | sec1_intro.tex | 107 | `8446` |
 | sec2_retrieval.tex | 255 | `8847` |
-| sec3_verification.tex | 49 | `844` |
-| sec3_verification.tex | 49 | `945` |
-| sec3_verification.tex | 49 | `706` |
-| sec3_verification.tex | 51 | `28` |
-| sec3_verification.tex | 51 | `46` |
-| sec3_verification.tex | 51 | `82` |
+| sec3_verification.tex | 49 | `1397` |
+| sec3_verification.tex | 49 | `1399` |
+| sec3_verification.tex | 49 | `707` |
+| sec3_verification.tex | 51 | `49` |
+| sec3_verification.tex | 51 | `53` |
+| sec3_verification.tex | 51 | `81` |
 | sec3_verification.tex | 166 | `0.99` |
 | sec4_budget.tex | 10 | `0.55` |
 | sec4_budget.tex | 28 | `0.1` |
@@ -557,6 +557,7 @@ Golub & LeVeque (1979) is listed in the format notes for §8 but is not cited in
 
 * Build: 0 errors, 0 undefined references/citations, 0 overfull boxes. Checked from `main.aux` and the PDF text:
   every figure and table is cited in numerical order, and every float is on or after the page of its first citation.
+* Fig. 2 bottom row: selection changed to chi2 <= 1.5 on 2026-09-28; n and percentiles updated.
 * **Figure citations added**: Fig. 1 in the last paragraph of Sect. 1 ("Figure 1 previews the argument: what a
   converged fit reports, against what the data support."); Fig. 2 at the end of the Table 1 paragraph in Sect. 3
   ("Figure 2 shows one record retrieved in all three configurations."). Figs. 1–6 are now cited in order 1..6.

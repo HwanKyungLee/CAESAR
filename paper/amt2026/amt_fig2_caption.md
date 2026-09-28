@@ -13,9 +13,9 @@ every other fitted term, with the fitted NO$_2$ term; the same for H$_2$O, with 
 residual, with ±RMS shaded and its histogram against a Gaussian of the same RMS at right. The lower three rows share
 one vertical scale across columns. Values in the NO$_2$ row are the operational retrieval and its reported 1σ;
 "band depth / RMS" is the peak-to-peak of the fitted NO$_2$ term divided by the residual RMS. **Bottom row:**
-the NO$_2$ retrieved by the same configuration over the surrounding 24 h (status-OK fits only; n = 844, 945, 706),
+the NO$_2$ retrieved by the same configuration over the surrounding 24 h (fits with reduced χ² ≤ 1.5; n = 1397, 1399, 707),
 the star marking this record; inset: distribution of residual RMS over those fits, on which this record sits at the
-28th, 46th and 82th percentile.
+49th, 53rd and 81st percentile.
 
 ## Provenance (for the author; not caption text)
 
@@ -33,5 +33,5 @@ the star marking this record; inset: distribution of residual RMS over those fit
   flag 502 mean, 1st-percentile offset (461 counts) removed, 5-px smoothing: peak 460.4 nm, half-max 451.7–473.4 nm.
 - Middle block: unchanged arrays `amt_fig2_data.csv` (Augur refit reproducing the operational record; see v1 table:
   NO$_2$ deviation 0.004 / 0.108 / 0.370 σ). CHOCHO is now drawn unscaled (peak-to-peak 0.2 / 0.4 / 5.4 × 10$^{-9}$ cm$^{-1}$).
-- Bottom row: operational results `Output\fitting\new\26yeosu\2026-06-01\fitting\260601_CH{1,2,3}_*.dat`, Status == "OK".
+- Bottom row: operational results `Output\fitting\new\26yeosu\2026-06-01\fitting\260601_CH{1,2,3}_*.dat`, reduced χ² ≤ 1.5 (changed 2026-09-28 from Status == "OK", the old signal-relative-RMS label; see manuscript README).
 - Script: `fig2v2.py`.
