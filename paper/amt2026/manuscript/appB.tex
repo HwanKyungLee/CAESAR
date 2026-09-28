@@ -1,0 +1,116 @@
+%% Appendix B -- from augur_AMT_부록B draft v1 (2026-09-22). Synthetic / algebraic only: no \fieldnum.
+%% Appendices A (fit settings, cross sections) and C (synthetic validation suite) of the outline are not drafted yet;
+%% this appendix is therefore typeset as the first appendix section and labelled app:B.
+\section{The projected Jacobian, column scaling and the joint covariance}
+\label{app:B}
+
+\subsection{Setup}
+\label{app:B1}
+
+Write the forward model of Sect.~\ref{sec:2.1} for one spectrum as
+\begin{equation*}
+\alpha \;=\; \Phi(\theta)\,c \;+\; \varepsilon ,
+\end{equation*}
+where $\theta = (\text{shift}, \text{squeeze})$ enters the columns of $\Phi$
+through the resampling of the reference cross sections, and $c$ collects the
+gas amounts and the Chebyshev baseline coefficients. The problem is separable:
+for any $\theta$ the linear parameters are determined by least squares,
+$c^\ast(\theta) = \Phi^{+}\alpha$, and the objective reduces to the \emph{profiled}
+residual
+\begin{equation*}
+r(\theta) \;=\; \bigl(I - \Phi(\theta)\Phi(\theta)^{+}\bigr)\,\alpha
+\;=\; P^{\perp}(\theta)\,\alpha .
+\end{equation*}
+The optimiser searches only $\theta$; $c$ is never a search direction. This is
+variable projection \citep{Golub_1973}.
+
+\subsection{The derivative has two terms}
+\label{app:B2}
+
+Differentiating the projector rather than the fit gives, for each nonlinear
+parameter $\theta_j$ and with $\Phi_j = \partial\Phi/\partial\theta_j$,
+\begin{equation*}
+\frac{\partial r}{\partial \theta_j}
+\;=\; -\Bigl[\, P^{\perp}\Phi_j\Phi^{+}
+\;+\; \bigl(P^{\perp}\Phi_j\Phi^{+}\bigr)^{\!\top} \Bigr]\alpha .
+\end{equation*}
+The first term is the change in the residual caused by moving the column
+space; the second is the change caused by the reprojection of $\alpha$ onto
+it. \citet{Kaufman_1975} drops the second, which is cheaper and is often adequate
+because it does not change the stationary point -- both expressions vanish
+where the true gradient vanishes -- only the path taken to it and the
+curvature reported there.
+
+It is not adequate here. On a small separable problem with the same structure
+as Sect.~\ref{sec:2.1} -- two Gaussian absorber columns and three Chebyshev columns -- the
+two-term expression agrees with a central finite difference of $r(\theta)$ to
+$2\times10^{-10}$ relative, while the one-term expression is in error by 20\,\%
+and 17\,\% in the two nonlinear parameters. The step-size sweep of Sect.~\ref{sec:3.2} measures
+the same thing on the real problem: the analytic derivative descends to the
+round-off floor, which an expression missing a term of that size could not do.
+
+\subsection{Column scaling changes nothing, until it changes everything}
+\label{app:B3}
+
+Replace $\Phi$ by $\Phi D$ for any invertible diagonal $D$. Then
+$(\Phi D)^{+} = D^{-1}\Phi^{+}$, so $P = \Phi D D^{-1}\Phi^{+} = \Phi\Phi^{+}$
+and $P^{\perp}$ are unchanged, and in the derivative of Appendix~\ref{app:B2} the factors
+$D$ and $D^{-1}$ cancel term by term. The profiled residual, its derivative
+and the fitted $\theta$ are therefore invariant under rescaling of the
+columns; only $c$ and its covariance rescale, and they rescale exactly
+inversely, so the retrieved amounts are unchanged.
+
+That is the algebra. The arithmetic is not invariant, and the failure is
+abrupt rather than gradual, because $\Phi^{+}$ is computed with a rank
+tolerance:
+
+\begin{center}
+\begin{tabular}{llll}
+\tophline
+column scaling & $\kappa(\Phi D)$ & $\lVert\Delta P^{\perp}\rVert$ & relative change in $\partial r/\partial\theta$ \\
+\middlehline
+none & $9.3$ & $0$ & $0$ \\
+$10^{-3}$ on one column & $6.1\times10^{5}$ & $2.4\times10^{-10}$ & $1.1\times10^{-10}$ \\
+$10^{-8}$ & $6.1\times10^{11}$ & $1.3\times10^{-4}$ & $5.1\times10^{-5}$ \\
+$10^{-12}$ & $7.7\times10^{15}$ & $1.00$ & $0.48$ \\
+$10^{-19}$ & $2.1\times10^{16}$ & $1.00$ & $0.48$ \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+Once the scaling drives the condition number past the tolerance the
+pseudo-inverse discards the column, the projector is onto a different
+subspace, and the invariance is lost completely rather than degraded. The
+operational problem sits at the bottom of that table by construction: a
+cross-section column is of order $10^{-19}$\,cm$^2$ and a Chebyshev column is
+of order unity. Column normalisation is therefore not a numerical nicety but
+the condition under which the invariance of Appendix~\ref{app:B3} holds at all, and the
+retrieval normalises every column to unit norm before the solve.
+
+\subsection{The joint covariance and what the fit usually reports}
+\label{app:B4}
+
+Linearising the full problem in $(c,\theta)$ at the solution gives the
+Jacobian $J = [\,\Phi \;\; B\,]$ with
+$B = \partial(\Phi c)/\partial\theta$, and the covariance
+$\sigma^{2}(J^{\top}J)^{-1}$. Partitioning it, the $\theta$ block is the
+Schur complement
+\begin{equation*}
+\mathrm{Cov}(\theta) \;=\; \sigma^{2}\bigl(B^{\top}P^{\perp}B\bigr)^{-1},
+\end{equation*}
+which is the projected curvature of Appendix~\ref{app:B2} and not $\sigma^2(B^\top B)^{-1}$: the
+part of $B$ that lies in the column space of $\Phi$ is absorbed by the linear
+parameters and constrains $\theta$ not at all. The $c$ block is correspondingly
+larger than the $(\Phi^{\top}\Phi)^{-1}$ that a fit with $\theta$ held fixed
+would return, by an amount that depends on how much of each column's
+sensitivity the nonlinear parameters can mimic. On the toy problem above the
+inflation runs from 1.001 to 1.257 across the five columns.
+
+Both statements are elementary and neither is new. What matters for Sect.~\ref{sec:5} is that
+a retrieval which reports $\sigma^2(\Phi^{\top}\Phi)^{-1}$ -- the covariance of
+the linear parameters at a fixed $\theta$ -- is reporting a quantity that is
+correct only if $\theta$ was known rather than fitted, and the difference is
+not small when $\theta$ is poorly determined. Augur forms the full
+$(J^{\top}J)^{-1}$ and reports both blocks; the identifiability statistics of
+Sect.~\ref{sec:5} are read from the $\theta$ block, which is available at no extra cost once
+the projected Jacobian of Appendix~\ref{app:B2} has been formed.

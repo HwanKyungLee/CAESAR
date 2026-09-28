@@ -1,0 +1,72 @@
+%% Augur -- AMT manuscript (Copernicus Publications, research article)
+%% Class: official copernicus.cls (Copernicus LaTeX package 7.16, downloaded 2026-09-28).
+%% Build:  latexmk -pdf main.tex        (or: pdflatex main; bibtex main; pdflatex main; pdflatex main)
+
+\documentclass[amt, manuscript]{copernicus}
+
+%% ---------------------------------------------------------------------------
+%% Local macros (kept to a minimum so the source stays Copernicus-compatible)
+%% ---------------------------------------------------------------------------
+%% \fieldnum{...} marks every number taken from the field record (2026 deployment).
+%% It prints its argument unchanged. Set \fielddrafttrue to colour them for proof-reading.
+\newif\iffielddraft
+\fielddraftfalse
+% \fielddrafttrue
+\newcommand{\fieldnum}[1]{\iffielddraft{\color{magenta}#1}\else#1\fi}
+%% \strong{...} = bold emphasis carried over from the drafts (markdown **...**).
+%% Copernicus copy-editing normally removes bold from running text; redefine to \emph if preferred.
+\newcommand{\strong}[1]{\textbf{#1}}
+\providecommand{\Sigmaup}{\Sigma}
+
+\begin{document}
+
+\title{Augur: an $\alpha$-domain variable-projection DOAS retrieval, and what its diagnostics reveal that standard fit reports do not}
+
+% \Author[affil][email]{given_name}{surname}   -- author list to be completed by the authors
+\Author[1][email-to-be-added]{First}{Author}
+\Author[1]{Co}{Author}
+
+\affil[1]{Gwangju Institute of Science and Technology (GIST), Gwangju, Republic of Korea}
+
+\runningtitle{Augur: an $\alpha$-domain variable-projection DOAS retrieval}
+\runningauthor{Author et al.}
+
+\received{}
+\pubdiscuss{}
+\revised{}
+\accepted{}
+\published{}
+
+\firstpage{1}
+
+\maketitle
+
+\input{abstract}
+
+\input{sec1_intro}
+\input{sec2_retrieval}
+\input{sec3_verification}
+\input{sec4_budget}
+\input{sec5_pipeline}
+\input{sec6_reporting}
+\input{sec7_field}
+\input{sec8_conclusions}
+
+\input{availability}
+
+\appendix
+\input{appB}
+\noappendix
+
+\authorcontribution{To be completed by the authors.}
+
+\competinginterests{To be completed by the authors.}
+
+\begin{acknowledgements}
+To be completed by the authors.
+\end{acknowledgements}
+
+\bibliographystyle{copernicus}
+\bibliography{references}
+
+\end{document}

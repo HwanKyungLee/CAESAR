@@ -1,0 +1,343 @@
+%% Sect. 4 -- from augur_AMT_§4 draft v16 (2026-09-22; Fig. 4 v2 caption of 2026-09-27)
+\section{Structural error budget}
+\label{sec:4}
+
+\subsection{What the fit reports, and what it cannot report}
+\label{sec:4.1}
+
+The covariance returned by the fit (Sect.~\ref{sec:2.6}) propagates one thing: the residual
+scatter of the spectrum being fitted. For the operational configuration this
+gives a single-scan reported uncertainty of \fieldnum{0.55}\,\% on the channel NO$_2$
+amount, and it is the number that appears in the data product.
+
+That number is conditional on the forward model being correct. Three inputs of
+Eq.~(\ref{eq:1}) are not measured simultaneously with the spectrum, but interpolated to
+its time from neighbouring calibration blocks: the zero-air reference $I_0$,
+the mirror reflectivity $R(\lambda,t)$, and -- for the periodic optical
+structure -- the etalon frequency $f$, which is held at a fixed value rather
+than redetermined per scan. An error in any of these enters $\alpha$ directly
+and is therefore indistinguishable, within a single fit, from a change in the
+gas amounts. The residual does not see it, so the reported uncertainty does
+not contain it.
+
+Two further inputs were tested and found not to matter. The instrument line
+shape is resampled onto the detector grid with a kernel radius of
+$\lfloor 4\sigma \rfloor + 1$ pixels, so a mismatch below about 0.25\,px does
+not change the kernel at all; at the mismatch measured in the ambient-temperature channel (FWHM 0.765 against 0.785\,nm) the retrieved amount
+moves by $\sim 10^{-5}$\,\%. Sample temperature and pressure, interpolated the
+same way as $I_0$, contribute below \fieldnum{0.1}\,\%. Both are reported as verified
+negligible rather than omitted, because ``not in the budget'' and ``measured to
+be small'' are different statements.
+
+\subsection{Measuring a structural term}
+\label{sec:4.2}
+
+A structural term is measured by perturbing the input the way the operational
+pipeline can actually be wrong, then re-running the full retrieval and reading
+the change in the retrieved amount. Two perturbations are used.
+
+\strong{Leave-one-out (LOO).} One calibration knot is removed, the remaining knots
+are re-interpolated across the resulting gap, and every scan in that gap is
+re-retrieved. This is an upper bound by construction: the interval the
+interpolant must span is roughly doubled relative to operation.
+
+\strong{Split-half.} Each calibration block is split into even and odd scans and two
+independent block means are formed. Their difference measures the noise on a
+knot with no change of interval, and therefore requires no extrapolation back
+to the operational spacing. With $n/2$ scans per half the difference carries a
+factor of two relative to the full-block knot noise, which is divided out.
+
+The two disagree by a channel-dependent factor, and that disagreement is itself
+the result:
+
+\begin{center}
+\begin{tabular}{llll}
+\tophline
+channel & knot noise (split-half) & LOO & ratio \\
+\middlehline
+hot PNs & \fieldnum{2.073}\,\% & \fieldnum{2.19}\,\% & \textbf{\fieldnum{0.95}} \\
+hot ANs & \fieldnum{1.122}\,\% & \fieldnum{2.29}\,\% & \textbf{\fieldnum{0.49}} \\
+cold & \fieldnum{2.391}\,\% & \fieldnum{3.95}\,\% & \textbf{\fieldnum{0.61}} \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+A ratio near unity means the LOO error is entirely knot noise -- the interpolant
+is not being asked to bridge any real curvature, and halving the reference
+interval would not improve it. A ratio near one half means the interval does
+carry curvature. The ordering agrees with the direct measurement of Sect.~\ref{sec:6.2}:
+tripling the reflectivity interval from 2 to 6\,h raises the interpolation error
+by \fieldnum{15}\,\% in hot PNs and by \fieldnum{33}\,\% in hot ANs.
+
+This has a practical consequence that answers a recommendation made
+qualitatively by \citet{Washenfelder_2008}. For the hot channels the
+interpolation error is noise-limited, not curvature-limited: measuring the
+references \emph{more often} does not reduce it, whereas increasing the number of
+scans averaged per calibration block does.
+
+\subsection{Terms must be propagated jointly, and the scale taken once}
+\label{sec:4.3}
+
+It is standard to measure each term separately and add the results in
+quadrature. Here that is wrong twice over, and the two failures have different
+causes.
+
+\strong{Model-space and $\alpha$-space perturbations are not additive.} Perturbing
+$I_0$ and perturbing $R$ both move $\alpha$, and their effects add scan by
+scan: the median of $|\,\delta_{\mathrm{joint}} - (\delta_{I_0} +
+\delta_{R})\,|$ is \fieldnum{0.8}--\fieldnum{2.2}\,\% of the signal. The etalon is different. Its sine
+and cosine columns are free linear parameters, so they absorb part of any
+smooth perturbation of $\alpha$ before it can reach the gas columns. Perturbing
+all three simultaneously gives a smaller result than summing the three
+responses, by \fieldnum{8.3}\,\% (hot ANs), \fieldnum{6.4}\,\% (hot PNs) and \fieldnum{$-0.2$}\,\% (cold). Adding the
+etalon term as if it were independent therefore overestimates, and by an amount
+that depends on the fitting window and polynomial order.
+
+\strong{Variances add; robust scales do not.} Summarising each term by a
+median-based scale and combining those in quadrature misses the directly
+measured joint scale by \fieldnum{$+13.3$}\,\% (hot ANs), \fieldnum{$-8.1$}\,\% (hot PNs) and \fieldnum{$+6.5$}\,\%
+($\Sigma$ANs). Performing the identical combination on standard deviations
+does not repair it: the joint exceeds the quadrature sum by \fieldnum{15.5}\,\% for the ANs
+channel and \fieldnum{7.1}\,\% for $\Sigma$ANs, and falls \fieldnum{2.5}\,\% below it for PNs. Neither space is additive, and neither
+discrepancy has a predictable sign.
+
+The cause is not correlation -- four estimators of the pairwise correlation
+(Pearson, Spearman, Kendall, winsorised) all return $|r| < \fieldnum{0.4}$, where the
+quadrature formula would need $r \approx 0.9$ -- but distribution shape. Write
+$s$ for the normalised shape statistic $1.4826\,\mathrm{MAD}/\mathrm{SD}$,
+which is unity for a Gaussian and 0.727 for a Laplace. The three $\Sigma$ANs
+components have $s = \fieldnum{0.73}$ ($I_0$), \fieldnum{0.32} ($R$) and \fieldnum{0.98} (etalon): one is
+Gaussian, one Laplace-like, one very much heavier-tailed. A median-based
+scale therefore captures a different fraction of the variance in each, and the
+joint series has a fourth shape again ($s = \fieldnum{0.56}$). A variance is indifferent
+to shape, which is why it adds.
+
+What makes this fatal for quadrature is not the size of the error but its
+unpredictability. The discrepancy is \fieldnum{$+13$}\,\% in one channel and \fieldnum{$-8$}\,\% in
+another, and moving to variances neither removes it nor changes its sign --
+\fieldnum{$+15.5$}\,\%, \fieldnum{$-2.5$}\,\% and \fieldnum{$+7.1$}\,\% for the same three series -- so it cannot be
+absorbed into a correction factor: knowing the factor
+requires knowing the shape of the joint distribution, and that is available
+only after the joint propagation has been performed. Quadrature of robust
+scales cannot be repaired, only replaced. The rule used throughout this paper
+is therefore:
+\begin{quote}
+Propagate every term, simultaneously, into the final product time series.
+Take the scale once, at the end, with the same estimator used for the
+quantity it will be compared against.
+\end{quote}
+
+\subsection{The budget}
+\label{sec:4.4}
+
+Table~\ref{tab:2} gives the budget as the robust scale of the jointly propagated
+response, in mixing-ratio units. The three hot/cold entries are per channel;
+the $\Sigma$ANs row is propagated through the channel difference, not formed
+from the channel rows, for the reason given in Sect.~\ref{sec:4.3}.
+
+\begin{table*}[t]
+\caption{Structural error budget, ppb, from a single propagation over all
+\fieldnum{8847} product records over 2026-05-18..05-24, on the clock-aligned reflectivity
+reference (Sect.~\ref{sec:5.4}; bound-terminated fits excluded, Sect.~\ref{sec:5.2}). A record is one 60\,s
+ambient bin, and the population is the bins in which both channels converged. Columns $I_0$, $R$,
+$f$ are single-term responses, shown for diagnosis; \emph{joint} is the measured
+simultaneous response and is the quantity to be used. Both a robust scale
+($1.4826\,$MAD) and a standard deviation are given: the first describes a
+typical record, the second includes the tail. $s$ is the shape statistic of
+Sect.~\ref{sec:4.3}.}
+\label{tab:2}
+\begin{tabular}{llllll}
+\tophline
+ & & $I_0$ & $R$ & $f$ & \textbf{joint} \\
+\middlehline
+hot ANs channel & rSD & \fieldnum{0.0437} & \fieldnum{0.0350} & \fieldnum{0.0082} & \textbf{\fieldnum{0.0641}} \\
+ & SD & \fieldnum{0.0600} & \fieldnum{0.0829} & \fieldnum{0.0086} & \textbf{\fieldnum{0.1186}} \\
+ & $s$ & \fieldnum{0.73} & \fieldnum{0.42} & \fieldnum{0.95} & \fieldnum{0.54} \\
+hot PNs channel & rSD & \fieldnum{0.0416} & \fieldnum{0.0126} & \fieldnum{0.0187} & \textbf{\fieldnum{0.0435}} \\
+ & SD & \fieldnum{0.0428} & \fieldnum{0.0384} & \fieldnum{0.0189} & \textbf{\fieldnum{0.0590}} \\
+ & $s$ & \fieldnum{0.97} & \fieldnum{0.33} & \fieldnum{0.99} & \fieldnum{0.74} \\
+$\Sigma$ANs & rSD & \fieldnum{0.0567} & \fieldnum{0.0268} & \fieldnum{0.0200} & \textbf{\fieldnum{0.0701}} \\
+ & SD & \fieldnum{0.0781} & \fieldnum{0.0836} & \fieldnum{0.0203} & \textbf{\fieldnum{0.1245}} \\
+ & $s$ & \fieldnum{0.73} & \fieldnum{0.32} & \fieldnum{0.98} & \fieldnum{0.56} \\
+\bottomhline
+\end{tabular}
+\end{table*}
+
+Which term dominates depends on which scale is read, and the two answers are
+opposite. Of the $\Sigma$ANs variance, $I_0$ carries \fieldnum{74}\,\% on the robust scale
+but \fieldnum{45}\,\% in standard deviation, while $R$ carries \fieldnum{17}\,\% and \fieldnum{52}\,\%. The
+reflectivity term is small for a typical record and the largest contributor
+overall, because its error is concentrated in a few intervals: five of the \fieldnum{155}
+hours in the window carry \fieldnum{57}\,\% of its variance (Fig.~\ref{fig:4}a, c). Section~\ref{sec:6} takes
+this as the basis for choosing between remedies.
+
+\begin{figure*}[t]
+\includegraphics[width=\textwidth]{figures/fig04.pdf}
+\caption{The structural error budget for the alkyl nitrate product, from leave-one-out
+propagation over the \fieldnum{8847} records of the budget window (18--24 May). \textbf{(a)} Fraction of records whose
+$\Sigma$ANs changes by more than a given amount when each reference term is perturbed alone, and when all three are
+perturbed together; the legend gives the robust scale and standard deviation of each (Table~\ref{tab:2}), and the dotted
+line is the uncertainty the fit reports for one scan. \textbf{(b)} Hour-to-hour variation of $\Sigma$ANs predicted by the
+jointly propagated budget, against the variation observed in the matched hours and over the whole campaign.
+\textbf{(c)} The reflectivity term record by record (points) and as an hourly RMS (steps); shaded, the five hours
+that carry \fieldnum{57}\,\% of its variance.}
+\label{fig:4}
+\end{figure*}
+
+Records whose perturbed fit terminated at a parameter bound are excluded, for
+consistency with Sect.~\ref{sec:5.2}: a fit pinned at a bound has not converged, and its
+response is not a measurement of anything.
+
+The cold channel is not included in Table~\ref{tab:2}. It was not re-run on the
+all-record basis, which lies outside the critical path of this paper, and its
+earlier representative-record values are withdrawn rather than reported on a
+different basis.
+
+The record evaluated here is the product reprocessed on the clock-aligned
+reflectivity reference (Sect.~\ref{sec:5.4}). It is not the dataset delivered to the
+campaign, which was produced before that correction and is retained as
+delivered.
+
+Table~\ref{tab:2} is conditional on a population. A perturbation experiment can only be
+run on scans that have neighbouring knots of both reference types, so periods
+in which the calibration itself failed are absent from it -- and those are
+precisely the periods with the largest errors. How far each record sits from
+its nearest knot of each type, how often the interpolation is in fact an
+extrapolation, and which periods those are, is measured campaign-wide in Sect.~\ref{sec:5.3}.
+The budget window of this section is the best-covered stretch of the
+deployment: no record outside the knot range and no gap longer than two hours,
+against \fieldnum{11.03}\,\% of cold records in gaps longer than two hours over the campaign
+as a whole. Table~\ref{tab:2} therefore describes the instrument when its calibration is
+working, and Sect.~\ref{sec:5.3} measures how often that condition does not hold.
+
+Against what the fit reports the budget is large. A budget record is one 60\,s
+ambient bin, which at the operational scan rate is one scan, and the median
+fit-propagated $\Sigma$ANs uncertainty at that resolution is \fieldnum{0.0501}\,ppb. The
+structural contribution alone is therefore \fieldnum{1.40} times the reported sigma on
+the robust scale and \fieldnum{2.49} times it in standard deviation, and the total
+uncertainty is \strong{\fieldnum{1.72} to \fieldnum{2.68} times what the fit reports}, the range spanning
+the two scales rather than any doubt about the measurement.
+
+The denominator has to be argued for, because three other quantities are
+available and none of them answers this question:
+
+\begin{center}
+\begin{tabular}{llll}
+\tophline
+denominator & ppb & resolution & total / denominator \\
+\middlehline
+\textbf{fit-propagated $\sigma$, per scan} & \textbf{\fieldnum{0.0501}} & \textbf{60\,s = 1 scan} & \textbf{\fieldnum{1.72}--\fieldnum{2.68}} \\
+uncertainty column shipped with the product & \fieldnum{0.0806} & 5\,min, systematic & \fieldnum{1.33}--\fieldnum{1.84} \\
+fit-propagated $\sigma$, 5\,min bin & \fieldnum{0.0224} & 5\,min & not comparable \\
+zero-air scatter, SD & \fieldnum{0.0811} & 34-scan block means & not comparable \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+The column shipped with the product is not a measurement uncertainty. It is a
+gain systematic: regressed against the channel NO$_2$ amount over \fieldnum{14\,974}
+records it is $\fieldnum{0.04209}\,[\mathrm{NO_2}] + \fieldnum{0.00025}$\,ppb with $r = \fieldnum{+0.9997}$, and
+the product header states that it covers day-to-day inter-channel gain only
+and must not be used alone to assess detection significance. Comparing the
+structural budget against it is a defensible sentence, but a different one:
+it asks whether structure is comparable to the gain term, not whether it
+exceeds the precision the retrieval claims. The 5\,min row is the same fit
+uncertainty averaged over five scans -- it is $\fieldnum{0.0501}/\sqrt{5}$ to three
+figures -- and dividing it into a structural scale measured at 60\,s would mix
+resolutions in the opposite direction. The zero-air scatter is the honest
+precision floor, but it is measured on 34-scan block means, each retrieved
+against a reference interpolated across the removed block, so it combines a
+different scan count with reference-interpolation error and is not a
+single-scan quantity. The per-scan fit uncertainty is the median over the
+\fieldnum{14\,974} five-minute records paired with the submitted product, each record's
+mean single-scan uncertainty propagated through the channel difference; it is
+taken over the deployment rather than the budget window, which matters little
+because the fit uncertainty is nearly constant (\fieldnum{0.0198}--\fieldnum{0.0296}\,ppb between the
+5th and 95th percentiles at five-minute resolution).
+
+\subsection{Consistency with the observed variation}
+\label{sec:4.5}
+
+An error budget assembled from perturbation experiments can be checked against
+the data it claims to describe. If a term is channel-differential, it must
+appear in the channel-difference product; if it varies on the timescale of the
+calibration interval, it must appear in the hour-to-hour variation of that
+product. The observed variation is an upper bound on the measurement error,
+because it also contains real atmospheric variability.
+
+The comparison is only meaningful if both sides pass through the same
+estimator. The observed quantity is summarised by
+$1.4826\,\mathrm{median}|\Delta|/\sqrt{2}$ over adjacent hourly means, so the
+propagated series is summarised the same way.
+
+The budget series is itself hourly (median spacing between consecutive entries
+\fieldnum{1.00}\,h, $p_{90}$ \fieldnum{1.03}\,h), so the two series describe the same lag, and the
+comparison is made on the same timestamps, paired.
+
+Two comparisons are defensible, and they differ because the perturbation
+series and the observed series have opposite temporal correlation. Their
+measured lag-1 autocorrelations are \fieldnum{$-0.50$} to \fieldnum{$-0.62$} for the budget and
+\fieldnum{$+0.68$} to \fieldnum{$+0.76$} for the observation. The negative value is a property of
+the experiment, not of the instrument: removing a knot pins the interpolant at
+the two neighbours and forces it to depart on alternate sides, so the
+perturbation response alternates in sign from hour to hour. The positive value
+is atmospheric persistence.
+
+The comparison is made at the resolution at which the observed bound is
+defined -- hourly means, differenced -- and against the same hours:
+
+\begin{center}
+\begin{tabular}{lll}
+\tophline
+ & gate statistic (ppb) & ratio \\
+\middlehline
+observed, campaign (\fieldnum{1201}\,h) & \fieldnum{0.0832} & -- \\
+observed, hours matched to the budget (\fieldnum{107}\,h) & \fieldnum{0.0727} & -- \\
+\textbf{budget, hourly, jointly propagated, matched hours} & \textbf{\fieldnum{0.0618}} & \textbf{\fieldnum{0.85}} \\
+budget, at record resolution & \fieldnum{0.0701} & \fieldnum{0.96} \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+The last row uses a different operator and is given only to show the size of
+that choice; both ratios in the column are taken against the same matched
+denominator, \fieldnum{0.0727}\,ppb. Both the numerator and the denominator of the ratio quoted here
+are evaluated on the same \fieldnum{107} matched hours and \fieldnum{106} consecutive pairs; the
+campaign-wide denominator gives \fieldnum{0.74} and is not used, because the matched
+hours are quieter than the campaign as a whole.
+
+The budget predicts \strong{\fieldnum{0.85} times} the observed hour-to-hour variation (Fig.~\ref{fig:4}b). It
+does not exceed it, as it must not, and it is not far below it either, which
+would have implied that the observed variation is dominated by something the
+budget does not describe.
+
+We report the two as consistent, and assign no pass or fail. The test cannot do better: it assumes the error is white at one-hour lag
+(any slower structural component is invisible to it), it cannot separate
+measurement error from atmospheric variability, and the upper bound doubles
+the interpolation interval by construction. Successive refinements of the
+comparison -- matching the estimator, matching the operator, matching the
+sample, and measuring the correlation -- moved the ratio within \fieldnum{0.87}--\fieldnum{1.39} and
+did not converge further. That range is the resolution of the method, and it
+is reported as such rather than collapsed to a single figure.
+
+One correction must be avoided, because it is available and wrong. Since
+$\operatorname{Var}(\Delta) = 2\sigma^2(1-\rho)$ is an identity when $\rho$ is
+the lag-1 autocorrelation of the same series, ``correcting'' the observed
+increment statistic for $\rho$ returns the standard deviation of the observed
+series itself -- \fieldnum{0.379}\,ppb for the hourly $\Sigma$ANs, i.e. the full
+geophysical variability. Comparing a structural budget against that number is
+not a test; the differencing was introduced precisely to remove it.
+
+\subsection{What should be reported instead}
+\label{sec:4.6}
+
+For each retrieved amount the product should carry three numbers, not one: the
+fit-reported uncertainty; the structural contribution evaluated for that scan's
+calibration context; and a flag identifying scans whose calibration knots are
+themselves suspect. The third matters because the structural error is not
+uniform -- the $R$ term carries the smallest shape statistic in Table~\ref{tab:2}
+($s = \fieldnum{0.32}$ for $\Sigma$ANs), meaning a small number of intervals carry most of
+its variance. Section~\ref{sec:6} implements all three. Sections~\ref{sec:5.3} and \ref{sec:5.4} add two
+further fields of the same kind -- how far the record is from its calibration,
+and whether the reference it used was still valid -- which the pipeline can
+supply without any new measurement.

@@ -1,0 +1,333 @@
+%% Sect. 5 -- from augur_AMT_§5 draft v6 (2026-09-22; KRISS paragraph and Fig. 5 v2 caption of 2026-09-27)
+\section{What the pipeline already knows and does not report}
+\label{sec:5}
+
+Section~\ref{sec:4} measured what the fit cannot know: errors that enter $\alpha$ through
+inputs the fit never sees, and which therefore leave no trace in the residual
+it minimises. This section is about the other category, and it is the cheaper
+one to fix. In each case below, the information needed to qualify a retrieved
+amount already exists somewhere in the pipeline -- in the profiled objective, in
+the optimiser's termination state, in the knot table, in the timestamps of the
+files being read -- and is discarded before the product is written. Nothing here
+calls for a better retrieval algorithm or an additional measurement. It calls
+for the pipeline to report what it has already computed.
+
+\subsection{A nonlinear parameter the data do not determine}
+\label{sec:5.1}
+
+A nonlinear least-squares routine reports convergence when its step and
+tolerance criteria are met. That is a statement about the optimiser, not about
+the objective: an iteration that stops because the step became small has
+established that it is at a stationary point of the profiled residual, and
+nothing more. If the profiled residual is nearly flat over the whole range the
+parameter is allowed to take, the returned value is set by where the search
+started and where the bounds are, and the uncertainty computed from the
+curvature at that point describes a curvature that is not there.
+
+This is not a defect of any particular implementation. It follows from
+reporting a parameter value without reporting how much the data constrain it,
+which is standard practice in DOAS retrieval software.
+
+\strong{A measured case: the wavelength shift in the cold channel.} The wavelength
+shift is the natural test because it is the parameter the retrieval is least
+able to distinguish from a change in the background. Scanning the shift across
+$\pm 4$\,px and profiling out the linear parameters at each point gives the
+objective's actual dependence on it.
+
+In the cold channel the objective is flat. Across the whole $\pm 4$\,px range
+the ratio of the largest to the smallest profiled residual sum of squares has
+a median of \fieldnum{1.0120} and never exceeds \fieldnum{1.0611}; in a set of \fieldnum{165} spectra the
+minimum lies at an edge of the scanned range in \fieldnum{77}\,\% of cases, and evaluating
+the objective at zero shift rather than at its minimum costs between \fieldnum{0.01}\,\%
+and \fieldnum{4.35}\,\%. The same scan in the hot PNs channel spans a factor of
+$\fieldnum{3.09\times10^{5}}$.
+
+Two implementations confirm that the consequence is not numerical. Under
+matched settings the shift returned for the same spectra is \fieldnum{$-2.014$}\,px in
+this work, with \fieldnum{85.5}\,\% of fits terminating at a bound, against \fieldnum{$-0.088$}\,px
+from QDOAS with \fieldnum{4.5}\,\% at a bound; tightening the QDOAS convergence threshold
+to $10^{-12}$ changes nothing. Both codes converge, both report a value, and
+the values differ by two pixels because the data do not distinguish them.
+
+The same channel does distinguish them when the absorber is strong enough. On
+2 June NO$_2$ from a cylinder standard (nominally 10\,$\mu$mol\,mol$^{-1}$ in N$_2$, past its
+certification date and used here only for its spectrum) was added to zero air
+in the cold cavity for half an hour; retrieved against the zero-air spectrum that preceded it, with the
+operational reference and window, the plateaus at 9.3 and 3.6\,ppb place the
+minimum of the objective at $-0.10$ and $-0.15$\,px, and evaluating it at
+$-2.0$\,px instead costs 39\,\% and 7.5\,\% of the residual, against nothing at all
+for the zero-air spectrum itself. The QDOAS value lies within 0.06\,px of that
+minimum; the value returned here does not, and the operational fixed value of
+$-0.5$\,px costs 2.0\,\% at 9.3\,ppb. What the ambient spectra lack is not a defined
+shift but the column to locate it (Fig.~\ref{fig:5}b, c).
+
+What the retrieved amounts do with that freedom is the point. Regressing the
+cold-channel retrievals against the hot-channel reference over \fieldnum{5364} spectra,
+allowing the shift to float gives slopes of \fieldnum{0.940} (NO$_2$), \fieldnum{0.858} (CHOCHO) and
+\fieldnum{1.027} (H$_2$O); fixing the shift at $-0.5$\,px gives \fieldnum{1.019}, \fieldnum{0.662} and \fieldnum{1.178}.
+The weakest absorber in the window moves by \fieldnum{23}\,\% according to a parameter the
+residual cannot resolve.
+
+On the ambient spectra alone the external check does not settle which
+treatment is right, and that is the substance of the problem rather than a gap
+in it. For the two species that do
+not dissociate in the heated cell, and whose slope against the reference
+should therefore be unity, the fitted shift agrees better -- \fieldnum{0.858} against
+\fieldnum{0.662} for CHOCHO, \fieldnum{1.027} against \fieldnum{1.178} for water; for NO$_2$ the fixed shift
+does. A convention cannot be chosen on this evidence, and choosing one
+silently is what current practice does. The laboratory spectrum answers what the
+ambient ones cannot: the shift this channel supports is close to zero,
+$-0.10$\,px, near neither the floated \fieldnum{$-2.0$}\,px nor the fixed $-0.5$\,px. Neither
+treatment was right, and neither fit report could have said so. What locates
+the parameter is a spectrum with enough absorber; what the product should carry
+is the value such a spectrum gives, and where it came from.
+
+\begin{figure*}[t]
+\includegraphics[width=\textwidth]{figures/fig05.pdf}
+\caption{The wavelength shift in the cold channel is not determined by ambient spectra,
+and is determined by a laboratory spectrum with added NO$_2$. \textbf{(a)} Profiled residual sum of squares against
+shift for twelve ambient spectra (the statistics quoted in Sect.~\ref{sec:5.1} are over \fieldnum{165}), each normalised to its own
+minimum; shaded, the range the operational configuration allows; dashed, the value it fixes. \textbf{(b)} The same
+scan for the laboratory spectra of 2 June: zero air with 9.3 and 3.6\,ppb of NO$_2$ added, and zero air alone;
+the band marks the vertical range of (a). \textbf{(c)} Shift returned for the ambient spectra by two independently
+converged implementations under matched settings (with the fraction of fits at a bound), the operational
+fixed value, and the profile minima of (b). \textbf{(d)} Slope of the cold-channel retrieval against the
+hot-channel reference ($n = \fieldnum{5364}$) with the shift fitted and with it fixed; CHOCHO and H$_2$O do not dissociate
+in the heated cell and should give unity.}
+\label{fig:5}
+\end{figure*}
+
+\strong{What is degenerate with what.} Not every input error threatens the same
+parameter. Propagating the three structural terms of Sect.~\ref{sec:4} separately and
+recording how far each moves the wavelength shift separates them cleanly:
+
+\begin{center}
+\begin{tabular}{llll}
+\tophline
+perturbation & median & $p_{90}$ & max \\
+\middlehline
+zero-air reference & \fieldnum{0.179}\,px & \fieldnum{0.743} & \fieldnum{4.755} \\
+reflectivity & \textbf{\fieldnum{0.006}} & \textbf{\fieldnum{0.020}} & \textbf{\fieldnum{0.097}} \\
+etalon frequency & \fieldnum{0.151} & \fieldnum{0.343} & \fieldnum{2.675} \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+An error in the reflectivity changes the magnitude of the extinction and
+essentially nothing else -- it never moves the shift by a tenth of a pixel. An
+error in the zero-air reference, or in the etalon frequency, changes the shape
+of the extinction and is therefore partly absorbed by the axis. This is the
+same distinction that Sect.~\ref{sec:6.1a} draws from the shape statistic, arrived at
+independently: the reflectivity is a pure amplitude term, and the other two
+compete with the nonlinear parameters.
+
+It also bounds the concern that the budget of Sect.~\ref{sec:4} is really measuring basin
+hopping. Records whose shift moved by more than a pixel under perturbation are
+\fieldnum{6.2}\,\% of the total and carry \fieldnum{4.8}\,\% of the variance, and removing them raises
+the budget rather than lowering it. The large-shift records are
+the low-amplification ones, where the absorption is deep and the retrieval is
+well conditioned.
+
+\strong{What the pipeline could report instead.} The profiled scan above is too
+expensive to run per spectrum, but its conclusion is available cheaply from the
+ratio of the objective at the returned value to the objective at a fixed
+reference point -- a quantity the fit evaluates anyway. Where that ratio lies
+within the noise, the parameter should be fixed, said to be fixed, and the cost
+of fixing it carried in the uncertainty of every amount that depends on it.
+Reporting \fieldnum{$-2.014 \pm 0.03$}\,px for a quantity the data locate only to \fieldnum{$\pm 2$}\,px
+is the failure this subsection describes, and for this channel the resulting
+term is larger than any in Table~\ref{tab:2}.
+
+\subsection{Termination at a bound is a routine outcome}
+\label{sec:5.2}
+
+Bound termination is usually treated as a failure to be logged. In this
+instrument it is the normal state of one channel and a systematic response to
+perturbation in another.
+
+The operational configuration allows the shift different freedom in each
+channel -- $[-10, +0.5]$\,px in hot ANs, $[-5, +5]$\,px in hot PNs, $[-1, +1]$\,px
+in cold -- and in the cold channel every one of the \fieldnum{22} base fits returns
+exactly \fieldnum{$-1.000$}\,px, the bound itself. The fits are reported as converged. In
+the production propagation of Sect.~\ref{sec:4} the cold shift is held fixed rather than
+bounded, and moves by exactly zero in every record, which confirms the
+configuration but also means the channel contributes no information about the
+parameter at all.
+
+In hot PNs, \fieldnum{123} records terminate at a bound under perturbation, and \fieldnum{121} of
+those are the zero-air perturbation; only \fieldnum{4} are unperturbed fits. The hot ANs
+channel has none. The operational fit is therefore well inside its feasible
+region, and it is the structural perturbation that drives it out -- which is to
+say that the margin between the operational solution and the edge of
+identifiability is smaller than the size of a reference error. This is also
+the ground on which Sect.~\ref{sec:4} excludes bound-terminated records from Table~\ref{tab:2}: a fit
+pinned at a bound has not converged, and its response is not a measurement of
+anything.
+
+\strong{What the pipeline could report instead.} The optimiser distinguishes a fit
+stopped by the gradient from one stopped by a step limit or at a parameter
+bound, and Augur computes these as distinct states internally. They are not
+carried into the product alongside the retrieved amount. Collapsing
+them into ``converged'' is what allows a bound-pinned shift to be published as a
+measurement.
+
+\subsection{How far a record is from its calibration}
+\label{sec:5.3}
+
+Every retrieved amount sits at some distance in time from the calibration
+knots that produced its reference spectra, and that distance varies over the
+campaign by more than an order of magnitude. The pipeline computes it -- it has
+to, in order to interpolate -- and then discards it. The retrieval interpolates
+the reflectivity across an \fieldnum{11.8}\,h gap exactly as it does across a one-hour gap,
+and returns the same uncertainty in both cases.
+
+Coverage was measured over the whole campaign by extracting the calibration
+blocks directly from the raw files, independently of the retrieval, and
+verified against the production knot cache (\fieldnum{157}/\fieldnum{157} hot and \fieldnum{164}/\fieldnum{164} cold knots
+at 0.000000\,s) and against the alpha header's own \texttt{ZA\_count=}\fieldnum{1313}. Two
+distinct deficits appear, and they are not the same quantity:
+
+\begin{center}
+\small\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llllllll}
+\tophline
+instrument & window & $n$ & $I_0$ out of range & $I_0$ gap $>2$\,h & $R$ out of range & $R$ gap $>2$\,h & worst $R$ gap \\
+\middlehline
+hot ch1/ch2 & campaign & \fieldnum{76\,282} & \fieldnum{0.08}\,\% & \fieldnum{0.07}\,\% & \fieldnum{3.76}\,\% & \fieldnum{1.23}\,\% & \fieldnum{10.6}\,h \\
+hot ch1/ch2 & budget window 05-18..24 & \fieldnum{9\,088} & \fieldnum{0.01}\,\% & \fieldnum{0.00}\,\% & \fieldnum{0.00}\,\% & \fieldnum{0.00}\,\% & \fieldnum{1.3}\,h \\
+cold & campaign & \fieldnum{43\,259} & \fieldnum{0.13}\,\% & \fieldnum{0.34}\,\% & \fieldnum{2.89}\,\% & \fieldnum{11.03}\,\% & \fieldnum{11.8}\,h \\
+cold & cold window 06-10..16 & \fieldnum{7\,069} & \fieldnum{0.42}\,\% & \fieldnum{0.00}\,\% & \fieldnum{17.32}\,\% & \fieldnum{18.31}\,\% & \fieldnum{11.8}\,h \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+For the zero-air reference the word ``interpolation'' is accurate: \fieldnum{0.08}\,\% of hot
+records lie outside the knot range and \fieldnum{0.07}\,\% inside a gap longer than two
+hours, with the nearest knot a median \fieldnum{922}\,s away. The zero-air knot set is on
+the corrected time axis -- the production cache over 05-18..24 reproduces a
+re-extraction at 0.000000\,s -- so the $I_0$ column is unaffected by the
+displacement described in Sect.~\ref{sec:5.4}.
+
+The cold channel's deficit is real and is a gap problem: the existing quality
+gates reject \fieldnum{11.3}\,\% of cold pairs against \fieldnum{0.24}\,\% of hot pairs (\fieldnum{3} of \fieldnum{1\,264});
+an independent count gives \fieldnum{75} of \fieldnum{743}, \fieldnum{10.1}\,\%, and nothing below turns on the
+difference. Independent rejection at the \fieldnum{11.3}\,\% rate would leave \fieldnum{3.5}\,\% of cold
+records in gaps longer than two hours against the \fieldnum{11.03}\,\% observed, and the
+worst gap, \fieldnum{11.8}\,h, is eleven consecutive rejected pairs -- a run that even at a
+40\,\% independent rejection rate would be expected 0.03 times in the campaign.
+The rejections arrive in runs, which is the episodic structure Sect.~\ref{sec:6.1a} found in
+the reflectivity variance itself, seen from the calibration side.
+
+The two deficits also explain a limit on Table~\ref{tab:2} itself. A perturbation
+experiment can only be run on scans that have neighbouring knots of both
+reference types, so periods in which the calibration failed are absent from the
+budget population -- and those are precisely the periods with the largest
+errors. In the cold channel, eleven of the thirteen zero-air blocks identified
+as defective in Sect.~\ref{sec:6} fall outside the case set because no reflectivity knot
+exists within \fieldnum{2.8}--\fieldnum{5.8}\,h of them: a collapse of the zero-air signal takes the
+He/zero-air pair down with it, so the two reference failures are one event
+seen twice.
+
+\strong{What the pipeline could report instead.} Three numbers the interpolation
+already holds: the elapsed time to the nearest knot of each reference type, the
+length of the enclosing knot interval, and a flag for records outside the knot
+range altogether rather than between knots. Section~\ref{sec:6.1} specifies them as
+product fields. They cost nothing to emit and they separate the \fieldnum{0.00}\,\% of the
+budget window from the \fieldnum{18.31}\,\% of the cold window, which no field in the
+current product distinguishes.
+
+\subsection{A reference error the fit does not see}
+\label{sec:5.4}
+
+Table~\ref{tab:2} is computed on a clock-aligned reflectivity reference. The operational
+one was not aligned: the reflectivity knots for 2026-05-18 to 05-30 lie on a
+time axis that a later correction to the raw-data reader superseded, while the
+spectra lie on the corrected one, so every record in that span was retrieved
+with a reflectivity displaced by nine hours. The budget window of Sect.~\ref{sec:4} falls
+inside it. The zero-air reference is unaffected -- its knots were already on
+the corrected axis, verified to 0.000000\,s -- and so is the cold channel, which
+the correction does not apply to.
+
+This makes it possible to measure directly what using a wrong reference costs,
+and what the fit report says about it. The retrieval was run over all \fieldnum{9\,132}
+records of the window twice, changing nothing but the knot time base.
+
+\begin{center}
+\begin{tabular}{llll}
+\tophline
+series & delta rSD (ppb) & delta SD (ppb) & vs the $R$ term of Table~\ref{tab:2} \\
+\middlehline
+ANs channel & \fieldnum{0.1048} & \fieldnum{0.1627} & \fieldnum{3.0} \\
+PNs channel & \fieldnum{0.0358} & \fieldnum{0.0563} & \fieldnum{2.8} \\
+\textbf{$\Sigma$ANs} & \textbf{\fieldnum{0.0999}} & \fieldnum{0.1437} & \textbf{\fieldnum{3.7}} \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+The displacement moves the alkyl nitrate product by \fieldnum{0.0999}\,ppb: between three
+and four times the reflectivity term of the budget, and \fieldnum{1.43} times the whole
+of it. It is the largest single term in this paper. It is not in Table~\ref{tab:2}
+because Table~\ref{tab:2} measures what a reference's own uncertainty costs, not what
+using the wrong reference costs.
+
+What the fit reports about it is the point of the section.
+
+\begin{center}
+\begin{tabular}{llllll}
+\tophline
+ & $\alpha$ RMS change & residual ratio & reported $\sigma$ ratio & $|\delta c| / \sigma$ & $|\delta\,\mathrm{shift}|$ \\
+\middlehline
+ANs & $\fieldnum{3.37\times10^{-9}}$ & \fieldnum{1.0020} & \fieldnum{1.0022} & \textbf{\fieldnum{1.99}} & \fieldnum{0.0053}\,px \\
+PNs & $\fieldnum{1.53\times10^{-8}}$ & \fieldnum{1.0016} & \fieldnum{1.0016} & \fieldnum{0.55} & \fieldnum{0.0065}\,px \\
+\bottomhline
+\end{tabular}
+\end{center}
+
+The extinction spectrum changes by an amount comparable to the single-scan
+noise floor of $\fieldnum{6.16\times10^{-9}}$. The residual and the reported uncertainty
+change by the same two parts in a thousand, and the agreement is not a
+coincidence: across the campaign the reported uncertainty is a near-constant
+multiple of the residual RMS ($r = \fieldnum{+0.999}$; the ratio moves by \fieldnum{2.8}\,\% between
+its 5th and 95th percentiles, Sect.~\ref{sec:7.3}). A fit report that shows an unchanged
+residual and an unchanged uncertainty is not offering two independent
+witnesses to its own quality. It is offering one, twice. The fitted wavelength shift moves by
+\fieldnum{0.005}\,px, where the reference perturbations of Table~\ref{tab:2} move it by \fieldnum{0.23}\,px --
+forty times less -- so the error is neither absorbed by the nonlinear
+parameters nor revealed by the residual. The retrieved concentration moves by
+two reported standard deviations. Every quantity a fit report offers as
+evidence of quality is unchanged; the answer is not.
+
+Correcting it did not simply reduce the budget, and the way it did not is
+informative. The robust scale of the $\Sigma$ANs budget fell by \fieldnum{7.5}\,\%
+(\fieldnum{0.0758} to \fieldnum{0.0701}\,ppb) while its standard deviation rose by \fieldnum{5.2}\,\% (\fieldnum{0.1184} to
+\fieldnum{0.1245}), so the total uncertainty relative to what is reported widened at both
+ends, from \fieldnum{1.81}--\fieldnum{2.57} to \fieldnum{1.72}--\fieldnum{2.68} times against the sigma the fit reports
+(Sect.~\ref{sec:4.4}). Two things were working in opposite
+directions. Coverage improved, from \fieldnum{93.0}\,\% to \fieldnum{98.7}\,\% of the window's records,
+because the misaligned knots had been falling outside the one-hour window that
+admits a record to the perturbation experiment. And the correlation between
+the two channels' joint responses fell from \fieldnum{$+0.412$} to \fieldnum{$+0.146$}: because
+$\Sigma$ANs is a channel difference, a common-mode error partly cancels in it,
+and the pre-correction cancellation was an artefact of an error the two
+channels shared. The contaminated product was flattering itself in two ways at
+once, and the budget measured on it inherited both.
+
+The cost is not uniform in time, and not in the direction we predicted before
+measuring it. Across the boundary where the clock was corrected, the affected
+side gives \fieldnum{0.0600}\,ppb against \fieldnum{0.0000}\,ppb on the unaffected side -- the latter a
+check that the realignment touched only the intended knots -- so the
+displacement costs less near the boundary than in the budget window. What
+matters is not proximity to the boundary but how fast the reflectivity is
+moving at the time, and it moves fastest early in the deployment. The
+budget-window figure of \fieldnum{0.0999}\,ppb is the value to quote; \fieldnum{0.0600}\,ppb is range
+information, not a worst case.
+
+\strong{What the pipeline could report instead.} The failure here is not that the
+clock was wrong -- that was a hardware fact, caught by an external reference and
+corrected. It is that a derived cache went stale and nothing noticed. The
+reflectivity file was written on 2026-07-10; the correction to the reader that
+invalidated it was committed on 2026-09-19; the retrieval read both without
+comparing them. A pipeline that records, for each derived reference, the
+version of the code and the raw files it was built from can detect this
+condition mechanically, and it is the only failure in this paper that admits a
+complete remedy rather than a better report. Section~\ref{sec:6.1} specifies the fields.

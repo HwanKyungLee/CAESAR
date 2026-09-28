@@ -1,0 +1,56 @@
+%% Abstract -- from augur_AMT_초록 draft v5 (2026-09-21, KRISS sentence and 'twelve days' of 2026-09-27)
+\begin{abstract}
+A DOAS fit reports a residual, a chi-square, an uncertainty and a convergence
+flag, and these are read as a description of how well the retrieval did. Each
+can assert more than the fit knows, and the gap is invisible from inside the
+fit report. We present Augur, an open retrieval for a two-channel
+thermal-dissociation broadband cavity-enhanced absorption spectrometer
+measuring NO$_2$, total peroxy nitrates and total alkyl nitrates
+\citep{Min_2016,Nam_2022}, and use it to measure that gap on 53 days of field
+measurements.
+
+Augur poses the retrieval in the extinction domain as a separable nonlinear
+least-squares problem and solves it by variable projection with an analytic
+two-term Golub--Pereyra Jacobian, propagating a joint covariance that includes
+the nonlinear parameters. Its contribution, however, is architectural rather
+than numerical. The time-resolved references enter as data, so a
+leave-one-out perturbation of the calibration record is a loop over knots
+rather than a reprocessing campaign; and the projected objective is available
+as a function of the nonlinear parameters, so the shape of the minimum can be
+mapped rather than inferred from a converged point. The retrieval underneath
+is not in dispute -- an independent DOAS code reproduces Augur to within its
+output resolution -- but neither of these questions can be put to a
+conventional implementation without reprocessing the campaign once per
+answer.
+
+Asking them changes what the uncertainty means. For the product the instrument
+reports, formed as the difference of two retrievals, leave-one-out perturbation of
+the zero-air, reflectivity and etalon references gives a structural
+uncertainty \fieldnum{1.4} to \fieldnum{2.5} times the sigma the fit reports for the same 60\,s
+record, so the total is \fieldnum{1.7} to \fieldnum{2.7} times what is reported. The uncertainty
+column delivered with the product is not that quantity at all but a gain
+systematic proportional to NO$_2$, and carries none of this. On synthetic spectra with
+known truth the reported sigma tracks the scatter to within about 10\,\% for
+white photon noise, but omitted companion absorbers bias
+the retrieval by a fixed extinction offset independent of analyte amount, and
+the same truth fitted in two windows disagrees by as much as the combined
+reported uncertainty. None of these enlarge the residual.
+
+Two failures are of a different kind, because the information existed upstream
+and was discarded. Wavelength shift is identifiable in one window and not in
+another -- the profiled objective varies by a median \fieldnum{1.2}\,\% over $\pm4$\,px where
+the other window spans five orders of magnitude -- yet both are reported as
+converged, and under matched settings \fieldnum{85.5}\,\% of them terminate at a parameter
+bound; a laboratory spectrum with added NO$_2$ locates the same shift to a tenth of
+a pixel, two pixels from where the ambient fit converged. And a nine-hour misalignment between the reflectivity time base and the
+spectra, present in twelve days of the operational product, displaced the
+retrieved alkyl nitrates by \fieldnum{0.0999}\,ppb, \fieldnum{1.43} times the entire structural
+budget, while moving the fitted wavelength shift by \fieldnum{0.005}\,px and changing the
+residual and the reported uncertainty by two parts in a thousand.
+
+Neither failure is expensive to prevent: the termination state, the distance
+to the nearest reference in time and the provenance of each reference are all
+known inside the retrieval and need only be carried to the product, which we
+recommend as a reporting convention and implement in Augur. We release Augur and a synthetic benchmark with which any
+DOAS implementation can measure the same quantities.
+\end{abstract}

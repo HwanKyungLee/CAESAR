@@ -1,0 +1,278 @@
+%% Sect. 2 -- Sects. 2.1-2.8 from augur_AMT_§2 draft v1 (2026-09-19); Sect. 2.9 from augur_AMT_§2.9_3 draft v1 (2026-09-21)
+\section{Retrieval formulation}
+\label{sec:2}
+
+\subsection{Forward model in the extinction domain}
+\label{sec:2.1}
+
+The cavity output is converted to an extinction coefficient before any spectral fitting
+is attempted. For a sample spectrum $I(\lambda)$ and a reference spectrum
+$I_0(\lambda)$ recorded with the cavity filled by zero air,
+\begin{equation}
+\alpha(\lambda) \;=\;
+\Bigl[\underbrace{\tfrac{R_L\,(1-R(\lambda,t))}{d}}_{\textstyle \alpha_{\mathrm{mirror}}}
+\;+\; R_L\,\alpha_{\mathrm{Ray}}(\lambda; T_0, P_0)\Bigr]
+\frac{I_0(\lambda)-I(\lambda)}{I(\lambda)}
+\;-\;\bigl[\alpha_{\mathrm{Ray}}(\lambda; T, P)-\alpha_{\mathrm{Ray}}(\lambda; T_0,P_0)\bigr],
+\label{eq:1}
+\end{equation}
+where $R(\lambda,t)$ is the mirror reflectivity, $d$ the mirror separation, $R_L$ the
+ratio of the full mirror separation to the effective cavity length actually filled by
+the sample (i.e. excluding the purge-gas volumes at the mirrors), and
+$\alpha_{\mathrm{Ray}}$ the Rayleigh extinction evaluated at the temperature and
+pressure of the sample $(T,P)$ and of the reference $(T_0,P_0)$. The second bracket
+removes the Rayleigh difference between the two states; the first converts a relative
+intensity change into an absolute extinction.
+
+Working in $\alpha$ rather than in optical density has one consequence that organises
+everything below: \strong{the gas amounts enter Eq.~(\ref{eq:1}) linearly.} The quantity to be fitted
+is a sum of reference cross sections with concentration coefficients, plus a smooth
+background, plus whatever periodic structure the optics impose. No logarithm stands
+between the unknowns and the measurement.
+
+\subsection{Separable structure}
+\label{sec:2.2}
+
+Let $p$ index the $n$ detector pixels of the fitting window and let
+\begin{equation*}
+x(p) \;=\; \frac{2\,(p-p_{\min})}{p_{\max}-p_{\min}} - 1 \;\in\; [-1,1].
+\end{equation*}
+The model for the measured extinction is
+\begin{equation}
+\alpha_{\text{model}}(p)\;=\;
+\sum_{i=1}^{m} c_i\,\tau_i(T)\,\sigma_i\bigl(p_i'\bigr)
+\;+\;\sum_{j=0}^{q} b_j\,T_j\bigl(x(p)\bigr)
+\;+\; a_s \sin(f p) + a_c \cos(f p),
+\label{eq:2}
+\end{equation}
+\begin{equation}
+p_i' \;=\; (p-p_c)\,s_i + p_c + \delta_i ,
+\label{eq:3}
+\end{equation}
+with $T_j$ the Chebyshev polynomial of the first kind, $p_c$ a fixed window centre,
+and $\tau_i(T)=1+\kappa_i (T-T_{\mathrm{ref}})/100$ the temperature scaling of the
+$i$-th cross section. Each reference carries its own wavelength shift $\delta_i$
+(pixels) and squeeze $s_i$; in practice one gas is designated the anchor and the
+companions are linked to it or fixed, which is a constraint on $\theta$ and not a
+change of structure.
+
+Two choices in Eq.~(\ref{eq:2}) deserve comment.
+
+\emph{The background is Chebyshev, not monomial.} On $x\in[-1,1]$ the Chebyshev basis is
+far better conditioned than $1,p,p^2,\dots$; with the monomial basis the polynomial
+block alone reaches condition numbers that make the background coefficients
+meaningless, and the ill-conditioning leaks into the gas coefficients through the
+shared normal equations.
+
+\emph{The etalon enters as a sine--cosine pair at fixed frequency, not as an
+amplitude--phase pair.} Since
+\begin{equation*}
+A\sin(fp+\varphi)=A\cos\varphi\,\sin(fp)+A\sin\varphi\,\cos(fp),
+\end{equation*}
+the two
+parametrisations span the same model space, but the pair $(a_s,a_c)$ is \strong{linear}
+whereas $(A,\varphi)$ is not. Writing it this way removes a nonlinear parameter from
+the search and makes the etalon amplitude and phase part of the globally solvable
+linear step. Only the frequency $f$ remains fixed a priori.
+
+Collecting the $k=m+(q+1)+2$ basis vectors into a design matrix $\mathbf{A}(\theta)$
+whose columns depend on the nonlinear vector $\theta=(\delta_i,s_i)$ only through
+Eq.~(\ref{eq:3}), and writing $\mathbf{W}=\mathrm{diag}(w_1,\dots,w_n)$ for the pixel weights,
+the problem is
+\begin{equation}
+\min_{\theta,\;\mathbf{c}}\;
+\bigl\|\mathbf{W}\bigl(\mathbf{y}-\mathbf{A}(\theta)\,\mathbf{c}\bigr)\bigr\|_2^2,
+\qquad \mathbf{y}=\alpha_{\text{meas}} .
+\label{eq:4}
+\end{equation}
+This is a \strong{separable} nonlinear least-squares problem in the sense of \citet{Golub_1973}:
+$k$ linear parameters and, for the operational configuration, two to
+six nonlinear ones.
+
+\subsection{Variable projection with an analytic projected Jacobian}
+\label{sec:2.3}
+
+For any $\theta$ the inner problem is an ordinary linear least-squares problem, so
+$\mathbf{c}$ need never be searched. Substituting the minimiser
+$\hat{\mathbf{c}}(\theta)=\mathbf{A}^{+}\mathbf{y}$ leaves the \emph{projected} residual
+\begin{equation}
+\mathbf{r}(\theta)\;=\;\bigl(\mathbf{I}-\mathbf{A}(\theta)\mathbf{A}(\theta)^{+}\bigr)\mathbf{y}
+\;=\;\mathbf{P}^{\perp}_{\mathbf{A}(\theta)}\,\mathbf{y},
+\label{eq:5}
+\end{equation}
+a function of $\theta$ alone. We minimise Eq.~(\ref{eq:5}) with a bounded
+Levenberg--Marquardt/trust-region solver. In implementation the weighted, column-scaled
+design matrix is factorised as $\mathbf{A}\mathbf{S}^{-1}=\mathbf{Q}\mathbf{R}$, which
+delivers $\hat{\mathbf{c}}$, the residual, and the projector
+$\mathbf{P}^{\perp}=\mathbf{I}-\mathbf{Q}\mathbf{Q}^{\!\top}$ from one factorisation.
+
+The Jacobian of Eq.~(\ref{eq:5}) is supplied analytically in the full Golub--Pereyra form,
+\begin{equation}
+\frac{\partial \mathbf{r}}{\partial \theta_k}
+\;=\;-\Bigl[\;\underbrace{\mathbf{P}^{\perp}\mathbf{D}_k\,\hat{\mathbf{c}}}_{\text{projection term}}
+\;+\;\underbrace{(\mathbf{A}^{+})^{\!\top}\mathbf{D}_k^{\top}\,\mathbf{r}}_{\text{second term}}\;\Bigr],
+\qquad
+\mathbf{D}_k=\frac{\partial \mathbf{A}}{\partial \theta_k},
+\label{eq:6}
+\end{equation}
+with $(\mathbf{A}^{+})^{\!\top}=\mathbf{Q}\mathbf{R}^{-\top}$. Only the gas columns of
+$\mathbf{D}_k$ are non-zero: differentiating Eq.~(\ref{eq:3}),
+\begin{equation}
+\frac{\partial}{\partial \delta_i}\,\sigma_i(p_i') = \sigma_i'(p_i'),
+\qquad
+\frac{\partial}{\partial s_i}\,\sigma_i(p_i') = (p-p_c)\,\sigma_i'(p_i'),
+\label{eq:7}
+\end{equation}
+so $\sigma_i'$ is obtained once from the derivative of the interpolating spline that
+already represents each reference. The polynomial and etalon columns are independent of
+$\theta$ and contribute nothing. Both terms of Eq.~(\ref{eq:6}) cost one triangular solve and
+one multiplication by $\mathbf{Q}$; the derivation and the invariance of Eq.~(\ref{eq:6}) under
+the column scaling $\mathbf{S}$ are given in Appendix~\ref{app:B}.
+
+Retaining the second term matters for two reasons. It is what makes Eq.~(\ref{eq:6}) the exact
+derivative rather than the \citet{Kaufman_1975} approximation, and -- because it is exact -- it
+can be checked against finite differences to the level of round-off, which turns the
+Jacobian into a regression test rather than a claim (Sect.~\ref{sec:3.1}).
+
+\strong{Relation to existing DOAS implementations.} The separable structure is not new to
+DOAS; what is absent from the established treatments is the derivative of the linear
+solution with respect to the nonlinear parameters. QDOAS solves the slant columns and
+the polynomial by singular value decomposition inside each evaluation of the fitting
+function while its Marquardt--Levenberg loop iterates over the nonlinear parameters
+only -- the structure WinDOAS itself named ``Marquardt-SVD'' -- but its source states that
+the derivatives with respect to shift and stretch are ``always numeric'', so no term of
+the form of Eq.~(\ref{eq:6}) is formed. DOASIS \citep{Kraus_2006} goes the other way: once shift and
+squeeze are fitted, the concentrations are handed to the nonlinear solver as well, and
+the thesis notes that the algorithm may then fail to find the global optimum that the
+linear step would have guaranteed. The standard textbook scheme \citep[][Sect.~8.3.4]{Platt} alternates one linear solve with one Levenberg--Marquardt step, explicitly ``with
+fixed parameters $a_j$ and $c_h$'' -- block-coordinate optimisation, in which
+$\partial \hat{\mathbf{c}}/\partial\theta$ does not appear. Outside DOAS, the analytic
+form of Eq.~(\ref{eq:6}) is established in atmospheric remote sensing: \citet{B_rligea_2023}
+use exactly this projected derivative, with the Kaufman variant, for a SWIR retrieval
+in which -- as in BIRRA \citep{Gimeno_Garc_a_2011} -- the separability is inverted
+relative to Eq.~(\ref{eq:2}).
+
+\subsection{Time-resolved mirror reflectivity}
+\label{sec:2.4}
+
+$R$ in Eq.~(\ref{eq:1}) is not a constant of the deployment. It is determined at intervals from
+helium injections and drifts between them. Rather than assigning one value per
+campaign, or per day, we carry $R(\lambda,t)$ as a monotone piecewise-cubic (PCHIP)
+interpolation through the injection knots, evaluated at the timestamp of each spectrum.
+Monotone interpolation is chosen so that the reconstruction cannot overshoot between
+knots; the cost, quantified in Sect.~\ref{sec:4.4}, is that it also cannot represent a turning point
+that falls between two knots.
+
+\subsection{Uncertainty}
+\label{sec:2.5}
+
+With $\hat{\sigma}^2 = \mathbf{r}^{\!\top}\mathbf{r}/(n-P)$, where $P$ counts the
+linear columns and the active nonlinear parameters, the conditional covariance of the
+linear coefficients is the usual
+\begin{equation}
+\mathrm{Cov}\bigl(\mathbf{c}\,\big|\,\theta=\hat\theta\bigr)
+=\hat{\sigma}^2\bigl(\mathbf{A}_{\mathbf{W}}^{\top}\mathbf{A}_{\mathbf{W}}\bigr)^{-1}.
+\label{eq:8}
+\end{equation}
+Equation~(\ref{eq:8}) is what DOAS retrievals conventionally report, and it is conditional: it
+holds the fitted shift and squeeze at their optimum. Variable projection separates
+$\theta$ from $\mathbf{c}$ in the \emph{solution}, but it does not separate them in the
+\emph{uncertainty} -- if the shift is uncertain, the concentrations inherit that uncertainty.
+We therefore also form the joint covariance from the full Jacobian of the unprofiled
+residual,
+\begin{equation}
+\mathbf{J}=\bigl[\;\mathbf{A}_{\mathbf{W}}\;\big|\;\mathbf{V}\;\bigr],
+\qquad
+\mathbf{V}_{:,k}=\sum_i \frac{\partial \mathbf{A}_{:,i}}{\partial \theta_k}\,\hat{c}_i,
+\qquad
+\mathrm{Cov}(\mathbf{c},\theta)=\hat{\sigma}^2\,(\mathbf{J}^{\top}\mathbf{J})^{-1},
+\label{eq:9}
+\end{equation}
+and take the gas block \citep{OLeary_2013}. Because Eq.~(\ref{eq:8}) is the Schur
+complement of the gas block of Eq.~(\ref{eq:9}), the joint standard errors are never smaller
+than the conditional ones. Note that $\mathbf{V}$ holds $\mathbf{c}$ fixed and is
+therefore \emph{not} the projected Jacobian of Eq.~(\ref{eq:6}); using Eq.~(\ref{eq:6}) here would count the
+linear block twice. Both quantities are reported, never one overwriting the other, so
+that the size of the difference can be read directly (Sect.~\ref{sec:4.5}).
+
+When $n-P\le 0$ the variance estimate is not defined and is reported as missing rather
+than as a finite number; the scan is flagged as underdetermined and retained.
+
+\subsection{Termination state}
+\label{sec:2.6}
+
+A fit that stops because it hit a parameter bound, and a fit that stops because the
+gradient vanished, are not the same result, but a residual-and-$\chi^2$ report cannot
+tell them apart. We therefore classify and export the termination state of the
+nonlinear stage separately from the solver's own success flag: CONVERGED, AT\_BOUND
+(a nonlinear parameter rests on its box constraint at exit), STEP\_LIMITED (the
+trust-region step was capped), MAX\_NFEV, and FAILED. The classifier is deliberately
+conservative -- it prefers to flag a fit that in fact reached the optimum over passing
+one that did not (Sect.~\ref{sec:3.2}) -- and it changes no retrieved value. Its effect is on what the
+record admits, and that effect is large (Sect.~\ref{sec:6.3}).
+
+\subsection{Implementation note: scaling of the fitted quantity}
+\label{sec:2.7}
+
+Equation~(\ref{eq:4}) is solved on $\alpha$ scaled to order unity, and the linear coefficients
+are scaled back afterwards. This is not cosmetic. Ambient $\alpha$ in these windows is
+of order $10^{-7}\,\mathrm{cm^{-1}}$, so residuals and gradients are of order
+$10^{-15}$, while the step and gradient tolerances of a general-purpose least-squares
+routine default to $10^{-8}$ and are applied as absolute thresholds. The convergence
+test is then satisfied at the starting point: the solver returns after a single
+function evaluation, having moved the shift by nothing, and reports success. In one
+operational spectrum the unscaled fit exited with shift $+0.0000$\,px after
+$n_{\mathrm{fev}}=1$, while the same spectrum scaled by $10^{7}$ converged to
+$-0.5000$\,px after $n_{\mathrm{fev}}=5$. We note this because it is silent -- the
+failure mode produces a plausible number with a success flag -- and because it is
+specific to re-implementations in scaled, tolerance-driven optimisers rather than to
+the DOAS method itself.
+
+\subsection{Constraints and options not used operationally}
+\label{sec:2.8}
+
+For completeness: the linear step can be solved with a non-negativity constraint on
+the gas coefficients, and a Tikhonov penalty can be applied to the gas, etalon and
+auxiliary columns (never to the Chebyshev background, which would distort it). Neither
+is used in the configuration reported here -- the operational $\lambda$ is zero and the
+concentrations are left unconstrained so that values near zero remain unbiased. The
+analytic Jacobian of Eq.~(\ref{eq:6}) requires the unconstrained linear step: at an active
+non-negativity bound the projector is not differentiable, and the implementation falls
+back to finite differences in that case. Robust (Tukey bisquare) iteratively reweighted
+fitting is available and likewise unused here.
+
+\subsection{What the implementation exposes}
+\label{sec:2.9}
+
+The formulation of Sects.~\ref{sec:2.1}--\ref{sec:2.8} is not unusual, and Sect.~\ref{sec:3.3} shows that a conventional
+implementation solving the same problem returns the same concentrations. What
+differs is what can be asked of the retrieval afterwards, and the difference
+is one of cost rather than of possibility.
+
+Two questions are asked repeatedly in this paper. The first is what happens to
+the product when a calibration reference is changed: the structural budget of
+Sect.~\ref{sec:4} removes one zero-air knot, one reflectivity knot or one etalon component at
+a time and re-runs the retrieval over \fieldnum{8847} product records, once per knot and
+then for the pairwise and triple combinations. The second is what the
+objective looks like away from the converged point: the identifiability map of
+Sect.~\ref{sec:5} evaluates the projected objective on a grid of 160 points in the wavelength
+shift for each of twelve spectra, and repeats a coarser version over 165.
+Neither question is answered by a fit report; both are answered by re-entering
+the retrieval with one input altered.
+
+Augur is arranged so that both are loops rather than reprocessing campaigns.
+The time-resolved references enter the forward model as data -- an array of
+knots with times, interpolated at evaluation -- rather than as a configured
+input file, so substituting one is an assignment. The projected objective is a
+callable of the nonlinear parameters, separate from the optimiser that
+searches it, so evaluating it at a chosen shift does not require converging a
+fit. In an implementation where the reference is a file named in a
+configuration and the objective is reachable only through the optimiser, the
+same two questions cost one reprocessing of the campaign per answer: several
+thousand for the budget, one hundred and sixty per spectrum for the map.
+
+This is the sense in which the contribution of the software is architectural.
+It is not that the quantities in Sects.~\ref{sec:4} and \ref{sec:5} cannot be obtained elsewhere. It is
+that obtaining them has to be cheap enough to do by default, because the
+finding of Sect.~\ref{sec:5.4} -- a nine-hour error in a reference time base, invisible in
+the residual -- was not found by looking for it.
