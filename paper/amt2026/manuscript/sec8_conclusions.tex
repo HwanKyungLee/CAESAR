@@ -1,85 +1,57 @@
-%% Sect. 8 -- from augur_AMT_§8 draft v1 (2026-09-22, additions of 2026-09-27), trimmed 2026-09-28
-%% (paragraph 2 tightened first, then every paragraph; word counts before/after in README.md)
+%% Sect. 8 -- from augur_AMT_§8 draft v1 (2026-09-22); rewritten for length and sentence length 2026-09-29.
 \conclusions
 \label{sec:8}
 
-We have presented Augur, an open retrieval posed in the extinction domain as a separable nonlinear least-squares
-problem and solved by variable projection, configured by instrument and campaign profiles rather than written for one
-instrument, and demonstrated its diagnostics on one field case: a thermal-dissociation broadband cavity-enhanced
-absorption spectrometer with two heated and one ambient-temperature cavity.
-The formulation is not the contribution. The implementation makes three things
-cheap: substituting a calibration reference and re-running the retrieval without
-reprocessing the campaign, evaluating the projected objective anywhere in the
-nonlinear parameters, and carrying to the product the state in which the optimiser
-stopped and the distance to each calibration reference; recording each reference's
-build time and time convention is specified here but not yet implemented. That turns
-reliability questions from studies into routine measurements.
+We have presented Augur, an open DOAS retrieval posed in the extinction domain as a separable nonlinear least-squares
+problem and solved by variable projection. It is configured by instrument and campaign profiles, and its diagnostics
+were demonstrated on one field case: a thermal-dissociation broadband cavity-enhanced absorption spectrometer with two
+heated and one ambient-temperature cavity. The formulation is conventional; the implementation makes three things cheap: substituting a calibration reference
+without reprocessing the campaign, evaluating the projected objective anywhere in the nonlinear parameters, and
+carrying the termination state and the distance to each reference into the product.
 
-The code solves the problem it states: on noise-free synthetic spectra with
-integer shifts the recovery is at the level of the linear algebra, the analytic
-projected Jacobian agrees with finite differences, and Augur and QDOAS agree to
-within the single-scan reported uncertainty; on field spectra the two codes agree in NO$_2$ with
-$r^2 \ge \fieldnum{0.990}$ but differ in the heated-channel scale by \fieldnum{4}--\fieldnum{6}\,\%. On the deployment the full chain returns
-\fieldnum{$+0.0054$}\,ppb at a true zero, a twentieth of the product's three-sigma detection limit of
-\fieldnum{0.203} to about \fieldnum{0.257}\,ppb -- a test of the additive chain only.
+The code solves the problem it states: synthetic recovery is at the level of the linear algebra, the analytic
+Jacobian agrees with finite differences to round-off, and Augur and QDOAS agree on synthetic spectra. On field spectra they agree in NO$_2$ with
+$r^2 \ge \fieldnum{0.990}$ but differ in the heated-channel scale by \fieldnum{4}--\fieldnum{6}\,\%. The full chain returns \fieldnum{$+0.0054$}\,ppb at a true zero, a
+twentieth of the three-sigma detection limit of \fieldnum{0.203} to about \fieldnum{0.257}\,ppb, which tests the additive chain only.
 
-The uncertainty a fit reports is correct where its model is: with white noise,
-a complete forward model and a well-identified shift the reported sigma tracks the synthetic scatter to within
-about ten per cent, and with a free shift the ratio reaches 1.32. Against the calibration chain it does not. For the
-channel-difference product, perturbing the zero-air reference, the reflectivity and
-the etalon as the operational pipeline builds them gives, in the best-calibrated week, a structural contribution of \fieldnum{1.28} (robust scale) to
-\fieldnum{2.29} (standard deviation) times the reported sigma, and a total uncertainty
-\fieldnum{1.63} to \fieldnum{2.50} times what the fit reports for the same 60\,s records. None
-of the calibration-chain terms enlarges the residual. The magnitudes are this instrument's; the mechanism,
-an intermittently measured reference interpolated to every record, is general.
+The first question concerned errors the fit cannot see. With white noise and a complete model the reported sigma tracks
+the synthetic scatter to within about ten per cent, rising to 1.32 with a free shift; against the calibration chain it
+fails. For the channel-difference product, perturbing the
+zero-air reference, the reflectivity and the etalon as the operational pipeline builds them gives, in the
+best-calibrated week, a structural contribution of \fieldnum{1.28} (robust scale) to \fieldnum{2.29} (standard deviation) times the
+reported sigma. The total uncertainty is \fieldnum{1.63} to \fieldnum{2.50} times what the fit reports for the same 60\,s records. None of the
+calibration-chain terms enlarges the residual. These terms add to the campaign-constant cross-section and
+Rayleigh uncertainties of earlier treatments rather than replacing them (Sect.~\ref{sec:4.6}). The magnitudes belong to
+this instrument; the mechanism, an intermittently measured reference interpolated to every record, is general.
 
-A second class of shortfall needs no new measurement, because the pipeline already
-holds the information. With the cold shift bounded to $\pm 1$\,px in a sensitivity run, every base fit
-of the ambient-temperature channel returned its shift at the bound, and in the budget propagation
-\fieldnum{187} of \fieldnum{9034} records were excluded because a fit, unperturbed or perturbed, terminated at a bound; all were
-recorded as converged. The rate depends on the step limit (Fig.~\ref{fig:1}b) and
-differs between implementations (Sect.~\ref{sec:5.1}), but the state is computed and then discarded. In one window the projected objective varies by about one per cent across four pixels of shift,
-in another over five orders of magnitude, and both are reported as converged. And
-a reflectivity reference on a superseded time convention displaced the alkyl
-nitrates by \fieldnum{1.44} times the structural budget while moving the residual and
-the reported uncertainty by two parts in a thousand. Neither the fit report nor the proposed fields see the
-largest error in this record (Sect.~\ref{sec:6.5}): against a co-located NIER analyser the heated-channel NO$_2$ reads low by a
-factor of about \fieldnum{0.6} while the ambient-temperature channel agrees, a multiplicative discrepancy whose cause is
-unresolved (Sect.~\ref{sec:3.6}).
+The second question concerned information the pipeline holds. With the cold shift bounded to $\pm 1$\,px in a
+sensitivity run, every base fit of the ambient-temperature channel returned its shift at the bound. In the budget
+propagation \fieldnum{187} of \fieldnum{9034} records were excluded because a fit terminated at a bound, and all were recorded as
+converged. In one window the projected objective varies by
+about one per cent across four pixels of shift, in another over five orders of magnitude, and both fits report
+convergence. A reflectivity reference on a superseded time convention displaced the alkyl nitrates by \fieldnum{1.44} times the
+structural budget, while the residual and the reported uncertainty moved by two parts in a thousand.
 
-We therefore propose that a retrieval report three numbers rather than one: the
-fit uncertainty; the structural term for that record's own calibration context
-rather than a campaign constant; and a context flag carrying the distance
-to the nearest knot and its side, the bracketing-interval length, an in-range flag, the number
-of adjacent blocks the quality gates rejected, and each reference's identity,
-build time and time convention. Every
-implementation already computes all of these except the build time and time convention of a reference,
-which must be recorded when the reference is built; no change of algorithm is needed. Two
-operational points follow. Where the interpolation error is set by knot noise, as in the 180\,$^{\circ}$C channel,
-averaging more scans per calibration block rather than running blocks more often is the lever to test; the
-within-block evidence of Sect.~\ref{sec:6.2} is unfavourable and the decisive measurement has not been made. And quality gates should be
-reported with the coverage they cost, because they remove coverage as well as variance (Sect.~\ref{sec:6.4}).
+A third category lies outside both. Against a co-located NIER analyser the heated-channel NO$_2$ reads low by a factor of
+about \fieldnum{0.6} while the ambient-temperature channel agrees. This multiplicative discrepancy, whose cause is unresolved, is
+the largest error in the record, and neither the fit report nor the proposed fields see it (Sects.~\ref{sec:3.6} and
+\ref{sec:6.5}).
 
-The evidence is one field case, one instrument over one campaign. The code is not tied to that instrument
-(Appendix~\ref{app:A}), but its behaviour on other configurations is not shown here. Two things should carry beyond
-it: the reporting convention, which asks for quantities every implementation
-has or can record when a reference is built, and the synthetic benchmark of 261 cases, which contains no retrieval code
-and no field data and so favours no implementation -- though its cross sections
-(convolved with this instrument's line shape) and windows make it independent of
-the retrieval code, not of the instrument. Extending it across line shapes, windows
-and pixel grids would separate what is general from what is ours; we release it so
-that others can do so.
+We therefore propose that a retrieval report three numbers: the fit uncertainty, the structural term for the record's own
+calibration context, and a context flag (Sect.~\ref{sec:6.1}). Every implementation already computes the flag's fields,
+except the build time and time convention of a reference, which must be recorded when the reference is built.
+Quality gates should be reported with the coverage they cost, because they remove coverage as well as variance
+(Sect.~\ref{sec:6.4}). Where the interpolation error is set by knot noise, as in the 180\,$^{\circ}$C channel, averaging more scans per
+calibration block is the lever to test; the within-block evidence is unfavourable and the decisive measurement has not
+been made (Sect.~\ref{sec:6.2}).
 
-Three directions follow. The wavelength shift belongs to the spectrograph, not the
-air, so fitting one shift jointly across the spectra of a calibration block -- a separable problem with common nonlinear parameters -- could
-remove the indeterminacy this paper only diagnoses (Sect.~\ref{sec:5.1}); a laboratory spectrum with a
-few ppb of added NO$_2$ already locates the ambient-temperature channel's shift to
-a tenth of a pixel (Sect.~\ref{sec:5.1}), so existing calibration blocks would serve
-if the absorber were supplied. And treating the zero-air reference and the
-reflectivity as measured quantities with their own covariance, not exact inputs,
-would propagate the structural term inside the fit rather than afterwards (Sect.~\ref{sec:4.6}).
+The evidence is one instrument over one campaign. The code is not tied to that instrument (Appendix~\ref{app:A}), but
+its behaviour on other configurations is not shown here. The reporting convention and the synthetic benchmark of 261
+cases, which contains no retrieval code or field data, should carry beyond it; extending the benchmark across line
+shapes, windows and pixel grids would separate what is general from what is ours.
 
-Third, the raw light level of each spectrum -- the proximate cause of all six ambient-temperature
-excursions of Sect.~\ref{sec:7.3} -- and the helium and zero-air intensities of each calibration block, not only
-their ratio, should travel with the product (Sect.~\ref{sec:6.5}), so that changes in the light reaching the detector
-can be seen where they happen instead of being inferred afterwards from the product.
+Three extensions follow from the results. Fitting one shift jointly across the spectra of a calibration block
+could remove the indeterminacy diagnosed here, given an absorber in the block (Sect.~\ref{sec:5.1}). Treating the zero-air
+reference and the reflectivity as measured quantities with their own covariance would propagate the structural term
+inside the fit (Sect.~\ref{sec:4.6}). And the raw light level of each spectrum, the proximate cause of all six ambient-temperature excursions, should travel
+with the product together with the helium and zero-air intensities of each calibration block (Sect.~\ref{sec:6.5}).

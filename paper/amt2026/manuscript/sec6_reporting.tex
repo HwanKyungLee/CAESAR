@@ -1,38 +1,34 @@
-%% Sect. 6 -- from augur_AMT_§6 draft v1 (2026-09-20, later revisions to 2026-09-27)
-%% The draft's "6.1a" is typeset as subsubsection 6.1.1 (label sec:6.1a).
+%% Sect. 6 -- from augur_AMT_§6 draft v1 (2026-09-20, later revisions to 2026-09-27); condensed 2026-09-29.
+%% The draft's "6.1a" is typeset as subsubsection 6.1.1 (label sec:6.1a). Sect. 6.1 is the single place where the
+%% reporting prescription is stated; Sects. 4, 5 and 8 point to it.
 \section{What should be reported, and what should be changed}
 \label{sec:6}
 
-Section~\ref{sec:4} established that the fit-reported uncertainty omits terms that are
-several times larger than itself, and Sect.~\ref{sec:5} that convergence does not
-imply identifiability. Neither finding requires a new retrieval algorithm to
-act on. This section states what a DOAS product should carry instead of a
-single uncertainty, and what in the measurement schedule is worth changing.
-Of the four recommendations, two are implemented in Augur and evaluated against
-the campaign: the knot gate (Sect.~\ref{sec:6.3}) and the coverage fields
-(Sect.~\ref{sec:6.4}). The reporting convention of Sect.~\ref{sec:6.1} is implemented in
-part -- the termination state, the distance to the nearest knot and the identity of
-the reference file are exported, while the build time and time convention of each
-reference are specified for implementation -- and the question of block length in
-Sect.~\ref{sec:6.2} is left open by the measurements reported here. Section~\ref{sec:6.5} names the errors that none
-of these measures reaches.
+This section states what a DOAS product should carry instead of a single uncertainty, and what in the measurement
+schedule is worth changing. The knot gate (Sect.~\ref{sec:6.3}) and the coverage fields (Sect.~\ref{sec:6.4}) are
+implemented in Augur and evaluated against the campaign. The reporting convention of
+Sect.~\ref{sec:6.1} is implemented in part: the termination state, the distance to the nearest knot and the identity
+of the reference file are exported, while the build time and time convention of each reference are specified for
+implementation. The measurements reported here leave the question of block length (Sect.~\ref{sec:6.2}) open, and
+Sect.~\ref{sec:6.5} names the errors that none of these measures reaches.
 
 \subsection{Three numbers per retrieval, not one}
 \label{sec:6.1}
 
-Every retrieved amount is reported with
+Every retrieved amount should be reported with three numbers:
 \begin{enumerate}
-\item the \strong{fit uncertainty}, from the covariance of the projected problem
-   (Sect.~\ref{sec:2.5}) -- what the residual supports, and nothing more;
-\item the \strong{structural term}, evaluated for that scan's own calibration
-   context rather than as a campaign constant; and
-\item a \strong{context flag} recording the state of the references the scan depends
-   on, in the specific form set out below.
+\item the fit uncertainty, from the covariance of the projected problem (Sect.~\ref{sec:2.5}), which describes what
+   the residual supports.
+\item the structural term, evaluated for that scan's own calibration context rather than as a campaign constant
+   (Sect.~\ref{sec:4}).
+\item a context flag recording the state of the references the scan depends on.
 \end{enumerate}
-
-The third item is the one that has to be specified rather than gestured at,
-because its value is entirely in which fields it carries. We report, per
-record and per reference type (zero air, reflectivity), the fields of Table~\ref{tab:context_fields}.
+The fit uncertainty is a statement about the residual of a model assumed correct, not about the inputs to that model,
+and keeping the three separate preserves that distinction for whoever uses the product. The fit uncertainty should
+travel with the termination state of the nonlinear stage (Sect.~\ref{sec:2.6}), and, where a nonlinear parameter may be
+unidentifiable, with the ratio of the objective at the returned value to that at a fixed reference point
+(Sect.~\ref{sec:5.1}). The value of the context flag lies in which fields it carries, so we specify them per record and
+per reference type (zero air, reflectivity) in Table~\ref{tab:context_fields}.
 
 \begin{table}[t]
 \caption{Fields of the context flag, reported per record and per reference type (zero air, reflectivity), and the reason for each.}
@@ -51,75 +47,38 @@ the time convention the reference was built under & a correction applied upstrea
 \end{tabular}
 \end{table}
 
-The last field is there because of Sect.~\ref{sec:5.4}, and it is worth being exact about
-what it would and would not have caught. The heated-channel clock ran on local time until 29 May
-and on UTC thereafter, so for twelve days of the campaign the raw time stamps were nine hours off the
-convention of the time axis; that is a property of the raw record, and no
-provenance field detects it. It was detected the way such things are detected
--- against an external time reference -- and a correction was added to the
-raw-data reader two months after the deployment ended.
+The last two fields address the failure of Sect.~\ref{sec:5.4}. No provenance field detects the clock error of the
+raw record itself, which was found against an external time reference and corrected in the reader two months after
+the deployment ended. The fields catch the failure that followed: a reflectivity reference built before the
+correction and never rebuilt. Any correction applied upstream invalidates every derived product built before it, and
+a pipeline whose derived products do not record their build convention cannot tell that this has happened.
 
-What the field catches is the failure that followed. The reflectivity knots
-had been computed before the correction existed, and nothing rebuilt them
-afterwards. From that moment the retrieval was combining spectra on the
-corrected time axis with a reference on the superseded one, and the twelve
-days of product made from that combination are wrong by more than their whole
-structural budget. This is not a clock problem; it is a staleness problem, and
-it is general. Any correction applied upstream invalidates every derived
-product built before it, and a pipeline in which derived products do not
-record the convention they were built under cannot tell that it has happened.
+The mismatch was visible in the data as a nine-hour run of out-of-range records at the start of the deployment -- the
+first zero-air block at 02:42, the first reflectivity knot at 11:40 -- with \fieldnum{42.3}\,\% of that day extrapolated. The
+distance and in-range fields would have carried that anomaly into the product on the first run after the correction,
+rather than two months later. Identifying its cause needed the build time of the reflectivity file and the convention
+it was built under, so detection and diagnosis need separate fields. The same tags allow a cheaper protection, a load-time check of the reference's time-convention tag against that of the
+spectra that refuses a mismatch. We recommend the check where the tags exist and the report in every case, because the
+report keeps the error interpretable for later readers.
 
-The mismatch was not silent in the data. It surfaced as a nine-hour run of
-out-of-range records at the very start of the deployment -- the first
-zero-air block at 02:42, the first reflectivity knot at 11:40 -- and \fieldnum{42.3}\,\% of
-that day extrapolated. The distance and in-range fields would have
-carried that anomaly into the product on the first run after the correction,
-rather than two months later. They would not have explained it: identifying
-the cause needed the build time of the reflectivity file and the convention it
-was built under. Detection and diagnosis are separate functions and need
-separate fields.
-
-There is also a cheaper protection than reporting, and it belongs in the same
-subsection because it is the same information used earlier. A reference
-carrying a time-convention tag can be checked against the tag on the spectra
-at load time, and a mismatch refused rather than reported. Reporting turns a
-silent error into a visible one; an assertion prevents it. We recommend the
-assertion where the tags exist and the report in every case, because the
-report is also what makes the error interpretable a year later, when the
-person reading the product is not the person who ran it.
-
-The second of these cannot be obtained cheaply, and it is worth saying why.
-The amplification factor $I_0/(I_0-I)$, which governs how an error in the
-zero-air reference enters the extinction, varies by a factor of forty between
-records and is available without any fitting; it is a natural candidate for a
-closed-form structural term. It does not work. Regressed against the measured
-response it explains between \fieldnum{0.0}\,\% and \fieldnum{9}\,\% of the variance, with the wrong
-sign, because the polynomial background absorbs the smooth part of the
-perturbation and what reaches the gas columns is set by shape rather than
-amplitude. Normalising the response by the retrieved amount does not help
-either: the robust coefficient of variation is \fieldnum{0.80}--\fieldnum{1.09} in relative terms
-against \fieldnum{0.83}--\fieldnum{1.11} in absolute. The structural term has to be obtained by
-running the perturbation. That is available in post-processing and not in a
+The structural term cannot be obtained in closed form. The amplification factor $I_0/(I_0-I)$, which governs how an
+error in the zero-air reference enters the extinction, varies by a factor of forty between records and is available
+without fitting. Regressed against the measured response, however, it explains between \fieldnum{0.0}\,\% and \fieldnum{9}\,\% of the
+variance, with the wrong sign. The polynomial background absorbs the smooth part of the perturbation, so what reaches
+the gas columns is set by shape rather than amplitude. Normalising the response by the retrieved amount does not help: the
+robust coefficient of variation is \fieldnum{0.80}--\fieldnum{1.09} in relative terms against \fieldnum{0.83}--\fieldnum{1.11} in absolute. The structural
+term therefore has to be obtained by running the perturbation, which is available in post-processing but not in a
 real-time monitor, and the two implementations differ accordingly.
-
-The second and third exist because the first is conditional. A fit
-uncertainty is a statement about the residual of a model assumed correct; it
-is not a statement about the inputs to that model. Separating the three keeps
-that distinction visible to whoever uses the product, instead of resolving it
-silently into one number that is too small.
 
 \subsubsection{Which remedy a term needs is readable from its shape}
 \label{sec:6.1a}
 
-The three structural terms call for three different actions, and the shape
-statistic $s$ of Sect.~\ref{sec:4.3} says which. A term with $s \approx 1$ is Gaussian: its
-error is spread evenly over all records and can only be reduced by a better
-model. A term with $s \approx 0.7$--1 is dominated by measurement noise on the
-references and responds to averaging. A term with $s \ll 0.7$ is concentrated
-in a few records, where averaging is useless and detection is everything.
-
-This is not an interpretation of $s$ but a prediction from it, and it can be
-checked. Ordering the \fieldnum{155} hours of the budget window by their contribution to each term's variance gives Table~\ref{tab:shape_remedy}.
+The shape statistic $s$ of Sect.~\ref{sec:4.3} indicates which of three actions a structural term needs. A term with
+$s \approx 1$ is Gaussian: its error is spread evenly over all records and can only be reduced by a better model. A term
+with $s \approx 0.7$--1 is dominated by measurement noise on the references and responds to averaging. A term with
+$s \ll 0.7$ is concentrated in a few records and needs detection rather than averaging. This prediction is checked by
+ordering the \fieldnum{155} hours of the budget window by their contribution to each term's variance
+(Table~\ref{tab:shape_remedy}).
 
 \begin{table}[t]
 \caption{Concentration in time of each structural term over the hours of the budget window (clock-aligned basis of Table~\ref{tab:2}): shape statistic $s$; number (and fraction) of hours holding 90\,\% of the term's variance; the number of contiguous runs those hours form, with the number expected for the same count of hours drawn at random; share of the variance on the standard-deviation basis; and the remedy the shape indicates.}
@@ -129,25 +88,19 @@ checked. Ordering the \fieldnum{155} hours of the budget window by their contrib
 term & $s$ & hours holding 90\,\% of the variance & contiguous runs (random expectation) & share of variance (SD) & remedy \\
 \middlehline
 $I_0$ & \fieldnum{0.73} & \fieldnum{63} (\fieldnum{41}\,\%) & \fieldnum{24} (\fieldnum{38}) & \fieldnum{45}\,\% & longer calibration blocks (untested, Sect.~\ref{sec:6.2}) \\
-$R$ & \textbf{\fieldnum{0.32}} & \textbf{\fieldnum{26} (\fieldnum{17}\,\%)} & \textbf{\fieldnum{12} (\fieldnum{22})} & \textbf{\fieldnum{52}\,\%} & detect and flag intervals (Sect.~\ref{sec:6.3}) \\
+$R$ & \fieldnum{0.32} & \fieldnum{26} (\fieldnum{17}\,\%) & \fieldnum{12} (\fieldnum{22}) & \fieldnum{52}\,\% & detect and flag intervals (Sect.~\ref{sec:6.3}) \\
 etalon $f$ & \fieldnum{0.98} & \fieldnum{118} (\fieldnum{76}\,\%) & \fieldnum{26} (\fieldnum{29}) & \fieldnum{3}\,\% & fit $f$ per scan, or model it \\
 \bottomhline
 \end{tabular}
 \end{table}
 
-The ordering by $s$ is the ordering by concentration, and the two-hour
-interval from 23:00 UTC on 18 May to 01:00 UTC on 19 May alone holds \fieldnum{37}\,\% of the reflectivity term's variance.
-The contiguous-run counts separate concentration from clumping: the
-reflectivity hours form far fewer runs than the same number of hours drawn at
-random, so they are episodes rather than scattered outliers and a flag can
-address them. The etalon hours are indistinguishable from random, which is
-the signature of a term no flag will help.
-
-Read on the robust scale the ordering of the first two reverses -- $I_0$
-carries \fieldnum{74}\,\% of the single-term quadrature sum and $R$ only \fieldnum{17}\,\% -- which is why the two scales
-are reported side by side in Table~\ref{tab:2}. A term that is small for a typical
-record and largest in total is exactly the one a campaign-mean uncertainty
-hides.
+The ordering by $s$ is the ordering by concentration: the two-hour interval from 23:00 UTC on 18 May to 01:00 UTC on
+19 May alone holds \fieldnum{37}\,\% of the reflectivity term's variance. The reflectivity hours form far fewer contiguous runs
+than the same number of hours drawn at random, so they are episodes rather than scattered outliers, and a flag can
+address them. The etalon hours are indistinguishable from random, the signature of a term no flag will help. On the
+robust scale the ordering of the first two terms reverses -- $I_0$ carries \fieldnum{74}\,\% of the single-term quadrature sum
+and $R$ only \fieldnum{17}\,\% -- which is why Table~\ref{tab:2} reports both scales. A term that is small for a typical record
+and largest in total is the one a campaign-mean uncertainty hides.
 
 \subsection{Calibration blocks: interval length and scans per block}
 \label{sec:6.2}
@@ -162,93 +115,63 @@ and shorter intervals would help.
 The other lever is the number of scans averaged into each calibration block, and the evidence on it is not
 conclusive (Appendix~\ref{app:C}). Within the operational block ($N = 34$ scans, $T = 32$\,s), doubling the number of
 scans averaged reduces the scatter of contiguous sub-blocks by \fieldnum{7}\,\% in the ANs channel, against the 29\,\% that
-independent scans would give; but the range that can be measured this way lies entirely below the operational block
-length, so it is mildly unfavourable rather than decisive, and the measurement that would settle it -- operating one
-longer block -- has not been made. Even with white averaging the return would be modest: the zero-air term carries
+independent scans would give. The measurable range lies entirely below the operational block length, so this evidence is
+mildly unfavourable rather than decisive, and the measurement that would settle it, operating one longer block, has not
+been made. Even with white averaging the return would be modest. The zero-air term carries
 \fieldnum{45}\,\% of the $\Sigma$ANs variance, so a fourfold block, which would raise the calibration duty from 1.20 to 3.89\,\%,
-would lower the structural budget from \fieldnum{0.1236} to \fieldnum{0.1008}\,ppb (\fieldnum{18.5}\,\%), whereas flagging the few
-defective reflectivity intervals would lower it to \fieldnum{0.0901}\,ppb. That ordering -- flagging before averaging --
+would lower the structural budget from \fieldnum{0.1236} to \fieldnum{0.1008}\,ppb (\fieldnum{18.5}\,\%). Flagging the few defective
+reflectivity intervals would lower it to \fieldnum{0.0901}\,ppb. That ordering -- flagging before averaging --
 holds whatever the block scaling turns out to be, because the reflectivity term is concentrated in a few episodes and
 the zero-air term is not (Sect.~\ref{sec:6.1a}).
 
 \subsection{Gating defective knots}
 \label{sec:6.3}
 
-Not all calibration blocks are usable, and the bad ones are few. Ordering the
-cold-channel zero-air blocks by their leave-one-out influence, the worst
-single block carries \fieldnum{28}\,\% of the total variance, the worst three carry \fieldnum{76}\,\%,
-and the worst five carry \fieldnum{97}\,\%. A structural term computed over all blocks is
-therefore a statement about a handful of them.
+A few calibration blocks carry most of the zero-air term. Ordering the cold-channel zero-air blocks by their
+leave-one-out influence, the worst single block carries \fieldnum{28}\,\% of the total variance, the worst three \fieldnum{76}\,\% and the worst
+five \fieldnum{97}\,\%, so a structural term computed over all blocks is a statement about a handful of them. They are identifiable
+before any fit is attempted. The block's light level relative to the campaign median, with the threshold
+$I/\tilde{I} < 0.5$, selects only \fieldnum{13} of the \fieldnum{38} blocks whose influence exceeds 2\,\%. Those \fieldnum{13}, however, include nine of
+the worst ten and account for \fieldnum{99.9}\,\% of the influence variance; the \fieldnum{25} blocks it misses are all in the
+\fieldnum{2}--\fieldnum{3}\,\% range, and the threshold excludes \fieldnum{8}\,\% of blocks. Classification accuracy would have rejected this threshold, but the relevant
+figure of merit is the variance removed, and a single observable removes essentially all of it.
 
-They are identifiable before any fit is attempted. A single observable -- the
-block's light level relative to the campaign median -- with the threshold
-$I/\tilde{I} < 0.5$ selects \fieldnum{13} of the \fieldnum{38} blocks whose influence exceeds 2\,\%,
-but those \fieldnum{13} include nine of the worst ten and account for \fieldnum{99.9}\,\% of the
-influence variance. The \fieldnum{25} blocks it misses are all in the \fieldnum{2}--\fieldnum{3}\,\% range. The
-threshold excludes \fieldnum{8}\,\% of blocks.
-
-Classification accuracy is the wrong figure of merit here and would have
-rejected this threshold: \fieldnum{13} of \fieldnum{38} is a poor hit rate and a good filter. What
-matters is the variance removed, and a single observable removes essentially
-all of it. No multi-indicator scheme is needed.
-
-The asymmetry with the reflectivity is worth recording, because it explains why
-only one of the two references needed this. Reflectivity knots already pass
-three quality gates -- a minimum fraction of valid pixels, an acceptance band on
-the retrieved effective path length, and limits on the calibration residual --
-so a defective helium or zero-air pair is rejected before it becomes a knot.
-The zero-air reference had no equivalent: every block became a knot regardless
-of how much light reached the detector. The gate described here closes that
-gap. It is implemented with the threshold expressed as a fraction of the run's
-own median block intensity rather than as an absolute count, so it transfers
-between instruments, and it is disabled by default so that reprocessing an
-existing product is an explicit choice rather than a silent change.
+Only the zero-air reference needed this gate. Reflectivity knots already pass three quality gates: a minimum fraction
+of valid pixels, an acceptance band on the retrieved effective path length, and limits on the calibration residual.
+A defective helium or zero-air pair is therefore rejected before it becomes a knot, whereas every zero-air block became
+a knot regardless of how much light reached the detector. The gate is implemented with the threshold expressed as a fraction
+of the run's own median block intensity rather than as an absolute count, so it transfers between instruments, and it
+is disabled by default so that reprocessing an existing product is an explicit choice.
 
 \subsection{Coverage: say when the reference is far away}
 \label{sec:6.4}
 
-Two things are missing, and conflating them produces the wrong prescription.
-One is \emph{extrapolation}: records outside the range spanned by the reflectivity
-knots. The other is a \emph{gap}: records between two knots more than two hours
-apart. The hot channel has \fieldnum{3.76}\,\% of the first and \fieldnum{1.23}\,\% of the second over
-the campaign; the cold channel \fieldnum{2.89}\,\% and \fieldnum{11.03}\,\%. Zero air has neither
-(\fieldnum{0.08}\,\% and \fieldnum{0.07}\,\%), so the constraint is entirely on the reflectivity.
+The coverage deficits of Table~\ref{tab:coverage} have two causes that cost different things to remove. Extrapolation
+(records outside the knot range) and gaps (records between knots more than two hours apart) both concern the
+reflectivity, since zero air has neither. The first cause is bookkeeping and the cheapest fix in this paper:
+reflectivity generation stopped at 07-09, which produces the hot channel's trailing extrapolation and is removed by
+re-running over files that already exist. The second is the clustered rejection of cold calibration pairs described in
+Sect.~\ref{sec:5.3}; its remedy is to restore the light level or, failing that, redundancy. Only this second cause
+concerns how often the instrument calibrates, and even there the average rate is not the problem, because the
+rejections arrive in the same episodes that carry the reflectivity variance (Table~\ref{tab:shape_remedy}).
 
-Two causes lie behind the deficit that survives clock alignment, and they cost different things to remove. The first
-is bookkeeping and the cheapest fix in this paper: reflectivity generation stopped at 07-09, which produces the hot
-channel's trailing extrapolation and is removed by re-running over files that already exist. The second is clustered
-rejection of calibration pairs, \fieldnum{11.3}\,\% of cold pairs, which explains the cold gaps (\fieldnum{11.03}\,\% over the campaign and
-\fieldnum{18.31}\,\% in the cold window); its remedy is to restore the light level or, failing that, redundancy. Only this
-second cause is about how often the instrument calibrates, and even there the average rate is not the problem.
-Independent rejection at the measured rate would leave \fieldnum{3.5}\,\% of cold records in gaps longer than two hours,
-against \fieldnum{11.03}\,\% observed. The rejections arrive in runs: the worst cold gap, \fieldnum{11.8}\,h, is eleven consecutive
-rejected pairs, which even at a 40\,\% independent rejection rate would be expected 0.03 times in the campaign. This
-is the episodic structure Sect.~\ref{sec:6.1a} found in the reflectivity variance itself -- \fieldnum{26} of \fieldnum{155} hours carrying
-90\,\% of it, in \fieldnum{12} contiguous runs where \fieldnum{22} would be expected at random -- seen from the calibration side.
+Quality control has a coverage cost. In the cold channel the reflectivity gates are, correctly, the proximate cause of
+the coverage deficit. This qualifies the argument of Sect.~\ref{sec:6.3} for a zero-air gate: gates remove variance and
+coverage, and a pipeline that gates without reporting the cost has moved the error somewhere harder to see. The context flag of Sect.~\ref{sec:6.1} records that cost. The same caution applies to the budget. The
+reflectivity contribution of Sect.~\ref{sec:4} is measured by removing a knot and re-interpolating, so its magnitude
+scales with the knot spacing, and a sparse reference appears as a dominant term partly because it is sparse. The remedy
+therefore belongs to the schedule and to reprocessing rather than to the retrieval. Records in gaps, which the budget cannot cover, are reported with the context flag set and excluded from any
+statistic that assumes a characterised uncertainty.
 
-It also locates the cost of quality control. The three gates the reflectivity already passes cost the hot channel
-\fieldnum{0.24}\,\% of its pairs and the cold channel \fieldnum{11.3}\,\%; in the cold channel the gates are, correctly, the proximate
-cause of the coverage deficit. This cuts against the argument of Sect.~\ref{sec:6.3}, which asks for a gate that zero
-air does not yet have: gates remove variance and they remove coverage, and a pipeline that gates without also
-reporting what the gating cost has moved the error somewhere it is harder to see. The context flag of
-Sect.~\ref{sec:6.1} closes that loop. The same caution applies to the budget: the reflectivity contribution of
-Sect.~\ref{sec:4} is measured by removing a knot and re-interpolating, so its magnitude scales with how far apart the
-knots already are, and a sparse reference presents itself as a dominant term partly because it is sparse -- which is
-why the remedy belongs to the schedule and to reprocessing rather than to the retrieval. Records in gaps are not
-covered by the budget at all, since a perturbation experiment needs a knot to perturb; they are reported with the
-context flag set and excluded from any statistic that assumes a characterised uncertainty.
-
-In the heated channels zero air is measured every hour and helium every three, and each reflectivity knot pairs a
-zero-air block with the most recent helium block that passed the quality gates (Appendix~\ref{app:A},
-Table~\ref{tab:cal_schedule}), so the knots are hourly while their helium half is up to three hours old, and older when a
-helium block is rejected. A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected
+Each reflectivity knot pairs an hourly zero-air block with the most recent accepted helium block, measured every three
+hours (Appendix~\ref{app:A}, Table~\ref{tab:cal_schedule}). A rejected zero-air/helium pair removes one hourly knot and leaves a two-hour gap; a rejected
 helium block removes no knot but makes the following knots use helium measured up to six hours earlier. Matching the
 helium cadence to the zero-air cadence would bring the total calibration duty from 1.20\,\% to 1.79\,\% and make the
 helium half of every knot contemporaneous. Whether it would also shorten the gaps depends on why pairs are rejected,
 which in the cold channel is mainly the light level. The case for it is redundancy against runs of rejection and
 contemporaneity, not precision: in the 180\,$^{\circ}$C channel the reflectivity error depends only weakly on interval
-length (Sect.~\ref{sec:6.2}), so more frequent helium would not make a well-covered record much more accurate. At
-1.2\,\% of the measurement time, calibration is the binding constraint on none of these remedies.
+length (Sect.~\ref{sec:6.2}). At 1.2\,\% of the measurement time, calibration is the binding constraint on none of these
+remedies.
 
 \subsection{Errors that neither the fit report nor the proposed fields detect}
 \label{sec:6.5}

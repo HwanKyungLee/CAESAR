@@ -1,0 +1,73 @@
+%% Appendix D -- supplementary budget analyses (moved from Sects. 4.4 and 5.1 on 2026-09-29; numbers unchanged).
+\section{Supplementary budget analyses}
+\label{app:D}
+
+\subsection{Choice of denominator}
+\label{app:D1}
+
+The ratio of total to reported uncertainty in Sect.~\ref{sec:4.4} uses the per-scan fit-propagated $\sigma$. Three
+other quantities are available, and none of them answers the same question (Table~\ref{tab:denominators}).
+
+\begin{table}[t]
+\caption{Candidate denominators for the ratio of total to reported $\Sigma$ANs uncertainty: value (ppb), time resolution, and the ratio of the total uncertainty (Table~\ref{tab:2}, robust scale to standard deviation) to each. The zero-air value is approximate (Sect.~\ref{sec:7.2}).}
+\label{tab:denominators}
+\begin{tabular}{llll}
+\tophline
+denominator & ppb & resolution & total / denominator \\
+\middlehline
+fit-propagated $\sigma$, per scan (used) & \fieldnum{0.0541} & 60\,s = 1 scan & \fieldnum{1.63}--\fieldnum{2.50} \\
+uncertainty column shipped with the product & \fieldnum{0.0806} & 5\,min, systematic & \fieldnum{1.32}--\fieldnum{1.83} \\
+fit-propagated $\sigma$, 5\,min bin & \fieldnum{0.025} & 5\,min & not comparable \\
+zero-air scatter, SD & $\approx$\fieldnum{0.086} & 34-scan block means & not comparable \\
+\bottomhline
+\end{tabular}
+\end{table}
+
+The column shipped with the product is a gain systematic rather than a measurement uncertainty. Regressed against
+the channel NO$_2$ amount over \fieldnum{14\,974} records it is $\fieldnum{0.04209}\,[\mathrm{NO_2}] + \fieldnum{0.00025}$\,ppb with
+$r = \fieldnum{+0.9997}$, and the product header states that it covers day-to-day inter-channel gain only and must not be used
+alone to assess detection significance; it does not bound the absolute scale either (Sect.~\ref{sec:3.6}). Comparing
+the structural budget against it asks whether structure is comparable to the gain term, not whether it exceeds the
+precision the retrieval claims. The five-minute row is the fit uncertainty averaged over five scans -- over the
+deployment it is $\fieldnum{0.0558}/\sqrt{5}$ -- and dividing it into a structural scale measured at 60\,s would mix resolutions
+in the opposite direction. The zero-air scatter is the precision floor, but it is measured on 34-scan block means,
+each retrieved against a reference interpolated across the removed block, so it combines a different scan count with
+reference-interpolation error and is not a single-scan quantity.
+
+The per-scan fit uncertainty is the median, over \fieldnum{8832} of the budget records, of the NO$_2$ uncertainty written by
+the operational fit of each channel propagated through the channel difference, $\sqrt{\sigma_{300}^2 +
+g'^2\sigma_{180}^2}$. Over the whole deployment, with the $g'$ of each calibration state, the same median is
+\fieldnum{0.0558}\,ppb (total \fieldnum{1.59}--\fieldnum{2.43} times), and at five-minute resolution the fit uncertainty lies between \fieldnum{0.0217}
+and \fieldnum{0.0326}\,ppb (5th and 95th percentiles).
+
+\subsection{Coupling of the structural terms to the wavelength shift}
+\label{app:D2}
+
+The structural terms of Sect.~\ref{sec:4} differ in how strongly they couple to the shift
+(Table~\ref{tab:shift_degeneracy}). An error in the reflectivity changes the magnitude of the extinction and little
+else: it moves the shift by a median of \fieldnum{0.006}\,px (90th percentile \fieldnum{0.027}\,px), although the largest displacement
+reaches \fieldnum{0.285}\,px. An error in the zero-air reference or in the etalon frequency changes the shape of the extinction
+and is partly absorbed by the wavelength axis. The shape statistic of Sect.~\ref{sec:6.1a} gives the same distinction
+independently: the reflectivity is a pure amplitude term, and the other two compete with the nonlinear parameters.
+
+\begin{table}[t]
+\caption{Change in the fitted wavelength shift (px) when each structural term of Sect.~\ref{sec:4} is perturbed alone, and
+when all three are perturbed together: median, 90th percentile and maximum over the \fieldnum{8847} clock-aligned budget
+records of Table~\ref{tab:2} (for each $\Sigma$ANs record, the larger of the two channels' changes).}
+\label{tab:shift_degeneracy}
+\begin{tabular}{llll}
+\tophline
+perturbation & median & $p_{90}$ & max \\
+\middlehline
+zero-air reference & \fieldnum{0.187}\,px & \fieldnum{0.826} & \fieldnum{4.388} \\
+reflectivity & \fieldnum{0.006} & \fieldnum{0.027} & \fieldnum{0.285} \\
+etalon frequency & \fieldnum{0.154} & \fieldnum{0.347} & \fieldnum{2.941} \\
+all three, joint & \fieldnum{0.243} & \fieldnum{0.766} & \fieldnum{4.276} \\
+\bottomhline
+\end{tabular}
+\end{table}
+
+The same propagation shows that the budget of Sect.~\ref{sec:4} is not an artefact of basin hopping in the shift. Records whose shift moved by more than a pixel
+under perturbation are \fieldnum{6.2}\,\% of the total and carry \fieldnum{5.0}\,\% of the variance, and removing them raises the budget
+(rSD \fieldnum{0.0693} to \fieldnum{0.0706}\,ppb, SD \fieldnum{0.1236} to \fieldnum{0.1244}\,ppb). These are the low-amplification records, where the
+absorption is deep and the retrieval well conditioned.

@@ -116,3 +116,70 @@ $(J^{\top}J)^{-1}$ and reports both blocks; the $\theta$ block is available at n
 the projected Jacobian of Appendix~\ref{app:B2} has been formed. It describes only the local curvature at the
 solution, which is why the identifiability statistics of Sect.~\ref{sec:5} are taken from profile scans of the
 projected objective rather than from this block.
+
+\subsection{Implementation of the projected Jacobian and relation to DOAS codes}
+\label{app:B5}
+
+In the implementation of Sect.~\ref{sec:2.3} the weighted, column-scaled design matrix is factorised as
+$\mathbf{A}\mathbf{S}^{-1}=\mathbf{Q}\mathbf{R}$, which delivers $\hat{\mathbf{c}}$, the residual, and the projector
+$\mathbf{P}^{\perp}=\mathbf{I}-\mathbf{Q}\mathbf{Q}^{\!\top}$ from one factorisation, with
+$(\mathbf{A}^{+})^{\!\top}=\mathbf{Q}\mathbf{R}^{-\top}$ in Eq.~(\ref{eq:6}). Only the gas columns of
+$\mathbf{D}_k$ are non-zero: differentiating Eq.~(\ref{eq:3}),
+\begin{equation}
+\frac{\partial}{\partial \delta_i}\,\sigma_i(p_i') = \sigma_i'(p_i'),
+\qquad
+\frac{\partial}{\partial s_i}\,\sigma_i(p_i') = (p-p_c)\,\sigma_i'(p_i'),
+\label{eq:7}
+\end{equation}
+so $\sigma_i'$ is obtained once from the derivative of the interpolating spline that
+already represents each reference. The polynomial and etalon columns are independent of
+$\theta$ and contribute nothing. Both terms of Eq.~(\ref{eq:6}) cost one triangular solve and
+one multiplication by $\mathbf{Q}$; their derivation and the invariance under the column scaling $\mathbf{S}$ are
+given in Appendices~\ref{app:B2} and \ref{app:B3}. The gradient of the objective is the same with and without
+the second term, because $\mathbf{A}^{+}\mathbf{r} = 0$; the second term adds the exact curvature and makes the
+Jacobian testable against finite differences to round-off (Sect.~\ref{sec:3.2}). We have not compared the
+convergence rates of the two forms.
+
+The separable structure is not new to DOAS; what the established treatments do not form is the derivative of
+the linear solution with respect to the nonlinear parameters. QDOAS solves the slant columns and the polynomial
+by singular value decomposition inside each evaluation of the fitting function while its
+Marquardt--Levenberg loop iterates over the nonlinear parameters only -- the structure WinDOAS itself named
+``Marquardt-SVD'' -- but its source states that the derivatives with respect to shift and stretch are ``always
+numeric'', so no term of the form of Eq.~(\ref{eq:6}) is formed. DOASIS \citep{Kraus_2006} goes the other way:
+once shift and squeeze are fitted, the concentrations are handed to the nonlinear solver as well, and the thesis
+notes that the algorithm may then fail to find the global optimum that the linear step would have guaranteed.
+The standard textbook scheme \citep[][Sect.~8.3.4]{Platt} alternates one linear solve with one
+Levenberg--Marquardt step, explicitly ``with fixed parameters $a_j$ and $c_h$'' -- block-coordinate
+optimisation, in which $\partial \hat{\mathbf{c}}/\partial\theta$ does not appear. Outside DOAS, the analytic form
+of Eq.~(\ref{eq:6}) is established in atmospheric remote sensing: \citet{B_rligea_2023} use exactly this
+projected derivative, with the Kaufman variant, for a SWIR retrieval in which -- as in BIRRA
+\citep{Gimeno_Garc_a_2011} -- the separability is inverted relative to Eq.~(\ref{eq:2}).
+
+For the covariance of Sect.~\ref{sec:2.5}: the inverse of the gas block of Eq.~(\ref{eq:9}) is the Schur complement
+\begin{equation*}
+\mathbf{A}_{\mathbf{W}}^{\top}\mathbf{A}_{\mathbf{W}} - \mathbf{A}_{\mathbf{W}}^{\top}\mathbf{V}(\mathbf{V}^{\top}\mathbf{V})^{-1}\mathbf{V}^{\top}\mathbf{A}_{\mathbf{W}},
+\end{equation*}
+which is never larger than the matrix inverted in Eq.~(\ref{eq:8}), so the joint standard errors are never
+smaller than the conditional ones. $\mathbf{V}$ holds $\mathbf{c}$ fixed and is therefore not the projected
+Jacobian of Eq.~(\ref{eq:6}); using Eq.~(\ref{eq:6}) there would count the linear block twice.
+
+\subsection{Scaling of the fitted quantity and options not used operationally}
+\label{app:B6}
+
+Equation~(\ref{eq:4}) is solved on $\alpha$ scaled to order unity, and the linear coefficients
+are scaled back afterwards. Ambient $\alpha$ in these windows is of order $10^{-7}\,\mathrm{cm^{-1}}$, so
+residuals and gradients are of order $10^{-15}$, while the default termination tolerances of a general-purpose
+least-squares routine are of order $10^{-8}$. On unscaled $\alpha$ the termination test can then be satisfied at
+the starting point: the solver returns after a single function evaluation, having moved the shift by nothing,
+and reports success. In one operational spectrum the unscaled fit exited with shift $+0.0000$\,px after
+$n_{\mathrm{fev}}=1$, while the same spectrum scaled by $10^{7}$ converged to $-0.5000$\,px after
+$n_{\mathrm{fev}}=5$. The failure is silent -- it produces a plausible number with a success flag -- and it is
+specific to re-implementations in scaled, tolerance-driven optimisers rather than to the DOAS method itself.
+
+The linear step can be solved with a non-negativity constraint on the gas coefficients, and a Tikhonov penalty
+can be applied to the gas, etalon and auxiliary columns (never to the Chebyshev background, which would distort
+it). Neither is used in the configuration reported here: the operational $\lambda$ is zero and the concentrations
+are left unconstrained so that values near zero remain unbiased. The analytic Jacobian of Eq.~(\ref{eq:6})
+requires the unconstrained linear step: at an active non-negativity bound the projector is not differentiable,
+and the implementation falls back to finite differences in that case. Robust (Tukey bisquare) iteratively
+reweighted fitting is available and likewise unused here.

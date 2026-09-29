@@ -44,26 +44,26 @@ line-shape FWHM (nm) & 0.681 & 0.683 & 0.765--0.785 \\
 \end{tabular}
 \end{table*}
 
-\strong{References.} The cross sections are NO$_2$ \citep{Vandaele_2002}, CHOCHO \citep{Volkamer_2005} and H$_2$O from
+\emph{References.} The cross sections are NO$_2$ \citep{Vandaele_2002}, CHOCHO \citep{Volkamer_2005} and H$_2$O from
 HITRAN line data \citep{Gordon_2022}, each convolved with the line shape of its channel before the fit; O$_4$ is not
 fitted in the operational configuration. No robust weighting, regularisation or non-negativity constraint is applied
-(Sect.~\ref{sec:2.8}).
+(Appendix~\ref{app:B6}).
 
-\strong{Wavelength calibration.} Each channel has its own Hg-lamp calibration with a quadratic pixel-to-wavelength
+\emph{Wavelength calibration.} Each channel has its own Hg-lamp calibration with a quadratic pixel-to-wavelength
 polynomial. Two calibrations of the 300\,$^{\circ}$C spectral region exist, one per region of interest on the
 detector; the operational fit setting uses the second, the two differ by about 0.6\,px (0.034\,nm), and which of the
 two belongs to block 2053 is not settled. The difference is within the shift range of that channel and is absorbed
 by the fitted shift.
 
-\strong{Temperature and pressure.} Sample temperature and pressure are recorded with every spectrum and enter the
+\emph{Temperature and pressure.} Sample temperature and pressure are recorded with every spectrum and enter the
 Rayleigh correction of Eq.~(\ref{eq:1}) and the conversion from number density to mixing ratio; their interpolation
 contributes below \fieldnum{0.1}\,\% (Sect.~\ref{sec:4.1}). The temperature scaling $\tau_i(T)$ of Eq.~(\ref{eq:2}) is not
 used ($\kappa_i = 0$).
 
-\strong{Cavity.} All three cavities have $d = 51.8$\,cm and $R_L = 1.0$. $R_L$ is assumed, not measured; since
+\emph{Cavity.} All three cavities have $d = 51.8$\,cm and $R_L = 1.0$. $R_L$ is assumed, not measured; since
 $\alpha \propto R_L$ it enters as a multiplicative factor (Sect.~\ref{sec:3.6}).
 
-\strong{Calibration references.} Zero-air and helium blocks are identical, 34 scans over 32\,s; zero air is measured
+\emph{Calibration references.} Zero-air and helium blocks are identical, 34 scans over 32\,s; zero air is measured
 every hour and helium every three hours (Table~\ref{tab:cal_schedule}). The zero-air reference $I_0$ is interpolated
 to the time of each spectrum from the neighbouring zero-air blocks, and the etalon frequency is held fixed
 (Sect.~\ref{sec:4.1}). Each reflectivity knot is formed from one zero-air block and the most recent helium block that

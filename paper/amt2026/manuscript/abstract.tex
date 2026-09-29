@@ -1,57 +1,20 @@
-%% Abstract -- from augur_AMT_초록 draft v5 (2026-09-21, KRISS sentence and 'twelve days' of 2026-09-27)
+%% Abstract -- rewritten 2026-09-29 to the Copernicus length guideline (<= 250 words).
 \begin{abstract}
-A DOAS fit reports a residual, a chi-square, an uncertainty and a convergence
-flag, and these are read as a description of how well the retrieval did. Each
-can assert more than the fit knows, and the gap is invisible from inside the
-fit report. We present Augur, an open retrieval for broadband
-absorption spectra that is configured by instrument and campaign profiles rather than written for one instrument,
-and use one field case to measure that gap: 53 days of measurements in 2026 with a thermal-dissociation broadband
-cavity-enhanced absorption spectrometer with two heated and one ambient-temperature cavity, measuring NO$_2$, total
-peroxy nitrates and total alkyl nitrates \citep{Min_2016,Nam_2022}.
+A DOAS fit reports a residual, a chi-square, an uncertainty and a convergence flag, which are read as a measure of
+retrieval quality. We present Augur, an open retrieval that poses the fit in the extinction domain as a
+separable nonlinear least-squares problem, solves it by variable projection and is configured by instrument and
+campaign profiles. Its calibration references enter as data, so they can be perturbed, and the objective mapped, without
+reprocessing a campaign. We use it on one field case, a
+thermal-dissociation broadband cavity-enhanced absorption spectrometer \citep{Min_2016,Nam_2022} with two heated and one
+ambient-temperature cavity, to measure two gaps between fit report and data.
 
-Augur poses the retrieval in the extinction domain as a separable nonlinear
-least-squares problem and solves it by variable projection with an analytic
-two-term Golub--Pereyra Jacobian, propagating a joint covariance that includes
-the nonlinear parameters. Its contribution, however, is architectural rather
-than numerical. The time-resolved references enter as data, so a
-leave-one-out perturbation of the calibration record is a loop over knots
-rather than a reprocessing campaign; and the projected objective is available
-as a function of the nonlinear parameters, so the shape of the minimum can be
-mapped rather than inferred from a converged point. On synthetic spectra an
-independent DOAS code reproduces Augur to within its output resolution; on the field record the
-two agree in NO$_2$ with $r^2 \ge \fieldnum{0.990}$ but differ in scale by up to \fieldnum{6}\,\% (Sect.~\ref{sec:3.3}). Neither of these questions can be put to a
-conventional implementation without reprocessing the campaign once per
-answer.
-
-Asking them changes what the uncertainty means. For the product the instrument
-reports, formed as the difference of two retrievals, leave-one-out perturbation of
-the zero-air, reflectivity and etalon references in the best-calibrated week of the deployment gives a structural
-uncertainty \fieldnum{1.3} to \fieldnum{2.3} times the sigma the fit reports for the same 60\,s
-records, so the total is \fieldnum{1.6} to \fieldnum{2.5} times what is reported. The uncertainty
-column delivered with the product is not that quantity at all but a gain
-systematic proportional to NO$_2$, and carries none of this. On synthetic spectra with
-known truth the realised scatter is 0.91 to 1.32 times the reported sigma under white noise (within 10\,\% in
-15 of 30 cases; 1.22 to 1.32 in 9 of 13 synthetic instruments at nominal noise, where the free wavelength shift
-adds scatter the covariance does not carry) and 1.42 to 2.05 times under autocorrelated noise. None of the
-calibration-chain terms enlarges the residual.
-
-Two failures are of a different kind, because the information existed upstream
-and was discarded. Wavelength shift is identifiable in one window and not in
-another -- the profiled objective of twelve ambient spectra varies by a median \fieldnum{1.2}\,\% over $\pm4$\,px where
-the other window spans five orders of magnitude -- yet both are reported as
-converged, and under matched settings \fieldnum{85.5}\,\% of them terminate at a parameter
-bound; a laboratory spectrum with added NO$_2$ locates the same shift to a tenth of
-a pixel, two pixels from where the ambient fit converged. And a nine-hour misalignment between the reflectivity time base and the
-spectra, present in twelve days of the operational product, displaced the
-retrieved alkyl nitrates by \fieldnum{0.100}\,ppb, \fieldnum{1.44} times the entire structural
-budget, while moving the fitted wavelength shift by \fieldnum{0.005}\,px and changing the
-residual and the reported uncertainty by two parts in a thousand.
-
-Neither failure is expensive to prevent: the termination state, the distance
-to the nearest reference in time and the provenance of each reference are all
-known inside the retrieval and need only be carried to the product, which we
-recommend as a reporting convention. Augur exports the termination state and the distance to the
-nearest reference and records which reference file was used; recording each reference's build time and
-time convention is specified but not yet implemented. We release Augur and a synthetic benchmark with which any
-DOAS implementation can measure the same quantities.
+The first is error the fit cannot see. For the alkyl nitrate product, leave-one-out perturbation of the zero-air,
+reflectivity and etalon references gives a structural uncertainty \fieldnum{1.28} to \fieldnum{2.29} times the reported sigma, and a
+total \fieldnum{1.63} to \fieldnum{2.50} times, without enlarging the residual. The second is information the pipeline holds and
+discards. The ambient-temperature channel's wavelength shift is not identifiable from ambient spectra, yet its fits
+report convergence. A reflectivity reference nine hours out of alignment displaced the product by
+\fieldnum{1.44} times the structural budget while changing the residual and the reported uncertainty by two parts in a
+thousand. A multiplicative scale error, evident only against a co-located reference analyser, is invisible to both.
+We propose that each record carry its termination state, distance to the nearest calibration and reference
+provenance, and release a synthetic benchmark for other implementations.
 \end{abstract}

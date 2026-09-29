@@ -1,23 +1,21 @@
-%% Sect. 3 -- from augur_AMT_§2.9_3 draft v1 (2026-09-21, Fig. 3 sentences of 2026-09-27)
+%% Sect. 3 -- from augur_AMT_§2.9_3 draft v1 (2026-09-21); condensed 2026-09-29.
 \section{Verification}
 \label{sec:3}
 
-Five things are verified, and they are different things. That the
-implementation solves the equations of Sect.~\ref{sec:2}; that the analytic Jacobian is the
-derivative it claims to be; that an independent implementation of the same
-problem returns the same answer; that the diagnostics of Sects.~\ref{sec:4} and \ref{sec:5} measure
-what they are said to measure, on data whose truth is known; and that the two
-hot channels share a relative scale. Absolute concentration accuracy against a
-reference standard is not established here and is not claimed anywhere in this
-paper.
+The verification covers five properties. The implementation solves the equations of Sect.~\ref{sec:2}, the analytic
+Jacobian is the derivative it claims to be, and an independent implementation of the same problem returns the same
+answer. The diagnostics of Sects.~\ref{sec:4} and \ref{sec:5} measure what they are said to measure on data whose
+truth is known, and the two hot channels share a relative scale. Absolute concentration accuracy
+against a reference standard is not established and is not claimed anywhere in this paper.
 
-Results in Sects.~\ref{sec:3}--\ref{sec:6} are reported for three retrieval configurations taken
-from the field case of Sect.~\ref{sec:7} and labelled by the cells they come from. What
-distinguishes them for the retrieval is listed in Table~\ref{tab:1}: the fitting window,
-the order of the baseline polynomial, the permitted shift range and the light
-level; the full configuration is in Appendix~\ref{app:A}. None of the results in Sects.~\ref{sec:3}--\ref{sec:6} depends on the chemistry the cells
-measure; where a result depends on a property of a configuration, that property
-is named. Figure~\ref{fig:2} shows one record retrieved in all three configurations.
+Results in Sects.~\ref{sec:3}--\ref{sec:6} are reported for three retrieval configurations of the field case of
+Sect.~\ref{sec:7}, labelled by the cells they come from. Table~\ref{tab:1} lists what distinguishes them for the
+retrieval: fitting window, baseline order, permitted shift range and light level; the full configuration is in
+Appendix~\ref{app:A}. None of the results depends on the chemistry the cells measure, and where a result depends on a
+property of a configuration, that property is named. Figure~\ref{fig:2} shows one record (1 June 2026, 10:35 KST; cold channel 10:34:34) retrieved in all three
+configurations. Each window sits on the low-noise band set by its LED. The cold window extends 13\,nm below its LED
+half-maximum, where the noise is several times higher. The step at 428\,nm in Fig.~\ref{fig:2}a is the band-pass filter
+edge, and that at 470\,nm in Fig.~\ref{fig:2}b the red edge of the 469\,nm LED.
 
 \begin{table}[t]
 \caption{Retrieval configurations used in Sects.~\ref{sec:3}--\ref{sec:6}, in short form; windows are rounded to the nanometre, and the full configuration, including the exact window bounds, is in Table~\ref{tab:config}.}
@@ -35,19 +33,12 @@ cold & ambient & 438--476 & 4th order & fixed at $-0.5$ & reduced \\
 
 \begin{figure*}[p]
 \includegraphics[width=\textwidth,height=0.66\textheight,keepaspectratio]{figures/fig02.pdf}
-\caption{One record (1 June 2026, 10:35 KST; cold channel 10:34:34) retrieved in the three
-configurations of Table~\ref{tab:1}. Columns: \textbf{(a)} hot ANs (300\,$^{\circ}$C), \textbf{(b)} hot PNs (180\,$^{\circ}$C), \textbf{(c)} cold.
-\textbf{Top row:} per-pixel noise of the 60\,s extinction spectrum in the hour around the record, with the fit window
-shaded. Each window sits on the low-noise band set by its LED (bar: LED emission half-maximum from zero-air
-spectra); the cold window extends 13\,nm below its LED half-maximum, where the noise is several times higher; the step at 428\,nm in (a) is the band-pass filter edge and the step at 470\,nm in (b) is the
-red edge of the 469\,nm LED. \textbf{Middle block,} top to bottom: measured extinction with the fitted model and the
-baseline-plus-etalon term (shading: sum of trace-gas terms); the NO$_2$ contribution, shown as the measurement minus
-every other fitted term, with the fitted NO$_2$ term; the same for H$_2$O, with the fitted CHOCHO term; and the
-residual, with $\pm$RMS shaded and its histogram against a Gaussian of the same RMS at right. The lower three rows share
-one vertical scale across columns. Values in the NO$_2$ row are the operational retrieval and its reported 1$\sigma$;
-``band depth / RMS'' is the peak-to-peak of the fitted NO$_2$ term divided by the residual RMS. \textbf{Bottom row:}
-the NO$_2$ retrieved by the same configuration over the surrounding 24\,h (fits with reduced $\chi^2 \le 1.5$; $n = \fieldnum{1397}$, \fieldnum{1399}, \fieldnum{707}),
-the star marking this record; inset: distribution of residual RMS over those fits, on which this record sits at the
+\caption{One record retrieved in the three configurations of Table~\ref{tab:1}: \textbf{(a)} hot ANs (300\,$^{\circ}$C), \textbf{(b)} hot PNs (180\,$^{\circ}$C), \textbf{(c)} cold. Top:
+per-pixel noise of the 60\,s extinction spectrum in the surrounding hour (fit window shaded; bar, LED half-maximum).
+Middle: extinction with fitted model and baseline-plus-etalon term; NO$_2$ and H$_2$O contributions (measurement minus
+other fitted terms) with their fits; residual with $\pm$RMS and histogram. The NO$_2$ row gives the operational value, its
+1$\sigma$, and peak-to-peak NO$_2$ over residual RMS. Bottom: NO$_2$ over the surrounding 24\,h (reduced $\chi^2 \le 1.5$;
+$n = \fieldnum{1397}$, \fieldnum{1399}, \fieldnum{707}; star, this record); inset, residual RMS distribution, on which this record sits at the
 \fieldnum{49}th, \fieldnum{53}rd and \fieldnum{81}st percentile.}
 \label{fig:2}
 \end{figure*}
@@ -55,59 +46,47 @@ the star marking this record; inset: distribution of residual RMS over those fit
 \subsection{Recovery of a known truth}
 \label{sec:3.1}
 
-Spectra are generated from the forward model of Sect.~\ref{sec:2.1} with prescribed gas
-amounts, a Chebyshev baseline, a wavelength shift and a squeeze, and retrieved
-with the same model. Over 27 combinations -- nine shifts from $-4$ to $+4$\,px (including sub-pixel
-values of $\pm0.37$\,px) crossed with squeezes of 0.998, 1.000 and 1.002 -- the largest error in the retrieved NO$_2$ amount is
-$9.5\times10^{-13}$ relative and the largest error in the recovered shift $6.7\times10^{-10}$\,px. The
-retrieval reproduces its own forward model to machine precision, which is a
-statement about the solver and not about the instrument.
+The retrieval reproduces its own forward model to machine precision. Spectra are generated from the forward model of
+Sect.~\ref{sec:2.1} with prescribed gas amounts, a Chebyshev baseline, a wavelength shift and a squeeze, and retrieved
+with the same model. Over 27 combinations -- nine shifts from $-4$ to $+4$\,px (including sub-pixel values of
+$\pm0.37$\,px) crossed with squeezes of 0.998, 1.000 and 1.002 -- the largest error in the retrieved NO$_2$ amount is
+$9.5\times10^{-13}$ relative and the largest error in the recovered shift $6.7\times10^{-10}$\,px. This is a statement
+about the solver, not about the instrument.
 
-The baseline order is the one structural choice the retrieval makes on its
-own. Sweeping it from 0 to 8 on a noise-free spectrum built with a
-fourth-order baseline, the retrieved NO$_2$ is in error by 27\,\% at order 0 and
-0.75\,\% at order 1, and reaches machine precision at order 2 and above; the
-normalised condition number rises from 14.9 to 33.8 across the sweep and the
-degrees of freedom fall from 543 to 535. On noisy realisations of the same
-spectrum the scatter of the retrieved NO$_2$ is 0.88 to 0.91 times the reported
-1$\sigma$ at order 2 and above. For this configuration, with white photon noise and a correct model, the
-reported uncertainty is accurate to about ten per cent -- which is the
-baseline against which the structural terms of Sect.~\ref{sec:4} should be read (Fig.~\ref{fig:3}a, b). It is a
-statement about one configuration: across the 13 synthetic instruments of Fig.~\ref{fig:1}a the white-noise ratio
-ranges from 0.91 to 1.32, and at nominal noise it lies between 1.22 and 1.32 in 9 of them, where the free
-wavelength shift adds scatter the covariance does not carry (Sect.~\ref{sec:3.4}).
+The baseline order is the one structural choice the retrieval makes on its own. Sweeping it from 0 to 8 on a
+noise-free spectrum built with a fourth-order baseline, the retrieved NO$_2$ is in error by 27\,\% at order 0 and
+0.75\,\% at order 1, and reaches machine precision at order 2 and above. Across the sweep the normalised condition
+number rises from 14.9 to 33.8 and the degrees of freedom fall from 543 to 535. On noisy realisations of the same
+spectrum the scatter of the retrieved NO$_2$ is 0.88 to 0.91 times the reported 1$\sigma$ at order 2 and above. For
+this configuration, with white photon noise and a correct model, the reported uncertainty is therefore accurate to
+about ten per cent, the baseline against which the structural terms of Sect.~\ref{sec:4} should be read
+(Fig.~\ref{fig:3}a, b). Across the 13 synthetic instruments of Fig.~\ref{fig:1}a the white-noise ratio ranges from 0.91
+to 1.32, within 10\,\% in 15 of the 30 cases. At nominal noise it lies between 1.22 and 1.32 in 9 of them, where the free wavelength shift adds scatter
+that the covariance does not carry (Sect.~\ref{sec:3.4}); under autocorrelated noise it is 1.42 to 2.05.
 
 \begin{figure*}[t]
 \includegraphics[width=\textwidth]{figures/fig03.pdf}
-\caption{Validation of the retrieval core. \textbf{(a)} Error in the recovered NO$_2$ amount (filled, relative) and
-wavelength shift (open, px) for 27 noise-free spectra: nine shifts between $-4$ and $+4$\,px, each with squeezes 0.998, 1.000
-and 1.002. \textbf{(b)} Error in NO$_2$ against the order of the fitted baseline for a noise-free spectrum built with a
-fourth-order baseline; inset, on noisy realisations of the same spectrum, the realised scatter of NO$_2$ divided by the
-reported 1$\sigma$. \textbf{(c)} Difference between the analytic Golub--Pereyra Jacobian and a central finite difference of the
-projected residual, against the finite-difference step, for the shift and the squeeze; the dashed line has slope $h^2$.
-\textbf{(d)} Shift recovered by Augur and by QDOAS minus the true shift, for true shifts from $-7$ to $+7$\,px (five noisy
-realisations each, both started at 0). \textbf{(e)} Standard deviation of (retrieved $-$ true)/reported $\sigma$ over 300 realisations
-in each of three conditions (measurement noise; ten times that; a narrow window with three times the noise), for Augur
-and QDOAS fitting the same model, and for Augur with its etalon terms switched on. \textbf{(f)} Benchmark group B: realised
-scatter divided by the reported uncertainty under white, doubled and autocorrelated (AR(1), $\rho = 0.5$) noise, for Augur,
-for the benchmark's reference implementation and for Augur with the shift fixed at its true value; the dashed line is the
-$\sqrt{3}$ inflation predicted for $\rho = 0.5$.}
+\caption{Validation of the retrieval core. \textbf{(a)} Error in recovered NO$_2$ (filled, relative) and shift (open, px)
+for 27 noise-free spectra (shifts $-4$ to $+4$\,px; squeezes 0.998, 1.000, 1.002). \textbf{(b)} NO$_2$ error against baseline
+order for a spectrum built with a fourth-order baseline; inset, realised scatter over reported 1$\sigma$ on noisy
+realisations. \textbf{(c)} Analytic minus finite-difference Jacobian against step (dashed: slope $h^2$). \textbf{(d)} Shift
+recovered by Augur and QDOAS minus truth, for true shifts $-7$ to $+7$\,px (five realisations each, started at 0).
+\textbf{(e)} SD of (retrieved $-$ true)/reported $\sigma$ over 300 realisations in three noise conditions. \textbf{(f)} Benchmark group B: realised
+scatter over reported uncertainty under white, doubled and AR(1) ($\rho = 0.5$) noise; dashed, the predicted $\sqrt{3}$.}
 \label{fig:3}
 \end{figure*}
 
 \subsection{The analytic Jacobian}
 \label{sec:3.2}
 
-The two-term Golub--Pereyra derivative of Sect.~\ref{sec:2.3} is compared against a central
-finite difference of the projected residual, evaluated inside a real fit
-rather than on a constructed test function: the optimiser call is intercepted
-and the analytic Jacobian it was handed is differenced against the residual it
-was minimising. An invariant check of this form runs on every fit in the test
-suite at the solver's default step; what is reported here is the step-size
-sweep (Table~\ref{tab:jacobian_steps}), which is what turns a passing check into a measurement.
+The two-term Golub--Pereyra derivative of Sect.~\ref{sec:2.3} agrees with a central finite difference of the
+projected residual down to the round-off floor. The comparison is made inside a real fit: the optimiser call is
+intercepted and the analytic Jacobian it was handed is differenced against the residual it was minimising. An
+invariant check of this form runs on every fit in the test suite at the solver's default step; the step-size sweep
+of Table~\ref{tab:jacobian_steps} turns that check into a measurement.
 
 \begin{table}[t]
-\caption{Difference between the analytic Golub--Pereyra Jacobian and a central finite difference of the projected residual, evaluated inside a real fit, against the finite-difference step $h$, for the shift (px) and the squeeze. Bold: the minimum of each column.}
+\caption{Difference between the analytic Golub--Pereyra Jacobian and a central finite difference of the projected residual, evaluated inside a real fit, against the finite-difference step $h$, for the shift (px) and the squeeze. Bold: the minimum of each column. The squeeze is a multiplier near unity in a box of order $\pm 0.02$, so at $h = 10^{-2}$ the step is half the box and the entry 1.02 is a bound artefact; a combined maximum over both parameters would show 1.02 there and hide the V.}
 \label{tab:jacobian_steps}
 \begin{tabular}{lll}
 \tophline
@@ -126,57 +105,45 @@ $10^{-9}$ & $1.09\times10^{-5}$ & $2.70\times10^{-7}$ \\
 \end{tabular}
 \end{table}
 
-Both parameters give the expected V (Fig.~\ref{fig:3}c). The truncation branch falls with a fitted
-slope of $+2.001$ in each, which is the $h^2$ of a central difference, and the
-round-off branch rises again as the difference of two nearly equal numbers
-loses significance. The minima are $2.60\times10^{-9}$ for the shift and
-$2.64\times10^{-9}$ for the squeeze, a ratio of 1.018: the two parameters reach
-the same floor, which is the signature of a floor set by round-off in the
-shared residual evaluation rather than by any error in either derivative.
-
-This is a stronger statement than agreement at one step size. An analytic
-expression that omitted a term -- the one-term approximation of \citet{Kaufman_1975}, which drops the derivative of the projector, is the natural candidate
--- would agree with the finite difference only down to the size of the omitted
-term and would then flatten, not descend to the round-off floor. The descent
-is what identifies the expression being differentiated as the derivative
-itself.
-
-The two parameters must be swept separately. The shift is measured in pixels
-and is $O(1)$, while the squeeze is a multiplier near unity constrained to a
-box of order $\pm 0.02$, so $h = 10^{-2}$ is already half the box for the
-squeeze and the entry there is a bound artefact rather than a failure of the
-derivative. A combined maximum over both parameters would show 1.02 at that
-step and hide the V.
+Both parameters give the expected V (Fig.~\ref{fig:3}c). The truncation branch falls with a fitted slope of
+$+2.001$ in each, the $h^2$ of a central difference, and the round-off branch rises again as the difference of two
+nearly equal numbers loses significance. The minima are $2.60\times10^{-9}$ for the shift and $2.64\times10^{-9}$ for
+the squeeze, a ratio of 1.018. A floor common to both parameters is set by round-off in the shared residual
+evaluation rather than by an error in either derivative. An expression that omitted a term, such as the one-term
+approximation of \citet{Kaufman_1975}, would agree only down to the size of the omitted term and then flatten; the
+descent to the floor identifies the expression as the derivative itself.
 
 \subsection{An independent implementation of the same problem}
 \label{sec:3.3}
 
-QDOAS \citep{Danckaert_2017} solves the same separable least-squares problem by a
-different route: Marquardt--Levenberg with a singular-value decomposition and a
-numerically differenced Jacobian, against Augur's variable projection with an
-analytic projected Jacobian. It does not know about cavities, so the
-comparison is made by presenting the extinction spectrum as a virtual
-transmission, $I = \exp(-K\alpha)$ with $I_0 = 1$, whereby the optical depth QDOAS
-forms is exactly $K\alpha$ and the two codes are solving the same equations on
-the same numbers.
+QDOAS \citep{Danckaert_2017} solves the same separable least-squares problem by Marquardt--Levenberg with a
+singular-value decomposition and a numerically differenced Jacobian. Because it does not model cavities, the
+extinction spectrum is presented to it as a virtual transmission, $I = \exp(-K\alpha)$ with $I_0 = 1$, so that the
+optical depth QDOAS forms is exactly $K\alpha$ and both codes solve the same equations on the same numbers.
 
-On noise-free synthetic spectra with shifts of 0, $-1.96$, $+2$ and $-4$\,px, Augur
-recovers NO$_2$ to $9.5\times10^{-13}$ relative and QDOAS to $5.0\times10^{-3}$, the latter limited by
-its output resolution rather than by its algorithm; QDOAS recovers the shift
-to within 0.0042\,px. On 30 noisy realisations the two codes have
-root-mean-square relative errors of 0.0042 and 0.0045 against the same truth,
-and differ from each other by at most $5.7\times10^{-3}$ relative in NO$_2$. On the field record (53 days), with each spectrum's measured temperature and pressure used
-for the unit conversion and records selected by an NO$_2$-conditional $\chi^2$ envelope, the NO$_2$ amounts of the
-two codes agree with $r^2 \ge \fieldnum{0.990}$ in all three configurations (Table~\ref{tab:qdoas_field}). The agreement is
-not a scale identity: the Deming slope QDOAS/Augur is \fieldnum{1.039} in the cold configuration and \fieldnum{1.063} and
-\fieldnum{1.043} in the 180 and 300\,$^{\circ}$C configurations, where $r^2 = \fieldnum{1.000}$, so the two codes differ in the
-heated-channel NO$_2$ scale by \fieldnum{4}--\fieldnum{6}\,\% for a reason we have not identified. The weak absorbers agree less
-well (CHOCHO $r^2$ \fieldnum{0.889}--\fieldnum{0.959}, slope \fieldnum{0.81}--\fieldnum{1.19}; H$_2$O slope \fieldnum{1.04}--\fieldnum{1.38}).
+On synthetic spectra the two codes agree to within the reported uncertainty. On noise-free spectra with shifts of
+0, $-1.96$, $+2$ and $-4$\,px, Augur recovers NO$_2$ to $9.5\times10^{-13}$ relative and QDOAS to $5.0\times10^{-3}$,
+the latter limited by its output resolution; QDOAS recovers the shift to within 0.0042\,px. On 30 noisy realisations
+the two codes have root-mean-square relative errors of 0.0042 and 0.0045 against the same truth, and differ from
+each other by at most $5.7\times10^{-3}$ relative in NO$_2$. In a larger test with 300 realisations in each of three
+noise conditions (measurement noise, ten times that, and a narrow window with three times the noise), the standard deviation of the error normalised by the reported uncertainty is 0.97 to 1.05 for
+both codes when they fit the same model. Started from zero, both recover true shifts between $-7$ and $+7$\,px with no
+miss larger than a pixel (Fig.~\ref{fig:3}d, e). Switching on Augur's etalon terms in the narrow window
+doubles the scatter there, which is a choice of model rather than a property of the solver.
+
+On the field record the two codes agree closely in NO$_2$ but differ in scale. Over the 53 days, with each
+spectrum's measured temperature and pressure used for the unit conversion and records selected by an
+NO$_2$-conditional $\chi^2$ envelope, the NO$_2$ amounts agree with $r^2 \ge \fieldnum{0.990}$ in all three configurations
+(Table~\ref{tab:qdoas_field}). The Deming slope QDOAS/Augur is \fieldnum{1.039} in the cold configuration and \fieldnum{1.063} and
+\fieldnum{1.043} in the 180 and 300\,$^{\circ}$C configurations, where $r^2 = \fieldnum{1.000}$, so the heated-channel NO$_2$ scale
+differs by \fieldnum{4}--\fieldnum{6}\,\% for a reason we have not identified. The weak absorbers agree less well (CHOCHO $r^2$
+\fieldnum{0.889}--\fieldnum{0.959}, slope \fieldnum{0.81}--\fieldnum{1.19}; H$_2$O slope \fieldnum{1.04}--\fieldnum{1.38}). Where the codes diverge most --
+the wavelength shift in the cold window, and with it the weak absorbers there (Sect.~\ref{sec:5.1}) -- the data do not
+determine the shift, so neither code's value is established by its fit.
 
 \begin{table}[t]
 \caption{Agreement of QDOAS with Augur on the field record, per retrieval configuration and species: number of
-records $n$ in the NO$_2$-conditional $\chi^2$ envelope, Deming slope QDOAS/Augur ($\lambda = 1$) and $r^2$. The
-unit conversion uses each spectrum's measured temperature and pressure.}
+records $n$ in the NO$_2$-conditional $\chi^2$ envelope, Deming slope QDOAS/Augur ($\lambda = 1$) and $r^2$.}
 \label{tab:qdoas_field}
 \begin{tabular}{lllll}
 \tophline
@@ -195,96 +162,60 @@ hot ANs (300\,$^{\circ}$C) & H$_2$O & \fieldnum{74\,539} & \fieldnum{1.038} & \f
 \end{tabular}
 \end{table}
 
-In a
-larger test with 300 realisations in each of three noise conditions, the
-standard deviation of the error normalised by the reported uncertainty is 0.97
-to 1.05 for both codes when they fit the same model, and started from zero both
-recover true shifts between $-7$ and $+7$\,px with no miss larger than a pixel
-(Fig.~\ref{fig:3}d, e). Switching on Augur's etalon terms in the narrow window doubles the
-scatter there -- a choice of model, not a property of the solver.
-
-The conclusion drawn from this in Sect.~\ref{sec:2.9} is therefore narrower than identity: on
-synthetic spectra the two codes return the same concentrations, and on field spectra they agree in NO$_2$
-to within a scale difference of a few per cent. Where they diverge most -- the wavelength shift in the cold
-window, and with it the weak absorbers there (Sect.~\ref{sec:5.1}) -- the data do not determine the shift, so
-neither code's value is established by its fit.
-
 \subsection{A benchmark that others can run}
 \label{sec:3.4}
 
-The comparison of Sect.~\ref{sec:3.3} is specific to one pair of codes and one set of cross
-sections. To make the same measurements repeatable elsewhere we release a
-synthetic benchmark of 261 cases in six groups: exact recovery with no noise
-(A), reported uncertainty against realised scatter under white, doubled and
-autocorrelated noise (B), bias from a deliberately incomplete model (C), cases
-whose wavelength shift is not determined by the data (D), the same truth
-presented in two fitting windows (E), and the cost of the sub-pixel
-interpolator against band-limited truth (F). Truth is known by construction,
-the spectra are built from the instrument's own cross sections and wavelength
-calibration but contain no retrieval code, and the generator is deterministic
-under a stated seed.
+To make these measurements repeatable with other codes and cross sections we release a synthetic benchmark of 261
+cases in six groups. They test exact recovery with no noise (A); reported uncertainty against realised scatter under
+white, doubled and autocorrelated noise (B); bias from a deliberately incomplete model (C); cases whose wavelength
+shift is not determined by the data (D); the same truth in two fitting windows (E); and the cost of the sub-pixel
+interpolator against band-limited truth (F). Truth is known by construction; the spectra are built from the
+instrument's own cross sections and wavelength calibration but contain no retrieval code, and the generator is
+deterministic under a stated seed.
 
-Group B is worth reporting in full, because its result is not the one the
-paper's own closure test gives and the difference is instructive. Augur
-returns scatter-to-reported ratios of 1.32, 1.09 and 1.65 for white, doubled
-and autocorrelated noise, against 1.19, 1.33 and 1.57 from the reference
-implementation: both codes pass one condition of three, and they fail
-different ones. Two effects account for the pattern. Fixing the wavelength
-shift at its true value brings Augur's white-noise ratio from 1.32 to 1.19,
-which is the reference implementation's value, so the difference between the
-two codes under white noise is the nonlinear degree of freedom and the size of
-the box it is searched in, not the covariance they propagate. And the
-correlated-noise result is predicted by the noise model rather than being a
-property of either code: an AR(1) residual with $\rho = 0.5$ inflates the
-variance of a sum by $(1+\rho)/(1-\rho) = 3$, so a covariance built on an
-independence assumption must understate the scatter by $\sqrt{3} = 1.73$. The
-measured 1.57 and 1.65 sit just below it, and fixing the shift moves Augur to
-1.75 -- the free shift had been absorbing part of the correlated structure
-(Fig.~\ref{fig:3}f).
+Group B shows that the reported uncertainty can fail for reasons that are calculable in advance. Augur returns
+scatter-to-reported ratios of 1.32, 1.09 and 1.65 for white, doubled and autocorrelated noise, against 1.19, 1.33 and
+1.57 from the reference implementation: both codes pass one condition of three, and they fail different ones. Fixing
+the wavelength shift at its true value brings Augur's white-noise ratio from 1.32 to 1.19, the reference
+implementation's value. The difference between the codes under white noise therefore lies in the nonlinear degree of
+freedom and its search box, not in the propagated covariance. The correlated-noise result follows from the
+noise model: an AR(1) residual with $\rho = 0.5$ inflates the variance of a sum by $(1+\rho)/(1-\rho) = 3$, so a
+covariance built on an independence assumption understates the scatter by $\sqrt{3} = 1.73$. The measured 1.57 and
+1.65 sit just below it, and fixing the shift moves Augur to 1.75, because the free shift had absorbed part of the
+correlated structure (Fig.~\ref{fig:3}f). The shortfall under correlated noise is thus predictable from the noise model.
 
-This is the benchmark doing what it was built for. The shortfall under
-correlated noise is not a defect to be repaired in either implementation; it
-is the reported uncertainty answering a question about photon statistics when
-the residual is not photon statistics, and its size is calculable in advance.
-
-A reference implementation is included, and its scorecard is the example
-against which a submission is read. It is a deliberately plain profiled grid
-search, not a production retrieval, and the benchmark is not a ranking: groups
-C and E are reported rather than passed or failed, because the quantity they
-measure is not one any implementation is expected to cover.
+A deliberately plain profiled grid search is included as a reference implementation whose scorecard shows how a
+submission is read. The benchmark does not rank codes: groups C and E are reported rather than passed or failed,
+because no implementation is expected to cover what they measure.
 
 \subsection{Relative scale between the two hot channels}
 \label{sec:3.5}
 
-The alkyl nitrate product is a difference between two channels, so their
-relative scale enters it directly. NO$_2$ was injected into both heated channels, with both ovens at their
-operating temperatures, at two concentration steps on 2026-08-10/11. The steps did not equilibrate (the
-delivery line was still passivating), so only the ratio between the channels is used. In the original
-processing the median of the per-record ratios was 1.2278 at the lower step and 1.2276 at the higher (the
-median channel readings were 14.75 and 11.97\,ppb, and 71.57 and 58.16\,ppb; ratios of these medians are 1.2322
-and 1.2306), and an origin regression over the 58 one-minute means of one file gives a slope of 0.81666
-with $r^2$ 0.9998. Reprocessed with the current code, block 2053 reads 1.239 times block 4101
+The alkyl nitrate product is a difference between two channels, so their relative scale enters it directly. NO$_2$
+was injected into both heated channels, with both ovens at their operating temperatures, at two concentration steps
+on 2026-08-10/11. The steps did not equilibrate (the delivery line was still passivating), so only the ratio between
+the channels is used. In the original processing the median of the per-record ratios was 1.2278 at the lower step
+and 1.2276 at the higher. The median channel readings were 14.75 and 11.97\,ppb, and 71.57 and 58.16\,ppb, whose ratios
+are 1.2322 and 1.2306. An origin regression over the 58 one-minute means of one file gives a slope of 0.81666 with
+$r^2$ 0.9998. Reprocessed with the current code, block 2053 reads 1.239 times block 4101
 (interquartile range 1.231--1.255, $n = 41$ records with block 4101 above 20\,ppb).
 
-This establishes that the relative scale is constant over the range tested. It does not give the scale
-used in the campaign product: the laboratory ratio describes the calibration state of August, and the
-product uses $g' = \fieldnum{0.952}$ for 18 May--5 June, from a field injection. Nor does it establish the absolute
-recovery of either channel, or separate optical from thermal causes of the offset between the channels,
-because both cells were at their operating temperatures throughout.
+The relative scale is therefore constant over the range tested. The laboratory ratio describes the calibration state
+of August, whereas the campaign product uses $g' = \fieldnum{0.952}$ for 18 May--5 June, from a field injection. The test
+also leaves the absolute recovery of either channel open and cannot separate optical from thermal causes of the
+offset between the channels, because both cells were at their operating temperatures throughout.
 
 \subsection{What is not verified here}
 \label{sec:3.6}
 
-A comparison with a co-located reference analyser exists, and it bounds what this paper can claim.
-Against the NIER air-quality-monitoring NO$_2$ analyser at the site (molybdenum-converter type), the
-operational NO$_2$ of the heated channels has ordinary-least-squares gains of \fieldnum{0.57} (180\,$^{\circ}$C) and \fieldnum{0.65}
-(300\,$^{\circ}$C), while the ambient-temperature channel has \fieldnum{0.92}--\fieldnum{1.00}; the median ratio of heated to
-ambient-temperature NO$_2$ is \fieldnum{0.72}, although the heated channels measure NO$_2$ plus thermally produced NO$_2$
-and should read at least as high. A laboratory injection with the ovens at 300 and 180\,$^{\circ}$C gave a block-2053
-sensitivity of at least 1.08 relative to the cylinder, so oven temperature alone does not explain the
-discrepancy, and its cause is unresolved. It is a multiplicative error that leaves the residual, the reported
-uncertainty and every context field proposed in Sect.~\ref{sec:6} unchanged -- an instance of the class of error
-this paper is about, not a property of the spectral fit. No absolute accuracy is claimed. The verification of Sects.~\ref{sec:3.1}
-and \ref{sec:3.3} is of the retrieval against its own forward model and against another
-implementation of that model, which bounds implementation error but not model
-error -- and model error is precisely what Sect.~\ref{sec:3.4} measures on the benchmark.
+A co-located reference analyser bounds what this paper can claim. Against the NIER air-quality-monitoring NO$_2$
+analyser at the site (molybdenum-converter type), the operational NO$_2$ of the heated channels has
+ordinary-least-squares gains of \fieldnum{0.57} (180\,$^{\circ}$C) and \fieldnum{0.65} (300\,$^{\circ}$C), while the ambient-temperature
+channel has \fieldnum{0.92}--\fieldnum{1.00}. The median ratio of heated to ambient-temperature NO$_2$ is \fieldnum{0.72}, although the heated
+channels measure NO$_2$ plus thermally produced NO$_2$ and should read at least as high. A laboratory injection with the
+ovens at 300 and 180\,$^{\circ}$C gave a block-2053 sensitivity of at least 1.08 relative to the cylinder, so oven
+temperature alone does not explain the discrepancy, and its cause is unresolved. The error is multiplicative and
+leaves the residual, the reported uncertainty and every context field proposed in Sect.~\ref{sec:6} unchanged
+(Sect.~\ref{sec:6.5}). No absolute accuracy is claimed. Sections~\ref{sec:3.1} and \ref{sec:3.3} verify the retrieval
+against its own forward model and against another implementation of that model, which bounds implementation error
+but not model error; model error is what the benchmark of Sect.~\ref{sec:3.4} measures.

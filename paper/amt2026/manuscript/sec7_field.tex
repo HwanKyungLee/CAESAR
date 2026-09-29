@@ -1,4 +1,4 @@
-%% Sect. 7 -- from augur_AMT_§7 draft v1 (2026-09-22; Sect. 7.3 recounted 2026-09-27)
+%% Sect. 7 -- from augur_AMT_§7 draft v1 (2026-09-22; Sect. 7.3 recounted 2026-09-27); condensed 2026-09-29.
 \section{Field demonstration}
 \label{sec:7}
 
@@ -8,30 +8,28 @@
 The field case is a thermal-dissociation broadband cavity-enhanced absorption spectrometer with two heated and one
 ambient-temperature cavity, of the design described by \citet{Min_2016} and \citet{Nam_2022}. Ambient air is split between a
 cell held at 180\,$^{\circ}$C, in which peroxy nitrates dissociate, and one at 300\,$^{\circ}$C, in which alkyl nitrates
-dissociate as well; a third cell at ambient temperature measures NO$_2$ directly. The three differ in what has been
+dissociate as well \citep{Day_2002,Wooldridge_2010}; a third cell at ambient temperature measures NO$_2$ directly. The three differ in what has been
 converted to NO$_2$ upstream rather than in how the spectrum is formed, and the sums of peroxy and alkyl nitrates
 follow as channel differences, $\Sigma$ANs with the inter-channel factor $g'$ of Sect.~\ref{sec:4.4}. The retrieval
 configuration of each channel -- window, baseline, references, shift and squeeze settings, wavelength calibration,
 line shape, cavity constants and calibration schedule -- is given in Appendix~\ref{app:A}.
 
 The instrument was deployed at Suncheon Shindae (SDD) from 2026-05-18 to 07-10 as part of a multi-institution
-intensive campaign. Two properties belong to this deployment rather than to the configuration: the median fitted shift
-in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px, inside its bound of $-10$\,px, and the field numbers of this paper
-were checked against a reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by
-$\pm$\fieldnum{0.25}\,\%, and are reported as first computed. The instrument itself, its inlet and its conversion
+intensive campaign. Two properties belong to this deployment rather than to the configuration. The median fitted shift
+in the 300\,$^{\circ}$C channel is \fieldnum{$-6.12$}\,px, inside its bound of $-10$\,px. The field numbers of this paper were checked
+against a reprocessing with a corrected pressure-sensor pairing, which changes the channel NO$_2$ by $\pm$\fieldnum{0.25}\,\%, and are
+reported as first computed. The instrument itself, its inlet and its conversion
 efficiencies are characterised elsewhere.
 
 
 \subsection{Noise floor of the product record}
 \label{sec:7.2}
 
-The quantity the product reports is a channel difference, so its noise floor
-has to be measured on the difference and not assembled from the channels. The
-two hot channels share a light source, a cavity and a clock, and their
-zero-air blocks coincide in time, so \fieldnum{155} blocks pair exactly and the
-difference can be formed record by record (Table~\ref{tab:noise_floor}). Assembling the floor from the
-channels in quadrature would assume an independence that there is no reason
-to expect.
+The noise floor of a channel-difference product has to be measured on the difference. The two hot channels share a
+light source, a cavity and a clock, and their zero-air blocks coincide in time, so \fieldnum{155} blocks pair exactly and the
+difference can be formed record by record (Table~\ref{tab:noise_floor}). The channels turn out to be nearly
+uncorrelated, $r = \fieldnum{-0.093}$, so a quadrature assembly would have come within about \fieldnum{4}\,\% of the measured value; on an
+instrument whose channels shared a drift it would not, and nothing in the fit report distinguishes the two cases.
 
 \begin{table}[t]
 \caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product. Standard-deviation values are approximate, recombined from the channel values with $g' = \fieldnum{0.9524}$; robust-scale values are from the earlier evaluation with a channel factor of 0.82 and were not recomputed.}
@@ -41,114 +39,69 @@ to expect.
  & robust scale & standard deviation \\
 \middlehline
 measured 1$\sigma$ & \fieldnum{0.0676} & $\approx$\fieldnum{0.086}\,ppb \\
-\textbf{detection limit, 3$\sigma$} & \textbf{\fieldnum{0.203}} & \textbf{$\approx$\fieldnum{0.257}\,ppb} \\
+detection limit, 3$\sigma$ & \fieldnum{0.203} & $\approx$\fieldnum{0.257}\,ppb \\
 median value at a true zero & \fieldnum{$+0.0054$}\,ppb & \fieldnum{$+0.0054$}\,ppb \\
 against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & $\approx$\fieldnum{1.06} \\
 \bottomhline
 \end{tabular}
 \end{table}
 
-The channels turn out to be nearly uncorrelated, $r = \fieldnum{-0.093}$, so the
-quadrature assembly would have come within about \fieldnum{4}\,\% of the measured value. That
-is a result of the measurement rather than a licence to skip it: the same
-comparison on an instrument whose channels shared a drift would not be so
-forgiving, and nothing in the fit report distinguishes the two cases.
+The median at a true zero is \fieldnum{$+0.0054$}\,ppb, the same at the channel level and in the difference. A product assembled
+through zero-air interpolation, a Rayleigh correction, a time-interpolated reflectivity, a spectral fit and a channel
+subtraction therefore returns zero when the truth is zero, to a twentieth of its own detection limit. This closes the
+additive chain end to end; a zero test is blind to gain errors, such as the scale discrepancy of Sect.~\ref{sec:3.6}.
 
-The median at a true zero is \fieldnum{$+0.0054$}\,ppb, and it is the same at the channel
-level and in the difference. A product assembled through zero-air
-interpolation, a Rayleigh correction, a time-interpolated reflectivity, a
-spectral fit and a channel subtraction returns zero when the truth is zero,
-to a twentieth of its own detection limit. This closes the additive chain end to end
-and belongs with the verification of Sect.~\ref{sec:3.1} as much as here; a zero test is blind to gain errors, such as
-the scale discrepancy of Sect.~\ref{sec:3.6}.
-
-Read against the uncertainty column shipped with the product, the product's noise floor is roughly covered:
-\fieldnum{0.84} to about \fieldnum{1.06} times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This is
-not in tension with Sect.~\ref{sec:4}, and the distinction matters enough to state. What is
-measured here is a zero-air floor -- the same references, minutes apart, no
-atmosphere and no elapsed time for a reference to go stale. What Sect.~\ref{sec:4} measures
-is what happens when a reference is wrong, and that is a different question
-with a different answer: \fieldnum{1.32} to \fieldnum{1.83} times the same product-column figure of
-\fieldnum{0.0806}\,ppb (Sect.~\ref{sec:4.4}). (Against the fit-propagated $\sigma$ of \fieldnum{0.0541}\,ppb, the denominator of
-Sect.~\ref{sec:4.4}, the total is \fieldnum{1.63} to \fieldnum{2.50} times that value, and in \fieldnum{46.1}\,\% of the \fieldnum{8832} budget records
-the structural change exceeds that record's own fit-propagated $\sigma$.) A reported uncertainty can describe the
-photon noise of a product faithfully and still say nothing about the
-references the product was built from.
-
-The reported uncertainty column of the product is not the quadrature of the
-channel columns -- it is \fieldnum{1.48} times larger, \fieldnum{0.0806}\,ppb against \fieldnum{0.0543} --
-because it is not a measurement uncertainty. It is the inter-channel gain
-systematic described in Sect.~\ref{sec:4.4}, which scales with the NO$_2$ amount, and for that
-reason the ratios of Sect.~\ref{sec:4} are taken against the fit-propagated sigma rather than
-against this column.
+The zero-air floor is roughly covered by the uncertainty column shipped with the product, at \fieldnum{0.84} to about \fieldnum{1.06}
+times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This does not conflict with Sect.~\ref{sec:4}: the zero-air
+floor uses the same references minutes apart, whereas the structural budget measures what happens when a reference is
+wrong. In \fieldnum{46.1}\,\% of the budget records the structural
+change exceeds that record's own fit-propagated $\sigma$. The product column is \fieldnum{1.48} times the quadrature of the channel
+columns, \fieldnum{0.0806}\,ppb against \fieldnum{0.0543}, because it is the inter-channel gain systematic of Appendix~\ref{app:D}, which scales
+with the NO$_2$ amount; the ratios of Sect.~\ref{sec:4} are therefore taken against the fit-propagated sigma.
 
 \subsection{The reporting convention in operation}
 \label{sec:7.3}
 
-Applied retrospectively to this deployment, in the heated and the ambient-temperature channels alike, the
-quantities Sect.~\ref{sec:6.1} asks for separate what the fit report catches from what it does not
-(Fig.~\ref{fig:6}); the provenance fields among them are specified, not yet implemented.
+Applied retrospectively to this deployment, the quantities of Sect.~\ref{sec:6.1} separate what the fit report catches from
+what it does not, in the heated and ambient-temperature channels alike (Fig.~\ref{fig:6}); the provenance fields among
+them are specified but not yet implemented. In Fig.~\ref{fig:6}f the residual flags an episode when the reduced $\chi^2$ exceeds 1.5, and the distance field when the
+knot interval exceeds 2\,h or a knot departs by more than 50\,\% from its running median. The light level flags it when the
+ambient or zero-air count falls below 30\,\% of its usual value; it was not assessed for the heated channels, and the cold
+configuration, with fixed shift and squeeze, has no bound information in its termination state.
 
-One episode is not caught by the fit report at all: the reference-convention
-displacement of Sect.~\ref{sec:5.4}. From 18 to 30 May the heated channels were retrieved with
-a reflectivity displaced by nine hours; the alkyl nitrate product moved by
-\fieldnum{0.100}\,ppb while the residual and the reported uncertainty changed by two parts
-in a thousand. Across the deployment the reported uncertainty of the ANs
-channel is a near-constant multiple of the residual RMS ($r = \fieldnum{+0.999}$ over
-all \fieldnum{74\,667} records; the ratio varies by \fieldnum{2.8}\,\% between its 5th and 95th
-percentiles), so the two are one witness, not two. Among the proposed fields, the distance and in-range fields flag
-these records (Sect.~\ref{sec:6.1}) and only the provenance fields would name the cause.
+The fit report does not catch the displacement of Sect.~\ref{sec:5.4} at all. Across the deployment the reported
+uncertainty of the ANs channel is a near-constant multiple of the residual RMS ($r = \fieldnum{+0.999}$ over all \fieldnum{74\,667} records;
+the ratio varies by \fieldnum{2.8}\,\% between its 5th and 95th percentiles), so the two are one witness. Among the proposed fields,
+the distance and in-range fields flag these records and only the provenance fields would name the cause.
 
-The ambient-temperature channel supplies the opposite case. Its six excursions
-below $-5$\,ppb (\fieldnum{19} hourly medians between 19 May and 2 June) are all visible in
-the fit itself: the residual RMS is \fieldnum{8} to \fieldnum{600} times its campaign median and the
-reduced chi-square \fieldnum{5.6} to \fieldnum{91}, against \fieldnum{1.2} in ordinary hours. Five of the six
-coincide with an abnormal reference context -- the bracketing reflectivity knots
-are \fieldnum{2.6} to \fieldnum{9.0}\,h apart against 1\,h nominal, or one of them departs from its
-running median by \fieldnum{66} to \fieldnum{300}\,\% against a typical \fieldnum{10}\,\% -- so the
-distance-to-reference and knot-validity fields explain them, but are not needed
-to find them. The sixth, four hours on 2 June, has an ordinary reference
-context and is identified by the residual alone. All six share a proximate
-cause that none of these fields names: the raw light level. In each, the
-ambient or the zero-air spectrum, or both, fell below 30\,\% of its usual count
-at 460\,nm, in four of them to within a few hundred counts of the detector dark
-level; on 2 June only the ambient path lost light (\fieldnum{22}\,\% of the zero-air level),
-which is why the reference stayed ordinary (Fig.~\ref{fig:6}). The misfit threshold ($\chi^2 > 1.5$) is itself
-signal-dependent (Sect.~\ref{sec:4.1}); these excursions exceed it by an order of magnitude or more.
+The ambient-temperature channel supplies the opposite case. Its six excursions below $-5$\,ppb (\fieldnum{19} hourly medians between
+19 May and 2 June) are all visible in the fit itself: the residual RMS is \fieldnum{8} to \fieldnum{600} times its campaign median and the
+reduced chi-square \fieldnum{5.6} to \fieldnum{91}, against \fieldnum{1.2} in ordinary hours. Five of the six coincide with an abnormal reference
+context: the bracketing reflectivity knots are \fieldnum{2.6} to \fieldnum{9.0}\,h apart against 1\,h nominal, or one of them departs from
+its running median by \fieldnum{66} to \fieldnum{300}\,\% against a typical \fieldnum{10}\,\%. The distance and knot-validity fields therefore explain
+them but are not needed to find them. The sixth, four hours on 2 June, has an ordinary reference context and is
+identified by the residual alone. All six share a proximate cause that none of these fields names, the raw light level.
+In each, the ambient or the zero-air spectrum, or both, fell below 30\,\% of its usual count at 460\,nm, in four of them to
+within a few hundred counts of the detector dark level. On 2 June only the ambient path lost light (\fieldnum{22}\,\% of the
+zero-air level), which is why the reference stayed ordinary. The misfit threshold is itself signal-dependent
+(Sect.~\ref{sec:4.1}), and these excursions exceed it by an order of magnitude or more.
 
-In the heated channels no hourly median falls below $-0.5$\,ppb over the
-deployment. The termination-state field flags one episode: for eleven minutes
-on 21 June the 180\,$^{\circ}$C channel returned its shift at the $+5$\,px bound, and the
-residual is raised over the same records (reduced chi-square \fieldnum{4.7} to \fieldnum{5.5}). Here
-the residual signals that something is wrong and the termination state says
-what.
-
-In each of these cases the fit either reports an ordinary residual and
-uncertainty for a displaced amount, or reports an abnormal one without saying
-why. For the displacement and for the bound episode, one of the context quantities -- distance to the
-nearest reference, termination state, or reference provenance -- supplies what is missing. For the cold
-excursions the proximate cause, the raw light level, is not among the proposed fields, and the heated-channel NO$_2$
-scale of Sect.~\ref{sec:3.6} is invisible to all of them (Sect.~\ref{sec:6.5}). The fields narrow the gap between what a fit reports and what is
-known about the record; they do not close it.
+In the heated channels no hourly median falls below $-0.5$\,ppb over the deployment. The termination-state field flags
+one episode: for eleven minutes on 21 June the 180\,$^{\circ}$C channel returned its shift at the $+5$\,px bound. The residual
+is raised over the same records (reduced chi-square \fieldnum{4.7} to \fieldnum{5.5}), so the residual signals a problem and the
+termination state identifies it. For the displacement and the bound episode, one of the context quantities supplies what the fit
+report lacks; the light level and the heated-channel scale are beyond all of them (Sect.~\ref{sec:6.5}).
 
 \begin{figure*}[p]
 \includegraphics[width=\textwidth,height=0.62\textheight,keepaspectratio]{figures/fig06.pdf}
-\caption{What each reporting field flags during the deployment (18 May -- 11 July 2026, KST).
-\textbf{(a)} From top: hourly median NO$_2$ of the three configurations (symmetric-log axis; red: cold hours below
-$-5$\,ppb); hourly median reduced $\chi^2$ with the misfit threshold of 1.5; for the cold channel, the interval between
-the reflectivity knots that bracket each record (triangles: a knot departing by more than 50\,\% from its running
-median); the raw cold-channel light at 460\,nm in ambient and zero-air spectra, with the detector dark level;
-the provenance of the heated-channel reflectivity; and records that terminated at a shift bound.
-Numbered badges mark the episodes of panel f. \textbf{(b)} Episode \textcircled{\scriptsize 1}: the change in $\Sigma$ANs when the heated channels are
-retrieved with the clock-aligned instead of the 9\,h displaced reflectivity (points: records; line: 6\,h median;
-dashed: end of the displaced span). Below, for 18--24 May, the change in concentration expressed in units of its
-reported $\sigma$, against the change in residual RMS and in reported $\sigma$. \textbf{(c)} Episodes \textcircled{\scriptsize 4} and \textcircled{\scriptsize 5}: cold NO$_2$ and
-reduced $\chi^2$ per record, with reflectivity knot times as ticks; the excursions fall in \fieldnum{9.0}\,h and \fieldnum{4.7}\,h gaps.
-\textbf{(d)} Episode \textcircled{\scriptsize 7}: the same for 2 June, where the knots are regular and only the residual flags the records.
-\textbf{(e)} Reported $\sigma$ against residual RMS for every hot ANs record. \textbf{(f)} For each episode, whether the residual
-($\chi^2 > 1.5$), the termination state, the distance to the nearest reference (knot interval $>2$\,h or knot
-departure $>50$\,\%), the reference provenance, or the raw light level (ambient or zero-air count below 30\,\% of its usual value) flags it;
-the light level was not assessed for the heated channels (--); the cold configuration has fixed shift and squeeze, so its
-termination state carries no bound information (n/a).}
+\caption{What each reporting field flags during the deployment (18 May -- 11 July 2026, KST). \textbf{(a)} Hourly median
+NO$_2$, three configurations (red: cold hours below $-5$\,ppb); hourly median reduced $\chi^2$; cold-channel
+reflectivity knot interval (triangles: knot departures $>50$\,\%); cold-channel light at 460\,nm; heated-channel
+reflectivity provenance; records at a shift bound. Badges: episodes of (f).
+\textbf{(b)} Episode \textcircled{\scriptsize 1}: change in $\Sigma$ANs between clock-aligned and 9\,h displaced reflectivity (line: 6\,h
+median); below, for 18--24 May, in units of reported $\sigma$.
+\textbf{(c, d)} Episodes \textcircled{\scriptsize 4}, \textcircled{\scriptsize 5} (\fieldnum{9.0}\,h and \fieldnum{4.7}\,h knot gaps) and \textcircled{\scriptsize 7}: cold NO$_2$ and reduced
+$\chi^2$ per record, knot times as ticks. \textbf{(e)} Reported $\sigma$ against residual RMS, hot ANs. \textbf{(f)} Fields flagging each
+episode.}
 \label{fig:6}
 \end{figure*}
