@@ -330,9 +330,17 @@ class ChannelConfigMixin:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(scenario, f, indent=4)
+                self._remember_fitset(path)
                 QMessageBox.information(self, "Success", f"{len(chans)} channels config saved!\nFile: {os.path.basename(path)}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Save Failed:\n{e}")
+
+    def _remember_fitset(self, path):
+        """마지막 FitSet 경로 — 다음 부팅 스플래시가 활성 채널의 레퍼런스 이름을 여기서 읽는다
+        (gui/splash.fitset_species). 사본을 따로 두지 않는다: 이름의 출처는 FitSet 하나."""
+        qs = getattr(self, "_qsettings", None)
+        if qs is not None:
+            qs.setValue("last_fitset", path)
 
     def load_scenario(self):
         """저장된 fit 설정 JSON 복원. v2(채널들) / v1(단일) 모두 지원."""
@@ -358,11 +366,13 @@ class ChannelConfigMixin:
                         f"Channels {legacy_channels} do not record the ±Neg policy. "
                         f"They were explicitly migrated to the current value ({fallback}); verify before RUN.")
                 self._load_channel_scenario(chans, scenario.get("active", sorted(chans)[0]))
+                self._remember_fitset(path)
                 QMessageBox.information(self, "Auto-Load Success",
                                         f"{len(chans)} channels config restored (channel tabs).\n[Load Data] then RUN!")
             else:   # v1 단일(하위호환)
                 self._apply_config(scenario, load_refs=True)
                 self._channel_configs = {1: self._capture_config()}
+                self._remember_fitset(path)
                 QMessageBox.information(self, "Success", "Config restored (single channel).")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load scenario:\n{e}")

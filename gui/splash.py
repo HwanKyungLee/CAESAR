@@ -1,21 +1,27 @@
-"""Augur 부팅 스플래시 — 새가 램프 스펙트럼을 긋고, 흡수가 새겨지고, 핏이 수렴한다.
+"""Augur·Vigil 부팅 스플래시 — Claude Design 핸드오프(docs/design_brief_2026-09-30/from_design)를
+QPainter 로 옮긴 것. 좌표·색·타이밍은 그 README 가 정본이다.
 
-로그 줄은 **실제로 끝난 부팅 단계만** 찍는다(`step`). 고정 문구를 두지 않는다 —
-사용자·세팅마다 값이 다르고, 틀린 정보를 띄우는 스플래시는 장식보다 나쁘다.
+바꾼 곳(저장소 원칙 때문):
+  · Augur 값 자리는 숫자 대신 중립 표기 `··· ± ···` — ✓ 붙은 숫자는 '확정 결과'로 읽힌다.
+  · Augur 입력 스펙트럼은 사인파 합성이 아니라 실제 흡수 단면(_TAU).
+  · Vigil 감시기는 `ok` 가 아니라 `armed` — 부팅 순간엔 아무것도 확인하지 않았다.
+  · 레퍼런스 이름은 새 상태 파일이 아니라 마지막 FitSet 의 활성 채널에서 읽는다(fitset_species).
 
-애니메이션은 경과 시간으로 그리므로, 메인 스레드가 막힌 동안엔 멈췄다가 이어진다.
-그래서 `main.py` 는 무거운 import 를 스레드로 돌리며 `wait_while` 로 프레임을 펌프하고,
-메인 스레드가 막히는 창 생성은 `wait_settled` 로 애니메이션이 끝난 뒤에 한다.
-클릭하면 닫힌다(QSplashScreen 기본) — 대기 루프도 그 즉시 빠져나온다.
+로그 줄은 실제로 끝난 부팅 단계만 찍는다(`step`). 모션은 경과 시간으로 그리므로 메인 스레드가
+막히면 멈췄다가 이어진다 — 호출부는 무거운 import 를 스레드로 돌리며 `wait_while`, 창 생성은
+`wait_settled` 뒤에 한다. 클릭하면 닫힌다(QSplashScreen 기본).
 """
 from __future__ import annotations
 
+import json
 import math
-import random
+import re
 import time
+from datetime import datetime
 
 from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QPainter, QPainterPath, QPen, QPixmap,
+                         QPolygonF)
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 
 # NO2(Vandaele 2002)·CHOCHO·H2O(벤치마크 hot_PNs 단면) + O4(Thalman & Volkamer 2013)의
@@ -38,21 +44,28 @@ _TAU = (
     0.21, 0.10, 0.01, -0.05, -0.11, -0.16, -0.16, -0.07, 0.12, 0.38, 0.56, 0.66, 0.67, 0.61, 0.51,
     0.36, 0.22, 0.06,
 )
+
 _WL0, _WL1 = 421.75, 478.33
 
-_BG = QColor("#10131a")
-_GOLD = QColor("#d9a441")
-_IVORY = QColor("#f2ecdf")
-_MUTED = QColor("#8d93a0")
-_TRACK = QColor("#232834")
-
-SPEED = 2.0               # 타임라인 배속. 2.0 → 1.3 s 에 끝나 import(≈1.2 s)와 겹친다 — 부팅을 늘리지 않는다
-SETTLE_MS = 2600 / SPEED  # 이 시각 이후 화면이 더 변하지 않는다 → 막혀도 티가 안 난다
+T_END = 1.3                           # s — 모션이 끝나는 시각(디자인 사양)
+SETTLE_MS = T_END * 1000              # 이 뒤로 화면이 변하지 않는다 → 메인 스레드가 막혀도 티가 안 난다
 
 
-def _ease(q: float) -> float:
-    q = min(1.0, max(0.0, q))
-    return 1.0 - (1.0 - q) ** 3
+def _cl(v: float) -> float:
+    return 0.0 if v < 0 else 1.0 if v > 1 else v
+
+
+def _ease(v: float) -> float:
+    return 1.0 - (1.0 - _cl(v)) ** 3
+
+
+def _back(v: float, c: float = 2.2) -> float:
+    v = _cl(v)
+    return 1 + (c + 1) * (v - 1) ** 3 + c * (v - 1) ** 2
+
+
+def _g(x: float, c: float, w: float) -> float:
+    return math.exp(-(((x - c) / w) ** 2))
 
 
 def _tau(u: float) -> float:
@@ -62,25 +75,62 @@ def _tau(u: float) -> float:
     return _TAU[i] * (1 - a) + _TAU[i + 1] * a
 
 
-def _hump(u: float) -> float:
-    return math.exp(-((u - 0.5) / 0.36) ** 2)
+def _family(*names: str) -> str:
+    """설치된 첫 서체. 디자인 서체(Spectral·IBM Plex)가 없으면 시스템 서체로 떨어진다."""
+    have = set(QFontDatabase.families())
+    return next((n for n in names if n in have), names[-1])
+
+
+def _font(family: str, px: float, weight: int = 400, italic: bool = False,
+          spacing_px: float = 0.0) -> QFont:
+    f = QFont(family)
+    f.setPixelSize(max(1, round(px)))
+    f.setWeight(QFont.Weight(weight))
+    f.setItalic(italic)
+    if spacing_px:
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, spacing_px)
+    return f
+
+
+_SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+
+
+def display_species(name: str) -> str:
+    """NO2 → NO₂, H2O → H₂O. 원소 기호 뒤 숫자만 아래첨자로."""
+    return re.sub(r"(?<=[A-Za-z)])(\d+)", lambda m: m.group(1).translate(_SUB), name)
+
+
+def fitset_species(path: str) -> list:
+    """FitSet json 의 **활성 채널** 레퍼런스 이름. 없거나 깨지면 [] — 스플래시는 실패하지 않는다."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            sc = json.load(f)
+        ch = sc["channels"][str(sc.get("active", sorted(sc["channels"])[0]))] if "channels" in sc else sc
+        return [r["name"] for r in ch.get("refs", []) if r.get("name")]
+    except Exception:            # noqa: BLE001 — 부팅 장식이 부팅을 막으면 안 된다
+        return []
 
 
 class BootSplash(QSplashScreen):
-    """Augur·Vigil 공통 틀: 장면(_draw_scene) + 워드마크·약어 + 부팅 로그. 장면만 서브클래스가 그린다."""
-    NAME = ""
+    """Augur·Vigil 공통 틀: 위 장면(_draw_scene) + 워드마크 행 + 진행선 + 부팅 로그 + 푸터.
+
+    로그는 **실제로 끝난 부팅 단계만**(`step`) — 고정 문구를 두지 않는다. 진행선도 시간이
+    아니라 끝난 단계 수로 찬다. 좌표는 560 × 390 절대값(디자인 핸드오프 README)."""
     W, H = 560, 390
+    NAME = ""
+    THEME: dict = {}
 
     def __init__(self, version: str, subtitle: str = "", n_steps: int = 6):
         pm = QPixmap(self.W, self.H)
-        pm.fill(_BG)
+        pm.fill(QColor(self.THEME["bg"]))
         super().__init__(pm, Qt.WindowType.WindowStaysOnTopHint)
         self._version = version
-        self._n_steps = max(1, n_steps)
         self._subtitle = subtitle
-        self._steps: list[tuple[str, str, str]] = []   # (status, label, value)
+        self._n_steps = max(1, n_steps)
+        self._steps: list = []            # (status, label, value)
         self._clock = QElapsedTimer()
         self._clock.start()
+        self._mono = _family("IBM Plex Mono", "Consolas")
 
     # ── 공개 API ────────────────────────────────────────────────────────
     def step(self, label: str, value: str, status: str = "ok") -> None:
@@ -100,190 +150,266 @@ class BootSplash(QSplashScreen):
             time.sleep(0.012)
 
     def wait_settled(self) -> None:
-        """애니메이션이 끝날 때까지(최대 SETTLE_MS) 돌린다. 이미 지났으면 즉시 반환."""
+        """모션이 끝날 때까지(최대 SETTLE_MS) 돌린다. 이미 지났으면 즉시 반환."""
         self.wait_while(lambda: self._clock.elapsed() < SETTLE_MS, max_s=SETTLE_MS / 1000)
 
-    # ── 그리기 ──────────────────────────────────────────────────────────
-    def _draw_acronym(self, p: QPainter, text: str, y: float) -> None:
-        """가운데 정렬로 그리되 대문자로 시작하는 단어의 첫 글자만 금색("of" 같은 소문자 단어는 제외)."""
-        fm = p.fontMetrics()
-        x = (self.W - fm.horizontalAdvance(text)) / 2
-        base = y + fm.ascent()
+    # ── 공통 그리기 ─────────────────────────────────────────────────────
+    def _text(self, p, x, baseline, s, font, color, anchor="left"):
+        p.setFont(font)
+        p.setPen(QColor(color))
+        w = p.fontMetrics().horizontalAdvance(s)
+        if anchor == "right":
+            x -= w
+        p.drawText(QPointF(x, baseline), s)
+        return w
+
+    def _acronym(self, p, x, baseline, text, font, color, strong_font, strong_color):
+        """대문자로 시작하는 단어의 첫 글자만 강조(굵게·강조색). 'of'·'for' 는 그대로."""
         prev = " "
         for ch in text:
-            p.setPen(_GOLD if (prev == " " and ch.isupper()) else _MUTED)
-            p.drawText(QPointF(x, base), ch)
-            x += fm.horizontalAdvance(ch)
+            hit = prev == " " and ch.isupper()
+            x += self._text(p, x, baseline, ch, strong_font if hit else font,
+                            strong_color if hit else color)
             prev = ch
-
+        return x
 
     def drawContents(self, p: QPainter) -> None:            # noqa: N802 (Qt 규약)
-        t = float(self._clock.elapsed()) * SPEED
+        th = self.THEME
+        t = self._clock.elapsed() / 1000.0
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(QRectF(0, 0, self.W, self.H), _BG)
-        M, TOP, RH = 28.0, 170.0, 30.0
-        small = QFont(self.font()); small.setPointSizeF(8)
-        self._draw_scene(p, t, small)
+        p.fillRect(QRectF(0, 0, self.W, self.H), QColor(th["bg"]))
+        self._draw_scene(p, t)
 
-        Wq = _ease((t - 2000) / 600)                               # 워드마크
-        if Wq > 0:
-            p.setOpacity(Wq)
-            big = QFont("Georgia"); big.setPointSizeF(24); big.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 114)
-            p.setFont(big); p.setPen(_IVORY)
-            p.drawText(QRectF(0, TOP + RH + 10, self.W, 40), Qt.AlignmentFlag.AlignCenter, self.NAME)
-            if self._subtitle:
-                p.setFont(small)
-                self._draw_acronym(p, self._subtitle, TOP + RH + 50)
-            p.setOpacity(1.0)
+        p.setOpacity(_ease((t - 0.3) / 0.3))
+        x = 30 + self._text(p, 30, 212, self.NAME, th["word_font"](), th["ink"])
+        x = self._acronym(p, x + 16, 212, self._subtitle, th["sub_font"](), th["sub"],
+                          th["sub_strong_font"](), th["brand"])
+        self._draw_version(p, x)
+        p.setOpacity(1.0)
 
-        # 로그: 실제로 끝난 단계만. 진행바 = 끝난 단계 / 예정 단계 수(n_steps).
-        ly = TOP + RH + 76
-        p.fillRect(QRectF(M, ly, self.W - 2 * M, 2), _TRACK)
-        mono = QFont("Consolas"); mono.setPointSizeF(8.5)
-        p.setFont(mono)
-        shown = self._steps[-6:]
-        for i, (st, lab, val) in enumerate(shown):
-            y = ly + 10 + i * 16
-            p.setPen({"ok": _GOLD, "skip": _MUTED}.get(st, QColor("#e0795b")))
-            p.drawText(QRectF(M, y, 40, 16), Qt.AlignmentFlag.AlignLeft, st)
-            p.setPen(_MUTED)
-            p.drawText(QRectF(M + 40, y, self.W - 2 * M - 40, 16), Qt.AlignmentFlag.AlignLeft,
-                       f"{lab} · {val}")
-        if self._steps:
-            done = min(1.0, len(self._steps) / self._n_steps)
-            p.fillRect(QRectF(M, ly, (self.W - 2 * M) * done, 2), _GOLD)
+        p.fillRect(QRectF(30, 240, 500, 1), QColor(th["track"]))
+        done = min(1.0, len(self._steps) / self._n_steps)
+        p.fillRect(QRectF(30, 240, 500 * done, 1), QColor(th["fill"]))
+        st_font = _font(self._mono, 10.5, 500)
+        msg_font = _font(self._mono, 10.5)
+        for i, (st, lab, val) in enumerate(self._steps[-6:]):
+            y = 252 + 10 + i * 15
+            self._text(p, 30, y, st, st_font, th["log_" + st] if ("log_" + st) in th else th["log_fail"])
+            self._text(p, 76, y, f"{lab} · {val}", msg_font, th["msg"])
+        self._text(p, self.W - 30, self.H - 18, "ARGUS · CAESAR",
+                   _font(self._mono, 9, spacing_px=1.1), th["footer"], anchor="right")
 
-        p.setFont(small); p.setPen(_MUTED)
-        p.drawText(QRectF(0, 10, self.W - 14, 14), Qt.AlignmentFlag.AlignRight,
-                   f"v{self._version}")
+    def _draw_version(self, p, x_after_subtitle):
+        raise NotImplementedError
+
+    def _draw_scene(self, p, t):
+        raise NotImplementedError
 
 
 class AugurSplash(BootSplash):
-    """새가 램프 스펙트럼을 긋고, 네 기체의 흡수가 새겨지고, 핏이 수렴하고, 잔차가 잦아든다."""
-    NAME = "Augur"
+    """밝은 종이 + 잉크. 실제 흡수 스펙트럼 → 육각 프리즘 → 레퍼런스 갈래 → 기체별 행.
 
-    def _draw_scene(self, p: QPainter, t: float, small: QFont) -> None:
-        M, TOP, RH = 28.0, 170.0, 30.0
-        px = lambda u: M + u * (self.W - 2 * M)                   # noqa: E731
-        py = lambda v: TOP - 26 - v * (TOP - 56)                  # noqa: E731
+    값 자리는 **중립 표기**(`··· ± ···`)다 — 이 프로그램에서 ✓ 붙은 숫자는 '확정 결과'라는
+    뜻이라, 스플래시 캡처 한 장이 존재하지 않는 측정값이 되면 안 된다(데이터 무결성 헌장)."""
+    NAME = "AUGUR"
+    COLS = ("#3B63B5", "#5B4FA6", "#7E4A86", "#4C6A7C", "#2F7A8C", "#6A5D9E")
 
-        ub = _ease(t / 1150) * 1.1
-        um = min(ub, 1.0)
-        D = _ease((t - 950) / 650)                                 # 흡수 새김
-        Z = max(0.0, 1 - _ease((t - 2100) / 500)) * D              # 광자 잡음
-        F = _ease((t - 1700) / 600)                                # 핏 선
-        s = lambda u, d=D: _hump(u) * (1 - 0.2 * d * _tau(u))     # noqa: E731
+    def __init__(self, version: str, subtitle: str = "", n_steps: int = 6, species=None):
+        serif = _family("Spectral", "Georgia")
+        self.THEME = dict(
+            bg="#F4F1EA", ink="#1A1D24", sub="#4A4E57", brand="#B4473A", track="#D8D3C7",
+            fill="#1A1D24", msg="#3B3F48", footer="#9A9A96",
+            log_ok="#1A1D24", log_skip="#9A9A96", log_fail="#B4473A",
+            word_font=lambda: _font(serif, 30, 700, spacing_px=3.6),
+            sub_font=lambda: _font(serif, 11.5, 400, italic=True),
+            sub_strong_font=lambda: _font(serif, 11.5, 700))
+        super().__init__(version, subtitle, n_steps)
+        self._serif = serif
+        self._species = [display_species(s) for s in (species or [])]
 
-        def curve(f, upto, n=360):
-            path = QPainterPath()
-            for i in range(n + 1):
-                u = i / n * upto
-                pt = QPointF(px(u), f(u))
-                path.lineTo(pt) if i else path.moveTo(pt)
-            return path
+    def _draw_version(self, p, _x):
+        self._text(p, self.W - 30, 26, f"v{self._version}", _font(self._mono, 10),
+                   "#6B6F78", anchor="right")
 
-        p.setPen(QPen(_GOLD, 1.4))
-        p.drawPath(curve(lambda u: py(s(u) + (random.random() - .5) * .035 * Z * _hump(u)), um))
-        if F > 0:
-            c = QColor(_IVORY); c.setAlphaF(0.85)
-            p.setPen(QPen(c, 1.0))
-            p.drawPath(curve(lambda u: py(s(u, 1.0)), F))
+    def _items(self):
+        sp = self._species
+        if not sp:
+            return [("σ", "#9A9A96", "none")]
+        if len(sp) <= 6:
+            return [(n, self.COLS[i], "gas") for i, n in enumerate(sp)]
+        return ([(n, self.COLS[i], "gas") for i, n in enumerate(sp[:5])]
+                + [(f"+{len(sp) - 5}", "#9A9A96", "more")])
 
-        p.setFont(small)
-        if D > 0:
-            c = QColor(_MUTED); c.setAlphaF(D)
-            p.setPen(c)
-            for wl, lab in ((430, "430"), (450, "450 nm"), (470, "470")):
-                x = px((wl - _WL0) / (_WL1 - _WL0))
-                p.drawLine(QPointF(x, TOP - 22), QPointF(x, TOP - 18))
-                p.drawText(QRectF(x - 40, TOP - 18, 80, 14), Qt.AlignmentFlag.AlignCenter, lab)
-
-        Rq = _ease((t - 1700) / 400)                               # 잔차
-        if Rq > 0:
-            y0 = TOP + RH / 2
-            amp = RH * .45 * (.15 + .85 * max(0.0, 1 - _ease((t - 2000) / 500)))
-            c = QColor(_MUTED); c.setAlphaF(0.9 * Rq)
-            p.setPen(QPen(c, 0.8))
-            p.drawPath(curve(lambda u: y0 + (random.random() - .5) * 2 * amp * _hump(u), 1.0, 240))
-            p.drawText(QRectF(M, TOP, 120, 14), Qt.AlignmentFlag.AlignLeft, "residual")
-
-        if ub < 1.1:                                               # 새
-            bx, by, fl = px(ub), py(s(um)) - 16, math.sin(t / 65)
-            path = QPainterPath(QPointF(bx - 9, by - 2 - 4 * fl))
-            path.quadTo(QPointF(bx - 4, by - 1), QPointF(bx, by + 2))
-            path.quadTo(QPointF(bx + 4, by - 1), QPointF(bx + 9, by - 2 - 4 * fl))
-            c = QColor(_IVORY); c.setAlphaF(max(0.0, min(1.0, 1 - (ub - .95) * 7)))
-            p.setPen(QPen(c, 1.5))
-            p.drawPath(path)
-
-
-def _ecg(u: float) -> float:
-    """심전도 한 박(P·QRS·T) — raw 유입 = 계기의 맥박."""
-    f = (u * 5.0) % 1.0
-    return (0.18 * math.exp(-((f - 0.18) / 0.03) ** 2) - 0.25 * math.exp(-((f - 0.38) / 0.012) ** 2)
-            + 1.0 * math.exp(-((f - 0.42) / 0.012) ** 2) - 0.35 * math.exp(-((f - 0.46) / 0.012) ** 2)
-            + 0.30 * math.exp(-((f - 0.68) / 0.05) ** 2))
+    def _draw_scene(self, p, t):
+        ink = QColor("#1A1D24")
+        paper = QColor("#F4F1EA")
+        # 1) 입력 스펙트럼 — 실제 NO2·CHOCHO·H2O·O4 차등 흡수(_TAU), 0–0.30 s 에 왼쪽부터
+        xs = [28 + 1.5 * k for k in range(67)]
+        n = round(_ease(t / 0.3) * len(xs))
+        if n > 1:
+            path = QPainterPath(QPointF(xs[0], 105 - 9 * _tau(0)))
+            for x in xs[1:n]:
+                path.lineTo(QPointF(x, 105 - 9 * _tau((x - 28) / 100)))
+            pen = QPen(ink, 1.6); pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin); pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen); p.drawPath(path)
+        # 2) 육각 프리즘(엠블럼)
+        p.setOpacity(_ease((t - 0.22) / 0.15))
+        outer = QPolygonF([QPointF(a, b) for a, b in ((152, 79), (174.5, 92), (174.5, 118), (152, 131), (129.5, 118), (129.5, 92))])
+        inner = QPolygonF([QPointF(a, b) for a, b in ((152, 88), (166.7, 96.5), (166.7, 113.5), (152, 122), (137.3, 113.5), (137.3, 96.5))])
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(ink); p.drawPolygon(outer)
+        p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(paper, 1.1)); p.drawPolygon(inner)
+        dash = QPen(paper, 1.1); dash.setDashPattern([2.5 / 1.1, 2 / 1.1]); p.setPen(dash)
+        p.drawLine(QPointF(138, 105), QPointF(138 + 28 * _ease((t - 0.32) / 0.12), 105))
+        p.setOpacity(1.0)
+        # 3) 갈래 + 4) 행 — 레퍼런스 개수만큼
+        items = self._items()
+        K = len(items)
+        gap = 0 if K == 1 else min(34, 126 / (K - 1))
+        y0 = 105 - gap * (K - 1) / 2
+        big = K <= 4
+        frame = int(t * 40)
+        name_f = _font(self._serif, 13 if big else 11.5, 700)
+        val_f = _font(self._mono, 19 if big else 14, 600)
+        val_dim = _font(self._mono, 19 if big else 14, 400)
+        small = _font(self._mono, 10)
+        for i, (name, col, kind) in enumerate(items):
+            yc = y0 + i * gap
+            u = _ease((t - 0.42 - 0.035 * i) / 0.24)
+            if u > 0:
+                pen = QPen(QColor(col), 2.6 if big else 2.0); pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(pen)
+                p.drawLine(QPointF(176, 105), QPointF(176 + 118 * u, 105 + (yc - 105) * u))
+            op = _ease((t - 0.58 - 0.03 * i) / 0.1)
+            if op <= 0:
+                continue
+            p.setOpacity(op)
+            base = yc + (5 if big else 4)
+            self._text(p, 302, base, name, name_f, col)
+            locked = t >= 0.78 + i * min(0.12, 0.34 / max(1, K - 1))
+            vx = 302 + 66 + 10 + 62                               # 값 칸 오른쪽 끝
+            if kind == "more":
+                self._text(p, vx + 10, base, "more", small, "#9A9A96")
+            elif kind == "none":
+                self._text(p, vx, base, "—", val_f if locked else val_dim,
+                           "#1A1D24" if locked else "#9A9A96", anchor="right")
+            else:
+                dots = "···" if locked else "·" * (1 + (frame + i) % 3)
+                self._text(p, vx, base, dots, val_f if locked else val_dim,
+                           "#1A1D24" if locked else "#9A9A96", anchor="right")
+                w = self._text(p, vx + 10, base, "± ···", small, "#6B6F78")
+                if locked:
+                    self._text(p, vx + 10 + w + 10, base, "✓", small, "#B4473A")
+            p.setOpacity(1.0)
 
 
 class VigilSplash(BootSplash):
-    """환자 모니터: 감시기 다섯(유입·HK·R·램프·농도)의 선을 커서가 쓸고 지나가며 긋고,
-    끝의 상태 점이 차례로 켜진다. 선 모양은 각 감시기가 실제로 보는 신호의 성격을 흉내낸다."""
-    NAME = "Vigil"
-    _LANES = ("ingest", "HK", "R", "lamp", "conc")
+    """어두운 밤 + 청색 등불. 맥박선 엠블럼 → 등불 점등 → 실시간 트레이스 → 감시기 다섯.
 
-    def __init__(self, *a, **kw):
-        super().__init__(*a, **kw)
-        rnd = random.Random(7)                      # 고정 시드 — 프레임마다 선이 떨리지 않게
-        walk, acc = [], 0.0
-        for _ in range(241):
-            acc = 0.85 * acc + rnd.gauss(0, 0.35)
-            walk.append(acc)
-        self._noise = [rnd.gauss(0, 1) for _ in range(241)]
-        self._walk = walk
+    감시기는 부팅 시점에 한 번도 돌지 않았으므로 `ok` 가 아니라 **armed**(대기)로 켠다 —
+    스플래시가 확인하지 않은 것을 괜찮다고 말하면 안 된다. 브랜드 청색은 경보색(초록·노랑·
+    주황·빨강)과 겹치지 않는다."""
+    NAME = "VIGIL"
+    EMB = ((30, 100), (70, 100), (78, 112), (86, 88), (96, 60), (106, 126), (114, 100), (150, 100))
+    MON = (("ingest", "#7FC3F0"), ("HK", "#8FA8F5"), ("R", "#A99BF0"), ("lamp", "#6FD0DA"), ("conc", "#B7C7DA"))
 
-    def _signal(self, k: int, u: float) -> float:
-        i = min(240, int(u * 240))
-        if k == 0:
-            return _ecg(u)
-        if k == 1:
-            return 0.45 * math.sin(2 * math.pi * (u * 1.3 + 0.1)) + 0.04 * self._noise[i]
-        if k == 2:
-            return -0.15 * u + 0.05 * self._noise[i]
-        if k == 3:
-            return 0.55 if ((u * 4.0) % 1.0) < 0.12 else -0.05 + 0.03 * self._noise[i]
-        return 0.30 * self._walk[i]
+    def __init__(self, version: str, subtitle: str = "", n_steps: int = 6):
+        sans = _family("IBM Plex Sans", "Segoe UI")
+        self.THEME = dict(
+            bg="#0B0F1A", ink="#DCE1EA", sub="#8A93A3", brand="#7FC3F0", track="#1C2333",
+            fill="#6E7686", msg="#B4BAC6", footer="#4A5264",
+            log_ok="#7FC3F0", log_skip="#6E7686", log_fail="#E5484D",
+            word_font=lambda: _font(sans, 28, 600, spacing_px=6.7),
+            sub_font=lambda: _font(sans, 11),
+            sub_strong_font=lambda: _font(sans, 11, 600))
+        super().__init__(version, subtitle, n_steps)
+        L = [0.0]
+        for (ax, ay), (bx, by) in zip(self.EMB, self.EMB[1:]):
+            L.append(L[-1] + math.hypot(bx - ax, by - ay))
+        self._L = L
 
-    def _draw_scene(self, p: QPainter, t: float, small: QFont) -> None:
-        M, TOP = 28.0, 170.0
-        x0, x1 = M + 52, self.W - M - 18
-        cur = _ease(t / 1500)                                   # 스윕 커서
-        p.setFont(small)
-        for k, name in enumerate(self._LANES):
-            yc = 40 + k * 26
-            p.setPen(_MUTED)
-            p.drawText(QRectF(M, yc - 7, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
-            track = QColor(_TRACK)
-            p.setPen(QPen(track, 0.6))
-            p.drawLine(QPointF(x0, yc), QPointF(x1, yc))
-            if cur > 0:
-                path = QPainterPath()
-                n = max(2, int(300 * cur))
-                for i in range(n + 1):
-                    u = i / 300
-                    pt = QPointF(x0 + u * (x1 - x0), yc - 10 * self._signal(k, u))
-                    path.lineTo(pt) if i else path.moveTo(pt)
-                p.setPen(QPen(_GOLD, 1.2))
-                p.drawPath(path)
-            on = _ease((t - 1450 - 110 * k) / 180)              # 점검 통과 → 점 점등
-            dot = QColor(_GOLD if on > 0 else _TRACK)
-            if on > 0:
-                dot.setAlphaF(on)
-            p.setPen(Qt.PenStyle.NoPen); p.setBrush(dot)
-            p.drawEllipse(QPointF(x1 + 10, yc), 3.2, 3.2)
+    def _draw_version(self, p, x):
+        self._text(p, x + 16, 212, f"v{self._version}", _font(self._mono, 10), "#6E7686")
+
+    def _draw_scene(self, p, t):
+        ink = QColor("#DCE1EA")
+        lamp = QColor("#7FC3F0")
+        p.setPen(QPen(QColor("#161D2B"), 1)); p.drawLine(QPointF(30, 100), QPointF(530, 100))
+        # 실시간 트레이스(엠블럼 뒤)
+        phase = max(0.0, t - 0.3) * 90
+        reach = 150 + 380 * _ease((t - 0.3) / 0.35)
+        hx, hy = 150.0, 100.0
+        if reach > 151:
+            path = QPainterPath()
+            x = 150.0
+            while x <= reach:
+                u = x + phase
+                m = u % 64
+                y = 100 + 0.6 * math.sin(u / 5.3) - 14 * _g(m, 32, 1.4) + 4 * _g(m, 36, 1.6) - 2 * _g(m, 22, 3)
+                path.lineTo(QPointF(x, y)) if x > 150 else path.moveTo(QPointF(x, y))
+                hx, hy = x, y
+                x += 1.5
+            c = QColor(ink); c.setAlphaF(0.75)
+            pen = QPen(c, 1.4); pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin); p.setPen(pen)
+            p.drawPath(path)
+        # 맥박선 엠블럼 — 0–0.32 s, 경로 길이 비율로
+        L, tot = self._L, self._L[-1]
+        ln = _cl(t / 0.32) * tot
+        path = QPainterPath(QPointF(*self.EMB[0]))
+        for i in range(1, len(self.EMB)):
+            if L[i] <= ln:
+                path.lineTo(QPointF(*self.EMB[i]))
+            else:
+                (ax, ay), (bx, by) = self.EMB[i - 1], self.EMB[i]
+                f = (ln - L[i - 1]) / (L[i] - L[i - 1])
+                if f > 0:
+                    path.lineTo(QPointF(ax + (bx - ax) * f, ay + (by - ay) * f))
+                break
+        pen = QPen(ink, 3.4); pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin); pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen); p.drawPath(path)
+        # 등불 — R파 꼭대기에 닿는 순간 켜진다
+        sL = t - 0.32 * (L[4] / tot)
+        if sL >= 0:
+            k = _back(sL / 0.25)
+            ring = QColor(lamp); ring.setAlphaF(0.8 * (1 - _cl(sL / 0.45)))
+            p.setPen(QPen(ring, 0.8)); p.setBrush(Qt.BrushStyle.NoBrush)
+            r = 9 + 16 * _ease(sL / 0.45); p.drawEllipse(QPointF(96, 44), r, r)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(lamp); p.drawEllipse(QPointF(96, 44), 9 * k, 9 * k)
+            p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(QColor("#0B0F1A"), 1.2))
+            p.drawEllipse(QPointF(96, 44), 5 * k, 5 * k)
+        if t > 0.3:
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(lamp); p.drawEllipse(QPointF(hx, hy), 3, 3)
             p.setBrush(Qt.BrushStyle.NoBrush)
-        if 0 < cur < 1:
-            c = QColor(_IVORY); c.setAlphaF(0.5)
-            p.setPen(QPen(c, 1.0))
-            xc = x0 + cur * (x1 - x0)
-            p.drawLine(QPointF(xc, 26), QPointF(xc, 40 + 4 * 26 + 14))
-
+        # 감시기 다섯 — armed(대기). 균등 배치(space-between)
+        name_f = _font(self._mono, 10.5)
+        lab_f = _font(self._mono, 10.5, 600)
+        widths = []
+        for name, _c in self.MON:
+            p.setFont(name_f); wn = p.fontMetrics().horizontalAdvance(name)
+            p.setFont(lab_f); wl = p.fontMetrics().horizontalAdvance("armed")
+            widths.append(9 + 8 + wn + 4 + wl)
+        gap = (500 - sum(widths)) / (len(widths) - 1)
+        x = 30.0
+        for i, ((name, col), w) in enumerate(zip(self.MON, widths)):
+            s = t - (0.62 + 0.07 * i)
+            c = QColor(col); c.setAlphaF(1.0 if s >= 0 else 0.18)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(c); p.drawEllipse(QPointF(x + 4.5, 141), 4.5, 4.5)
+            if s >= 0:
+                pop = _cl(s / 0.35)
+                rc = QColor(col); rc.setAlphaF(0.9 * (1 - pop))
+                rr = (9 + 14 * _ease(pop)) / 2
+                p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(rc, 1)); p.drawEllipse(QPointF(x + 4.5, 141), rr, rr)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            nx = x + 17 + self._text(p, x + 17, 145, name, name_f, "#B4BAC6")
+            if s >= 0:
+                self._text(p, nx + 4, 145, "armed", lab_f, "#6E7686")
+            x += w + gap
+        # LIVE 시계 — 실제 PC 시각. 모션 중 4 Hz 깜빡임, 정지 후 켜짐
+        p.setOpacity(_ease((t - 0.35) / 0.2))
+        clock = "LIVE " + datetime.now().strftime("%H:%M:%S")
+        cf = _font(self._mono, 10)
+        p.setFont(cf); cw = p.fontMetrics().horizontalAdvance(clock)
+        dot = QColor(lamp); dot.setAlphaF(1.0 if t >= T_END or int(t * 4) % 2 == 0 else 0.4)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(dot)
+        p.drawEllipse(QPointF(self.W - 30 - cw - 10, 22), 3, 3); p.setBrush(Qt.BrushStyle.NoBrush)
+        self._text(p, self.W - 30, 26, clock, cf, "#8A93A3", anchor="right")
+        p.setOpacity(1.0)
