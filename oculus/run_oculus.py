@@ -26,6 +26,7 @@ from oculus.ingest_cursor import IngestCursor
 from oculus.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
 from oculus.monitors.hk_monitor import evaluate_hk
 from oculus.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
+from oculus.monitors.lamp_monitor import LampMonitor
 from oculus.monitors.r_monitor import RMonitor
 from oculus.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from oculus.state_log import StateLog
@@ -77,6 +78,10 @@ class OculusApp:
         self._r_by_channel: dict = {}      # {(profile_id, channel_id): (status, msg, metrics)}
         self._r_status: dict = {}          # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._r_last_status: dict = {}     # {path: status} — 로그 중복 방지용
+        self._lamp_monitors: dict = {}     # {(profile_id, channel_id): LampMonitor}
+        self._lamp_by_channel: dict = {}
+        self._lamp_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
+        self._lamp_last_status: dict = {}
         self._conc_monitors: dict = {}     # {(profile_id, channel_id): ConcMonitor}
         self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
         self._conc_by_channel: dict = {}   # {(profile_id, channel_id): (status, msg, metrics)}
@@ -128,21 +133,41 @@ class OculusApp:
                 self._r_trend.setdefault(key, deque(maxlen=TREND_MAXLEN)).append(
                     (now, metrics.get("R"), metrics.get("baseline")))
                 touched = True
-        if not touched:
-            return
-        entries = [self._r_by_channel[(prof.profile_id, ch.id)]
+        if touched:
+            self._combine_channels(prof, ev, self._r_by_channel, self._r_status,
+                                   self._r_last_status, kind="r", label="R")
+
+    def _combine_channels(self, prof, ev, by_channel, status, last_status, kind, label) -> None:
+        """채널별 최신 판정 → 그 파일의 worst 로 합치고, 상태가 바뀔 때만 로그."""
+        entries = [by_channel[(prof.profile_id, ch.id)]
                   for ch in prof.signal_channels()
-                  if (prof.profile_id, ch.id) in self._r_by_channel]
+                  if (prof.profile_id, ch.id) in by_channel]
         combined_status = SKIP
         for s, _m, _mt in entries:
             combined_status = worse(combined_status, s)
         combined_msg = "; ".join(m for _s, m, _mt in entries)
-        self._r_status[ev.file] = (combined_status, combined_msg, {})
-        if self._r_last_status.get(ev.file) != combined_status:
-            self.state_log.append(combined_status, combined_msg, file=ev.file, kind="r")
+        status[ev.file] = (combined_status, combined_msg, {})
+        if last_status.get(ev.file) != combined_status:
+            self.state_log.append(combined_status, combined_msg, file=ev.file, kind=kind)
             if self.dashboard is not None:
-                self.dashboard.log_line(f"[{os.path.basename(ev.file)}] R {combined_status}: {combined_msg}")
-        self._r_last_status[ev.file] = combined_status
+                self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {label} {combined_status}: {combined_msg}")
+        last_status[ev.file] = combined_status
+
+    def _observe_lamp(self, prof, ev) -> None:
+        """모든 signal 채널의 ZA 블록 세기(램프 헬스). 설정 없이 기본 문턱으로 돈다."""
+        # ponytail: 문턱은 모듈 상수(2026 여수 실측). 캠페인별로 달라지면 프로파일 키로 뺄 것.
+        touched = False
+        for ch in prof.signal_channels():
+            key = (prof.profile_id, ch.id)
+            lm = self._lamp_monitors.setdefault(key, LampMonitor())
+            result = lm.observe(ev.role, ch.slice(ev.row))
+            if result is not None:
+                status, msg, metrics = result
+                self._lamp_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)
+                touched = True
+        if touched:
+            self._combine_channels(prof, ev, self._lamp_by_channel, self._lamp_status,
+                                   self._lamp_last_status, kind="lamp", label="lamp")
 
     def _observe_concentration(self, prof, ev, now) -> None:
         """이 행의 프로파일에 concentration 설정이 있는 signal 채널마다 ConcMonitor.observe.
@@ -221,6 +246,7 @@ class OculusApp:
                                               "warn": field.warn, "alarm": field.alarm}
                 self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
             self._observe_reflectance(prof, ev, now)
+            self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
         self._last_arrival = latest_arrival(events, self._last_arrival)
 
@@ -234,6 +260,8 @@ class OculusApp:
                     for p, (s, m, mt) in self._r_status.items()]
         results += [(f"conc:{os.path.basename(p)}", s, m, mt)
                     for p, (s, m, mt) in self._conc_status.items()]
+        results += [(f"lamp:{os.path.basename(p)}", s, m, mt)
+                    for p, (s, m, mt) in self._lamp_status.items()]
         overall_status, overall_msg = aggregate(results)
 
         if overall_status != self._last_status:
