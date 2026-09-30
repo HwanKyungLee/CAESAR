@@ -23,7 +23,6 @@ if _ROOT not in sys.path:
 
 from vigil.alert_engine import P1, SKIP, aggregate, worse
 from vigil.ingest_cursor import IngestCursor
-from vigil.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
 from vigil.monitors.hk_monitor import evaluate_hk
 from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
 from vigil.monitors.lamp_monitor import LampMonitor
@@ -104,6 +103,7 @@ class VigilApp:
         if scen is None:
             scen = json.load(open(cfg.fitset_path, encoding="utf-8"))
             self._fitset_cache[cfg.fitset_path] = scen
+        from vigil.monitors.conc_monitor import pick_fitset_channel
         return pick_fitset_channel(scen, cfg.wl_dir)
 
     def _observe_reflectance(self, prof, ev, now) -> None:
@@ -179,6 +179,9 @@ class VigilApp:
             key = (prof.profile_id, ch.id)
             cm = self._conc_monitors.get(key)
             if cm is None:
+                # 여기서 처음 임포트한다 — scipy·피팅 엔진을 끌어와 ~1 s. 모듈 최상단에 두면
+                # 스플래시가 뜨기도 전에 그만큼 멈춘다(main 이 스레드로 미리 데운다).
+                from vigil.monitors.conc_monitor import ConcMonitor
                 try:
                     fit_ch = self._get_fitset_channel(ch.concentration)
                     cm = ConcMonitor(fit_ch, ch.concentration)
@@ -326,19 +329,49 @@ def main(argv=None) -> int:
 
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
-    from vigil.dashboard.dashboard_window import DashboardWindow
 
     app = QApplication(sys.argv[:1])
+
+    # 스플래시 먼저 — 로그 줄은 실제로 끝난 부팅 단계만(gui/splash.py).
+    from gui.splash import VigilSplash
+    from vigil import __version__
+    splash = VigilSplash(__version__, "Vital-signs Inspector for Gas Instruments, Live", n_steps=6)
+    splash.show()
+    splash.pump()
+    splash.step("engine", f"Vigil v{__version__}")
+
+    # 농도 감시기(scipy·피팅 엔진 ≈ 1 s)는 Qt 를 안 건드리므로 스레드로 미리 데운다.
+    import importlib, threading
+    _pre = threading.Thread(target=lambda: importlib.import_module("vigil.monitors.conc_monitor"),
+                            daemon=True)
+    _pre.start()
+
+    splash.step("watch", args.dir)
+    _cursors = os.path.join(args.state_dir, "cursors.json")
+    _resume = os.path.isfile(_cursors)
+    splash.step("state", f"{os.path.basename(args.state_dir)} · "
+                         f"{'resume' if _resume else 'fresh (raw 를 처음부터 읽는다)'}",
+                "ok" if _resume else "skip")
+    from core.provenance import code_version
+    _ver = code_version()
+    splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
+
+    from vigil.dashboard.dashboard_window import DashboardWindow
     win = DashboardWindow(title=f"Vigil — {args.dir}")
     core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win)
+    splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
     win.log_line(f"watching {args.dir} (poll {args.poll_sec:.1f}s, "
                 f"{len(core.profiles)} profile(s) loaded)")
+    splash.wait_while(_pre.is_alive)
+    splash.wait_settled()
+    splash.step("dashboard", "ready")
 
     timer = QTimer()
     timer.timeout.connect(core.tick)
     timer.start(int(args.poll_sec * 1000))
 
     win.show()
+    splash.finish(win)
     return app.exec()
 
 

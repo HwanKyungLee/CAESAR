@@ -66,7 +66,9 @@ def _hump(u: float) -> float:
     return math.exp(-((u - 0.5) / 0.36) ** 2)
 
 
-class AugurSplash(QSplashScreen):
+class BootSplash(QSplashScreen):
+    """Augur·Vigil 공통 틀: 장면(_draw_scene) + 워드마크·약어 + 부팅 로그. 장면만 서브클래스가 그린다."""
+    NAME = ""
     W, H = 560, 390
 
     def __init__(self, version: str, subtitle: str = "", n_steps: int = 6):
@@ -119,7 +121,48 @@ class AugurSplash(QSplashScreen):
         t = float(self._clock.elapsed()) * SPEED
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(QRectF(0, 0, self.W, self.H), _BG)
+        M, TOP, RH = 28.0, 170.0, 30.0
+        small = QFont(self.font()); small.setPointSizeF(8)
+        self._draw_scene(p, t, small)
 
+        Wq = _ease((t - 2000) / 600)                               # 워드마크
+        if Wq > 0:
+            p.setOpacity(Wq)
+            big = QFont("Georgia"); big.setPointSizeF(24); big.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 114)
+            p.setFont(big); p.setPen(_IVORY)
+            p.drawText(QRectF(0, TOP + RH + 10, self.W, 40), Qt.AlignmentFlag.AlignCenter, self.NAME)
+            if self._subtitle:
+                p.setFont(small)
+                self._draw_acronym(p, self._subtitle, TOP + RH + 50)
+            p.setOpacity(1.0)
+
+        # 로그: 실제로 끝난 단계만. 진행바 = 끝난 단계 / 예정 단계 수(n_steps).
+        ly = TOP + RH + 76
+        p.fillRect(QRectF(M, ly, self.W - 2 * M, 2), _TRACK)
+        mono = QFont("Consolas"); mono.setPointSizeF(8.5)
+        p.setFont(mono)
+        shown = self._steps[-6:]
+        for i, (st, lab, val) in enumerate(shown):
+            y = ly + 10 + i * 16
+            p.setPen({"ok": _GOLD, "skip": _MUTED}.get(st, QColor("#e0795b")))
+            p.drawText(QRectF(M, y, 40, 16), Qt.AlignmentFlag.AlignLeft, st)
+            p.setPen(_MUTED)
+            p.drawText(QRectF(M + 40, y, self.W - 2 * M - 40, 16), Qt.AlignmentFlag.AlignLeft,
+                       f"{lab} · {val}")
+        if self._steps:
+            done = min(1.0, len(self._steps) / self._n_steps)
+            p.fillRect(QRectF(M, ly, (self.W - 2 * M) * done, 2), _GOLD)
+
+        p.setFont(small); p.setPen(_MUTED)
+        p.drawText(QRectF(0, 10, self.W - 14, 14), Qt.AlignmentFlag.AlignRight,
+                   f"v{self._version}")
+
+
+class AugurSplash(BootSplash):
+    """새가 램프 스펙트럼을 긋고, 네 기체의 흡수가 새겨지고, 핏이 수렴하고, 잔차가 잦아든다."""
+    NAME = "Augur"
+
+    def _draw_scene(self, p: QPainter, t: float, small: QFont) -> None:
         M, TOP, RH = 28.0, 170.0, 30.0
         px = lambda u: M + u * (self.W - 2 * M)                   # noqa: E731
         py = lambda v: TOP - 26 - v * (TOP - 56)                  # noqa: E731
@@ -146,7 +189,6 @@ class AugurSplash(QSplashScreen):
             p.setPen(QPen(c, 1.0))
             p.drawPath(curve(lambda u: py(s(u, 1.0)), F))
 
-        small = QFont(self.font()); small.setPointSizeF(8)
         p.setFont(small)
         if D > 0:
             c = QColor(_MUTED); c.setAlphaF(D)
@@ -174,34 +216,74 @@ class AugurSplash(QSplashScreen):
             p.setPen(QPen(c, 1.5))
             p.drawPath(path)
 
-        Wq = _ease((t - 2000) / 600)                               # 워드마크
-        if Wq > 0:
-            p.setOpacity(Wq)
-            big = QFont("Georgia"); big.setPointSizeF(24); big.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 114)
-            p.setFont(big); p.setPen(_IVORY)
-            p.drawText(QRectF(0, TOP + RH + 10, self.W, 40), Qt.AlignmentFlag.AlignCenter, "Augur")
-            if self._subtitle:
-                p.setFont(small)
-                self._draw_acronym(p, self._subtitle, TOP + RH + 50)
-            p.setOpacity(1.0)
 
-        # 로그: 실제로 끝난 단계만. 진행바 = 끝난 단계 / 예정 단계 수(n_steps).
-        ly = TOP + RH + 76
-        p.fillRect(QRectF(M, ly, self.W - 2 * M, 2), _TRACK)
-        mono = QFont("Consolas"); mono.setPointSizeF(8.5)
-        p.setFont(mono)
-        shown = self._steps[-6:]
-        for i, (st, lab, val) in enumerate(shown):
-            y = ly + 10 + i * 16
-            p.setPen({"ok": _GOLD, "skip": _MUTED}.get(st, QColor("#e0795b")))
-            p.drawText(QRectF(M, y, 40, 16), Qt.AlignmentFlag.AlignLeft, st)
+def _ecg(u: float) -> float:
+    """심전도 한 박(P·QRS·T) — raw 유입 = 계기의 맥박."""
+    f = (u * 5.0) % 1.0
+    return (0.18 * math.exp(-((f - 0.18) / 0.03) ** 2) - 0.25 * math.exp(-((f - 0.38) / 0.012) ** 2)
+            + 1.0 * math.exp(-((f - 0.42) / 0.012) ** 2) - 0.35 * math.exp(-((f - 0.46) / 0.012) ** 2)
+            + 0.30 * math.exp(-((f - 0.68) / 0.05) ** 2))
+
+
+class VigilSplash(BootSplash):
+    """환자 모니터: 감시기 다섯(유입·HK·R·램프·농도)의 선을 커서가 쓸고 지나가며 긋고,
+    끝의 상태 점이 차례로 켜진다. 선 모양은 각 감시기가 실제로 보는 신호의 성격을 흉내낸다."""
+    NAME = "Vigil"
+    _LANES = ("ingest", "HK", "R", "lamp", "conc")
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        rnd = random.Random(7)                      # 고정 시드 — 프레임마다 선이 떨리지 않게
+        walk, acc = [], 0.0
+        for _ in range(241):
+            acc = 0.85 * acc + rnd.gauss(0, 0.35)
+            walk.append(acc)
+        self._noise = [rnd.gauss(0, 1) for _ in range(241)]
+        self._walk = walk
+
+    def _signal(self, k: int, u: float) -> float:
+        i = min(240, int(u * 240))
+        if k == 0:
+            return _ecg(u)
+        if k == 1:
+            return 0.45 * math.sin(2 * math.pi * (u * 1.3 + 0.1)) + 0.04 * self._noise[i]
+        if k == 2:
+            return -0.15 * u + 0.05 * self._noise[i]
+        if k == 3:
+            return 0.55 if ((u * 4.0) % 1.0) < 0.12 else -0.05 + 0.03 * self._noise[i]
+        return 0.30 * self._walk[i]
+
+    def _draw_scene(self, p: QPainter, t: float, small: QFont) -> None:
+        M, TOP = 28.0, 170.0
+        x0, x1 = M + 52, self.W - M - 18
+        cur = _ease(t / 1500)                                   # 스윕 커서
+        p.setFont(small)
+        for k, name in enumerate(self._LANES):
+            yc = 40 + k * 26
             p.setPen(_MUTED)
-            p.drawText(QRectF(M + 40, y, self.W - 2 * M - 40, 16), Qt.AlignmentFlag.AlignLeft,
-                       f"{lab} · {val}")
-        if self._steps:
-            done = min(1.0, len(self._steps) / self._n_steps)
-            p.fillRect(QRectF(M, ly, (self.W - 2 * M) * done, 2), _GOLD)
+            p.drawText(QRectF(M, yc - 7, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
+            track = QColor(_TRACK)
+            p.setPen(QPen(track, 0.6))
+            p.drawLine(QPointF(x0, yc), QPointF(x1, yc))
+            if cur > 0:
+                path = QPainterPath()
+                n = max(2, int(300 * cur))
+                for i in range(n + 1):
+                    u = i / 300
+                    pt = QPointF(x0 + u * (x1 - x0), yc - 10 * self._signal(k, u))
+                    path.lineTo(pt) if i else path.moveTo(pt)
+                p.setPen(QPen(_GOLD, 1.2))
+                p.drawPath(path)
+            on = _ease((t - 1450 - 110 * k) / 180)              # 점검 통과 → 점 점등
+            dot = QColor(_GOLD if on > 0 else _TRACK)
+            if on > 0:
+                dot.setAlphaF(on)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(dot)
+            p.drawEllipse(QPointF(x1 + 10, yc), 3.2, 3.2)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+        if 0 < cur < 1:
+            c = QColor(_IVORY); c.setAlphaF(0.5)
+            p.setPen(QPen(c, 1.0))
+            xc = x0 + cur * (x1 - x0)
+            p.drawLine(QPointF(xc, 26), QPointF(xc, 40 + 4 * 26 + 14))
 
-        p.setFont(small); p.setPen(_MUTED)
-        p.drawText(QRectF(0, 10, self.W - 14, 14), Qt.AlignmentFlag.AlignRight,
-                   f"v{self._version}")
