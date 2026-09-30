@@ -33,7 +33,7 @@ _BADGE_ICON = {OK: "🟢", P2: "🟡", P1: "🟠", P0: "🔴", SKIP: "⏳"}
 _CELL_COLOR = {OK: None, P2: QColor("#B36B00"), P1: QColor("#E65100"),
               P0: QColor("red"), SKIP: None}
 
-_COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R", "Conc"]
+_COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R", "Lamp", "Conc"]
 
 # 채널/가스/HK필드 커브에 순환 배정하는 정성 팔레트(gui/monitor_widget.py의 3채널 팔레트보다
 # 종류가 많아야 함 — 레퍼런스 가스 수가 FitSet마다 다르므로).
@@ -86,7 +86,7 @@ class DashboardWindow(QMainWindow):
         self.table = QTableWidget(0, len(_COLUMNS))
         self.table.setHorizontalHeaderLabels(_COLUMNS)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for col in (3, 4, 5):
+        for col in (3, 4, 5, 6):
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -137,12 +137,14 @@ class DashboardWindow(QMainWindow):
         color = _CELL_COLOR.get(status)
         if color is not None:
             item.setForeground(color)
+        if msg:
+            item.setToolTip(msg)          # 셀이 좁아 잘린 메시지를 마우스로 다 볼 수 있게
         return item
 
     def update_files(self, rows: dict) -> None:
         """rows: {file_path: {"last_row":datetime|None, "lag":float|None,
         "hk_status":str|None, "hk_msg":str|None, "r_status":str|None, "r_msg":str|None,
-        "conc_status":str|None, "conc_msg":str|None}}.
+        "lamp_status":str|None, "lamp_msg":str|None, "conc_status":str|None, "conc_msg":str|None}}.
         어떤 판정이든 아직 없으면 status=None으로 두면 '⏳ —'로 표시된다."""
         self.table.setRowCount(len(rows))
         for i, (path, info) in enumerate(sorted(rows.items())):
@@ -158,7 +160,8 @@ class DashboardWindow(QMainWindow):
             self.table.setItem(i, 2, lag_item)
             self.table.setItem(i, 3, self._status_item(info.get("hk_status"), info.get("hk_msg")))
             self.table.setItem(i, 4, self._status_item(info.get("r_status"), info.get("r_msg")))
-            self.table.setItem(i, 5, self._status_item(info.get("conc_status"), info.get("conc_msg")))
+            self.table.setItem(i, 5, self._status_item(info.get("lamp_status"), info.get("lamp_msg")))
+            self.table.setItem(i, 6, self._status_item(info.get("conc_status"), info.get("conc_msg")))
 
     def update_conc_trend(self, trend: dict, meta: dict) -> None:
         """trend: {(profile_id,ch_id): deque[(datetime, {gas: ppb})]}. FitSet에 걸린 레퍼런스

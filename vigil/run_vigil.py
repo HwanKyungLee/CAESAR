@@ -276,11 +276,13 @@ class VigilApp:
             for p, t in self._files_seen.items():
                 hk = self._hk_status.get(p)
                 r = self._r_status.get(p)
+                lamp = self._lamp_status.get(p)
                 conc = self._conc_status.get(p)
                 rows[p] = {
                     "last_row": t, "lag": (now - t).total_seconds(),
                     "hk_status": hk[0] if hk else None, "hk_msg": hk[1] if hk else None,
                     "r_status": r[0] if r else None, "r_msg": r[1] if r else None,
+                    "lamp_status": lamp[0] if lamp else None, "lamp_msg": lamp[1] if lamp else None,
                     "conc_status": conc[0] if conc else None, "conc_msg": conc[1] if conc else None,
                 }
             self.dashboard.update_files(rows)
