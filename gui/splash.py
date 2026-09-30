@@ -2,7 +2,8 @@
 QPainter 로 옮긴 것. 좌표·색·타이밍은 그 README 가 정본이다.
 
 바꾼 곳(저장소 원칙 때문):
-  · Augur 값 자리는 숫자 대신 중립 표기 `··· ± ···` — ✓ 붙은 숫자는 '확정 결과'로 읽힌다.
+  · Augur 값 자리의 숫자는 **돌기만 하다가 확정 순간 ✓ 로 바뀌며 사라진다** — 멈춘 숫자에
+    ✓ 가 붙으면 '확정 결과'로 읽힌다. 도는 숫자는 누가 봐도 계산 중이고, 남는 화면엔 가짜 값이 없다.
   · Augur 입력 스펙트럼은 사인파 합성이 아니라 실제 흡수 단면(_TAU).
   · Vigil 감시기는 `ok` 가 아니라 `armed` — 부팅 순간엔 아무것도 확인하지 않았다.
   · 레퍼런스 이름은 새 상태 파일이 아니라 마지막 FitSet 의 활성 채널에서 읽는다(fitset_species).
@@ -20,7 +21,7 @@ import time
 from datetime import datetime
 
 from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt
-from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QPainter, QPainterPath, QPen, QPixmap,
+from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QPainter, QPainterPath, QPen, QPixmap,
                          QPolygonF)
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 
@@ -109,6 +110,24 @@ def fitset_species(path: str) -> list:
         return [r["name"] for r in ch.get("refs", []) if r.get("name")]
     except Exception:            # noqa: BLE001 — 부팅 장식이 부팅을 막으면 안 된다
         return []
+
+
+def set_app_icon(app, name: str) -> None:
+    """창·작업표시줄 아이콘 = icons/<name>.ico (tools/make_icons.py 산출물). 파일이 없으면 그냥 둔다.
+
+    Windows 는 pythonw 프로세스의 작업표시줄 아이콘을 파이썬 것으로 묶으므로, 앱마다
+    AppUserModelID 를 따로 줘야 창 아이콘이 작업표시줄에도 뜬다."""
+    import os
+    import sys
+    ico = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons", f"{name}.ico")
+    if os.path.isfile(ico):
+        app.setWindowIcon(QIcon(ico))
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"ARGUS.CAESAR.{name}")
+        except Exception:        # noqa: BLE001 — 아이콘 때문에 앱이 안 뜨면 안 된다
+            pass
 
 
 class BootSplash(QSplashScreen):
@@ -215,8 +234,9 @@ class BootSplash(QSplashScreen):
 class AugurSplash(BootSplash):
     """밝은 종이 + 잉크. 실제 흡수 스펙트럼 → 육각 프리즘 → 레퍼런스 갈래 → 기체별 행.
 
-    값 자리는 **중립 표기**(`··· ± ···`)다 — 이 프로그램에서 ✓ 붙은 숫자는 '확정 결과'라는
-    뜻이라, 스플래시 캡처 한 장이 존재하지 않는 측정값이 되면 안 된다(데이터 무결성 헌장)."""
+    값 자리의 숫자는 돌기만 하고 확정 순간 ✓ 로 바뀐다 — 이 프로그램에서 ✓ 붙은 숫자는
+    '확정 결과'라는 뜻이라, 스플래시 캡처 한 장이 존재하지 않는 측정값이 되면 안 된다(데이터
+    무결성 헌장). 기체 이름은 확정 전엔 흐리고 확정되면 짙어진다."""
     NAME = "AUGUR"
     COLS = ("#3B63B5", "#5B4FA6", "#7E4A86", "#4C6A7C", "#2F7A8C", "#6A5D9E")
 
@@ -275,8 +295,8 @@ class AugurSplash(BootSplash):
         big = K <= 4
         frame = int(t * 40)
         name_f = _font(self._serif, 13 if big else 11.5, 700)
-        val_f = _font(self._mono, 19 if big else 14, 600)
         val_dim = _font(self._mono, 19 if big else 14, 400)
+        tick_f = _font(self._serif, 19 if big else 14, 700)
         small = _font(self._mono, 10)
         for i, (name, col, kind) in enumerate(items):
             yc = y0 + i * gap
@@ -290,21 +310,22 @@ class AugurSplash(BootSplash):
                 continue
             p.setOpacity(op)
             base = yc + (5 if big else 4)
-            self._text(p, 302, base, name, name_f, col)
             locked = t >= 0.78 + i * min(0.12, 0.34 / max(1, K - 1))
+            nc = QColor(col)
+            if not locked and kind != "more":
+                nc.setAlphaF(0.55)                                  # 확정 전엔 흐리게
+            self._text(p, 302, base, name, name_f, nc)
             vx = 302 + 66 + 10 + 62                               # 값 칸 오른쪽 끝
             if kind == "more":
-                self._text(p, vx + 10, base, "more", small, "#9A9A96")
+                self._text(p, vx, base, "more", small, "#9A9A96", anchor="right")
+            elif not locked:                                      # 도는 숫자(장식, 결과 아님)
+                h = ((frame * 7919 + i * 104729 + 17) * 2654435761) & 0xFFFFFFFF
+                spin = f"{(h % 1000) / 100:.2f}"
+                self._text(p, vx, base, spin, val_dim, "#9A9A96", anchor="right")
             elif kind == "none":
-                self._text(p, vx, base, "—", val_f if locked else val_dim,
-                           "#1A1D24" if locked else "#9A9A96", anchor="right")
+                self._text(p, vx, base, "—", val_dim, "#9A9A96", anchor="right")
             else:
-                dots = "···" if locked else "·" * (1 + (frame + i) % 3)
-                self._text(p, vx, base, dots, val_f if locked else val_dim,
-                           "#1A1D24" if locked else "#9A9A96", anchor="right")
-                w = self._text(p, vx + 10, base, "± ···", small, "#6B6F78")
-                if locked:
-                    self._text(p, vx + 10 + w + 10, base, "✓", small, "#B4473A")
+                self._text(p, vx, base, "✓", tick_f, "#B4473A", anchor="right")
             p.setOpacity(1.0)
 
 
@@ -419,3 +440,28 @@ class VigilSplash(BootSplash):
         p.drawEllipse(QPointF(self.W - 30 - cw - 10, 22), 3, 3); p.setBrush(Qt.BrushStyle.NoBrush)
         self._text(p, self.W - 30, 26, clock, cf, "#8A93A3", anchor="right")
         p.setOpacity(1.0)
+
+
+if __name__ == "__main__":
+    # 미리보기: python -m gui.splash [augur|vigil]  — 실제 부팅과 같은 모션을 화면에 띄운다.
+    # 로그 줄은 미리보기용 예시다(실제 앱은 끝난 단계만 찍는다). 레퍼런스는 마지막 FitSet.
+    import sys
+    from PyQt6.QtCore import QSettings
+    app = QApplication(sys.argv[:1])
+    which = sys.argv[1:] or ["augur", "vigil"]
+    for w in which:
+        if w == "augur":
+            sp = fitset_species(QSettings("CAESAR", "app").value("last_fitset", "", type=str))
+            s = AugurSplash("preview", "Analyzer of Unseen Gases Using Resonators",
+                            species=sp or ["NO2", "CHOCHO", "H2O", "O4"])
+            steps = [("engine", "Augur (preview)"), ("layouts", "example"), ("build", "example")]
+        else:
+            s = VigilSplash("preview", "Vital-signs Inspector for Gas Instruments, Live")
+            steps = [("engine", "Vigil (preview)"), ("watch", "example"), ("build", "example")]
+        s.show()
+        s.restart()
+        for lab, val in steps:
+            s.step(lab, val)
+        s.wait_settled()
+        s.wait_while(lambda: True, max_s=1.5)       # 마지막 화면 잠깐 유지
+        s.close()

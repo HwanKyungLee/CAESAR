@@ -47,7 +47,8 @@ if __name__ == '__main__':
     # ── Splash screen ────────────────────────────────────────────────────────
     # Show it FIRST, before any heavy import or window build. Every log line on it
     # is a boot step that actually finished (gui/splash.py) — no canned text.
-    from gui.splash import AugurSplash, fitset_species
+    from gui.splash import AugurSplash, fitset_species, set_app_icon
+    set_app_icon(app, "augur")
     from PyQt6.QtCore import QSettings
     # 갈래 = 마지막 FitSet 활성 채널의 레퍼런스(없으면 σ). 이름의 출처는 FitSet 하나다.
     _species = fitset_species(QSettings("CAESAR", "app").value("last_fitset", "", type=str))

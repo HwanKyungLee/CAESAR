@@ -333,7 +333,8 @@ def main(argv=None) -> int:
     app = QApplication(sys.argv[:1])
 
     # 스플래시 먼저 — 로그 줄은 실제로 끝난 부팅 단계만(gui/splash.py).
-    from gui.splash import VigilSplash
+    from gui.splash import VigilSplash, set_app_icon
+    set_app_icon(app, "vigil")
     from vigil import __version__
     splash = VigilSplash(__version__, "Vital-signs Inspector for Gas Instruments, Live", n_steps=6)
     splash.show()
