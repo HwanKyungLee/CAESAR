@@ -74,3 +74,4 @@ New `\fieldnum` values (A, B, C, D5, D6, D7): r 0.985, ≤0.03; slopes 0.61, 0.5
 - **§7.2**: "within about 4 %" → "within about \fieldnum{3} %" (quadrature rSD 0.0753 vs paired 0.0733 ppb, +2.8 %, r = −0.093). Resolves flag 6 in §4.
 - 20 May slope kept as 0.59 (confirmed by the lead).
 - Rebuilt: 45 pages, 0 errors, 0 undefined references/citations, 0 overfull boxes.
+- **§3.6 lab-path update (lead edit)**: laboratory standard delivered through the inlet and ovens; laboratory bounds 1.08/0.87; field standard-addition sentence (+~30 words). Rebuilt: 45 pages, 0 errors, 0 undefined references/citations.
