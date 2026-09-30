@@ -340,17 +340,11 @@ def main(argv=None) -> int:
     splash.pump()
     splash.step("engine", f"Vigil v{__version__}")
 
-    # 농도 감시기(scipy·피팅 엔진 ≈ 1 s)는 Qt 를 안 건드리므로 스레드로 미리 데운다.
-    import importlib, threading
-    _pre = threading.Thread(target=lambda: importlib.import_module("vigil.monitors.conc_monitor"),
-                            daemon=True)
-    _pre.start()
-
     splash.step("watch", args.dir)
     _cursors = os.path.join(args.state_dir, "cursors.json")
     _resume = os.path.isfile(_cursors)
     splash.step("state", f"{os.path.basename(args.state_dir)} · "
-                         f"{'resume' if _resume else 'fresh (raw 를 처음부터 읽는다)'}",
+                         f"{'resume' if _resume else 'fresh (reads raw from the start)'}",
                 "ok" if _resume else "skip")
     from core.provenance import code_version
     _ver = code_version()
@@ -362,6 +356,15 @@ def main(argv=None) -> int:
     splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
     win.log_line(f"watching {args.dir} (poll {args.poll_sec:.1f}s, "
                 f"{len(core.profiles)} profile(s) loaded)")
+
+    # 모션은 여기서부터 — 위의 준비(git·대시보드 생성)는 메인 스레드를 막으므로 첫 장면에서
+    # 끝낸다(실측 0.2–0.4 s 정지가 세 번). 농도 감시기(scipy·피팅 엔진 ≈ 1 s)는 Qt 를 안
+    # 건드리므로 스레드로 미리 데우며 1.3 s 모션을 끊김 없이 재생한다.
+    import importlib, threading
+    _pre = threading.Thread(target=lambda: importlib.import_module("vigil.monitors.conc_monitor"),
+                            daemon=True)
+    splash.restart()
+    _pre.start()
     splash.wait_while(_pre.is_alive)
     splash.wait_settled()
     splash.step("dashboard", "ready")

@@ -57,19 +57,6 @@ if __name__ == '__main__':
     splash.pump()
     splash.step("engine", f"Augur v{__version__}")
 
-    # Heavy third-party imports (numpy/scipy/matplotlib ≈ 1 s) run in a thread so the
-    # animation keeps moving. Qt-touching modules stay on the main thread below.
-    import threading, importlib
-    def _prewarm():
-        for _m in ("numpy", "scipy.interpolate", "scipy.optimize", "scipy.signal",
-                   "scipy.ndimage", "matplotlib", "matplotlib.figure"):
-            try:
-                importlib.import_module(_m)
-            except Exception:   # noqa: BLE001 — the real import below reports it
-                pass
-    _pre = threading.Thread(target=_prewarm, daemon=True)
-    _pre.start()
-
     # Scale font size relative to screen height (reference: 1080p → 9pt)
     from core.data_io import ui_scale
     _s = ui_scale()
@@ -102,13 +89,27 @@ if __name__ == '__main__':
     _ver = code_version()
     splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
 
+    # 모션은 여기서부터. 위의 가벼운 준비는 메인 스레드를 막으므로(실측 0.45 s — 스레드와
+    # numpy 임포트 잠금을 다툰다) 첫 장면에서 끝내고, 무거운 서드파티 임포트(scipy·matplotlib
+    # ≈ 1 s)는 스레드로 돌리며 1.3 s 모션을 끊김 없이 재생한다.
+    import threading, importlib
+    def _prewarm():
+        for _m in ("scipy.interpolate", "scipy.optimize", "scipy.signal",
+                   "scipy.ndimage", "matplotlib", "matplotlib.figure"):
+            try:
+                importlib.import_module(_m)
+            except Exception:   # noqa: BLE001 — the real import below reports it
+                pass
+    _pre = threading.Thread(target=_prewarm, daemon=True)
+    splash.restart()
+    _pre.start()
     splash.wait_while(_pre.is_alive)
+    splash.wait_settled()
 
     # ── Main window initialization ───────────────────────────────────────────
-    # Building the window blocks the main thread (~1 s), which freezes the
-    # animation — so let it reach its still final frame first.
+    # 창 모듈 임포트(~0.2–0.6 s)와 생성(~0.7 s)은 메인 스레드를 막는다 — 모션이 정지
+    # 화면에 닿은 뒤에 한다(전에 임포트를 먼저 해서 ✓ 확정 대목이 0.6 s 끊겼다).
     from gui.app_window import CAESARAnalyzer  # The main application window class
-    splash.wait_settled()
     ex = CAESARAnalyzer()
     splash.step("interface", "ready")
 

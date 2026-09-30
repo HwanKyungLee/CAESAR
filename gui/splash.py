@@ -138,6 +138,12 @@ class BootSplash(QSplashScreen):
         self._steps.append((status, label, value))
         self.pump()
 
+    def restart(self) -> None:
+        """모션을 처음부터. 메인 스레드를 막는 가벼운 준비(설정·git·레이아웃)를 첫 장면에서 끝낸
+        뒤 부른다 — 그 사이 흐른 시간만큼 모션이 건너뛰어지지 않게."""
+        self._clock.restart()
+        self.pump()
+
     def pump(self) -> None:
         self.repaint()
         QApplication.processEvents()
