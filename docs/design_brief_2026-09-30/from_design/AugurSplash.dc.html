@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</helmet>
+<div onClick="{{ skip }}" style="position:relative; width:560px; height:390px; background:#F4F1EA; color:#1A1D24; overflow:hidden; cursor:pointer; font-family:'Spectral', Georgia, serif;">
+  <svg width="560" height="390" viewBox="0 0 560 390" style="position:absolute; left:0; top:0;">
+    <path d="{{ inD }}" style="fill:none; stroke:#1A1D24; stroke-width:1.6; stroke-linejoin:round; stroke-linecap:round;"></path>
+    <g style="opacity:{{ hexOp }};">
+      <polygon points="152,79 174.5,92 174.5,118 152,131 129.5,118 129.5,92" style="fill:#1A1D24;"></polygon>
+      <polygon points="152,88 166.7,96.5 166.7,113.5 152,122 137.3,113.5 137.3,96.5" style="fill:none; stroke:#F4F1EA; stroke-width:1.1;"></polygon>
+      <line x1="138" y1="105" x2="{{ innerX }}" y2="105" style="stroke:#F4F1EA; stroke-width:1.1; stroke-dasharray:2.5 2;"></line>
+    </g>
+    <line x1="176" y1="105" x2="{{ r0.x }}" y2="{{ r0.y }}" style="stroke:{{ r0.c }}; stroke-width:{{ rw }}; stroke-linecap:round; opacity:{{ r0.o }};"></line>
+    <line x1="176" y1="105" x2="{{ r1.x }}" y2="{{ r1.y }}" style="stroke:{{ r1.c }}; stroke-width:{{ rw }}; stroke-linecap:round; opacity:{{ r1.o }};"></line>
+    <line x1="176" y1="105" x2="{{ r2.x }}" y2="{{ r2.y }}" style="stroke:{{ r2.c }}; stroke-width:{{ rw }}; stroke-linecap:round; opacity:{{ r2.o }};"></line>
+    <line x1="176" y1="105" x2="{{ r3.x }}" y2="{{ r3.y }}" style="stroke:{{ r3.c }}; stroke-width:{{ rw }}; stroke-linecap:round; opacity:{{ r3.o }};"></line>
+    <line x1="176" y1="105" x2="{{ r4.x }}" y2="{{ r4.y }}" style="stroke:{{ r4.c }}; stroke-width:{{ rw }}; stroke-linecap:round; opacity:{{ r4.o }};"></line>
+    <line x1="176" y1="105" x2="{{ r5.x }}" y2="{{ r5.y }}" style="stroke:{{ r5.c }}; stroke-width:{{ rw }}; stroke-linecap:round; opacity:{{ r5.o }};"></line>
+  </svg>
+  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="4">
+    <div style="position:absolute; left:302px; top:{{ r.y }}px; display:flex; align-items:baseline; gap:10px; font-family:'IBM Plex Mono', monospace; white-space:nowrap; opacity:{{ r.op }};">
+      <span style="width:66px; font-family:'Spectral', serif; font-size:{{ r.nf }}px; color:{{ r.c }}; font-weight:700;">{{ r.n }}</span>
+      <span style="width:62px; text-align:right; font-size:{{ r.vf }}px; font-weight:{{ r.w }}; color:{{ r.vc }};">{{ r.v }}</span>
+      <span style="font-size:10px; color:#6B6F78;">± {{ r.u }}</span>
+      <span style="font-size:10px; color:#9A9A96;">{{ r.unit }}</span>
+      <span style="font-size:10px; color:#B4473A; opacity:{{ r.lock }};">✓</span>
+    </div>
+  </sc-for>
+  <div style="position:absolute; right:30px; top:16px; font-family:'IBM Plex Mono', monospace; font-size:10px; color:#6B6F78;">v0.2.0</div>
+  <div style="position:absolute; left:30px; top:188px; display:flex; align-items:baseline; gap:16px; opacity:{{ wOp }};">
+    <div style="font-size:30px; font-weight:700; letter-spacing:0.12em; line-height:30px;">AUGUR</div>
+    <div style="font-size:11.5px; font-style:italic; color:#4A4E57;"><b style="font-style:normal; font-weight:700; color:#B4473A;">A</b>nalyzer of <b style="font-style:normal; font-weight:700; color:#B4473A;">U</b>nseen <b style="font-style:normal; font-weight:700; color:#B4473A;">G</b>ases <b style="font-style:normal; font-weight:700; color:#B4473A;">U</b>sing <b style="font-style:normal; font-weight:700; color:#B4473A;">R</b>esonators</div>
+  </div>
+  <div style="position:absolute; left:30px; right:30px; top:240px; height:1px; background:#D8D3C7;"></div>
+  <div style="position:absolute; left:30px; top:240px; height:1px; width:{{ progW }}px; background:#1A1D24;"></div>
+  <div style="position:absolute; left:30px; top:252px; display:flex; flex-direction:column; gap:3px; font-family:'IBM Plex Mono', monospace; font-size:10.5px; line-height:12px;">
+    <sc-for list="{{ log }}" as="l" hint-placeholder-count="5">
+      <div style="display:flex; gap:18px; opacity:{{ l.op }};"><span style="width:28px; color:{{ l.c }}; font-weight:500;">{{ l.s }}</span><span style="color:#3B3F48;">{{ l.m }}</span></div>
+    </sc-for>
+  </div>
+  <div style="position:absolute; right:30px; bottom:16px; font-family:'IBM Plex Mono', monospace; font-size:9px; letter-spacing:0.12em; color:#9A9A96;">ARGUS · CAESAR</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:560,&quot;height&quot;:390},&quot;count&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:4,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:8},&quot;species&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;Array&lt;[string, number, number, string]&gt;&quot;},&quot;t&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:null,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:1.3,&quot;step&quot;:0.05},&quot;replay&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  state = { now: 0 };
+  T = 1.3;
+  COLS = ['#3B63B5', '#5B4FA6', '#7E4A86', '#4C6A7C', '#2F7A8C', '#6A5D9E'];
+  ALL = [['NO₂', 8.42, 0.11, 'ppb'], ['CHOCHO', 0.186, 0.021, 'ppb'], ['H₂O', 1.27, 0.04, '%'], ['O₄', 0.98, 0.03, 'rel'], ['HONO', 0.64, 0.08, 'ppb'], ['IO', 1.9, 0.4, 'ppt'], ['MGLY', 0.21, 0.05, 'ppb'], ['O₃', 41.2, 1.8, 'ppb']];
+  componentDidMount() { if (this.props.t == null) this.play(); }
+  componentDidUpdate(pp) { if (pp.replay !== this.props.replay && this.props.t == null) this.play(); }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+  play() {
+    cancelAnimationFrame(this.raf);
+    const s = performance.now();
+    const tick = () => { const t = (performance.now() - s) / 1000; this.setState({ now: Math.min(t, this.T) }); if (t < this.T) this.raf = requestAnimationFrame(tick); };
+    this.raf = requestAnimationFrame(tick);
+  }
+  build() {
+    let s = 3; const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    const pts = [];
+    for (let x = 28; x <= 128; x += 1.5) pts.push([x, 105 + 7 * Math.sin(x / 3.1) * Math.sin(x / 11) + (rnd() - 0.5) * 3]);
+    return { pts };
+  }
+  renderVals() {
+    if (!this.d) this.d = this.build();
+    const t = this.props.t != null ? this.props.t : this.state.now;
+    const cl = v => Math.max(0, Math.min(1, v));
+    const ease = v => 1 - Math.pow(1 - cl(v), 3);
+    const n = Math.round(ease(t / 0.3) * this.d.pts.length);
+    const inD = this.d.pts.slice(0, n).map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1].toFixed(1)).join('');
+    const sp = this.props.species ?? this.ALL.slice(0, this.props.count ?? 4);
+    const N = sp.length;
+    let items;
+    if (N === 0) items = [{ n: 'σ', v: null, u: '—', unit: '', c: '#9A9A96' }];
+    else if (N <= 6) items = sp.map(([n, v, u, unit], i) => ({ n, v, u, unit, c: this.COLS[i] }));
+    else items = sp.slice(0, 5).map(([n, v, u, unit], i) => ({ n, v, u, unit, c: this.COLS[i] })).concat([{ n: '+' + (N - 5), more: true, c: '#9A9A96' }]);
+    const K = items.length;
+    const top = 44, bot = 170, gap = K === 1 ? 0 : Math.min(34, (bot - top) / (K - 1));
+    const y0 = 105 - (gap * (K - 1)) / 2;
+    const big = K <= 4;
+    const lockT = i => 0.78 + i * Math.min(0.12, 0.34 / Math.max(1, K - 1));
+    const frame = Math.floor(t * 40);
+    const rv = {};
+    for (let i = 0; i < 6; i++) {
+      if (i >= K) { rv['r' + i] = { x: 176, y: 105, c: '#000', o: 0 }; continue; }
+      const u = ease((t - 0.42 - i * 0.035) / 0.24);
+      const yc = y0 + i * gap;
+      rv['r' + i] = { x: (176 + 118 * u).toFixed(1), y: (105 + (yc - 105) * u).toFixed(1), c: items[i].c, o: u > 0 ? 1 : 0 };
+    }
+    const rows = items.map((it, i) => {
+      const locked = t >= lockT(i);
+      const yc = y0 + i * gap;
+      let shown = '', u = '', unit = '';
+      if (it.more) { shown = ''; u = ''; unit = 'more'; }
+      else if (it.v == null) { shown = locked ? '—' : String(Math.floor((frame * 7) % 97) / 10); u = '—'; }
+      else {
+        const dec = (String(it.v).split('.')[1] || '').length;
+        shown = locked ? it.v.toFixed(dec) : (it.v * (0.3 + (((frame * 7 + i * 13) % 97) / 97) * 1.6)).toFixed(dec);
+        u = it.u; unit = it.unit;
+      }
+      return { n: it.n, c: it.c, y: (yc - (big ? 13 : 10)).toFixed(1), nf: big ? 13 : 11.5, vf: big ? 19 : 14, v: shown, u: it.more ? '' : u, unit, op: ease((t - 0.58 - i * 0.03) / 0.1), w: locked ? 600 : 400, vc: locked ? '#1A1D24' : '#9A9A96', lock: locked && !it.more ? 1 : 0 };
+    });
+    const log = [['ok', 'engine · Augur v0.2.0'], ['ok', 'layouts · 3 known (1 from profiles)'], ['skip', 'campaign · not set'], ['ok', 'workers · 8 cpu'], ['ok', 'build · gcf814d10']]
+      .map(([st, m], i) => ({ s: st, m, c: st === 'ok' ? '#1A1D24' : st === 'fail' ? '#B4473A' : '#9A9A96', op: t >= 0.15 + 0.2 * i ? 1 : 0 }));
+    return {
+      inD, hexOp: ease((t - 0.22) / 0.15), innerX: (138 + 28 * ease((t - 0.32) / 0.12)).toFixed(1), ...rv, rw: K <= 4 ? 2.6 : 2, rows,
+      wOp: ease((t - 0.3) / 0.3), progW: (500 * cl(t / this.T)).toFixed(1), log,
+      skip: () => { cancelAnimationFrame(this.raf); this.setState({ now: this.T }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

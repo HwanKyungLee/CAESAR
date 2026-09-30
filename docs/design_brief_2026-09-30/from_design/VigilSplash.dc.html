@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</helmet>
+<div onClick="{{ skip }}" style="position:relative; width:560px; height:390px; background:#0B0F1A; color:#DCE1EA; overflow:hidden; cursor:pointer; font-family:'IBM Plex Sans', 'Segoe UI', sans-serif;">
+  <svg width="560" height="390" viewBox="0 0 560 390" style="position:absolute; left:0; top:0;">
+    <line x1="30" y1="100" x2="530" y2="100" style="stroke:#161D2B; stroke-width:1;"></line>
+    <path d="{{ traceD }}" style="fill:none; stroke:#DCE1EA; stroke-width:1.4; stroke-linejoin:round; stroke-linecap:round; opacity:0.75;"></path>
+    <path d="{{ embD }}" style="fill:none; stroke:#DCE1EA; stroke-width:3.4; stroke-linejoin:round; stroke-linecap:round;"></path>
+    <circle cx="96" cy="44" r="{{ ring }}" style="fill:none; stroke:#7FC3F0; stroke-width:0.8; opacity:{{ ringO }};"></circle>
+    <circle cx="96" cy="44" r="{{ lampR }}" style="fill:#7FC3F0;"></circle>
+    <circle cx="96" cy="44" r="{{ lampIn }}" style="fill:none; stroke:#0B0F1A; stroke-width:1.2;"></circle>
+    <circle cx="{{ hx }}" cy="{{ hy }}" r="3" style="fill:#7FC3F0; opacity:{{ hO }};"></circle>
+  </svg>
+  <div style="position:absolute; right:30px; top:16px; display:flex; align-items:center; gap:7px; font-family:'IBM Plex Mono', monospace; font-size:10px; color:#8A93A3; opacity:{{ liveO }};"><div style="width:6px; height:6px; border-radius:50%; background:#7FC3F0; opacity:{{ blink }};"></div>LIVE {{ clock }}</div>
+  <div style="position:absolute; left:30px; top:136px; right:30px; display:flex; justify-content:space-between;">
+    <sc-for list="{{ lamps }}" as="p" hint-placeholder-count="5">
+      <div style="display:flex; align-items:center; gap:8px; font-family:'IBM Plex Mono', monospace; font-size:10.5px; white-space:nowrap;">
+        <div style="position:relative; width:9px; height:9px;">
+          <div style="position:absolute; left:50%; top:50%; width:{{ p.ring }}px; height:{{ p.ring }}px; margin-left:{{ p.ringM }}px; margin-top:{{ p.ringM }}px; border-radius:50%; border:1px solid {{ p.c }}; opacity:{{ p.ringOp }}; box-sizing:border-box;"></div>
+          <div style="width:9px; height:9px; border-radius:50%; background:{{ p.c }}; opacity:{{ p.on }};"></div>
+        </div>
+        <span style="color:#B4BAC6;">{{ p.n }}</span><span style="color:{{ p.c }}; font-weight:600; opacity:{{ p.okO }};">ok</span>
+      </div>
+    </sc-for>
+  </div>
+  <div style="position:absolute; left:30px; top:188px; display:flex; align-items:baseline; gap:16px; opacity:{{ wOp }};">
+    <div style="font-size:28px; font-weight:600; letter-spacing:0.24em; line-height:30px;">VIGIL</div>
+    <div style="font-size:11px; color:#8A93A3;"><b style="font-weight:600; color:#7FC3F0;">V</b>ital-signs <b style="font-weight:600; color:#7FC3F0;">I</b>nspector for <b style="font-weight:600; color:#7FC3F0;">G</b>as <b style="font-weight:600; color:#7FC3F0;">I</b>nstruments, <b style="font-weight:600; color:#7FC3F0;">L</b>ive</div>
+    <div style="font-family:'IBM Plex Mono', monospace; font-size:10px; color:#6E7686;">v0.0.1</div>
+  </div>
+  <div style="position:absolute; left:30px; right:30px; top:240px; height:1px; background:#1C2333;"></div>
+  <div style="position:absolute; left:30px; top:240px; height:1px; width:{{ progW }}px; background:#6E7686;"></div>
+  <div style="position:absolute; left:30px; top:252px; display:flex; flex-direction:column; gap:3px; font-family:'IBM Plex Mono', monospace; font-size:10.5px; line-height:12px;">
+    <sc-for list="{{ log }}" as="l" hint-placeholder-count="5">
+      <div style="display:flex; gap:18px; opacity:{{ l.op }};"><span style="width:28px; color:{{ l.c }}; font-weight:500;">{{ l.s }}</span><span style="color:#B4BAC6;">{{ l.m }}</span></div>
+    </sc-for>
+  </div>
+  <div style="position:absolute; right:30px; bottom:16px; font-family:'IBM Plex Mono', monospace; font-size:9px; letter-spacing:0.12em; color:#4A5264;">ARGUS · CAESAR</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:560,&quot;height&quot;:390},&quot;t&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:null,&quot;tsType&quot;:&quot;number&quot;,&quot;min&quot;:0,&quot;max&quot;:1.3,&quot;step&quot;:0.05},&quot;sound&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;replay&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  state = { now: 0 };
+  T = 1.3;
+  EMB = [[30, 100], [70, 100], [78, 112], [86, 88], [96, 60], [106, 126], [114, 100], [150, 100]];
+  W = [['ingest', '#7FC3F0', 880], ['HK', '#8FA8F5', 988], ['R', '#A99BF0', 1109], ['lamp', '#6FD0DA', 1175], ['conc', '#B7C7DA', 1319]];
+  L0 = 0.62; LD = 0.07;
+  componentDidMount() { if (this.props.t == null) this.play(); }
+  componentDidUpdate(pp) { if (pp.replay !== this.props.replay && this.props.t == null) this.play(); }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+  beep(f) {
+    if (!this.props.sound) return;
+    try {
+      this.ac = this.ac || new (window.AudioContext || window.webkitAudioContext)();
+      const o = this.ac.createOscillator(), g = this.ac.createGain(), n = this.ac.currentTime;
+      o.frequency.value = f; o.type = 'sine';
+      g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.1, n + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.06);
+      o.connect(g).connect(this.ac.destination); o.start(n); o.stop(n + 0.07);
+    } catch (e) {}
+  }
+  play() {
+    cancelAnimationFrame(this.raf);
+    const s = performance.now(); let k = 0;
+    const tick = () => {
+      const t = (performance.now() - s) / 1000;
+      while (k < 5 && t >= this.L0 + k * this.LD) { this.beep(this.W[k][2]); k++; }
+      this.setState({ now: Math.min(t, this.T) }); if (t < this.T) this.raf = requestAnimationFrame(tick);
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
+  cum() { if (!this.Lc) { const L = [0]; for (let i = 1; i < this.EMB.length; i++) L.push(L[i - 1] + Math.hypot(this.EMB[i][0] - this.EMB[i - 1][0], this.EMB[i][1] - this.EMB[i - 1][1])); this.Lc = L; } return this.Lc; }
+  renderVals() {
+    const t = this.props.t != null ? this.props.t : this.state.now;
+    const cl = v => Math.max(0, Math.min(1, v));
+    const ease = v => 1 - Math.pow(1 - cl(v), 3);
+    const back = v => { v = cl(v); const c = 2.2; return 1 + (c + 1) * Math.pow(v - 1, 3) + c * Math.pow(v - 1, 2); };
+    const g = (x, c, w) => Math.exp(-(((x - c) / w) ** 2));
+    const L = this.cum(), tot = L[L.length - 1];
+    const len = cl(t / 0.32) * tot;
+    let embD = '';
+    for (let i = 0; i < this.EMB.length; i++) {
+      if (L[i] <= len) embD += (i ? 'L' : 'M') + this.EMB[i][0] + ' ' + this.EMB[i][1];
+      else { if (i > 0) { const a = this.EMB[i - 1], b = this.EMB[i], f = (len - L[i - 1]) / (L[i] - L[i - 1]); if (f > 0) embD += 'L' + (a[0] + (b[0] - a[0]) * f).toFixed(1) + ' ' + (a[1] + (b[1] - a[1]) * f).toFixed(1); } break; }
+    }
+    const peakT = 0.32 * (L[4] / tot);
+    const sL = t - peakT;
+    const lampK = sL >= 0 ? back(sL / 0.25) : 0;
+    const phase = Math.max(0, t - 0.3) * 90;
+    const reach = 150 + 380 * ease((t - 0.3) / 0.35);
+    let traceD = '', hx = 150, hy = 100;
+    for (let x = 150; x <= reach; x += 1.5) {
+      const u = x + phase;
+      let y = 100 + 0.6 * Math.sin(u / 5.3);
+      for (let k = -1; k < 12; k++) { const c = 190 + k * 64; y += -14 * g(u % 64, 32, 1.4) * (k === 0 ? 1 : 0); }
+      const m = ((u % 64) + 64) % 64;
+      y += -14 * g(m, 32, 1.4) + 4 * g(m, 36, 1.6) - 2 * g(m, 22, 3);
+      traceD += (x === 150 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
+      hx = x; hy = y;
+    }
+    const lamps = this.W.map(([n, c], i) => {
+      const s = t - (this.L0 + i * this.LD); const pop = s >= 0 ? cl(s / 0.35) : 0; const ring = 9 + 14 * ease(pop);
+      return { n, c, on: s >= 0 ? 1 : 0.18, ring: ring.toFixed(1), ringM: (-ring / 2).toFixed(1), ringOp: s >= 0 ? (0.9 * (1 - pop)).toFixed(3) : 0, okO: s >= 0 ? 1 : 0 };
+    });
+    const d = new Date(); const pad = v => String(v).padStart(2, '0');
+    const log = [['ok', 'engine · Vigil v0.0.1'], ['ok', 'watch · E:/Yeosu_2026/CAESAR_Hot/2026-06'], ['ok', 'state · vigil_state · resume'], ['ok', 'build · gcf814d10'], ['ok', 'profiles · 4 loaded']]
+      .map(([st, m], i) => ({ s: st, m, c: st === 'ok' ? '#7FC3F0' : st === 'fail' ? '#E5484D' : '#6E7686', op: t >= 0.15 + 0.2 * i ? 1 : 0 }));
+    return {
+      embD, traceD, hx: hx.toFixed(1), hy: hy.toFixed(1), hO: t > 0.3 ? 1 : 0,
+      lampR: (9 * lampK).toFixed(2), lampIn: (5 * lampK).toFixed(2),
+      ring: (9 + 16 * ease(sL / 0.45)).toFixed(1), ringO: sL >= 0 ? (0.8 * (1 - cl(sL / 0.45))).toFixed(3) : 0,
+      lamps, clock: pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()),
+      liveO: ease((t - 0.35) / 0.2), blink: t < this.T ? (Math.floor(t * 4) % 2 ? 0.4 : 1) : 1,
+      wOp: ease((t - 0.3) / 0.3), progW: (500 * cl(t / this.T)).toFixed(1), log,
+      skip: () => { cancelAnimationFrame(this.raf); this.setState({ now: this.T }); }
+    };
+  }
+}
+</script>
+</body>
+</html>
