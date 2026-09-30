@@ -1,0 +1,8 @@
+zero_air_floor.py --fitset <ops 09-17> --ratio 0.9524  (run 2026-09-30, qtstub_run.py; clock-fixed R)
+ANs channel n155 median 0.0028 rSD 0.0545 SD 0.0642 reported 0.0378 (1.44x)
+PNs channel n155 median -0.0020 rSD 0.0546 SD 0.0536 reported 0.0475 (1.15x)
+SumANs = ch1 - 0.95*ch2, 155 paired ZA blocks, inter-channel r = -0.093
+ measured rSD 0.0733 SD 0.0856 MDL(3rSD) 0.2198 MDL(3SD) 0.2569 ; quadrature rSD 0.0753
+ median +0.0053 ppb ; vs product column 0.0806: rSD 0.91x, SD 1.06x
+ scan-number scaling 34->60: ANs 0.0410 (1.09x reported), PNs 0.0411 (0.87x)
+wall 48 s
