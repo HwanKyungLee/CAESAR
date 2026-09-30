@@ -33,9 +33,7 @@ _install_session_log()
 # (`gui.app_window`, which pulls in matplotlib + scipy via the dialog
 # modules) is deferred until *after* the splash is on screen — otherwise
 # the logo can't appear until ~a second of import work finishes first.
-from PyQt6.QtWidgets import QApplication, QSplashScreen
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import QApplication
 
 from core.__version__ import __version__
 
@@ -47,23 +45,26 @@ if __name__ == '__main__':
     app.setStyle("Fusion")  # Fusion style: clean, modern look on all platforms
 
     # ── Splash screen ────────────────────────────────────────────────────────
-    # Show the logo FIRST, before any heavy module import or window build, so it
-    # appears almost instantly. Everything slow below runs while it is visible.
-    splash_pixmap = QPixmap("AUGUR.png").scaledToWidth(
-        360, Qt.TransformationMode.SmoothTransformation
-    )
-    splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
+    # Show it FIRST, before any heavy import or window build. Every log line on it
+    # is a boot step that actually finished (gui/splash.py) — no canned text.
+    from gui.splash import AugurSplash
+    splash = AugurSplash(__version__, "Analyzer of Unseen Gases Using Resonators", n_steps=6)
     splash.show()
+    splash.pump()
+    splash.step("engine", f"Augur v{__version__}")
 
-    # Print a loading message at the bottom-center of the splash image
-    splash.showMessage(
-        f"Loading Augur v{__version__} Engine...",
-        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
-        Qt.GlobalColor.white
-    )
-
-    # Force the event loop to paint the splash before the blocking work below
-    app.processEvents()
+    # Heavy third-party imports (numpy/scipy/matplotlib ≈ 1 s) run in a thread so the
+    # animation keeps moving. Qt-touching modules stay on the main thread below.
+    import threading, importlib
+    def _prewarm():
+        for _m in ("numpy", "scipy.interpolate", "scipy.optimize", "scipy.signal",
+                   "scipy.ndimage", "matplotlib", "matplotlib.figure"):
+            try:
+                importlib.import_module(_m)
+            except Exception:   # noqa: BLE001 — the real import below reports it
+                pass
+    _pre = threading.Thread(target=_prewarm, daemon=True)
+    _pre.start()
 
     # Scale font size relative to screen height (reference: 1080p → 9pt)
     from core.data_io import ui_scale
@@ -78,25 +79,34 @@ if __name__ == '__main__':
     # 등록된다 — **새 캠페인은 코드를 고치지 않고 JSON만 얹으면 된다**(열 수로 자동 라우팅).
     # 이미 아는 열 수는 덮지 않는다. 실패해도 앱은 그대로 뜬다.
     try:
-        from core.raw_parser import autoload_campaign_layouts
-        autoload_campaign_layouts()
+        from core.raw_parser import autoload_campaign_layouts, CAMPAIGN_LAYOUTS
+        _new = autoload_campaign_layouts()
+        splash.step("layouts", f"{len(CAMPAIGN_LAYOUTS)} known ({len(_new)} from profiles)")
     except Exception as _e:   # noqa: BLE001
         print(f"[main] 캠페인 레이아웃 자동등록 건너뜀: {_e}")
+        splash.step("layouts", f"{type(_e).__name__}", "fail")
+
+    # 지난 세션에 남긴 사용자 설정 — 창이 같은 키로 다시 읽는다(gui/app_window.py).
+    from PyQt6.QtCore import QSettings
+    _qs = QSettings("CAESAR", "app")
+    _camp = _qs.value("campaign", "", type=str)
+    splash.step("campaign", _camp or "not set", "ok" if _camp else "skip")
+    _cpu = _qs.value("cpu_workers", 0, type=int)
+    splash.step("workers", f"{_cpu} cpu" if _cpu else f"default ({os.cpu_count()} cpu)")
+
+    from core.provenance import code_version
+    _ver = code_version()
+    splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
+
+    splash.wait_while(_pre.is_alive)
 
     # ── Main window initialization ───────────────────────────────────────────
-    # Importing app_window loads matplotlib/scipy (heaviest part of startup);
-    # CAESARAnalyzer.__init__ then builds every widget and connects all signals.
-    # Both run under the splash so the user sees the logo the whole time.
+    # Building the window blocks the main thread (~1 s), which freezes the
+    # animation — so let it reach its still final frame first.
     from gui.app_window import CAESARAnalyzer  # The main application window class
-
-    splash.showMessage(
-        "Building interface...",
-        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
-        Qt.GlobalColor.white
-    )
-    app.processEvents()
-
+    splash.wait_settled()
     ex = CAESARAnalyzer()
+    splash.step("interface", "ready")
 
     ex.showMaximized()
 
