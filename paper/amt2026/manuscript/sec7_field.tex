@@ -28,30 +28,30 @@ efficiencies are characterised elsewhere.
 The noise floor of a channel-difference product has to be measured on the difference. The two hot channels share a
 light source, a cavity and a clock, and their zero-air blocks coincide in time, so \fieldnum{155} blocks pair exactly and the
 difference can be formed record by record (Table~\ref{tab:noise_floor}). The channels turn out to be nearly
-uncorrelated, $r = \fieldnum{-0.093}$, so a quadrature assembly would have come within about \fieldnum{4}\,\% of the measured value; on an
+uncorrelated, $r = \fieldnum{-0.093}$, so a quadrature assembly would have come within about \fieldnum{3}\,\% of the measured value; on an
 instrument whose channels shared a drift it would not, and nothing in the fit report distinguishes the two cases.
 
 \begin{table}[t]
-\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product. Standard-deviation values are approximate, recombined from the channel values with $g' = \fieldnum{0.9524}$; robust-scale values are from the earlier evaluation with a channel factor of 0.82 and were not recomputed.}
+\caption{Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two heated channels: 1$\sigma$, 3$\sigma$ detection limit, median at a true zero, and the ratio of the measured 1$\sigma$ to the uncertainty column shipped with the product. Both scales are computed on the \fieldnum{155} paired blocks with $g' = \fieldnum{0.9524}$; the inter-channel correlation is $r = \fieldnum{-0.093}$.}
 \label{tab:noise_floor}
 \begin{tabular}{lll}
 \tophline
  & robust scale & standard deviation \\
 \middlehline
-measured 1$\sigma$ & \fieldnum{0.0676} & $\approx$\fieldnum{0.086}\,ppb \\
-detection limit, 3$\sigma$ & \fieldnum{0.203} & $\approx$\fieldnum{0.257}\,ppb \\
-median value at a true zero & \fieldnum{$+0.0054$}\,ppb & \fieldnum{$+0.0054$}\,ppb \\
-against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.84} & $\approx$\fieldnum{1.06} \\
+measured 1$\sigma$ & \fieldnum{0.0733} & \fieldnum{0.0856}\,ppb \\
+detection limit, 3$\sigma$ & \fieldnum{0.220} & \fieldnum{0.257}\,ppb \\
+median value at a true zero & \fieldnum{$+0.0053$}\,ppb & \fieldnum{$+0.0053$}\,ppb \\
+against the product-column \fieldnum{0.0806}\,ppb & \fieldnum{0.91} & \fieldnum{1.06} \\
 \bottomhline
 \end{tabular}
 \end{table}
 
-The median at a true zero is \fieldnum{$+0.0054$}\,ppb, the same at the channel level and in the difference. A product assembled
+The median at a true zero is \fieldnum{$+0.0053$}\,ppb in the difference (\fieldnum{$+0.0028$} and \fieldnum{$-0.0020$}\,ppb in the channels). A product assembled
 through zero-air interpolation, a Rayleigh correction, a time-interpolated reflectivity, a spectral fit and a channel
-subtraction therefore returns zero when the truth is zero, to a twentieth of its own detection limit. This closes the
+subtraction therefore returns zero when the truth is zero, to a fortieth of its own detection limit. This closes the
 additive chain end to end; a zero test is blind to gain errors, such as the scale discrepancy of Sect.~\ref{sec:3.6}.
 
-The zero-air floor is roughly covered by the uncertainty column shipped with the product, at \fieldnum{0.84} to about \fieldnum{1.06}
+The zero-air floor is roughly covered by the uncertainty column shipped with the product, at \fieldnum{0.91} to \fieldnum{1.06}
 times that column's \fieldnum{0.0806}\,ppb, depending on the scale. This does not conflict with Sect.~\ref{sec:4}: the zero-air
 floor uses the same references minutes apart, whereas the structural budget measures what happens when a reference is
 wrong. In \fieldnum{46.1}\,\% of the budget records the structural

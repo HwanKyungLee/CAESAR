@@ -1,4 +1,4 @@
-"""oculus/{ingest_cursor,watcher,liveness_monitor}.py 단위테스트 (데이터 비의존).
+"""vigil/{ingest_cursor,watcher,liveness_monitor}.py 단위테스트 (데이터 비의존).
 
 커버:
   1) IngestCursor: set/get 왕복, 재시작(새 인스턴스) 후에도 오프셋 복원
@@ -8,7 +8,7 @@
   5) Watcher: 프로파일 라우팅 → flag role·bytepack 시각 복원
   6) liveness_monitor: SKIP/OK/P0 경계 + latest_arrival 폴딩
 
-사용: python oculus/test_watcher.py → 전부 PASS면 exit 0
+사용: python vigil/test_watcher.py → 전부 PASS면 exit 0
 """
 import os
 import shutil
@@ -20,11 +20,11 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.ingest_cursor import IngestCursor
-from oculus.monitors.liveness_monitor import check_liveness, latest_arrival
-from oculus.alert_engine import OK, P0, SKIP
-from oculus.profile import ProfileSet
-from oculus.watcher import Watcher
+from vigil.ingest_cursor import IngestCursor
+from vigil.monitors.liveness_monitor import check_liveness, latest_arrival
+from vigil.alert_engine import OK, P0, SKIP
+from vigil.profile import ProfileSet
+from vigil.watcher import Watcher
 
 _n_pass = 0
 _n_fail = 0

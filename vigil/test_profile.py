@@ -1,4 +1,4 @@
-"""oculus/profile.py 단위테스트 (데이터 비의존, 합성 raw 행).
+"""vigil/profile.py 단위테스트 (데이터 비의존, 합성 raw 행).
 
 커버:
   1) 기본 폴더 프로파일 로드 + 스키마 검증
@@ -11,7 +11,7 @@
   8) 채널 자동탐지(블록 최대값 → signal/noise)
   9) bytepack 시각 복원
 
-사용: python oculus/test_profile.py  → 전부 PASS면 exit 0
+사용: python vigil/test_profile.py  → 전부 PASS면 exit 0
 """
 import json
 import os
@@ -24,7 +24,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.profile import (Profile, ProfileSet, ProfileError, HKField,
+from vigil.profile import (Profile, ProfileSet, ProfileError, HKField,
                             validate_profile_dict, load_profiles)
 
 _n_pass = 0
@@ -76,11 +76,11 @@ def test_invalid_profile():
 
 def test_duplicate_profile_id():
     print("[3b] 중복 profile_id → ProfileError")
-    from oculus.profile import DEFAULT_PROFILE_DIR
+    from vigil.profile import DEFAULT_PROFILE_DIR
     src = os.path.join(DEFAULT_PROFILE_DIR, "caesar_hot.example.json")
     with open(src, encoding="utf-8") as fh:
         d = json.load(fh)  # 유효 프로파일 (같은 id로 두 파일 생성)
-    tmp = tempfile.mkdtemp(prefix="oculus_prof_")
+    tmp = tempfile.mkdtemp(prefix="vigil_prof_")
     try:
         for name in ("a.json", "b.json"):
             with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:

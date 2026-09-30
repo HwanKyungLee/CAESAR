@@ -1,4 +1,4 @@
-"""oculus/alert_engine.py — 경보 등급 공통 어휘 (설계문서 §5, §6).
+"""vigil/alert_engine.py — 경보 등급 공통 어휘 (설계문서 §5, §6).
 
 `liveness_monitor`·`monitors/hk_monitor`(그리고 앞으로 올 r_monitor·conc_monitor)가
 전부 같은 심각도 어휘를 쓰게 한다 — 각자 OK/P0 같은 상수를 따로 정의하면 나중에
@@ -21,7 +21,7 @@ def worse(a: str, b: str) -> str:
 
 def aggregate(results):
     """[(name, status, msg, metrics), ...] → (전체등급, 요약문). health_checks.overall()과 같은 역할,
-    Oculus 자체 등급 어휘(P0/P1/P2)로. 빈 리스트면 SKIP."""
+    Vigil 자체 등급 어휘(P0/P1/P2)로. 빈 리스트면 SKIP."""
     if not results:
         return SKIP, "판정 항목 없음"
     worst = SKIP

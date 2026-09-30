@@ -1,4 +1,4 @@
-"""oculus/monitors/r_monitor.py 단위테스트 (합성 ZA/He 스펙트럼, 실제 Rayleigh 물리 사용).
+"""vigil/monitors/r_monitor.py 단위테스트 (합성 ZA/He 스펙트럼, 실제 Rayleigh 물리 사용).
 
 합성 스펙트럼은 core.physics.RayleighPhysics로 정확한 alpha_za/alpha_he를 구한 뒤
 그 식을 대수적으로 역산해 "목표 R"이 나오도록 I_za/I_he 비율을 만든다 — 그래서
@@ -12,7 +12,7 @@ tools.reflectance_calc.ReflectanceCalculator의 실제 품질게이트(contrast 
   4) wavecal 없음 → 실패 1회는 P1, 연속 3회면 P0
   5) contrast 붕괴(ZA≈He) → ReflectanceCalculator 품질게이트가 실제로 막고 P1/P0로 이어짐
 
-사용: python oculus/monitors/test_r_monitor.py → 전부 PASS면 exit 0
+사용: python vigil/monitors/test_r_monitor.py → 전부 PASS면 exit 0
 """
 import os
 import sys
@@ -24,8 +24,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from core.physics import RayleighPhysics
-from oculus.alert_engine import OK, P0, P1, P2
-from oculus.monitors.r_monitor import RMonitor
+from vigil.alert_engine import OK, P0, P1, P2
+from vigil.monitors.r_monitor import RMonitor
 
 _n_pass = 0
 _n_fail = 0

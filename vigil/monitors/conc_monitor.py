@@ -1,4 +1,4 @@
-"""oculus/monitors/conc_monitor.py — 기체 농도 경량 DOAS 피팅 (설계문서 §1.1, M3).
+"""vigil/monitors/conc_monitor.py — 기체 농도 경량 DOAS 피팅 (설계문서 §1.1, M3).
 
 `core/param_optimizer.fit_scan()`(단일 스캔 핏 → 지표, 이 세션의 옵티마이저 CLI들과
 같은 단일 출처)을 그대로 재사용한다. 이 모듈이 얹는 건 딱 세 가지:
@@ -29,7 +29,7 @@ import numpy as np
 
 from core.doas_fit import DoasFitter
 from core import param_optimizer as PO
-from oculus.alert_engine import OK, P0, P1, P2, worse
+from vigil.alert_engine import OK, P0, P1, P2, worse
 from tools import optimize_params as OP
 
 FAIL_STREAK_FOR_P0 = 3   # 연속 이 이상 핏 실패하면 P0로 격상(r_monitor.py와 같은 관례)
@@ -72,14 +72,14 @@ class ConcMonitor:
             if not isinstance(fitset_policy, bool):
                 raise TypeError("FitSet allow_negative_gas must be bool")
             if cfg.allow_negative_gas != fitset_policy:
-                raise ValueError("Oculus profile allow_negative_gas disagrees with FitSet")
+                raise ValueError("Vigil profile allow_negative_gas disagrees with FitSet")
             self.allow_negative_gas = fitset_policy
             self.gas_policy_provenance = "FitSet"
         else:
-            warnings.warn("legacy FitSet has no allow_negative_gas; using explicit Oculus profile policy",
+            warnings.warn("legacy FitSet has no allow_negative_gas; using explicit Vigil profile policy",
                           RuntimeWarning, stacklevel=2)
             self.allow_negative_gas = cfg.allow_negative_gas
-            self.gas_policy_provenance = "legacy FitSet fallback: Oculus profile"
+            self.gas_policy_provenance = "legacy FitSet fallback: Vigil profile"
 
         self._za_buf: list = []
         self._i0: Optional[np.ndarray] = None

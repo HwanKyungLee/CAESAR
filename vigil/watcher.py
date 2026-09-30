@@ -1,4 +1,4 @@
-"""oculus/watcher.py — Ingest Watcher (설계문서 §1.4, §2, §4).
+"""vigil/watcher.py — Ingest Watcher (설계문서 §1.4, §2, §4).
 
 raw 폴더를 폴링해 새로 append된 완성된 줄만 읽어 RowEvent로 흘려보낸다.
 
@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from oculus.ingest_cursor import IngestCursor
-from oculus.profile import Profile, ProfileSet
+from vigil.ingest_cursor import IngestCursor
+from vigil.profile import Profile, ProfileSet
 
 
 @dataclass
@@ -34,7 +34,7 @@ class RowEvent:
     flag: Optional[int]
     role: Optional[str]          # profile.flag_role(flag) — 'sampling'|'za_inject'|... or None
     row_time: Optional[datetime]  # bytepack에서 복원한 행 내부 시각 (프로파일 매치 실패시 None)
-    arrival_time: datetime        # Oculus가 이 행을 관측한 벽시계 시각(now()) — liveness 기준
+    arrival_time: datetime        # Vigil이 이 행을 관측한 벽시계 시각(now()) — liveness 기준
     row: list                    # 파싱된 float 행 전체(HK/채널 판독용)
 
 
@@ -133,10 +133,10 @@ class Watcher:
         for name, group in seen.items():
             if len(group) > 1 and name not in self._warned_dupes:
                 self._warned_dupes.add(name)
-                print(f"[oculus][WARN] 같은 파일명이 {len(group)}곳에 있다 — "
+                print(f"[vigil][WARN] 같은 파일명이 {len(group)}곳에 있다 — "
                       f"같은 스캔을 중복 수집한다: {name}")
                 for p in group:
-                    print(f"[oculus][WARN]     {p}")
+                    print(f"[vigil][WARN]     {p}")
 
 
     def poll(self) -> list:

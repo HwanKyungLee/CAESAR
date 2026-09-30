@@ -1,4 +1,4 @@
-"""oculus/monitors/lamp_monitor.py — 램프(LED) 세기 헬스.
+"""vigil/monitors/lamp_monitor.py — 램프(LED) 세기 헬스.
 
 HK 는 LED **온도**만 본다. 빛의 **세기**가 계단으로 바뀌거나(재정렬·필터 재장착·
 LED 전류 조정) 꺼져도(광경로 차단) 지금까지는 아무 경보가 없었다. ZA(제로에어)
@@ -33,7 +33,7 @@ from typing import Optional
 
 import numpy as np
 
-from oculus.alert_engine import OK, P0, P1, P2
+from vigil.alert_engine import OK, P0, P1, P2
 
 WARN_REL = 0.05
 ALARM_REL = 0.15          # = core.step_guard.REL_FLOOR (핫 정상 drift p99.5 의 ~2배)

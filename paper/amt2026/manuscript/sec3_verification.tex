@@ -136,7 +136,12 @@ spectrum's measured temperature and pressure used for the unit conversion and re
 NO$_2$-conditional $\chi^2$ envelope, the NO$_2$ amounts agree with $r^2 \ge \fieldnum{0.990}$ in all three configurations
 (Table~\ref{tab:qdoas_field}). The Deming slope QDOAS/Augur is \fieldnum{1.039} in the cold configuration and \fieldnum{1.063} and
 \fieldnum{1.043} in the 180 and 300\,$^{\circ}$C configurations, where $r^2 = \fieldnum{1.000}$, so the heated-channel NO$_2$ scale
-differs by \fieldnum{4}--\fieldnum{6}\,\% for a reason we have not identified. The weak absorbers agree less well (CHOCHO $r^2$
+differs by \fieldnum{4}--\fieldnum{6}\,\%. The difference is partly tied to the wavelength shift. Within each day the QDOAS/Augur ratio rises with the fitted
+shift by \fieldnum{0.9}\,\% per pixel in the 300\,$^{\circ}$C configuration (positive on \fieldnum{49} of \fieldnum{50} days; median fitted shift
+\fieldnum{$-5.8$}\,px, both codes finding the same shift) and by \fieldnum{0.6}\,\% per pixel at 180\,$^{\circ}$C (\fieldnum{45} of \fieldnum{49} days). It does not
+depend on the fitted stretch (Spearman $\rho = \fieldnum{-0.006}$). Augur shifts the pixel-domain reference, QDOAS the
+wavelength-domain one through the calibration polynomial \citep{Beirle_2013}. The ambient-temperature configuration,
+whose shift is fixed, still differs by \fieldnum{3.9}\,\%, so a common component of about \fieldnum{4}\,\% remains unidentified. The weak absorbers agree less well (CHOCHO $r^2$
 \fieldnum{0.889}--\fieldnum{0.959}, slope \fieldnum{0.81}--\fieldnum{1.19}; H$_2$O slope \fieldnum{1.04}--\fieldnum{1.38}). Where the codes diverge most --
 the wavelength shift in the cold window, and with it the weak absorbers there (Sect.~\ref{sec:5.1}) -- the data do not
 determine the shift, so neither code's value is established by its fit.
@@ -176,13 +181,11 @@ deterministic under a stated seed.
 Group B shows that the reported uncertainty can fail for reasons that are calculable in advance. Augur returns
 scatter-to-reported ratios of 1.32, 1.09 and 1.65 for white, doubled and autocorrelated noise, against 1.19, 1.33 and
 1.57 from the reference implementation: both codes pass one condition of three, and they fail different ones. Fixing
-the wavelength shift at its true value brings Augur's white-noise ratio from 1.32 to 1.19, the reference
-implementation's value. The difference between the codes under white noise therefore lies in the nonlinear degree of
-freedom and its search box, not in the propagated covariance. The correlated-noise result follows from the
-noise model: an AR(1) residual with $\rho = 0.5$ inflates the variance of a sum by $(1+\rho)/(1-\rho) = 3$, so a
-covariance built on an independence assumption understates the scatter by $\sqrt{3} = 1.73$. The measured 1.57 and
-1.65 sit just below it, and fixing the shift moves Augur to 1.75, because the free shift had absorbed part of the
-correlated structure (Fig.~\ref{fig:3}f). The shortfall under correlated noise is thus predictable from the noise model.
+the wavelength shift at its true value brings Augur's white-noise ratio to 1.19, so the difference between the codes lies
+in the nonlinear degree of freedom and its search box, not in the propagated covariance. An AR(1) residual with
+$\rho = 0.5$ inflates the variance of a sum by $(1+\rho)/(1-\rho) = 3$, so a covariance built on independence understates
+the scatter by $\sqrt{3} = 1.73$. The measured 1.57 and 1.65 sit just below it, and fixing the shift moves Augur to 1.75,
+because the free shift had absorbed part of the correlated structure (Fig.~\ref{fig:3}f).
 
 A deliberately plain profiled grid search is included as a reference implementation whose scorecard shows how a
 submission is read. The benchmark does not rank codes: groups C and E are reported rather than passed or failed,
@@ -194,16 +197,36 @@ because no implementation is expected to cover what they measure.
 The alkyl nitrate product is a difference between two channels, so their relative scale enters it directly. NO$_2$
 was injected into both heated channels, with both ovens at their operating temperatures, at two concentration steps
 on 2026-08-10/11. The steps did not equilibrate (the delivery line was still passivating), so only the ratio between
-the channels is used. In the original processing the median of the per-record ratios was 1.2278 at the lower step
-and 1.2276 at the higher. The median channel readings were 14.75 and 11.97\,ppb, and 71.57 and 58.16\,ppb, whose ratios
-are 1.2322 and 1.2306. An origin regression over the 58 one-minute means of one file gives a slope of 0.81666 with
-$r^2$ 0.9998. Reprocessed with the current code, block 2053 reads 1.239 times block 4101
-(interquartile range 1.231--1.255, $n = 41$ records with block 4101 above 20\,ppb).
+the channels is used. In the original processing the median of the per-record ratios was 1.228 at both steps. The median channel readings
+were 14.75 and 11.97\,ppb, and 71.57 and 58.16\,ppb, whose ratios are 1.232 and 1.231. An origin regression over the 58
+one-minute means of one file gives a slope of 0.817 with $r^2$ 0.9998, the reciprocal of the same laboratory ratio.
+Reprocessed with the current code, block 2053 reads 1.239 times block 4101 (interquartile range 1.231--1.255, $n = 41$
+records with block 4101 above 20\,ppb).
 
-The relative scale is therefore constant over the range tested. The laboratory ratio describes the calibration state
-of August, whereas the campaign product uses $g' = \fieldnum{0.952}$ for 18 May--5 June, from a field injection. The test
+The relative scale is therefore constant over the concentration steps within this test. It is not constant between
+calibration states (Table~\ref{tab:relscale}): the ratio differs by up to 30\,\% between them, and the campaign product
+uses the value of each field state, $g' = \fieldnum{0.952}$ for 18 May--5 June, not the laboratory one.
+ The test
 also leaves the absolute recovery of either channel open and cannot separate optical from thermal causes of the
 offset between the channels, because both cells were at their operating temperatures throughout.
+
+
+\begin{table}[t]
+\caption{Relative response of the two heated channels, block 2053 over block 4101 (300\,$^{\circ}$C over 180\,$^{\circ}$C),
+by calibration state; field periods in local time (KST).}
+\label{tab:relscale}
+\begin{tabular}{lll}
+\tophline
+state & period or date & ratio \\
+\middlehline
+field injection, S1 & 18 May--5 June & \fieldnum{0.952} \\
+field injection, S2 & 5--21 June & \fieldnum{0.962} \\
+field injection, S3 & 21 June--10 July & \fieldnum{1.014} \\
+laboratory, current code & August & 1.239 (IQR 1.231--1.255) \\
+laboratory, original processing & August & 1.228--1.232 \\
+\bottomhline
+\end{tabular}
+\end{table}
 
 \subsection{What is not verified here}
 \label{sec:3.6}
@@ -214,7 +237,24 @@ ordinary-least-squares gains of \fieldnum{0.57} (180\,$^{\circ}$C) and \fieldnum
 channel has \fieldnum{0.92}--\fieldnum{1.00}. The median ratio of heated to ambient-temperature NO$_2$ is \fieldnum{0.72}, although the heated
 channels measure NO$_2$ plus thermally produced NO$_2$ and should read at least as high. A laboratory injection with the
 ovens at 300 and 180\,$^{\circ}$C gave a block-2053 sensitivity of at least 1.08 relative to the cylinder, so oven
-temperature alone does not explain the discrepancy, and its cause is unresolved. The error is multiplicative and
+temperature alone does not explain the discrepancy.
+
+The discrepancy is not a time-base artefact. Before 29 May the heated channels correlate with the analyser at zero lag
+($r = \fieldnum{0.985}$) and not at $\pm 9$\,h ($r \le \fieldnum{0.03}$), and their origin slopes are \fieldnum{0.61} (300\,$^{\circ}$C) and
+\fieldnum{0.55} (180\,$^{\circ}$C) before 29 May and \fieldnum{0.58} and \fieldnum{0.49} after. It is present from the first full day (\fieldnum{0.59} on
+20 May) and in every calibration state (median ratio to the analyser \fieldnum{0.59}, \fieldnum{0.55} and \fieldnum{0.50} in S1--S3), declining
+somewhat later in the campaign, so it is not caused by a single intervention. Ozone-driven NO$_2$ loss in the ovens,
+one of the known thermal-dissociation inlet interferences \citep{Thieser_2016,Dewald_2021,Wust_2025}, is not supported:
+at night the 300\,$^{\circ}$C/ambient-temperature ratio rises with O$_3$ across O$_3$ terciles (\fieldnum{0.69}, \fieldnum{0.71}, \fieldnum{0.78}), and
+the 180\,$^{\circ}$C channel reads lower than the 300\,$^{\circ}$C one. Factors common to the laboratory test and field operation --
+the $R_L = 1$ assumption, the gas temperature recorded with each spectrum (median \fieldnum{31}--\fieldnum{33}\,$^{\circ}$C), the
+cross-section temperature and the retrieval code, which QDOAS reproduces to \fieldnum{4}--\fieldnum{6}\,\% -- cannot produce a factor
+of \fieldnum{0.6}, because the same processing gave at least 1.08 in the laboratory. The remaining candidates are what differed
+between the two: the field calibration references (reflectivity, helium and zero air), the sampling path upstream of
+the cavities, the ambient matrix, and the reference analyser, although the ambient-temperature agreement of
+\fieldnum{0.92}--\fieldnum{1.00} bounds a molybdenum-converter interference to a few per cent. Separating them needs a standard
+delivered through the complete sampling path under field calibration, and the cause remains unresolved. The error is
+multiplicative and
 leaves the residual, the reported uncertainty and every context field proposed in Sect.~\ref{sec:6} unchanged
 (Sect.~\ref{sec:6.5}). No absolute accuracy is claimed. Sections~\ref{sec:3.1} and \ref{sec:3.3} verify the retrieval
 against its own forward model and against another implementation of that model, which bounds implementation error

@@ -9,8 +9,7 @@ schedule is worth changing. The knot gate (Sect.~\ref{sec:6.3}) and the coverage
 implemented in Augur and evaluated against the campaign. The reporting convention of
 Sect.~\ref{sec:6.1} is implemented in part: the termination state, the distance to the nearest knot and the identity
 of the reference file are exported, while the build time and time convention of each reference are specified for
-implementation. The measurements reported here leave the question of block length (Sect.~\ref{sec:6.2}) open, and
-Sect.~\ref{sec:6.5} names the errors that none of these measures reaches.
+implementation; Sect.~\ref{sec:6.5} names the errors that none of these measures reaches.
 
 \subsection{Three numbers per retrieval, not one}
 \label{sec:6.1}
@@ -24,7 +23,10 @@ Every retrieved amount should be reported with three numbers:
 \item a context flag recording the state of the references the scan depends on.
 \end{enumerate}
 The fit uncertainty is a statement about the residual of a model assumed correct, not about the inputs to that model,
-and keeping the three separate preserves that distinction for whoever uses the product. The fit uncertainty should
+and keeping the three separate preserves that distinction for whoever uses the product. Reporting per-record uncertainty
+components with different correlation scales (random, structured, common) is established practice for Earth-observation
+climate data records \citep{Merchant_2017}, building on \citet{JCGM_2008}; the three-number convention applies it to a single
+retrieval. The fit uncertainty should
 travel with the termination state of the nonlinear stage (Sect.~\ref{sec:2.6}), and, where a nonlinear parameter may be
 unidentifiable, with the ratio of the objective at the returned value to that at a fixed reference point
 (Sect.~\ref{sec:5.1}). The value of the context flag lies in which fields it carries, so we specify them per record and
@@ -48,8 +50,7 @@ the time convention the reference was built under & a correction applied upstrea
 \end{table}
 
 The last two fields address the failure of Sect.~\ref{sec:5.4}. No provenance field detects the clock error of the
-raw record itself, which was found against an external time reference and corrected in the reader two months after
-the deployment ended. The fields catch the failure that followed: a reflectivity reference built before the
+raw record itself (Sect.~\ref{sec:5.4}). The fields catch the failure that followed: a reflectivity reference built before the
 correction and never rebuilt. Any correction applied upstream invalidates every derived product built before it, and
 a pipeline whose derived products do not record their build convention cannot tell that this has happened.
 
@@ -57,9 +58,8 @@ The mismatch was visible in the data as a nine-hour run of out-of-range records 
 first zero-air block at 02:42, the first reflectivity knot at 11:40 -- with \fieldnum{42.3}\,\% of that day extrapolated. The
 distance and in-range fields would have carried that anomaly into the product on the first run after the correction,
 rather than two months later. Identifying its cause needed the build time of the reflectivity file and the convention
-it was built under, so detection and diagnosis need separate fields. The same tags allow a cheaper protection, a load-time check of the reference's time-convention tag against that of the
-spectra that refuses a mismatch. We recommend the check where the tags exist and the report in every case, because the
-report keeps the error interpretable for later readers.
+it was built under, so detection and diagnosis need separate fields. The same tags allow a load-time check that refuses a reference whose time-convention tag differs from that of the
+spectra; we recommend it where the tags exist, and the report in every case so that the error stays interpretable.
 
 The structural term cannot be obtained in closed form. The amplification factor $I_0/(I_0-I)$, which governs how an
 error in the zero-air reference enters the extinction, varies by a factor of forty between records and is available
@@ -98,8 +98,7 @@ The ordering by $s$ is the ordering by concentration: the two-hour interval from
 19 May alone holds \fieldnum{37}\,\% of the reflectivity term's variance. The reflectivity hours form far fewer contiguous runs
 than the same number of hours drawn at random, so they are episodes rather than scattered outliers, and a flag can
 address them. The etalon hours are indistinguishable from random, the signature of a term no flag will help. On the
-robust scale the ordering of the first two terms reverses -- $I_0$ carries \fieldnum{74}\,\% of the single-term quadrature sum
-and $R$ only \fieldnum{17}\,\% -- which is why Table~\ref{tab:2} reports both scales. A term that is small for a typical record
+robust scale the ordering of the first two terms reverses (Sect.~\ref{sec:4.4}), which is why Table~\ref{tab:2} reports both scales. A term that is small for a typical record
 and largest in total is the one a campaign-mean uncertainty hides.
 
 \subsection{Calibration blocks: interval length and scans per block}
@@ -112,12 +111,10 @@ measured to increase the interpolation error from \fieldnum{0.87}\,\% to \fieldn
 shorter interval would buy little; in the 300\,$^{\circ}$C channel the interval carries curvature (Table~\ref{tab:splithalf_loo}),
 and shorter intervals would help.
 
-The other lever is the number of scans averaged into each calibration block, and the evidence on it is not
-conclusive (Appendix~\ref{app:C}). Within the operational block ($N = 34$ scans, $T = 32$\,s), doubling the number of
+The other lever is the number of scans averaged into each calibration block (Appendix~\ref{app:C}). Within the operational block ($N = 34$ scans, $T = 32$\,s), doubling the number of
 scans averaged reduces the scatter of contiguous sub-blocks by \fieldnum{7}\,\% in the ANs channel, against the 29\,\% that
-independent scans would give. The measurable range lies entirely below the operational block length, so this evidence is
-mildly unfavourable rather than decisive, and the measurement that would settle it, operating one longer block, has not
-been made. Even with white averaging the return would be modest. The zero-air term carries
+independent scans would give. The measurable range lies below the operational block length, so the evidence is not decisive;
+operating one longer block would settle it. Even with white averaging the return would be modest. The zero-air term carries
 \fieldnum{45}\,\% of the $\Sigma$ANs variance, so a fourfold block, which would raise the calibration duty from 1.20 to 3.89\,\%,
 would lower the structural budget from \fieldnum{0.1236} to \fieldnum{0.1008}\,ppb (\fieldnum{18.5}\,\%). Flagging the few defective
 reflectivity intervals would lower it to \fieldnum{0.0901}\,ppb. That ordering -- flagging before averaging --
@@ -183,8 +180,7 @@ The first is a multiplicative gain error. Against a co-located NIER analyser the
 factor of about \fieldnum{0.6} while the ambient-temperature channel agrees (Sect.~\ref{sec:3.6}). A gain leaves the residual, the
 reported uncertainty, the termination state and every distance and provenance field unchanged, and the zero-air test
 of Sect.~\ref{sec:7.2} is blind to it because a gain applied to zero is zero. Only a comparison with an independent
-measurement of the same quantity -- a reference analyser, a cylinder, or a channel that should agree -- reveals it,
-and such a comparison does not by itself identify the cause.
+measurement of the same quantity reveals it, and does not by itself identify the cause.
 
 The second is the raw light level. All six ambient-temperature excursions of Sect.~\ref{sec:7.3} coincide with spectra
 that fell below 30\,\% of their usual count at 460\,nm; the residual finds them, and the reference context is abnormal

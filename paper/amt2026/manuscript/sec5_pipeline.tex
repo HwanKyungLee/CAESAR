@@ -22,11 +22,13 @@ In the cold channel the objective is flat. For twelve ambient spectra the ratio 
 profiled residual sum of squares has a median of \fieldnum{1.0120} and never exceeds \fieldnum{1.0611}. In a larger set of \fieldnum{165}
 spectra the minimum lies at an edge of the scanned range in \fieldnum{77}\,\% of cases, and evaluating the objective at zero
 shift rather than at its minimum costs \fieldnum{0.01}\,\% to \fieldnum{4.35}\,\%. The same scan in the hot PNs channel spans
-a factor of $\fieldnum{3.09\times10^{5}}$. Two implementations confirm that the consequence is not numerical. Under matched
-settings the shift returned for the same spectra is \fieldnum{$-2.014$}\,px in this work, with \fieldnum{85.5}\,\% of fits terminating
+a factor of $\fieldnum{3.09\times10^{5}}$. Operationally the cold shift is fixed at $-0.5$\,px, so the following comparison uses a free shift under settings matched
+to QDOAS, which shifts and stretches the reference in the wavelength domain \citep{Beirle_2013}. With the shift free,
+the value returned for the same spectra is \fieldnum{$-2.014$}\,px in this work, with \fieldnum{85.5}\,\% of fits terminating
 at a bound, against \fieldnum{$-0.088$}\,px from QDOAS with \fieldnum{4.5}\,\% at a bound; tightening the QDOAS convergence threshold to
-$10^{-12}$ changes nothing. Both codes converge and report values two pixels apart, because the data do not
-distinguish them.
+$10^{-12}$ changes nothing. The objective map, which involves no optimiser, already places the minimum at an edge in \fieldnum{77}\,\% of spectra, so
+bound termination follows from the flat objective. Both codes converge and report values two pixels apart, because the
+data do not distinguish them.
 
 The same channel locates the shift when the absorber is strong enough. On 2 June NO$_2$ from a cylinder standard
 (nominally 10\,$\mu$mol\,mol$^{-1}$ in N$_2$, past its certification date and used here only for its spectrum) was added
@@ -77,8 +79,7 @@ another. The operational configuration (Appendix~\ref{app:A}) bounds the shift t
 $[-5, +5]$\,px in hot PNs and fixes it at $-0.5$\,px in the cold channel. In a sensitivity run that instead bounded the
 cold shift to $[-1, +1]$\,px, every one of the \fieldnum{22} base fits returned exactly \fieldnum{$-1.000$}\,px, the bound itself, and was
 reported as converged. In the production propagation of Sect.~\ref{sec:4} the cold shift is held fixed, as in operation,
-and moves by exactly zero in every record, which confirms the configuration but also means the channel contributes
-no information about the parameter.
+so the channel contributes no information about the parameter.
 
 On the clock-aligned basis of Table~\ref{tab:2}, \fieldnum{187} of the \fieldnum{9034} $\Sigma$ANs records are excluded because a fit of
 either channel, unperturbed or perturbed, terminated at a bound. The split by perturbation was recorded only for the
@@ -162,7 +163,8 @@ $\Sigma$ANs & \fieldnum{0.100} & \fieldnum{0.1418} & \fieldnum{3.7} \\
 \end{table}
 
 The displacement moves the alkyl nitrate product by \fieldnum{0.100}\,ppb, between three and four times the reflectivity term of
-the budget and \fieldnum{1.44} times the whole of it. It is the largest term we can quantify within the retrieval; the
+the budget and \fieldnum{1.44} times the whole of it; the ratio compares a systematic displacement with a record-to-record
+budget and indicates scale only. It is the largest term we can quantify within the retrieval; the
 multiplicative scale discrepancy of Sect.~\ref{sec:3.6} is larger but lies outside it. It is not in Table~\ref{tab:2},
 which measures what a reference's own uncertainty costs rather than what using the wrong reference costs.
 
@@ -198,9 +200,8 @@ pre-correction cancellation was an artefact of an error the two channels shared.
 contaminated product, and the budget measured on it inherited them.
 
 The cost of the displacement depends on how fast the reflectivity was moving. Across the boundary where the clock was
-corrected, the affected side gives \fieldnum{0.0622}\,ppb against \fieldnum{0.0000}\,ppb on the unaffected side, which confirms that the
-realignment touched only the intended knots. The displacement thus costs less near the boundary than in the budget
-window, where the reflectivity moved fastest. The budget-window figure of \fieldnum{0.100}\,ppb is the value to quote;
+corrected, the affected side gives \fieldnum{0.0622}\,ppb against \fieldnum{0.0000}\,ppb on the unaffected side, confirming that the
+realignment touched only the intended knots; near the boundary the reflectivity moved more slowly than in the budget window. The budget-window figure of \fieldnum{0.100}\,ppb is the value to quote;
 \fieldnum{0.0622}\,ppb is range information, not a worst case.
 
 The underlying cause was a stale derived file. The heated-channel clock itself ran on local time until 29 May and was

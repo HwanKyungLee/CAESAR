@@ -1,4 +1,4 @@
-"""oculus/find_flags.py — raw .dat에서 flag 분포를 훑고 필요한 구간만 뽑아내는 도구.
+"""vigil/find_flags.py — raw .dat에서 flag 분포를 훑고 필요한 구간만 뽑아내는 도구.
 
 왜 필요한가
 -----------
@@ -13,13 +13,13 @@ raw 한 파일은 1시간 ≈ 3,700 스캔이고 한 줄이 25 KB라 **파일 �
 사용
 ----
     # 1) 이 파일에 어떤 flag가 몇 번 나오는지 + 어디서 바뀌는지
-    python oculus/find_flags.py "D:/data/2026-06-02-006.dat"
+    python vigil/find_flags.py "D:/data/2026-06-02-006.dat"
 
     # 2) 폴더 전체를 훑어 교정 스캔이 든 파일 찾기
-    python oculus/find_flags.py "D:/data/CAESAR"
+    python vigil/find_flags.py "D:/data/CAESAR"
 
     # 3) flag 전환 지점 주변만 뽑아 작은 파일로 저장(업로드용)
-    python oculus/find_flags.py "D:/data/2026-06-02-006.dat" --extract sample.dat
+    python vigil/find_flags.py "D:/data/2026-06-02-006.dat" --extract sample.dat
 
 옵션
 ----
@@ -126,7 +126,7 @@ def main(argv=None) -> int:
             for p in interesting:
                 print(f"    {p}")
             print("\n이 중 하나를 골라 --extract 로 뽑으세요:")
-            print(f'    python oculus/find_flags.py "{interesting[0]}" --extract sample.dat')
+            print(f'    python vigil/find_flags.py "{interesting[0]}" --extract sample.dat')
         else:
             print("대기 측정(flag=1)만 발견 — 이 폴더엔 교정 스캔이 없습니다.")
         return 0

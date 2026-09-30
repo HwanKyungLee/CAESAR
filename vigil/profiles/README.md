@@ -1,6 +1,6 @@
-# Oculus 인스트루먼트 프로파일
+# Vigil 인스트루먼트 프로파일
 
-Oculus가 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 읽어** 모니터링한다"는 원칙
+Vigil이 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 읽어** 모니터링한다"는 원칙
 (설계문서 §0-A.6 · §2-A)을 실현하는 설정 계층이다. `Cold`/`Hot`/`PNs`/`ANs` 같은 이름은
 채널 구성·캐비티 선택에 따라 매번 달라지므로, 이런 것들을 코드에서 빼내 **프로파일 JSON**으로
 옮긴다. 파싱·경보 로직은 프로파일이 선언한 열지도·밴드·flag 규약만 본다.
@@ -18,7 +18,7 @@ Oculus가 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 �
 
 ## 동작 방식
 
-1. Oculus는 이 폴더의 프로파일을 전부 로드한다.
+1. Vigil은 이 폴더의 프로파일을 전부 로드한다.
 2. 감시 폴더에서 raw 파일을 만나면 `match`(우선 `n_columns`, 보조 `filename_glob`)로
    프로파일을 **라우팅**한다. → 한 인스턴스가 Cold·Hot 등 여러 레이아웃을 동시에 처리(§0-A.5).
 3. 매칭된 프로파일의 열지도로 헤더·채널·HK를 뽑고, `flags`로 측정 단계를 구분하고,
@@ -52,8 +52,8 @@ Oculus가 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 �
 
 ```bash
 pip install jsonschema
-python -c "import json,jsonschema; s=json.load(open('oculus/profiles/_schema.json')); \
-jsonschema.validate(json.load(open('oculus/profiles/caesar_hot.example.json')), s); print('valid')"
+python -c "import json,jsonschema; s=json.load(open('vigil/profiles/_schema.json')); \
+jsonschema.validate(json.load(open('vigil/profiles/caesar_hot.example.json')), s); print('valid')"
 ```
 
 ## 실데이터 검증 (2026-06-02 샘플, Hot 1행 / Cold 4행)

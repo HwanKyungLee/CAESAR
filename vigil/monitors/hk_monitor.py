@@ -1,7 +1,7 @@
-"""oculus/monitors/hk_monitor.py — HK(Housekeeping) 밴드 헬스 (설계문서 §1.3, M1).
+"""vigil/monitors/hk_monitor.py — HK(Housekeeping) 밴드 헬스 (설계문서 §1.3, M1).
 
 프로파일의 HK 지도가 물리 환산·밴드판정을 이미 갖고 있다(`profile.HK.read()`) —
-이 모듈은 그 결과를 Oculus의 P0/P1/P2 어휘(§5)로 옮기고, CCD 포화를 더한다.
+이 모듈은 그 결과를 Vigil의 P0/P1/P2 어휘(§5)로 옮기고, CCD 포화를 더한다.
 피팅이 필요 없어(§7 "두 번째로 싸고 가치 큼") watcher가 이미 파싱해 둔 행만 있으면 된다.
 
 등급 매핑(§5 예시에 맞춤):
@@ -15,8 +15,8 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from oculus.alert_engine import OK, P0, P1, P2, worse
-from oculus.profile import Profile, SEVERITY_ALARM, SEVERITY_WARN
+from vigil.alert_engine import OK, P0, P1, P2, worse
+from vigil.profile import Profile, SEVERITY_ALARM, SEVERITY_WARN
 
 
 def _fmt(label: str, val: float, unit: Optional[str]) -> str:

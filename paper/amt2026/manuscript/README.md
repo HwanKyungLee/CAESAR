@@ -3,7 +3,9 @@
 *Augur: an α-domain variable-projection DOAS retrieval, and what its diagnostics reveal that standard fit reports do not*
 (Atmospheric Measurement Techniques, research article). Assembled 2026-09-28 from the section drafts listed below.
 
-**Note (2026-09-29):** `main.pdf` in this folder could not be overwritten (the file was locked, probably open in a viewer); the current build is `main_build_2026-09-29.pdf` — rename it to `main.pdf` once the old file is closed.
+**Note (2026-09-30):** `main.pdf` and `main_fieldnum_coloured.pdf` in this folder were overwritten with the 2026-09-30 build (the 09-29 lock is gone; `main_build_2026-09-29.pdf` no longer exists).
+
+**Status (2026-09-30, follow-up edit round A–F).** §3.6 cause paragraph (time-base test, calibration states, O$_3$ terciles, bound from the laboratory test); §3.3 shift dependence of the QDOAS scale; §2.9 measured runtimes; external-review fixes D1–D12 (abstract 250 words without the 1.44 ratio; §3.5 digits and new Table 4 `tab:relscale`; LOO scope; §4.5 wording; §5.1 fixed-shift framing; Table 13 noise floor recomputed with g′ = 0.9524; cold "earlier run" row removed from Table 5; §4 topic sentences; Stutz/Hausmann, Merchant/JCGM and Horbanski citations); 8 new bib entries (30 total). Main text 12,620 words by the internal counter (12,150 before, +470). 45 pages; 0 errors, 0 undefined references/citations, 0 overfull boxes. Details and old→new numbers in `CHANGES_2026-09-30_edit.md`.
 
 **Status (2026-09-29, after the evaluation edit pass).** Abstract rewritten to 246 words; research questions stated in §1 ¶2; main text cut from 16,215 to 12,150 words (running text, this README's counter; ≈13,190 on the evaluation's count) by moving implementation detail to Appendix B5–B6 and supplementary budget analyses to a new Appendix D, merging duplicated passages and folding the four 'What the pipeline could report instead' blocks into §6.1 pointers; new §4.6 on previous uncertainty treatments; sentences over 60 words 23 → 0, over 40 words 121 → 37; bold removed from running text; captions ≤ ~120 words; 19 uncited bib entries removed, one reference added; AI-use disclosure and [AUTHOR] placeholders added. No number changed (number-invariance diff in `CHANGES_2026-09-29_edit.md`). 43 pages (main text pp. 1–31).
 
@@ -28,7 +30,7 @@ latexmk -pdf main.tex          # or: pdflatex main; bibtex main; pdflatex main; 
 ```
 `main.pdf` in this folder was built on 2026-09-28 with TinyTeX 2026.09 (pdfTeX + BibTeX): **0 errors, 0 undefined
 references or citations, 0 overfull boxes, 0 BibTeX warnings**. The only remaining warning is "Text page 12 contains only
-floats" (Fig. 2, a full-page float). 43 pages (rebuilt 2026-09-29 after the evaluation edit pass; 48 after Phase 3, 46 after Phase 1+2). Main text pp. 1–31 (was 1–38).
+floats" (Fig. 2, a full-page float). 45 pages (rebuilt 2026-09-30 after the follow-up round; 43 on 2026-09-29 after the evaluation edit pass; 48 after Phase 3, 46 after Phase 1+2). Main text through §8 ends before Appendix A on p. 33 (2026-09-30; was pp. 1–31 on 09-29, 1–38 earlier).
 
 copernicus.cls needs a few packages that a minimal TeX install lacks: `cancel`, `supertabular`, `newunicodechar`,
 `accents`, `subfloat`, `fontawesome5`, `fontawesome` (v4, for `fontawesomesymbols-*.tex`), `regexpatch`, and `t5enc.def`
@@ -46,8 +48,8 @@ from `vntex`. With TeX Live/MiKTeX: `tlmgr install cancel supertabular newunicod
 | `abstract.tex` | Abstract | 초록 v5 (2026-09-21, 09-27 edits) |
 | `sec1_intro.tex` | 1 Introduction (+ Fig. 1 float) | §1 v1 |
 | `sec2_retrieval.tex` | 2.1–2.8, 2.9 | §2 v1; §2.9 from §2.9+§3 v1 |
-| `sec3_verification.tex` | 3.1–3.6, Tables 1–3 (Table 3 = new QDOAS field table, `tab:qdoas_field`) (+ Fig. 2, Fig. 3 floats) | §2.9+§3 v1 |
-| `sec4_budget.tex` | 4.1–4.6, Tables 4–7 (budget = Table 5, `tab:2`), Fig. 4 | §4 v16 |
+| `sec3_verification.tex` | 3.1–3.6, Tables 1–4 (Table 3 = QDOAS field table, `tab:qdoas_field`; Table 4 = `tab:relscale`, 2026-09-30) (+ Fig. 2, Fig. 3 floats) | §2.9+§3 v1 |
+| `sec4_budget.tex` | 4.1–4.6, Tables 5–7 (budget = Table 6, `tab:2`), Fig. 4 | §4 v16 |
 | `sec5_pipeline.tex` | 5.1–5.4, Fig. 5 | §5 v6 |
 | `sec6_reporting.tex` | 6.1, 6.1.1 (draft "6.1a"), 6.2–6.4 | §6 v1 |
 | `sec7_field.tex` | 7.1–7.3, Fig. 6 | §7 v1 |
@@ -80,7 +82,7 @@ experiment), Appendix B, the KRISS cylinder-injection results in §5.1 (−0.10/
 dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and counts spelled out in words ("twelve days",
 "six excursions", "eleven of the thirteen"). The Sect. 3.3 field comparison (text and Table 3) is wrapped.
 
-**505 `\fieldnum` sites** (line numbers as of 2026-09-29, after the evaluation edit pass):
+**548 `\fieldnum` sites** (line numbers as of 2026-09-30, after the follow-up edit round):
 
 | file | line | value |
 |---|---|---|
@@ -88,16 +90,27 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | abstract.tex | 12 | `2.29` |
 | abstract.tex | 13 | `1.63` |
 | abstract.tex | 13 | `2.50` |
-| abstract.tex | 16 | `1.44` |
+| abstract.tex | 16 | `0.100` |
 | sec1_intro.tex | 53 | `1.6` |
 | sec1_intro.tex | 53 | `2.5` |
-| sec1_intro.tex | 55 | `1.44` |
+| sec1_intro.tex | 56 | `0.100` |
 | sec1_intro.tex | 83 | `1.63` |
 | sec1_intro.tex | 84 | `2.50` |
 | sec1_intro.tex | 84 | `8847` |
 | sec1_intro.tex | 85 | `8446` |
-| sec2_retrieval.tex | 158 | `9034` |
-| sec2_retrieval.tex | 159 | `8847` |
+| sec2_retrieval.tex | 159 | `9034` |
+| sec2_retrieval.tex | 160 | `8847` |
+| sec2_retrieval.tex | 168 | `0.74` |
+| sec2_retrieval.tex | 169 | `74` |
+| sec2_retrieval.tex | 169 | `1.9` |
+| sec2_retrieval.tex | 169 | `9034` |
+| sec2_retrieval.tex | 170 | `1399` |
+| sec2_retrieval.tex | 170 | `54` |
+| sec2_retrieval.tex | 170 | `90` |
+| sec2_retrieval.tex | 171 | `4.8` |
+| sec2_retrieval.tex | 171 | `157` |
+| sec2_retrieval.tex | 172 | `54` |
+| sec2_retrieval.tex | 172 | `17` |
 | sec3_verification.tex | 41 | `1397` |
 | sec3_verification.tex | 41 | `1399` |
 | sec3_verification.tex | 41 | `707` |
@@ -111,49 +124,82 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec3_verification.tex | 138 | `1.000` |
 | sec3_verification.tex | 139 | `4` |
 | sec3_verification.tex | 139 | `6` |
-| sec3_verification.tex | 140 | `0.889` |
-| sec3_verification.tex | 140 | `0.959` |
-| sec3_verification.tex | 140 | `0.81` |
-| sec3_verification.tex | 140 | `1.19` |
-| sec3_verification.tex | 140 | `1.04` |
-| sec3_verification.tex | 140 | `1.38` |
-| sec3_verification.tex | 152 | `36\,241` |
-| sec3_verification.tex | 152 | `1.039` |
-| sec3_verification.tex | 152 | `0.990` |
-| sec3_verification.tex | 153 | `36\,241` |
-| sec3_verification.tex | 153 | `0.807` |
-| sec3_verification.tex | 153 | `0.889` |
-| sec3_verification.tex | 154 | `36\,241` |
-| sec3_verification.tex | 154 | `1.377` |
-| sec3_verification.tex | 154 | `0.887` |
-| sec3_verification.tex | 155 | `73\,916` |
-| sec3_verification.tex | 155 | `1.063` |
-| sec3_verification.tex | 155 | `1.000` |
-| sec3_verification.tex | 156 | `73\,916` |
-| sec3_verification.tex | 156 | `1.195` |
-| sec3_verification.tex | 156 | `0.914` |
-| sec3_verification.tex | 157 | `73\,916` |
-| sec3_verification.tex | 157 | `1.042` |
-| sec3_verification.tex | 157 | `0.974` |
-| sec3_verification.tex | 158 | `74\,539` |
-| sec3_verification.tex | 158 | `1.043` |
-| sec3_verification.tex | 158 | `1.000` |
-| sec3_verification.tex | 159 | `74\,539` |
-| sec3_verification.tex | 159 | `1.054` |
-| sec3_verification.tex | 159 | `0.959` |
-| sec3_verification.tex | 160 | `74\,539` |
-| sec3_verification.tex | 160 | `1.038` |
-| sec3_verification.tex | 160 | `0.981` |
-| sec3_verification.tex | 204 | `0.952` |
-| sec3_verification.tex | 213 | `0.57` |
-| sec3_verification.tex | 213 | `0.65` |
-| sec3_verification.tex | 214 | `0.92` |
-| sec3_verification.tex | 214 | `1.00` |
-| sec3_verification.tex | 214 | `0.72` |
+| sec3_verification.tex | 140 | `0.9` |
+| sec3_verification.tex | 140 | `49` |
+| sec3_verification.tex | 140 | `50` |
+| sec3_verification.tex | 141 | `$-5.8$` |
+| sec3_verification.tex | 141 | `0.6` |
+| sec3_verification.tex | 141 | `45` |
+| sec3_verification.tex | 141 | `49` |
+| sec3_verification.tex | 142 | `-0.006` |
+| sec3_verification.tex | 144 | `3.9` |
+| sec3_verification.tex | 144 | `4` |
+| sec3_verification.tex | 145 | `0.889` |
+| sec3_verification.tex | 145 | `0.959` |
+| sec3_verification.tex | 145 | `0.81` |
+| sec3_verification.tex | 145 | `1.19` |
+| sec3_verification.tex | 145 | `1.04` |
+| sec3_verification.tex | 145 | `1.38` |
+| sec3_verification.tex | 157 | `36\,241` |
+| sec3_verification.tex | 157 | `1.039` |
+| sec3_verification.tex | 157 | `0.990` |
+| sec3_verification.tex | 158 | `36\,241` |
+| sec3_verification.tex | 158 | `0.807` |
+| sec3_verification.tex | 158 | `0.889` |
+| sec3_verification.tex | 159 | `36\,241` |
+| sec3_verification.tex | 159 | `1.377` |
+| sec3_verification.tex | 159 | `0.887` |
+| sec3_verification.tex | 160 | `73\,916` |
+| sec3_verification.tex | 160 | `1.063` |
+| sec3_verification.tex | 160 | `1.000` |
+| sec3_verification.tex | 161 | `73\,916` |
+| sec3_verification.tex | 161 | `1.195` |
+| sec3_verification.tex | 161 | `0.914` |
+| sec3_verification.tex | 162 | `73\,916` |
+| sec3_verification.tex | 162 | `1.042` |
+| sec3_verification.tex | 162 | `0.974` |
+| sec3_verification.tex | 163 | `74\,539` |
+| sec3_verification.tex | 163 | `1.043` |
+| sec3_verification.tex | 163 | `1.000` |
+| sec3_verification.tex | 164 | `74\,539` |
+| sec3_verification.tex | 164 | `1.054` |
+| sec3_verification.tex | 164 | `0.959` |
+| sec3_verification.tex | 165 | `74\,539` |
+| sec3_verification.tex | 165 | `1.038` |
+| sec3_verification.tex | 165 | `0.981` |
+| sec3_verification.tex | 208 | `0.952` |
+| sec3_verification.tex | 222 | `0.952` |
+| sec3_verification.tex | 223 | `0.962` |
+| sec3_verification.tex | 224 | `1.014` |
+| sec3_verification.tex | 236 | `0.57` |
+| sec3_verification.tex | 236 | `0.65` |
+| sec3_verification.tex | 237 | `0.92` |
+| sec3_verification.tex | 237 | `1.00` |
+| sec3_verification.tex | 237 | `0.72` |
+| sec3_verification.tex | 243 | `0.985` |
+| sec3_verification.tex | 243 | `0.03` |
+| sec3_verification.tex | 243 | `0.61` |
+| sec3_verification.tex | 244 | `0.55` |
+| sec3_verification.tex | 244 | `0.58` |
+| sec3_verification.tex | 244 | `0.49` |
+| sec3_verification.tex | 244 | `0.59` |
+| sec3_verification.tex | 245 | `0.59` |
+| sec3_verification.tex | 245 | `0.55` |
+| sec3_verification.tex | 245 | `0.50` |
+| sec3_verification.tex | 248 | `0.69` |
+| sec3_verification.tex | 248 | `0.71` |
+| sec3_verification.tex | 248 | `0.78` |
+| sec3_verification.tex | 250 | `31` |
+| sec3_verification.tex | 250 | `33` |
+| sec3_verification.tex | 251 | `4` |
+| sec3_verification.tex | 251 | `6` |
+| sec3_verification.tex | 252 | `0.6` |
+| sec3_verification.tex | 255 | `0.92` |
+| sec3_verification.tex | 255 | `1.00` |
 | sec4_budget.tex | 10 | `0.55` |
 | sec4_budget.tex | 18 | `0.1` |
-| sec4_budget.tex | 24 | `1.05` |
-| sec4_budget.tex | 24 | `1.57` |
+| sec4_budget.tex | 23 | `1.05` |
+| sec4_budget.tex | 23 | `1.57` |
 | sec4_budget.tex | 41 | `0.74` |
 | sec4_budget.tex | 41 | `0.91` |
 | sec4_budget.tex | 44 | `0.40` |
@@ -172,14 +218,11 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec4_budget.tex | 61 | `2.25` |
 | sec4_budget.tex | 61 | `0.40` |
 | sec4_budget.tex | 61 | `0.43` |
-| sec4_budget.tex | 62 | `2.391` |
-| sec4_budget.tex | 62 | `3.95` |
-| sec4_budget.tex | 62 | `0.61` |
-| sec4_budget.tex | 73 | `0.8` |
-| sec4_budget.tex | 73 | `2.2` |
-| sec4_budget.tex | 75 | `8.3` |
-| sec4_budget.tex | 76 | `6.4` |
-| sec4_budget.tex | 76 | `$-0.2$` |
+| sec4_budget.tex | 72 | `0.8` |
+| sec4_budget.tex | 72 | `2.2` |
+| sec4_budget.tex | 74 | `8.3` |
+| sec4_budget.tex | 75 | `6.4` |
+| sec4_budget.tex | 75 | `$-0.2$` |
 | sec4_budget.tex | 80 | `$+13.3$` |
 | sec4_budget.tex | 80 | `$-8.1$` |
 | sec4_budget.tex | 80 | `$+6.9$` |
@@ -251,26 +294,26 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec4_budget.tex | 157 | `2.29` |
 | sec4_budget.tex | 157 | `1.63` |
 | sec4_budget.tex | 157 | `2.50` |
-| sec4_budget.tex | 172 | `1.00` |
-| sec4_budget.tex | 172 | `1.03` |
-| sec4_budget.tex | 173 | `$-0.60$` |
-| sec4_budget.tex | 174 | `$+0.73$` |
-| sec4_budget.tex | 185 | `1258` |
-| sec4_budget.tex | 185 | `0.081` |
-| sec4_budget.tex | 186 | `154` |
-| sec4_budget.tex | 186 | `0.082` |
-| sec4_budget.tex | 187 | `0.0618` |
-| sec4_budget.tex | 187 | `0.75` |
-| sec4_budget.tex | 188 | `0.0693` |
-| sec4_budget.tex | 188 | `0.84` |
-| sec4_budget.tex | 193 | `0.75` |
-| sec4_budget.tex | 194 | `154` |
-| sec4_budget.tex | 194 | `153` |
-| sec4_budget.tex | 194 | `0.082` |
-| sec4_budget.tex | 195 | `0.76` |
-| sec4_budget.tex | 199 | `0.75` |
-| sec4_budget.tex | 199 | `0.84` |
-| sec4_budget.tex | 203 | `0.366` |
+| sec4_budget.tex | 173 | `1.00` |
+| sec4_budget.tex | 173 | `1.03` |
+| sec4_budget.tex | 174 | `$-0.60$` |
+| sec4_budget.tex | 175 | `$+0.73$` |
+| sec4_budget.tex | 186 | `1258` |
+| sec4_budget.tex | 186 | `0.081` |
+| sec4_budget.tex | 187 | `154` |
+| sec4_budget.tex | 187 | `0.082` |
+| sec4_budget.tex | 188 | `0.0618` |
+| sec4_budget.tex | 188 | `0.75` |
+| sec4_budget.tex | 189 | `0.0693` |
+| sec4_budget.tex | 189 | `0.84` |
+| sec4_budget.tex | 194 | `0.75` |
+| sec4_budget.tex | 195 | `154` |
+| sec4_budget.tex | 195 | `153` |
+| sec4_budget.tex | 195 | `0.082` |
+| sec4_budget.tex | 196 | `0.76` |
+| sec4_budget.tex | 200 | `0.75` |
+| sec4_budget.tex | 200 | `0.84` |
+| sec4_budget.tex | 204 | `0.366` |
 | sec5_pipeline.tex | 22 | `1.0120` |
 | sec5_pipeline.tex | 22 | `1.0611` |
 | sec5_pipeline.tex | 22 | `165` |
@@ -278,131 +321,132 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec5_pipeline.tex | 24 | `0.01` |
 | sec5_pipeline.tex | 24 | `4.35` |
 | sec5_pipeline.tex | 25 | `3.09\times10^{5}` |
-| sec5_pipeline.tex | 26 | `$-2.014$` |
-| sec5_pipeline.tex | 26 | `85.5` |
-| sec5_pipeline.tex | 27 | `$-0.088$` |
-| sec5_pipeline.tex | 27 | `4.5` |
-| sec5_pipeline.tex | 40 | `5364` |
-| sec5_pipeline.tex | 40 | `0.940` |
-| sec5_pipeline.tex | 41 | `0.858` |
-| sec5_pipeline.tex | 41 | `1.027` |
-| sec5_pipeline.tex | 41 | `1.019` |
-| sec5_pipeline.tex | 41 | `0.662` |
-| sec5_pipeline.tex | 41 | `1.178` |
-| sec5_pipeline.tex | 42 | `23` |
-| sec5_pipeline.tex | 44 | `34` |
-| sec5_pipeline.tex | 44 | `18` |
-| sec5_pipeline.tex | 46 | `2.2` |
-| sec5_pipeline.tex | 47 | `$-0.06$` |
-| sec5_pipeline.tex | 47 | `$+2.2$` |
-| sec5_pipeline.tex | 47 | `$-0.8$` |
-| sec5_pipeline.tex | 47 | `23` |
-| sec5_pipeline.tex | 58 | `5364` |
-| sec5_pipeline.tex | 65 | `$-2.014 \pm 0.03$` |
-| sec5_pipeline.tex | 65 | `$\pm 2$` |
-| sec5_pipeline.tex | 78 | `22` |
-| sec5_pipeline.tex | 78 | `$-1.000$` |
-| sec5_pipeline.tex | 83 | `187` |
-| sec5_pipeline.tex | 83 | `9034` |
-| sec5_pipeline.tex | 85 | `121` |
-| sec5_pipeline.tex | 86 | `4` |
-| sec5_pipeline.tex | 97 | `11.8` |
-| sec5_pipeline.tex | 99 | `157` |
-| sec5_pipeline.tex | 99 | `157` |
-| sec5_pipeline.tex | 100 | `164` |
-| sec5_pipeline.tex | 100 | `164` |
-| sec5_pipeline.tex | 100 | `1313` |
-| sec5_pipeline.tex | 106 | `9149` |
-| sec5_pipeline.tex | 113 | `76\,282` |
-| sec5_pipeline.tex | 113 | `0.08` |
-| sec5_pipeline.tex | 113 | `0.07` |
-| sec5_pipeline.tex | 113 | `3.76` |
-| sec5_pipeline.tex | 113 | `1.23` |
-| sec5_pipeline.tex | 113 | `10.6` |
-| sec5_pipeline.tex | 114 | `9\,088` |
-| sec5_pipeline.tex | 114 | `0.01` |
-| sec5_pipeline.tex | 114 | `0.00` |
-| sec5_pipeline.tex | 114 | `0.00` |
-| sec5_pipeline.tex | 114 | `0.00` |
-| sec5_pipeline.tex | 114 | `1.3` |
-| sec5_pipeline.tex | 115 | `43\,259` |
-| sec5_pipeline.tex | 115 | `0.13` |
-| sec5_pipeline.tex | 115 | `0.34` |
-| sec5_pipeline.tex | 115 | `2.89` |
-| sec5_pipeline.tex | 115 | `11.03` |
-| sec5_pipeline.tex | 115 | `11.8` |
-| sec5_pipeline.tex | 116 | `7\,069` |
-| sec5_pipeline.tex | 116 | `0.42` |
-| sec5_pipeline.tex | 116 | `0.00` |
-| sec5_pipeline.tex | 116 | `17.32` |
-| sec5_pipeline.tex | 116 | `18.31` |
+| sec5_pipeline.tex | 27 | `$-2.014$` |
+| sec5_pipeline.tex | 27 | `85.5` |
+| sec5_pipeline.tex | 28 | `$-0.088$` |
+| sec5_pipeline.tex | 28 | `4.5` |
+| sec5_pipeline.tex | 29 | `77` |
+| sec5_pipeline.tex | 42 | `5364` |
+| sec5_pipeline.tex | 42 | `0.940` |
+| sec5_pipeline.tex | 43 | `0.858` |
+| sec5_pipeline.tex | 43 | `1.027` |
+| sec5_pipeline.tex | 43 | `1.019` |
+| sec5_pipeline.tex | 43 | `0.662` |
+| sec5_pipeline.tex | 43 | `1.178` |
+| sec5_pipeline.tex | 44 | `23` |
+| sec5_pipeline.tex | 46 | `34` |
+| sec5_pipeline.tex | 46 | `18` |
+| sec5_pipeline.tex | 48 | `2.2` |
+| sec5_pipeline.tex | 49 | `$-0.06$` |
+| sec5_pipeline.tex | 49 | `$+2.2$` |
+| sec5_pipeline.tex | 49 | `$-0.8$` |
+| sec5_pipeline.tex | 49 | `23` |
+| sec5_pipeline.tex | 60 | `5364` |
+| sec5_pipeline.tex | 67 | `$-2.014 \pm 0.03$` |
+| sec5_pipeline.tex | 67 | `$\pm 2$` |
+| sec5_pipeline.tex | 80 | `22` |
+| sec5_pipeline.tex | 80 | `$-1.000$` |
+| sec5_pipeline.tex | 84 | `187` |
+| sec5_pipeline.tex | 84 | `9034` |
+| sec5_pipeline.tex | 86 | `121` |
+| sec5_pipeline.tex | 87 | `4` |
+| sec5_pipeline.tex | 98 | `11.8` |
+| sec5_pipeline.tex | 100 | `157` |
+| sec5_pipeline.tex | 100 | `157` |
+| sec5_pipeline.tex | 101 | `164` |
+| sec5_pipeline.tex | 101 | `164` |
+| sec5_pipeline.tex | 101 | `1313` |
+| sec5_pipeline.tex | 107 | `9149` |
+| sec5_pipeline.tex | 114 | `76\,282` |
+| sec5_pipeline.tex | 114 | `0.08` |
+| sec5_pipeline.tex | 114 | `0.07` |
+| sec5_pipeline.tex | 114 | `3.76` |
+| sec5_pipeline.tex | 114 | `1.23` |
+| sec5_pipeline.tex | 114 | `10.6` |
+| sec5_pipeline.tex | 115 | `9\,088` |
+| sec5_pipeline.tex | 115 | `0.01` |
+| sec5_pipeline.tex | 115 | `0.00` |
+| sec5_pipeline.tex | 115 | `0.00` |
+| sec5_pipeline.tex | 115 | `0.00` |
+| sec5_pipeline.tex | 115 | `1.3` |
+| sec5_pipeline.tex | 116 | `43\,259` |
+| sec5_pipeline.tex | 116 | `0.13` |
+| sec5_pipeline.tex | 116 | `0.34` |
+| sec5_pipeline.tex | 116 | `2.89` |
+| sec5_pipeline.tex | 116 | `11.03` |
 | sec5_pipeline.tex | 116 | `11.8` |
-| sec5_pipeline.tex | 121 | `0.08` |
-| sec5_pipeline.tex | 122 | `0.07` |
-| sec5_pipeline.tex | 122 | `922` |
-| sec5_pipeline.tex | 126 | `11.3` |
-| sec5_pipeline.tex | 127 | `0.24` |
-| sec5_pipeline.tex | 127 | `3` |
-| sec5_pipeline.tex | 127 | `1\,264` |
-| sec5_pipeline.tex | 127 | `75` |
-| sec5_pipeline.tex | 127 | `743` |
-| sec5_pipeline.tex | 127 | `10.1` |
-| sec5_pipeline.tex | 128 | `11.3` |
-| sec5_pipeline.tex | 128 | `3.5` |
-| sec5_pipeline.tex | 129 | `11.03` |
-| sec5_pipeline.tex | 129 | `11.8` |
-| sec5_pipeline.tex | 134 | `2.8` |
-| sec5_pipeline.tex | 134 | `5.8` |
-| sec5_pipeline.tex | 136 | `0.00` |
-| sec5_pipeline.tex | 136 | `18.31` |
-| sec5_pipeline.tex | 147 | `9\,132` |
-| sec5_pipeline.tex | 151 | `0.9524` |
-| sec5_pipeline.tex | 157 | `0.1048` |
-| sec5_pipeline.tex | 157 | `0.1627` |
-| sec5_pipeline.tex | 157 | `3.0` |
-| sec5_pipeline.tex | 158 | `0.0358` |
-| sec5_pipeline.tex | 158 | `0.0563` |
-| sec5_pipeline.tex | 158 | `2.8` |
-| sec5_pipeline.tex | 159 | `0.100` |
-| sec5_pipeline.tex | 159 | `0.1418` |
-| sec5_pipeline.tex | 159 | `3.7` |
-| sec5_pipeline.tex | 164 | `0.100` |
-| sec5_pipeline.tex | 165 | `1.44` |
-| sec5_pipeline.tex | 176 | `3.37\times10^{-9}` |
-| sec5_pipeline.tex | 176 | `1.0020` |
-| sec5_pipeline.tex | 176 | `1.0022` |
-| sec5_pipeline.tex | 176 | `1.99` |
-| sec5_pipeline.tex | 176 | `0.0053` |
-| sec5_pipeline.tex | 177 | `1.53\times10^{-8}` |
-| sec5_pipeline.tex | 177 | `1.0016` |
-| sec5_pipeline.tex | 177 | `1.0016` |
-| sec5_pipeline.tex | 177 | `0.55` |
-| sec5_pipeline.tex | 177 | `0.0065` |
-| sec5_pipeline.tex | 183 | `6.16\times10^{-9}` |
-| sec5_pipeline.tex | 185 | `0.005` |
-| sec5_pipeline.tex | 186 | `0.243` |
-| sec5_pipeline.tex | 191 | `7.0` |
-| sec5_pipeline.tex | 191 | `0.0745` |
-| sec5_pipeline.tex | 191 | `0.0693` |
-| sec5_pipeline.tex | 191 | `4.5` |
-| sec5_pipeline.tex | 191 | `0.1183` |
-| sec5_pipeline.tex | 191 | `0.1236` |
-| sec5_pipeline.tex | 192 | `1.70` |
-| sec5_pipeline.tex | 192 | `2.41` |
-| sec5_pipeline.tex | 192 | `1.63` |
-| sec5_pipeline.tex | 192 | `2.50` |
-| sec5_pipeline.tex | 193 | `8505` |
-| sec5_pipeline.tex | 193 | `9034` |
-| sec5_pipeline.tex | 193 | `9149` |
-| sec5_pipeline.tex | 194 | `93.0` |
-| sec5_pipeline.tex | 194 | `98.7` |
-| sec5_pipeline.tex | 196 | `$+0.412$` |
-| sec5_pipeline.tex | 196 | `$+0.146$` |
-| sec5_pipeline.tex | 201 | `0.0622` |
-| sec5_pipeline.tex | 201 | `0.0000` |
-| sec5_pipeline.tex | 203 | `0.100` |
-| sec5_pipeline.tex | 204 | `0.0622` |
-| sec6_reporting.tex | 57 | `42.3` |
+| sec5_pipeline.tex | 117 | `7\,069` |
+| sec5_pipeline.tex | 117 | `0.42` |
+| sec5_pipeline.tex | 117 | `0.00` |
+| sec5_pipeline.tex | 117 | `17.32` |
+| sec5_pipeline.tex | 117 | `18.31` |
+| sec5_pipeline.tex | 117 | `11.8` |
+| sec5_pipeline.tex | 122 | `0.08` |
+| sec5_pipeline.tex | 123 | `0.07` |
+| sec5_pipeline.tex | 123 | `922` |
+| sec5_pipeline.tex | 127 | `11.3` |
+| sec5_pipeline.tex | 128 | `0.24` |
+| sec5_pipeline.tex | 128 | `3` |
+| sec5_pipeline.tex | 128 | `1\,264` |
+| sec5_pipeline.tex | 128 | `75` |
+| sec5_pipeline.tex | 128 | `743` |
+| sec5_pipeline.tex | 128 | `10.1` |
+| sec5_pipeline.tex | 129 | `11.3` |
+| sec5_pipeline.tex | 129 | `3.5` |
+| sec5_pipeline.tex | 130 | `11.03` |
+| sec5_pipeline.tex | 130 | `11.8` |
+| sec5_pipeline.tex | 135 | `2.8` |
+| sec5_pipeline.tex | 135 | `5.8` |
+| sec5_pipeline.tex | 137 | `0.00` |
+| sec5_pipeline.tex | 137 | `18.31` |
+| sec5_pipeline.tex | 148 | `9\,132` |
+| sec5_pipeline.tex | 152 | `0.9524` |
+| sec5_pipeline.tex | 158 | `0.1048` |
+| sec5_pipeline.tex | 158 | `0.1627` |
+| sec5_pipeline.tex | 158 | `3.0` |
+| sec5_pipeline.tex | 159 | `0.0358` |
+| sec5_pipeline.tex | 159 | `0.0563` |
+| sec5_pipeline.tex | 159 | `2.8` |
+| sec5_pipeline.tex | 160 | `0.100` |
+| sec5_pipeline.tex | 160 | `0.1418` |
+| sec5_pipeline.tex | 160 | `3.7` |
+| sec5_pipeline.tex | 165 | `0.100` |
+| sec5_pipeline.tex | 166 | `1.44` |
+| sec5_pipeline.tex | 178 | `3.37\times10^{-9}` |
+| sec5_pipeline.tex | 178 | `1.0020` |
+| sec5_pipeline.tex | 178 | `1.0022` |
+| sec5_pipeline.tex | 178 | `1.99` |
+| sec5_pipeline.tex | 178 | `0.0053` |
+| sec5_pipeline.tex | 179 | `1.53\times10^{-8}` |
+| sec5_pipeline.tex | 179 | `1.0016` |
+| sec5_pipeline.tex | 179 | `1.0016` |
+| sec5_pipeline.tex | 179 | `0.55` |
+| sec5_pipeline.tex | 179 | `0.0065` |
+| sec5_pipeline.tex | 185 | `6.16\times10^{-9}` |
+| sec5_pipeline.tex | 187 | `0.005` |
+| sec5_pipeline.tex | 188 | `0.243` |
+| sec5_pipeline.tex | 193 | `7.0` |
+| sec5_pipeline.tex | 193 | `0.0745` |
+| sec5_pipeline.tex | 193 | `0.0693` |
+| sec5_pipeline.tex | 193 | `4.5` |
+| sec5_pipeline.tex | 193 | `0.1183` |
+| sec5_pipeline.tex | 193 | `0.1236` |
+| sec5_pipeline.tex | 194 | `1.70` |
+| sec5_pipeline.tex | 194 | `2.41` |
+| sec5_pipeline.tex | 194 | `1.63` |
+| sec5_pipeline.tex | 194 | `2.50` |
+| sec5_pipeline.tex | 195 | `8505` |
+| sec5_pipeline.tex | 195 | `9034` |
+| sec5_pipeline.tex | 195 | `9149` |
+| sec5_pipeline.tex | 196 | `93.0` |
+| sec5_pipeline.tex | 196 | `98.7` |
+| sec5_pipeline.tex | 198 | `$+0.412$` |
+| sec5_pipeline.tex | 198 | `$+0.146$` |
+| sec5_pipeline.tex | 203 | `0.0622` |
+| sec5_pipeline.tex | 203 | `0.0000` |
+| sec5_pipeline.tex | 204 | `0.100` |
+| sec5_pipeline.tex | 205 | `0.0622` |
+| sec6_reporting.tex | 58 | `42.3` |
 | sec6_reporting.tex | 66 | `0.0` |
 | sec6_reporting.tex | 66 | `9` |
 | sec6_reporting.tex | 69 | `0.80` |
@@ -429,47 +473,49 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec6_reporting.tex | 92 | `29` |
 | sec6_reporting.tex | 92 | `3` |
 | sec6_reporting.tex | 98 | `37` |
-| sec6_reporting.tex | 101 | `74` |
-| sec6_reporting.tex | 102 | `17` |
-| sec6_reporting.tex | 110 | `0.87` |
-| sec6_reporting.tex | 110 | `1.00` |
-| sec6_reporting.tex | 110 | `2.05` |
-| sec6_reporting.tex | 111 | `2.73` |
-| sec6_reporting.tex | 117 | `7` |
-| sec6_reporting.tex | 121 | `45` |
-| sec6_reporting.tex | 122 | `0.1236` |
-| sec6_reporting.tex | 122 | `0.1008` |
-| sec6_reporting.tex | 122 | `18.5` |
-| sec6_reporting.tex | 123 | `0.0901` |
-| sec6_reporting.tex | 131 | `28` |
-| sec6_reporting.tex | 131 | `76` |
-| sec6_reporting.tex | 132 | `97` |
-| sec6_reporting.tex | 134 | `13` |
-| sec6_reporting.tex | 134 | `38` |
-| sec6_reporting.tex | 134 | `13` |
-| sec6_reporting.tex | 135 | `99.9` |
-| sec6_reporting.tex | 135 | `25` |
-| sec6_reporting.tex | 136 | `2` |
-| sec6_reporting.tex | 136 | `3` |
-| sec6_reporting.tex | 136 | `8` |
-| sec6_reporting.tex | 183 | `0.6` |
+| sec6_reporting.tex | 109 | `0.87` |
+| sec6_reporting.tex | 109 | `1.00` |
+| sec6_reporting.tex | 109 | `2.05` |
+| sec6_reporting.tex | 110 | `2.73` |
+| sec6_reporting.tex | 115 | `7` |
+| sec6_reporting.tex | 118 | `45` |
+| sec6_reporting.tex | 119 | `0.1236` |
+| sec6_reporting.tex | 119 | `0.1008` |
+| sec6_reporting.tex | 119 | `18.5` |
+| sec6_reporting.tex | 120 | `0.0901` |
+| sec6_reporting.tex | 128 | `28` |
+| sec6_reporting.tex | 128 | `76` |
+| sec6_reporting.tex | 129 | `97` |
+| sec6_reporting.tex | 131 | `13` |
+| sec6_reporting.tex | 131 | `38` |
+| sec6_reporting.tex | 131 | `13` |
+| sec6_reporting.tex | 132 | `99.9` |
+| sec6_reporting.tex | 132 | `25` |
+| sec6_reporting.tex | 133 | `2` |
+| sec6_reporting.tex | 133 | `3` |
+| sec6_reporting.tex | 133 | `8` |
+| sec6_reporting.tex | 180 | `0.6` |
 | sec7_field.tex | 19 | `$-6.12$` |
 | sec7_field.tex | 20 | `0.25` |
 | sec7_field.tex | 29 | `155` |
 | sec7_field.tex | 31 | `-0.093` |
 | sec7_field.tex | 31 | `4` |
+| sec7_field.tex | 35 | `155` |
 | sec7_field.tex | 35 | `0.9524` |
-| sec7_field.tex | 41 | `0.0676` |
-| sec7_field.tex | 41 | `0.086` |
-| sec7_field.tex | 42 | `0.203` |
+| sec7_field.tex | 35 | `-0.093` |
+| sec7_field.tex | 41 | `0.0733` |
+| sec7_field.tex | 41 | `0.0856` |
+| sec7_field.tex | 42 | `0.220` |
 | sec7_field.tex | 42 | `0.257` |
-| sec7_field.tex | 43 | `$+0.0054$` |
-| sec7_field.tex | 43 | `$+0.0054$` |
+| sec7_field.tex | 43 | `$+0.0053$` |
+| sec7_field.tex | 43 | `$+0.0053$` |
 | sec7_field.tex | 44 | `0.0806` |
-| sec7_field.tex | 44 | `0.84` |
+| sec7_field.tex | 44 | `0.91` |
 | sec7_field.tex | 44 | `1.06` |
-| sec7_field.tex | 49 | `$+0.0054$` |
-| sec7_field.tex | 54 | `0.84` |
+| sec7_field.tex | 49 | `$+0.0053$` |
+| sec7_field.tex | 49 | `$+0.0028$` |
+| sec7_field.tex | 49 | `$-0.0020$` |
+| sec7_field.tex | 54 | `0.91` |
 | sec7_field.tex | 54 | `1.06` |
 | sec7_field.tex | 55 | `0.0806` |
 | sec7_field.tex | 57 | `46.1` |
@@ -498,8 +544,8 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec8_conclusions.tex | 14 | `0.990` |
 | sec8_conclusions.tex | 14 | `4` |
 | sec8_conclusions.tex | 14 | `6` |
-| sec8_conclusions.tex | 14 | `$+0.0054$` |
-| sec8_conclusions.tex | 15 | `0.203` |
+| sec8_conclusions.tex | 14 | `$+0.0053$` |
+| sec8_conclusions.tex | 15 | `0.220` |
 | sec8_conclusions.tex | 15 | `0.257` |
 | sec8_conclusions.tex | 21 | `1.28` |
 | sec8_conclusions.tex | 21 | `2.29` |
@@ -507,7 +553,7 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | sec8_conclusions.tex | 22 | `2.50` |
 | sec8_conclusions.tex | 29 | `187` |
 | sec8_conclusions.tex | 29 | `9034` |
-| sec8_conclusions.tex | 32 | `1.44` |
+| sec8_conclusions.tex | 33 | `0.100` |
 | sec8_conclusions.tex | 36 | `0.6` |
 | appA_config.tex | 60 | `0.1` |
 | appA_config.tex | 70 | `1261` |
@@ -554,7 +600,7 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | appD_denominator.tex | 19 | `1.32` |
 | appD_denominator.tex | 19 | `1.83` |
 | appD_denominator.tex | 20 | `0.025` |
-| appD_denominator.tex | 21 | `0.086` |
+| appD_denominator.tex | 21 | `0.0856` |
 | appD_denominator.tex | 27 | `14\,974` |
 | appD_denominator.tex | 27 | `0.04209` |
 | appD_denominator.tex | 27 | `0.00025` |
@@ -588,7 +634,6 @@ dispersion, ILS FWHM), thresholds (−5 ppb, 1.5, 30 %, 50 %, 2 h), dates, and c
 | appD_denominator.tex | 72 | `0.0706` |
 | appD_denominator.tex | 72 | `0.1236` |
 | appD_denominator.tex | 72 | `0.1244` |
-| main.tex | 10 | `...` |
 
 ## 5. §8 Conclusions — trimmed
 
@@ -613,6 +658,8 @@ paragraph 1 (termination state and reference distance are carried; reference bui
 not implemented).
 
 ## 6. Citations and bibliography
+
+**2026-09-30:** 8 entries added (30 total): `Beirle_2013`, `Hausmann_1999`, `Merchant_2017`, `JCGM_2008` (@misc), `Horbanski_2019`, `Thieser_2016` (second author "Schuster, G.", no umlaut, per CrossRef), `Dewald_2021`, `Wust_2025`. Authors, volume, pages and year checked against CrossRef; `Wust_2025` initials corrected to CrossRef (Wüst, L.; Türk, G. N. T. E.). Hausmann_1999 last page (475) is from the lead's publisher check, CrossRef gives the first page only.
 
 **2026-09-29:** `references.bib` reduced to the 22 cited entries (19 uncited removed; list in `CHANGES_2026-09-29_edit.md` §3). New entry `Fritsch_1980` (doi:10.1137/0717021, CrossRef-verified). Newly cited existing entries: `Raue_2009`, `Efron_1979`, `Day_2002`, `Wooldridge_2010`; `Washenfelder_2008`, `Min_2016`, `Nam_2022`, `Stutz_1996`, `Platt` are cited in the new §4.6 for statements checked against their full texts or abstracts. The table below records the 2026-09-28 additions.
 
@@ -645,22 +692,23 @@ Golub & LeVeque (1979) is listed in the format notes for §8 but is not cited in
 * **Tables**: the 17 unnumbered in-line tables (the earlier count of 18 was a miscount) are now Copernicus table floats
   with the caption above the tabular and an in-text `Table~\ref{}` in the sentence that introduces each. Numbering is now:
 
-*Numbering after the 2026-09-29 edit pass:*
+*Numbering after the 2026-09-30 follow-up round:*
 
 | no. | label | caption (start) |
 |---|---|---|
 | 1 | `tab:1` | Retrieval configurations used in Sects.~\ref{sec:3}--\ref{sec:6}, in short form; windows a … |
 | 2 | `tab:jacobian_steps` | Difference between the analytic Golub--Pereyra Jacobian and a central finite difference of … |
 | 3 | `tab:qdoas_field` | Agreement of QDOAS with Augur on the field record, per retrieval configuration and species … |
-| 4 | `tab:splithalf_loo` | Zero-air reference-interpolation error in the channel NO$_2$ amount (per cent) from the sp … |
-| 5 | `tab:2` | Structural error budget, ppb, from a single propagation over the 60\,s ambient records of  … |
-| 6 | `tab:hourly_check` | Hour-to-hour variation of hourly $\Sigma$ANs, summarised by $1.4826\,\mathrm{median}/\Delt … |
-| 7 | `tab:coverage` | Calibration coverage of the retrieved records, from calibration blocks extracted directly  … |
-| 8 | `tab:clock_displacement` | Change in the retrieved amounts when the heated channels are retrieved with the clock-alig … |
-| 9 | `tab:clock_fitreport` | What the fit report shows for the displacement of Table~\ref{tab:clock_displacement}: RMS  … |
-| 10 | `tab:context_fields` | Fields of the context flag, reported per record and per reference type (zero air, reflecti … |
-| 11 | `tab:shape_remedy` | Concentration in time of each structural term over the hours of the budget window (clock-a … |
-| 12 | `tab:noise_floor` | Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two  … |
+| 4 | `tab:relscale` | Relative response of the two heated channels, block 2053 over block 4101 (300\,$^{\circ}$C … |
+| 5 | `tab:splithalf_loo` | Zero-air reference-interpolation error in the channel NO$_2$ amount (per cent) from the sp … |
+| 6 | `tab:2` | Structural error budget, ppb, from a single propagation over the 60\,s ambient records of  … |
+| 7 | `tab:hourly_check` | Hour-to-hour variation of hourly $\Sigma$ANs, summarised by $1.4826\,\mathrm{median}|\Delt … |
+| 8 | `tab:coverage` | Calibration coverage of the retrieved records, from calibration blocks extracted directly  … |
+| 9 | `tab:clock_displacement` | Change in the retrieved amounts when the heated channels are retrieved with the clock-alig … |
+| 10 | `tab:clock_fitreport` | What the fit report shows for the displacement of Table~\ref{tab:clock_displacement}: RMS  … |
+| 11 | `tab:context_fields` | Fields of the context flag, reported per record and per reference type (zero air, reflecti … |
+| 12 | `tab:shape_remedy` | Concentration in time of each structural term over the hours of the budget window (clock-a … |
+| 13 | `tab:noise_floor` | Noise floor of the $\Sigma$ANs product, measured on the paired zero-air blocks of the two  … |
 | A1 | `tab:config` | Operational retrieval configuration of the three channels. ``Linked'' parameters take the  … |
 | A2 | `tab:cal_schedule` | Calibration schedule of the heated channels, with block counts for the budget window (18-- … |
 | B1 | `tab:colscaling` | Effect of rescaling one column of the small test problem of Appendix~\ref{app:B2} on the c … |
@@ -670,9 +718,7 @@ Golub & LeVeque (1979) is listed in the format notes for §8 but is not cited in
 | D1 | `tab:denominators` | Candidate denominators for the ratio of total to reported $\Sigma$ANs uncertainty: value ( … |
 | D2 | `tab:shift_degeneracy` | Change in the fitted wavelength shift (px) when each structural term of Sect.~\ref{sec:4}  … |
 
-
-
-  The old "Table 2" (budget) is now **Table 4**; all prose uses `\ref`, so no hard-coded table numbers remain
+  The old "Table 2" (budget) is now **Table 6** (2026-09-30; Table 4 = new `tab:relscale`); all prose uses `\ref`, so no hard-coded table numbers remain
   (only "Sect. 8.3.4" of the cited textbook).
 * **Cross-references fixed** (target subsection re-read in each case):
   - §4.1 "covariance returned by the fit": Sect. 2.6 → **Sect. 2.5**.

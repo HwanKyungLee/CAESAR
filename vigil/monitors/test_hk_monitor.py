@@ -1,4 +1,4 @@
-"""oculus/{alert_engine,monitors/hk_monitor}.py 단위테스트 (데이터 비의존, 합성 raw 행).
+"""vigil/{alert_engine,monitors/hk_monitor}.py 단위테스트 (데이터 비의존, 합성 raw 행).
 
 커버:
   1) alert_engine.worse/aggregate — 등급 랭킹, 집계 메시지
@@ -8,7 +8,7 @@
   5) hk_monitor: NaN 값(센서 결측) → P2
   6) hk_monitor: 신호채널 일부 포화 → P1, 전부 포화 → P0
 
-사용: python oculus/monitors/test_hk_monitor.py → 전부 PASS면 exit 0
+사용: python vigil/monitors/test_hk_monitor.py → 전부 PASS면 exit 0
 """
 import os
 import sys
@@ -17,9 +17,9 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.alert_engine import OK, P0, P1, P2, SKIP, aggregate, worse
-from oculus.monitors.hk_monitor import evaluate_hk
-from oculus.profile import ProfileSet
+from vigil.alert_engine import OK, P0, P1, P2, SKIP, aggregate, worse
+from vigil.monitors.hk_monitor import evaluate_hk
+from vigil.profile import ProfileSet
 
 _n_pass = 0
 _n_fail = 0

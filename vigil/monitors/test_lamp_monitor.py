@@ -1,4 +1,4 @@
-"""oculus/monitors/lamp_monitor.py 단위테스트 (합성 ZA 블록, 데이터 불필요).
+"""vigil/monitors/lamp_monitor.py 단위테스트 (합성 ZA 블록, 데이터 불필요).
 
 커버:
   1) ZA 구간이 끝난 행에서만 판정, 짧은 조각은 무시
@@ -7,7 +7,7 @@
   4) 기준선의 20 % 미만 → P0, 그 블록은 기준선에 안 들어가 복귀가 계단으로 안 보임
   5) 계단 뒤 기준선이 새 레벨에 적응
 
-사용: python oculus/monitors/test_lamp_monitor.py → 전부 PASS면 exit 0
+사용: python vigil/monitors/test_lamp_monitor.py → 전부 PASS면 exit 0
 """
 import os
 import sys
@@ -18,8 +18,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.alert_engine import OK, P0, P1, P2
-from oculus.monitors.lamp_monitor import LampMonitor
+from vigil.alert_engine import OK, P0, P1, P2
+from vigil.monitors.lamp_monitor import LampMonitor
 
 _n_pass = 0
 _n_fail = 0

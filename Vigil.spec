@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['oculus/run_oculus.py'],
+    ['vigil/run_vigil.py'],
     pathex=['.'],
     binaries=[],
-    datas=[('oculus/profiles/_schema.json', 'oculus/profiles'), ('oculus/profiles/caesar_cold.example.json', 'oculus/profiles'), ('oculus/profiles/caesar_hot.example.json', 'oculus/profiles'), ('tools/channel_map.json', 'tools')],
+    datas=[('vigil/profiles/_schema.json', 'vigil/profiles'), ('vigil/profiles/caesar_cold.example.json', 'vigil/profiles'), ('vigil/profiles/caesar_hot.example.json', 'vigil/profiles'), ('tools/channel_map.json', 'tools')],
     hiddenimports=['tools.optimize_params'],
     hookspath=[],
     hooksconfig={},
@@ -21,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Oculus',
+    name='Vigil',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -40,5 +40,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Oculus',
+    name='Vigil',
 )

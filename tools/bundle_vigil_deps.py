@@ -1,8 +1,8 @@
-"""tools/bundle_oculus_deps.py — Oculus를 Python 없는 컴퓨터에 USB로 옮길 때 필요한
+"""tools/bundle_vigil_deps.py — Vigil을 Python 없는 컴퓨터에 USB로 옮길 때 필요한
 FitSet 의존 파일(웨이브캘·레퍼런스 스펙트럼)을 한 폴더로 모은다.
 
-Oculus는 레퍼런스·웨이브캘을 자체 생성하지 않고 Augur가 만든 FitSet json을 그대로 읽는다
-(oculus/monitors/conc_monitor.py, oculus/profile.py:ConcentrationConfig — 단일 출처 원칙).
+Vigil은 레퍼런스·웨이브캘을 자체 생성하지 않고 Augur가 만든 FitSet json을 그대로 읽는다
+(vigil/monitors/conc_monitor.py, vigil/profile.py:ConcentrationConfig — 단일 출처 원칙).
 문제는 그 FitSet json이 가리키는 wl_path/refs[].path, 그리고 프로파일 json 자체의
 reflectance.wavecal_path가 전부 이 개발 컴퓨터의 절대경로라, 그대로 복사하면 대상
 컴퓨터에서 파일을 못 찾는다. 이 스크립트는 프로파일 json → (FitSet json →) 실물 파일을
@@ -10,17 +10,17 @@ reflectance.wavecal_path가 전부 이 개발 컴퓨터의 절대경로라, 그�
 놓을 위치) 기준 절대경로로 다시 쓴다.
 
 사용:
-    python tools/bundle_oculus_deps.py oculus/profiles/caesar_cold.example.json ^
-        --out dist/oculus_deps --base-dir "D:/Oculus"
+    python tools/bundle_vigil_deps.py vigil/profiles/caesar_cold.example.json ^
+        --out dist/vigil_deps --base-dir "D:/Vigil"
 
     # 여러 프로파일(냉/열) 동시에 — FitSet/레퍼런스가 겹치면 한 번만 복사됨
-    python tools/bundle_oculus_deps.py oculus/profiles/*.json --out dist/oculus_deps --base-dir D:/Oculus
+    python tools/bundle_vigil_deps.py vigil/profiles/*.json --out dist/vigil_deps --base-dir D:/Vigil
 
-그 다음 dist/oculus_deps 폴더 전체를 --base-dir로 지정한 그 경로에 그대로 복사하면 된다
+그 다음 dist/vigil_deps 폴더 전체를 --base-dir로 지정한 그 경로에 그대로 복사하면 된다
 (경로가 다르면 --base-dir를 실제 위치로 다시 지정해 재실행 — 복사만 다시 하면 됨, 원본은
 안 건드림).
 
-자체 검증: python tools/bundle_oculus_deps.py --selftest
+자체 검증: python tools/bundle_vigil_deps.py --selftest
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ import sys
 
 def _resolve(path: str, ref_dir: str) -> str | None:
     """path가 상대경로면 그걸 담고 있던 json 파일의 디렉터리(ref_dir) 기준으로 푼다.
-    Oculus 런타임은 이런 경로를 CWD 기준으로 그대로 열기 때문에(참고: 원본에도 상대경로가
+    Vigil 런타임은 이런 경로를 CWD 기준으로 그대로 열기 때문에(참고: 원본에도 상대경로가
     섞여 있음), 여기선 "그 json 근처에 있겠거니" 가정하고 최선을 다해 찾는다 — 못 찾으면
     None(호출 쪽에서 missing으로 보고)."""
     if not path:
@@ -174,20 +174,20 @@ def _selftest():
         json.dump(profile, open(profile_path, "w"))
 
         out = os.path.join(tmp, "out")
-        result = bundle([profile_path], out, "D:/Oculus")
+        result = bundle([profile_path], out, "D:/Vigil")
 
         assert result["copied"] == 3, result           # Calib.txt (x2 uses, 1 copy) + Ref_NO2.dat
         assert result["missing"] == [os.path.join(roi1, "nope.dat").replace("\\", "/")], result
 
         new_prof = json.load(open(os.path.join(out, "profiles", "profile_test.json")))
-        assert new_prof["channels"][0]["reflectance"]["wavecal_path"] == "D:/Oculus/wv_cal/roi1/Calib.txt"
+        assert new_prof["channels"][0]["reflectance"]["wavecal_path"] == "D:/Vigil/wv_cal/roi1/Calib.txt"
         new_fitset_path = new_prof["channels"][0]["concentration"]["fitset_path"]
-        assert new_fitset_path == "D:/Oculus/fit_setting/FitSet_test.json"
+        assert new_fitset_path == "D:/Vigil/fit_setting/FitSet_test.json"
 
         new_fitset = json.load(open(os.path.join(out, "fit_setting", "FitSet_test.json")))
         ch1 = new_fitset["channels"]["1"]
-        assert ch1["wl_path"] == "D:/Oculus/wv_cal/roi1/Calib.txt"
-        assert ch1["refs"][0]["path"] == "D:/Oculus/wv_cal/roi1/Ref_NO2.dat"
+        assert ch1["wl_path"] == "D:/Vigil/wv_cal/roi1/Calib.txt"
+        assert ch1["refs"][0]["path"] == "D:/Vigil/wv_cal/roi1/Ref_NO2.dat"
         assert ch1["refs"][1]["path"] == os.path.join(roi1, "nope.dat").replace("\\", "/")  # 못 찾으면 원본 유지
 
         assert os.path.exists(os.path.join(out, "wv_cal", "roi1", "Calib.txt"))
@@ -200,7 +200,7 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # cp949 콘솔에서 — 등 깨지는 것 방지
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("profiles", nargs="*", help="oculus/profiles/*.json (실제 사용할 프로파일)")
+    ap.add_argument("profiles", nargs="*", help="vigil/profiles/*.json (실제 사용할 프로파일)")
     ap.add_argument("--out", help="번들을 생성할 로컬 폴더")
     ap.add_argument("--base-dir", help="대상 컴퓨터에서 이 번들 폴더가 놓일 절대경로 "
                                         "(기본: --out의 절대경로 — 같은 경로에 그대로 옮길 거면 생략 가능)")

@@ -22,7 +22,8 @@ where $R(\lambda,t)$ is the mirror reflectivity and $d$ the mirror separation. $
 separation to the cavity length actually filled by the sample, excluding the purge-gas volumes at the mirrors, and
 $\alpha_{\mathrm{Ray}}$ is the Rayleigh extinction at the temperature and pressure of the sample $(T,P)$ and of the
 reference $(T_0,P_0)$. The first bracket converts a relative
-intensity change into an absolute extinction; the second removes the Rayleigh difference between the two states.
+intensity change into an absolute extinction; the second removes the Rayleigh difference between the two states. Light-level changes between reference and sample enter $\alpha$ directly, a sensitivity that the iterative
+cavity-enhanced DOAS method of \citet{Horbanski_2019} removes.
 In $\alpha$, unlike in optical density, the gas amounts enter linearly: the quantity to be fitted is a sum of
 reference cross sections with concentration coefficients, a smooth background and the periodic structure the
 optics impose.
@@ -161,11 +162,14 @@ the converged point: the identifiability map of Sect.~\ref{sec:5} evaluates the 
 points in the wavelength shift for each of twelve spectra, and repeats a coarser version over 165. A fit report
 answers neither question; both require re-entering the retrieval with one input altered.
 
-In Augur both are loops. The time-resolved references enter the forward model as data, an array of knots with
-times interpolated at evaluation, so substituting one is an assignment. The projected objective is a callable of the
-nonlinear parameters, separate from the optimiser, so it can be evaluated at a chosen shift without converging a fit. Where the reference is a file named in a configuration and the objective is reachable only through the optimiser,
-each answer costs one reprocessing of the campaign: several thousand for the budget, one hundred and sixty per
-spectrum for the map. The formulation itself is conventional (Sect.~\ref{sec:3.3}). The contribution of
-the software is architectural: it makes the quantities of Sects.~\ref{sec:4} and \ref{sec:5} cheap enough to obtain
-by default. The nine-hour time-base error of Sect.~\ref{sec:5.4}, invisible in the residual, could be measured only
+Both questions are loops over data already in memory. The time-resolved references enter the forward model as data,
+an array of knots with times interpolated at evaluation, so substituting one is an assignment, and the projected
+objective is a callable of the nonlinear parameters that can be evaluated at a chosen shift without converging a fit.
+In one process on the analysis workstation, the in-memory budget takes \fieldnum{0.74}\,s per record for both heated channels
+and all four perturbations (\fieldnum{74}\,s for a 100-record subset), about \fieldnum{1.9}\,h for the \fieldnum{9034}-record window. A file-based
+route that rebuilds the extinction record and refits one channel-day (\fieldnum{1399} records) takes \fieldnum{54}\,s and \fieldnum{90}\,s, about
+\fieldnum{4.8}\,min per perturbation for the two channels even if only the affected day is reprocessed. With \fieldnum{157} zero-air and
+\fieldnum{54} helium knots in the window, the single-knot removals alone would take about \fieldnum{17}\,h, before the pairwise and
+triple combinations. The formulation itself is conventional (Sect.~\ref{sec:3.3}); the contribution of the software is
+architectural, in that it brings the quantities of Sects.~\ref{sec:4} and \ref{sec:5} to this cost. The nine-hour time-base error of Sect.~\ref{sec:5.4}, invisible in the residual, could be measured only
 by re-running the retrieval with the time base changed.

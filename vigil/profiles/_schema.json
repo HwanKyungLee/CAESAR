@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://caesar/oculus/profiles/_schema.json",
-  "title": "Oculus Instrument Profile",
+  "$id": "https://caesar/vigil/profiles/_schema.json",
+  "title": "Vigil Instrument Profile",
   "description": "하나의 CAESAR raw 파일 레이아웃을 서술하는 프로파일. Cold/Hot/PNs 같은 명칭은 이 파일 안의 label(표시용)로만 존재하고, 파싱·경보 로직은 여기 선언된 열지도/밴드/flag 규약만 본다. 로직 코드에 채널 의미를 하드코딩하지 않는다.",
   "type": "object",
   "required": ["profile_id", "profile_version", "match", "header", "flags", "channels", "hk", "cadence"],

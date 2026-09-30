@@ -1,4 +1,4 @@
-"""oculus/dashboard/dashboard_window.py — 최소 실시간 대시보드 (설계문서 §6, M0+M1+M2+M3).
+"""vigil/dashboard/dashboard_window.py — 최소 실시간 대시보드 (설계문서 §6, M0+M1+M2+M3).
 
 M0: 종합 상태 배지(OK/P1/P2/P0) + 파일별 최근 행 시각/지연 + append-only 로그.
 M1: 파일별 HK(밴드·포화) 상태 열 + HK 필드 추세 그래프. M2: 파일별 R(거울) 상태 열 + R 추세
@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from oculus.alert_engine import OK, P0, P1, P2, SKIP
+from vigil.alert_engine import OK, P0, P1, P2, SKIP
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -44,7 +44,7 @@ _ALARM_COLOR = '#C62828'
 
 
 class DashboardWindow(QMainWindow):
-    def __init__(self, title: str = "Oculus — Pipeline Health"):
+    def __init__(self, title: str = "Vigil — Pipeline Health"):
         super().__init__()
         self.setWindowTitle(title)
         self.resize(1280, 800)
@@ -121,7 +121,7 @@ class DashboardWindow(QMainWindow):
             self._color_of[key] = col
         return col
 
-    # ── 공개 API — run_oculus의 poll 루프가 매 tick 호출 ─────────────────
+    # ── 공개 API — run_vigil의 poll 루프가 매 tick 호출 ─────────────────
     def set_status(self, status: str, msg: str) -> None:
         """종합 상태 배지 갱신(liveness + HK + R 등 전체 aggregate 결과)."""
         self.badge.setText(f"{_BADGE_ICON.get(status, '?')} {msg}")
@@ -223,7 +223,7 @@ class DashboardWindow(QMainWindow):
             bitem.setData(xs, bs)
 
     def update_hk_trend(self, trend: dict, meta: dict) -> None:
-        """trend: {(profile_id,field_key): deque[(datetime, value)]} — run_oculus가 warn/alarm
+        """trend: {(profile_id,field_key): deque[(datetime, value)]} — run_vigil가 warn/alarm
         밴드 있는 필드만 이미 걸러 넣는다. meta: label/unit/warn=(lo,hi)/alarm=(lo,hi)."""
         for key, dq in trend.items():
             if not dq:

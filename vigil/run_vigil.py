@@ -1,12 +1,12 @@
-"""oculus/run_oculus.py — Oculus 진입점 (M0 유입 감시 + M1 HK + M2 R + M3 농도 + 대시보드).
+"""vigil/run_vigil.py — Vigil 진입점 (M0 유입 감시 + M1 HK + M2 R + M3 농도 + 대시보드).
 
 사용:
-    python oculus/run_oculus.py --dir "D:\\CAESAR raw\\2026-yeosu"
-    python -m oculus.run_oculus --dir ... --poll-sec 1.0
+    python vigil/run_vigil.py --dir "D:\\CAESAR raw\\2026-yeosu"
+    python -m vigil.run_vigil --dir ... --poll-sec 1.0
 
 DAQ PC에서 LabVIEW와 나란히 돌리는 걸 전제로 한다(설계문서 §0-A.1) — raw를
 읽기만 하고 절대 쓰지 않으며(§2 원칙2), 자기 상태(커서·로그)는 `--state-dir`
-(기본 레포의 `oculus_state/`)에만 쓴다.
+(기본 레포의 `vigil_state/`)에만 쓴다.
 """
 from __future__ import annotations
 
@@ -21,16 +21,16 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.alert_engine import P1, SKIP, aggregate, worse
-from oculus.ingest_cursor import IngestCursor
-from oculus.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
-from oculus.monitors.hk_monitor import evaluate_hk
-from oculus.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
-from oculus.monitors.lamp_monitor import LampMonitor
-from oculus.monitors.r_monitor import RMonitor
-from oculus.profile import DEFAULT_PROFILE_DIR, ProfileSet
-from oculus.state_log import StateLog
-from oculus.watcher import Watcher
+from vigil.alert_engine import P1, SKIP, aggregate, worse
+from vigil.ingest_cursor import IngestCursor
+from vigil.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
+from vigil.monitors.hk_monitor import evaluate_hk
+from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
+from vigil.monitors.lamp_monitor import LampMonitor
+from vigil.monitors.r_monitor import RMonitor
+from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
+from vigil.state_log import StateLog
+from vigil.watcher import Watcher
 
 TREND_MAXLEN = 300   # ponytail: 그래프 표시용 최근 N개 — 부족하면 늘릴 것
 
@@ -56,7 +56,7 @@ def _hk_value(prof, row, key):
         return float("nan")
 
 
-class OculusApp:
+class VigilApp:
     """감시 루프 상태 컨테이너. QTimer가 매 tick `.tick()`을 부른다."""
 
     def __init__(self, watch_dir: str, profile_dir: str, state_dir: str,
@@ -289,13 +289,20 @@ class OculusApp:
             self.dashboard.update_hk_trend(self._hk_trend, self._trend_meta)
 
 
+def _default_state_dir() -> str:
+    """2026-09-30 Oculus → Vigil 개명. 측정 PC 에 옛 `oculus_state/` 가 있으면 그걸 계속 쓴다 —
+    새 폴더로 가면 커서가 초기화돼 raw 를 처음부터 다시 읽는다."""
+    new, old = os.path.join(_ROOT, "vigil_state"), os.path.join(_ROOT, "oculus_state")
+    return old if (os.path.isdir(old) and not os.path.isdir(new)) else new
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Oculus M0+M1+M2+M3 — raw 유입 + HK + R + 농도 실시간 감시")
+    ap = argparse.ArgumentParser(description="Vigil M0+M1+M2+M3 — raw 유입 + HK + R + 농도 실시간 감시")
     ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
                     help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")
-    ap.add_argument("--state-dir", default=os.path.join(_ROOT, "oculus_state"),
-                    help="커서·로그 저장 폴더 (기본 <repo>/oculus_state)")
+    ap.add_argument("--state-dir", default=_default_state_dir(),
+                    help="커서·로그 저장 폴더 (기본 <repo>/vigil_state, 옛 oculus_state 가 있으면 그것)")
     ap.add_argument("--poll-sec", type=float, default=1.0, help="폴링 주기(초, 기본 1.0)")
     return ap
 
@@ -317,11 +324,11 @@ def main(argv=None) -> int:
 
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication
-    from oculus.dashboard.dashboard_window import DashboardWindow
+    from vigil.dashboard.dashboard_window import DashboardWindow
 
     app = QApplication(sys.argv[:1])
-    win = DashboardWindow(title=f"Oculus — {args.dir}")
-    core = OculusApp(args.dir, args.profiles, args.state_dir, dashboard=win)
+    win = DashboardWindow(title=f"Vigil — {args.dir}")
+    core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win)
     win.log_line(f"watching {args.dir} (poll {args.poll_sec:.1f}s, "
                 f"{len(core.profiles)} profile(s) loaded)")
 
@@ -334,8 +341,8 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    # `python oculus/run_oculus.py`로 직접 실행하면 인터프리터가 스크립트 디렉터리(oculus/)를
-    # sys.path 맨 앞에 넣는다 — oculus/profile.py가 표준라이브러리 profile 모듈을 가려버려
+    # `python vigil/run_vigil.py`로 직접 실행하면 인터프리터가 스크립트 디렉터리(vigil/)를
+    # sys.path 맨 앞에 넣는다 — vigil/profile.py가 표준라이브러리 profile 모듈을 가려버려
     # (pyqtgraph.debug가 cProfile을 통해 그걸 import) 대시보드 임포트가 죽는다. 패키지 임포트는
     # 이미 위에서 _ROOT로 되므로, 이 항목만 지워도 안전.
     _self_dir = os.path.dirname(os.path.abspath(__file__))

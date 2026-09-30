@@ -17,9 +17,8 @@ in the gas amounts; the residual does not see it, so the reported uncertainty do
 Of two further inputs, sample temperature and pressure contribute negligibly and the instrument line shape could not
 be tested adequately. Temperature and pressure, interpolated the same way as $I_0$, contribute below \fieldnum{0.1}\,\%. The kernel is resampled onto the
 detector grid with a radius of $\lfloor 4\sigma \rfloor + 1$ pixels, and at the mismatch measured in the
-ambient-temperature channel (FWHM 0.765 against 0.785\,nm) the retrieved amount moved by $\sim 10^{-5}$\,\%. This shows
-that the test did not carry a width change of that size into the forward model, not that the retrieval is
-insensitive to it. A test with a continuously resampled kernel has not been made, and no mismatch was measured for
+ambient-temperature channel (FWHM 0.765 against 0.785\,nm) the retrieved amount moved by $\sim 10^{-5}$\,\%. This shows only
+that the test did not carry a width change of that size into the forward model; a test with a continuously resampled kernel has not been made, and no mismatch was measured for
 the heated channels. The residual does carry a signal-proportional model error: the median reduced $\chi^2$ of the
 300\,$^{\circ}$C channel rises from \fieldnum{1.05} at NO$_2$(180\,$^{\circ}$C) below 1\,ppb to \fieldnum{1.57} at 10--20\,ppb. That error
 is not in the budget below; the cross sections and the line shape are candidates.
@@ -31,7 +30,8 @@ A structural term is measured by perturbing an input the way the operational pip
 re-running the full retrieval and reading the change in the retrieved amount. In leave-one-out (LOO) perturbation,
 a jackknife-type resampling of the calibration record \citep{Efron_1979}, one calibration knot is removed, the remaining
 knots are re-interpolated across the gap, and every scan in it is re-retrieved. Because the interpolated interval is
-roughly doubled relative to operation, LOO is an upper bound by construction. In the split-half estimate, each calibration block
+roughly doubled relative to operation, LOO is an upper bound by construction for the interpolation terms (scope in
+Sect.~\ref{sec:4.4}). In the split-half estimate, each calibration block
 is split into contiguous (first and second half) or interleaved (even and odd scans) halves, and the difference of
 the two block means measures the knot noise with no change of interval. With $n/2$ scans per half the difference
 carries a factor of two relative to the full-block knot noise, which is divided out.
@@ -51,7 +51,7 @@ understate it.
 \caption{Zero-air reference-interpolation error in the channel NO$_2$ amount (per cent) from the split-half estimate
 of knot noise, with contiguous and interleaved halves, and from leave-one-out (LOO) knot removal, and the ratio
 split-half/LOO. Hot channels: the 157 zero-air knots of 18--24 May, current fit settings and clock-aligned
-reflectivity. Cold: an earlier run with different settings, not recomputed on this basis.}
+reflectivity.}
 \label{tab:splithalf_loo}
 \begin{tabular}{lllll}
 \tophline
@@ -59,7 +59,6 @@ channel & split-half, contiguous & split-half, interleaved & LOO & ratio \\
 \middlehline
 hot PNs & \fieldnum{1.437}\,\% & \fieldnum{1.782}\,\% & \fieldnum{1.95}\,\% & \fieldnum{0.74}--\fieldnum{0.91} \\
 hot ANs & \fieldnum{0.90}\,\% & \fieldnum{0.97}\,\% & \fieldnum{2.25}\,\% & \fieldnum{0.40}--\fieldnum{0.43} \\
-cold (earlier run) & -- & \fieldnum{2.391}\,\% & \fieldnum{3.95}\,\% & \fieldnum{0.61} \\
 \bottomhline
 \end{tabular}
 \end{table}
@@ -76,7 +75,8 @@ simultaneously therefore gives a smaller result than summing the three responses
 \fieldnum{6.4}\,\% (hot PNs) and \fieldnum{$-0.2$}\,\% (cold). Adding the etalon term as if it were independent overestimates by an
 amount that depends on the fitting window and polynomial order.
 
-Second, neither variances nor robust scales add. Combining median-based scales in quadrature misses the directly
+Second, the joint scale differs from any quadrature combination of the single-term scales, whether robust scales or
+standard deviations are combined. Combining median-based scales in quadrature misses the directly
 measured joint scale by \fieldnum{$+13.3$}\,\% (hot ANs), \fieldnum{$-8.1$}\,\% (hot PNs) and \fieldnum{$+6.9$}\,\% ($\Sigma$ANs). The same
 combination on standard deviations does not repair it: the joint exceeds the quadrature sum by \fieldnum{15.5}\,\% for the
 ANs channel and \fieldnum{7.6}\,\% for $\Sigma$ANs, and falls \fieldnum{2.5}\,\% below it for PNs. For variances the failure has two
@@ -128,7 +128,7 @@ $\Sigma$ANs & rSD & \fieldnum{0.0558} & \fieldnum{0.0269} & \fieldnum{0.0191} & 
 \end{tabular}
 \end{table*}
 
-The dominant term depends on the scale. Of the single-term quadrature sum for $\Sigma$ANs, $I_0$ carries \fieldnum{74}\,\% on
+The reflectivity term dominates the tail of the budget and the zero-air term its typical record. Of the single-term quadrature sum for $\Sigma$ANs, $I_0$ carries \fieldnum{74}\,\% on
 the robust scale but \fieldnum{45}\,\% in standard deviation, while $R$ carries \fieldnum{17}\,\% and \fieldnum{52}\,\%. The reflectivity term
 is small for a typical record and the largest contributor overall, because its error is concentrated in a few
 intervals: five of the \fieldnum{155} hours in the window carry \fieldnum{57}\,\% of its variance (Fig.~\ref{fig:4}a, c).
@@ -156,8 +156,9 @@ operational scan rate is one scan, and the median fit-propagated $\Sigma$ANs unc
 same records, is \fieldnum{0.0541}\,ppb. The structural contribution alone is therefore \fieldnum{1.28} times the reported sigma on the
 robust scale and \fieldnum{2.29} times it in standard deviation. The total uncertainty is \fieldnum{1.63} to \fieldnum{2.50} times what the
 fit reports, the range spanning the two scales rather than any doubt about the measurement. Because
-leave-one-out doubles the interpolation interval (Sect.~\ref{sec:4.2}) and the window is the best-calibrated week of
-the deployment, these are upper-bound estimates for a well-calibrated period. The per-scan fit uncertainty is the
+leave-one-out doubles the interpolation interval (Sect.~\ref{sec:4.2}), these are upper-bound estimates for the
+interpolation terms in the best-calibrated week of the deployment. They exclude terms common to all knots (cross
+sections, Rayleigh scattering, the reflectivity scale) and periods of failed calibration, and are not a campaign-wide bound. The per-scan fit uncertainty is the
 appropriate denominator; the uncertainty column shipped with the product, the five-minute fit uncertainty and the
 zero-air scatter answer different questions (Appendix~\ref{app:D}, Table~\ref{tab:denominators}).
 
@@ -192,8 +193,8 @@ budget, at record resolution & \fieldnum{0.0693} & \fieldnum{0.84} \\
 
 The budget predicts \fieldnum{0.75} times the observed hour-to-hour variation (Fig.~\ref{fig:4}b), evaluated on the same
 \fieldnum{154} matched hours and \fieldnum{153} consecutive pairs against \fieldnum{0.082}\,ppb; the campaign-wide denominator gives almost the same
-ratio, \fieldnum{0.76}. The budget stays below the observed variation, as it must, but not so far below as to imply an undescribed dominant
-error, so we report the two as consistent without assigning a pass or fail. The test assumes the error is white at one-hour lag, so any slower
+ratio, \fieldnum{0.76}. The budget is not larger than the observed variation, as it must be, nor so far below it as to imply an undescribed
+dominant error; we assign no pass or fail. The test assumes the error is white at one-hour lag, so any slower
 structural component is invisible to it; it cannot separate measurement error from atmospheric variability; and
 the upper bound doubles the interpolation interval by construction. The choice of operator alone moves the ratio
 from \fieldnum{0.75} to \fieldnum{0.84} (Table~\ref{tab:hourly_check}), which sets the resolution of the method.
@@ -218,10 +219,10 @@ measures a different quantity: the record-to-record error produced by interpolat
 references, which is neither a constant scale nor visible in the residual. It adds to the cross-section and Rayleigh
 terms, which remain multiplicative and are not re-estimated here.
 
-Residual-based error estimates address a third quantity. \citet{Stutz_1996} estimate the concentration error from
-the influence of random residual structures and of the wavelength-mapping correction, and \citet{Platt} set out the
-conditions under which the least-squares error holds. Such estimates act on what the residual contains, whereas the
-structural terms leave the residual unchanged (Sect.~\ref{sec:4.1}), so no inflation derived from the residual can
-recover them. A further step, not attempted here, would treat the zero-air reference and the reflectivity as
+Residual-based error estimates address a third quantity. \citet{Platt} set out the conditions under which the
+least-squares error holds, and corrections such as the correlation factor of \citet{Stutz_1996}, which accounts for
+random residual structures and the wavelength-mapping correction, and the bootstrap and Monte Carlo estimates of
+\citet{Hausmann_1999} address structure that appears in the residual. The structural terms here leave the residual
+unchanged (Sect.~\ref{sec:4.1}), so no inflation derived from the residual can recover them. A further step, not attempted here, would treat the zero-air reference and the reflectivity as
 measured quantities with their own covariance and propagate the structural term inside the fit rather than
 afterwards. What the product should carry in consequence is specified once, in Sect.~\ref{sec:6.1}.

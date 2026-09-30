@@ -1,10 +1,10 @@
-"""oculus/ingest_cursor.py — 파일별 처리 오프셋 저장/복원 (재시작 견고성).
+"""vigil/ingest_cursor.py — 파일별 처리 오프셋 저장/복원 (재시작 견고성).
 
 설계문서 §2 원칙1(증분): 파일 전체를 매번 다시 읽지 않고, 마지막으로 처리한
-바이트 오프셋을 기억해 새로 붙은 부분만 읽는다. Oculus가 재시작해도(크래시·
+바이트 오프셋을 기억해 새로 붙은 부분만 읽는다. Vigil이 재시작해도(크래시·
 업데이트) 처음부터 다시 읽지 않도록 이 오프셋을 디스크에 영속화한다.
 
-Oculus는 raw를 절대 쓰지 않는다(§2 원칙2) — 커서는 별도 상태 폴더에만 저장한다.
+Vigil은 raw를 절대 쓰지 않는다(§2 원칙2) — 커서는 별도 상태 폴더에만 저장한다.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Optional
 class IngestCursor:
     """{파일 절대경로: {"offset": int, "mtime": float}} — JSON 파일에 영속화.
 
-        cur = IngestCursor(r"oculus_state\\cursors.json")
+        cur = IngestCursor(r"vigil_state\\cursors.json")
         off = cur.get(path)              # 미기록이면 0
         cur.set(path, new_offset, mtime) # 즉시 디스크에 저장(원자적 교체)
     """

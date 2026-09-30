@@ -1,4 +1,4 @@
-"""oculus/monitors/r_monitor.py — R(반사율)/거울 헬스 (설계문서 §1.2, M2).
+"""vigil/monitors/r_monitor.py — R(반사율)/거울 헬스 (설계문서 §1.2, M2).
 
 ZA/He 스캔 쌍에서 R을 산출해 추세를 본다. 물리 계산은
 `tools/reflectance_calc.ReflectanceCalculator`를 그대로 재사용(단일 출처, 그
@@ -18,7 +18,7 @@ from typing import Optional
 
 import numpy as np
 
-from oculus.alert_engine import OK, P0, P1, P2
+from vigil.alert_engine import OK, P0, P1, P2
 
 # 연속 이 횟수 이상 R 산출 실패하면 "정지 수준"으로 격상(§5 P0 예시: "R 산출 연속 실패").
 FAIL_STREAK_FOR_P0 = 3

@@ -1,4 +1,4 @@
-"""oculus/monitors/conc_monitor.py 단위테스트.
+"""vigil/monitors/conc_monitor.py 단위테스트.
 
 실데이터 재구성: `Output/alpha/60s/cold`의 실제(이미 검증된) alpha 배열을
 `spectrum = I0 * exp(-alpha)`로 raw 광량 도메인으로 역변환해서 넣는다 —
@@ -13,7 +13,7 @@
   4) 연속 실패 → P0 격상
   5) pick_fitset_channel — wl_dir 매칭
 
-사용: python oculus/monitors/test_conc_monitor.py → 전부 PASS면 exit 0
+사용: python vigil/monitors/test_conc_monitor.py → 전부 PASS면 exit 0
 """
 import glob
 import json
@@ -32,9 +32,9 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from oculus.alert_engine import OK, P0, P1, P2
-from oculus.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
-from oculus.profile import ConcentrationConfig
+from vigil.alert_engine import OK, P0, P1, P2
+from vigil.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
+from vigil.profile import ConcentrationConfig
 from tools import optimize_params as OP
 from tools.residual_compare import load_alpha
 
