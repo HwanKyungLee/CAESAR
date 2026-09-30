@@ -202,11 +202,21 @@ def estimate_shift(eng, alphas, species, px_min, px_max, poly_deg,
                 c, *_ = np.linalg.lstsq(A, y, rcond=None)
             except Exception:             # noqa: BLE001
                 continue
-            rs.append(float(np.sqrt(np.mean((y - A @ c) ** 2))))
+            r = float(np.sqrt(np.mean((y - A @ c) ** 2)))
+            if np.isfinite(r):            # NaN 스캔이 median 을 NaN 으로 만들면 비교가 늘 거짓
+                rs.append(r)
         if rs:
             m = float(np.median(rs))
             if m < best_r:
                 best_r, best_sh = m, float(sh)
+    # 0 은 중립값이라 반환은 유지하되, "정렬 실패"를 "정렬이 0"과 구분되게 알린다.
+    import warnings
+    if not np.isfinite(best_r):
+        warnings.warn("estimate_shift: 유효 스캔이 없어 정렬 실패 — shift 0 은 추정값이 아니다.",
+                      RuntimeWarning, stacklevel=2)
+    elif best_sh <= lo + 1e-9 or best_sh >= hi - 1e-9:
+        warnings.warn(f"estimate_shift: 최적 shift {best_sh:+.2f}px 가 탐색 경계 [{lo},{hi}] 에 붙었다 "
+                      f"— 실제 정렬이 범위 밖일 수 있다.", RuntimeWarning, stacklevel=2)
     return best_sh
 
 

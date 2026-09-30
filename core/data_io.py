@@ -1162,10 +1162,23 @@ class DataIO:
             if not (DataIO.HOT_DEPLOY_STEM <= stem < DataIO.HOT_UTC_TOGGLE_STEM):
                 return 0.0
             if ncols is None:
-                if rows is None:
-                    rows = DataIO._load_file_to_cache(filepath)
                 # 헤더행(6177)은 핫·콜드가 같으므로 데이터행 폭으로 판별한다.
-                ncols = max((len(r) for r in rows[:10]), default=0)
+                if rows is not None:
+                    ncols = max((len(r) for r in rows[:10]), default=0)
+                else:
+                    # 앞 10줄 탭만 센다 — 파일 통째 로드(1.7 s → 캐시 없는 워커에선
+                    # 파일마다 반복)를 피한다. 캐시 판정과 같은 strip·split 규칙.
+                    ncols = 0
+                    with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                        seen = 0
+                        for ln in fh:
+                            s = ln.strip()
+                            if not s:
+                                continue
+                            ncols = max(ncols, len(s.split('\t')))
+                            seen += 1
+                            if seen >= 10:
+                                break
             if int(ncols) != DataIO.HOT_NCOLS:
                 return 0.0
             return DataIO.HOT_PRE_TOGGLE_SHIFT_SEC

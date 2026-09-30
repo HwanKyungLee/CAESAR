@@ -11,7 +11,7 @@
 - 2026-09-25~27에 쓴 'ch2 = 300 °C'는 **오판**이었다(철회). 근거·영향 목록: [`CHANNEL_IDENTITY_YEOSU2026.md`](CHANNEL_IDENTITY_YEOSU2026.md).
 - raw 블록 번호·라벨·기억만으로 채널을 정하지 말 것 — 8/11 이후 광섬유 배치가 바뀌었다. **LED 스펙트럼 모양**으로 판단.
 - `core/raw_parser.py`는 6181열 파일에 파일명 날짜 2026-05-01~08-31일 때만 ANs/PNs 이름을 붙인다(그 밖은 ch1/ch2).
-- 압력 센서 짝(맞는 짝: 2053 ↔ `P_ANs` 6164, 4101 ↔ `P_PNs` 6162)이 `core/data_io.py`·R 설정에서 반대 — 수정 대기.
+- 압력 센서 짝(2053 ↔ `P_ANs` 6164, 4101 ↔ `P_PNs` 6162)은 `core/data_io.py`가 채널 정체로 고른다(`87028c4`). R 경로의 `col_press` 인자는 받기만 하고 안 쓰인다(`data_io` 경유) — 그 상수를 근거로 삼지 말 것.
 
 ## 뭘 만드는 저장소인가
 
@@ -76,11 +76,7 @@
   믿지 말 것. cold 는 대상이 아니다(`ncols == HOT_NCOLS` 인 파일만 보정).
   확인법: `rt_precompute._file_first_sec(파일)` 과 `knot_sec` 이 맞는지.
 
-- **`DataIO.clock_epoch_offset_sec(path)` 를 `ncols` 없이 부르면 파일을 통째로
-  로드한다** (`core/data_io.py:1127`). 시각만 필요해서 가볍게 파싱하는 코드가
-  여기서 통째로 무의미해진다(실측: raw 1파일 1.7초 → 10분 초과). 앞 10줄의 탭
-  개수로 폭을 세서 `ncols=` 로 넘겨라 — 그쪽 판정식과 같은 계산이다.
-  예: `tools/extract_cal_knots.py`.
+- ~~`clock_epoch_offset_sec` 를 `ncols` 없이 부르면 파일 통째 로드~~ → 2026-09-30 고침: 이제 앞 10줄만 센다.
 - **knot 커버리지를 잴 때 knot 출처가 알파 구간을 덮는지 먼저 확인하라.** 7일치
   진단 캐시로 전 캠페인 알파를 재면 "I₀ 범위밖 88 %" 가 나오는데 커버리지가
   아니라 입력 불일치다. `tools/alpha_context_sidecar.py` 가 이제 경고한다.
