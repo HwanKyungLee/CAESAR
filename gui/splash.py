@@ -102,6 +102,19 @@ class AugurSplash(QSplashScreen):
         self.wait_while(lambda: self._clock.elapsed() < SETTLE_MS, max_s=SETTLE_MS / 1000)
 
     # ── 그리기 ──────────────────────────────────────────────────────────
+    def _draw_acronym(self, p: QPainter, text: str, y: float) -> None:
+        """가운데 정렬로 그리되 대문자로 시작하는 단어의 첫 글자만 금색("of" 같은 소문자 단어는 제외)."""
+        fm = p.fontMetrics()
+        x = (self.W - fm.horizontalAdvance(text)) / 2
+        base = y + fm.ascent()
+        prev = " "
+        for ch in text:
+            p.setPen(_GOLD if (prev == " " and ch.isupper()) else _MUTED)
+            p.drawText(QPointF(x, base), ch)
+            x += fm.horizontalAdvance(ch)
+            prev = ch
+
+
     def drawContents(self, p: QPainter) -> None:            # noqa: N802 (Qt 규약)
         t = float(self._clock.elapsed()) * SPEED
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -168,8 +181,8 @@ class AugurSplash(QSplashScreen):
             p.setFont(big); p.setPen(_IVORY)
             p.drawText(QRectF(0, TOP + RH + 10, self.W, 40), Qt.AlignmentFlag.AlignCenter, "Augur")
             if self._subtitle:
-                p.setFont(small); p.setPen(_MUTED)
-                p.drawText(QRectF(0, TOP + RH + 50, self.W, 16), Qt.AlignmentFlag.AlignCenter, self._subtitle)
+                p.setFont(small)
+                self._draw_acronym(p, self._subtitle, TOP + RH + 50)
             p.setOpacity(1.0)
 
         # 로그: 실제로 끝난 단계만. 진행바 = 끝난 단계 / 예정 단계 수(n_steps).
