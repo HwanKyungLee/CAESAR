@@ -42,7 +42,7 @@ def test_no_local_core_math():
     """`cpu_count() ... // 2` 류의 자체 계산이 소스에 없어야 한다."""
     pat = re.compile(r'cpu_count\(\)[^\n]*//\s*\d')
     bad = []
-    for sub in ('core', 'gui', 'tools', 'oculus'):
+    for sub in ('core', 'gui', 'tools', 'vigil'):
         for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, sub)):
             dirnames[:] = [d for d in dirnames if d != '__pycache__']
             for fn in filenames:

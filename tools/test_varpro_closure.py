@@ -50,7 +50,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REF_DIRS = [
     os.environ.get("AUGUR_WVCAL_DIR", ""),
     os.path.join(ROOT, "tests", "data", "wv_cal_roi1"),
-    os.path.join(ROOT, "dist", "oculus_deps", "wv_cal", "roi1"),
+    os.path.join(ROOT, "dist", "vigil_deps", "wv_cal", "roi1"),
     r"C:\GHL\2026 yeosu\Output\wv_cal\roi1",
     r"C:\Doasis_Work\Output\wv_cal\roi1",
 ]

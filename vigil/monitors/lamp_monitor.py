@@ -18,13 +18,18 @@ LED 전류 조정) 꺼져도(광경로 차단) 지금까지는 아무 경보가 
     warn 문턱 = max(warn_rel, ADAPT_FACTOR × p95(기준선 대비 평소 이탈)) — `core.step_guard`
     와 같은 채널 적응 규칙. 콜드는 램프가 하루 주기로 ±8–10 % 출렁여 고정 5 % 면 블록의
     31 % 가 P2 였다. P1·P0 문턱은 적응시키지 않는다(계단·꺼짐은 채널과 무관하게 잡는다).
+    평소 이탈은 **최근 RECENT_EXCLUDE 블록을 뺀** 기록으로 잰다 — 전 기록으로 재면 계단 뒤
+    새 레벨이 곧바로 p95 를 부풀려 경보가 2시간 만에 꺼졌다(2026-06-05 +8 %, 아래). 빼면
+    기준선이 새 레벨로 넘어갈 때(~12 블록)까지 유지된다. 대가: 콜드 7일 경보 전환 12 → 16.
 P0 블록은 기준선에 넣지 않는다(어두운 블록이 기준을 끌어내리면 복귀가 계단처럼 보인다).
 계단 뒤 새 레벨은 넣는다 — 기준선이 ~history/2 블록 뒤 새 정상에 적응한다.
 
 문턱 근거 (2026 여수, ZA 블록 = 시간당 1회):
   · 평상시: 핫 인접블록 변화 p95 0.6–1.3 %, 24블록 중앙값 대비 이탈 중앙 0.3 %
     (`diagnostics/i0_interp_2026-09/_cache_hot_*_b.npz`, 05-24~06-01)
-  · 실사건: 핫 05-26 08:30→09:00 **+20 %** 계단, 콜드 06-15~16 정상의 **~4 %** 로 반복 추락
+  · 실사건: 핫 05-26 08:30→09:00 **+20 %** 계단, 콜드 06-15~16 정상의 **~4 %** 로 반복 추락,
+    핫 06-05 22:47 KST ROI2 필터 재장착 → block 4101 만 **+8 %** (raw 05-31~06-11 재추출,
+    block 2053 은 매끈 — (1−R)/d 에서 본 +18 % 와 같은 사건, 세기로는 더 작게 보인다)
 """
 from __future__ import annotations
 
@@ -39,6 +44,7 @@ WARN_REL = 0.05
 ALARM_REL = 0.15          # = core.step_guard.REL_FLOOR (핫 정상 drift p99.5 의 ~2배)
 ADAPT_FACTOR = 2.0        # = core.step_guard.ADAPT_FACTOR
 ADAPT_PCTL = 95.0
+RECENT_EXCLUDE = 12       # 적응 문턱 산정에서 뺄 최근 블록 수(= HISTORY_WINDOW/2)
 DARK_FRAC = 0.20
 HISTORY_WINDOW = 24       # ≈ 하루치 ZA 블록
 MIN_HISTORY_FOR_BASELINE = 3
@@ -80,8 +86,9 @@ class LampMonitor:
         hist = np.asarray(self._history, dtype=float)
         baseline = float(np.median(hist))
         rel = level / baseline - 1.0 if baseline > 0 else float("nan")
-        warn = max(self.warn_rel,
-                   ADAPT_FACTOR * float(np.percentile(np.abs(hist / baseline - 1.0), ADAPT_PCTL)))
+        old = hist[:-RECENT_EXCLUDE] if hist.size > RECENT_EXCLUDE + MIN_HISTORY_FOR_BASELINE else hist[:0]
+        warn = self.warn_rel if old.size == 0 else max(
+            self.warn_rel, ADAPT_FACTOR * float(np.percentile(np.abs(old / baseline - 1.0), ADAPT_PCTL)))
         metrics.update(baseline=baseline, rel=rel, warn_rel=warn)
         if baseline > 0 and level < self.dark_frac * baseline:
             return P0, (f"램프 꺼짐/광경로 차단 의심 I={level:.0f} "

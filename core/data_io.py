@@ -851,7 +851,7 @@ class DataIO:
                         return np.nan
 
                     # 채널별 선호 이름 → 공통 이름 → 같은 kind 아무거나.
-                    # 'Cold'/'Hot' 같은 구성 이름으로 분기하지 않는다(Oculus 설계 §0-A.6).
+                    # 'Cold'/'Hot' 같은 구성 이름으로 분기하지 않는다(Vigil 설계 §0-A.6).
                     # ★ 압력 센서는 **채널 정체(이름)로** 고른다 — 슬롯 번호로 고르지 않는다
                     #   (2026-09-27 판정, CHANNEL_IDENTITY_YEOSU2026.md §4). 여수 캠페인에서
                     #   P_ANs(6164)는 300 °C 경로 = primary(block 2053, 'ANs'),

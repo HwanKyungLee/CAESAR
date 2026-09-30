@@ -94,9 +94,16 @@ def test_adapts_after_step():
     check("새 레벨이 기준선이 되면 OK", statuses[-1] == OK, str(statuses))
 
 
+def test_moderate_step_stays_visible():
+    print("[6] +8 % 계단(06-05 필터 재장착 크기)이 곧바로 꺼지지 않는다")
+    lm = LampMonitor(); _warm(lm, n=24)
+    statuses = [_block(lm, 12000 * 1.08)[0] for _ in range(8)]
+    check("8블록 내내 P2 유지", all(s == P2 for s in statuses), str(statuses))
+
+
 def main():
     for t in (test_window_and_fragments, test_baseline_accumulation, test_levels,
-              test_dark_and_recovery, test_adapts_after_step):
+              test_dark_and_recovery, test_adapts_after_step, test_moderate_step_stays_visible):
         t()
     print(f"\nlamp_monitor tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0

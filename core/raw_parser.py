@@ -78,7 +78,7 @@ disagree the MATLAB label is recorded as a comment for reference.
   사용자가 고르거나 경로를 적을 필요가 없고, 라우팅은 raw의 열 수(데이터)가 한다.
   이미 아는 열 수는 덮지 않는다(기본 등록이 이긴다 — `row.hk` 키가 조용히 바뀌면
   기존 소비자가 말없이 깨지므로).
-* ``load_campaign_layout(path)`` — **캠페인 프로파일**(``oculus/profiles/*.json``)을
+* ``load_campaign_layout(path)`` — **캠페인 프로파일**(``vigil/profiles/*.json``)을
   읽어 등록(특정 파일을 명시할 때). 캠페인별 컬럼 지도는 그 파일이 이미 갖고 있으므로 새 포맷을 만들지 않는다.
   단위 환산(°C ÷100, mbar ×P_SCALE)은 **core가 단일 출처**이고, 프로파일이 다른 scale을
   적어두면 0.1% 초과일 때 경고한다.
@@ -278,8 +278,8 @@ SENTINEL_RAW = (0.0, 65535.0)
 
 # ── 스펙트럼 CCD 포화 ──────────────────────────────────────────────────────────
 # 16-bit ADC 라 만재는 65535 지만, 문턱은 그보다 낮게 둔다 — 만재 직전에 이미
-# 응답이 휘어 흡수를 **과소평가**하기 때문이다. 64000 은 Oculus 프로파일
-# (`oculus/profiles/caesar_*.example.json` 의 `saturation.adc_max`)이 쓰는 값과
+# 응답이 휘어 흡수를 **과소평가**하기 때문이다. 64000 은 Vigil 프로파일
+# (`vigil/profiles/caesar_*.example.json` 의 `saturation.adc_max`)이 쓰는 값과
 # 같게 맞춘 것이다. 프로파일 쪽은 계기마다 덮어쓸 수 있는 설정이고, 이 상수는
 # 프로파일 체계가 없는 Augur 본 파이프라인의 기본값이다.
 #
@@ -296,7 +296,7 @@ SATURATION_ADC_MAX = 64000.0
 def count_saturated(spectrum, adc_max: float = SATURATION_ADC_MAX) -> int:
     """스펙트럼에서 포화 픽셀 수. 무결성 헌장대로 **버리지 않고 세기만** 한다.
 
-    같은 판정을 Oculus 는 `core.profile.Profile.is_saturated` 로 한다(프로파일별
+    같은 판정을 Vigil 는 `core.profile.Profile.is_saturated` 로 한다(프로파일별
     adc_max). 문턱식이 갈리지 않게 기본값을 여기 한 곳에서 관리한다.
     """
     a = np.asarray(spectrum, dtype=float)
@@ -448,11 +448,11 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
 
 
 def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayout:
-    """**캠페인 프로파일 JSON**(`oculus/profiles/*.json`)에서 raw 레이아웃을 등록.
+    """**캠페인 프로파일 JSON**(`vigil/profiles/*.json`)에서 raw 레이아웃을 등록.
 
     캠페인별 컬럼 지도는 이미 그 파일이 갖고 있다(`match.n_columns`, `channels[].columns`,
     `hk.start_col`+`fields[].rel`, `flags`). 새 포맷을 만들지 않고 그걸 읽는다 — Augur와
-    Oculus가 **한 파일**을 본다(Oculus 설계 §2-A "역수혈").
+    Vigil이 **한 파일**을 본다(Vigil 설계 §2-A "역수혈").
 
     파싱은 `core.profile`(스키마 검증 포함, 그 포맷의 **유일한** 리더)에 맡기고, 여기서는
     그 결과를 raw_parser의 레이아웃 표로 옮기기만 한다.

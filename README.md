@@ -2,7 +2,7 @@
 
 # Augur
 
-> **CAESAR** BBCEAS 미량기체 분석 소프트웨어 (구 "CAESAR Pro"). 랩 통합 관측시스템 **ARGUS** 아래, 계측기 **CAESAR**의 데이터를 농도로 확정하는 분석 프로그램이다. (측정 중 실시간 감시는 별도 프로그램 **Oculus**가 맡는다 — 설계: [`docs/Oculus_설계_2026-07.md`](docs/Oculus_설계_2026-07.md))
+> **CAESAR** BBCEAS 미량기체 분석 소프트웨어 (구 "CAESAR Pro"). 랩 통합 관측시스템 **ARGUS** 아래, 계측기 **CAESAR**의 데이터를 농도로 확정하는 분석 프로그램이다. (측정 중 실시간 감시는 별도 프로그램 **Vigil**(구 Oculus)이 맡는다 — 설계: [`docs/Vigil_설계_2026-07.md`](docs/Vigil_설계_2026-07.md))
 
 [![CI](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml/badge.svg)](https://github.com/HwanKyungLee/CAESAR/actions/workflows/ci.yml)
 
@@ -38,7 +38,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-**개발자/리뷰어**라면 패키지로 설치하면 `core`/`gui`/`oculus`를 어디서든 임포트할 수 있고
+**개발자/리뷰어**라면 패키지로 설치하면 `core`/`gui`/`vigil`을 어디서든 임포트할 수 있고
 테스트를 한 번에 돌릴 수 있다:
 
 ```bash
@@ -126,7 +126,7 @@ CAESAR/
 │   ├── doas_fit.py            ← 공유 VarPro DOAS 피터 (DoasFitter) — GUI/도구 공통
 │   ├── physics.py             ← 공용 물리 (RayleighPhysics, KalmanTracker)
 │   ├── result_io.py           ← 리트리벌 결과 파일 공통 IO (읽기/자르기/병합)
-│   ├── profile.py             ← 캠페인/인스트루먼트 프로파일 로더 (Augur·Oculus 공용 단일 리더)
+│   ├── profile.py             ← 캠페인/인스트루먼트 프로파일 로더 (Augur·Vigil 공용 단일 리더)
 │   ├── refit.py               ← 저장된 결과 한 스캔을 그때 설정으로 재핏 (잔차 패널)
 │   ├── run_meta.py            ← 결과 `.meta.json` 사이드카 (runid=설정 해시, 버전 diff)
 │   ├── day_audit.py           ← 측정일 감사 (ZA/He 교정 블록이 주기대로 들어왔나)

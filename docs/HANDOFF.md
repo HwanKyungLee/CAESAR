@@ -822,7 +822,7 @@ except 감사(2026-09-15)는 **"예외를 삼키고 그럴듯한 값으로 갈�
 
 `gui/`의 나머지 183건(`ui_plot_maker/widget.py` 29, `ui_dialogs_calib.py` 19,
 `app_window*.py` 38, 뷰어 표시 경로 등), `tools/` 58, `calibration/` 10,
-`diagnostics/` 9, `oculus/` 6 = **약 266건은 보지 않았다.**
+`diagnostics/` 9, `vigil/` 6 = **약 266건은 보지 않았다.**
 
 멈춘 기준: **숫자를 만들거나 파일로 내보내는 경로는 전부 봤다.** 나머지는 표시·입력·
 그림이라 틀리면 **화면에서 눈에 보인다** — 조용히 틀리는 부류가 아니다. 여기서 더
@@ -1017,7 +1017,7 @@ Link가 공유하는 건 (shift, squeeze) 값뿐 — 캐시할 중복 결과가 
   재배치하면 이 모듈이 가장 경계하는 "조용히 틀린 HK"가 된다.
 - **당장 피해는 없다**: `tempsptrm`를 읽는 소비자가 없다(`data_io._HK_REL` 최대 rel=26).
 - **확인되면 할 일**: `core/raw_parser.py`의 `HotHKMap["tempsptrm"]`을 6180으로 옮기고,
-  `oculus/profiles/caesar_hot.example.json`의 `t_spectrometer`(rel 28 → 31)도 같이.
+  `vigil/profiles/caesar_hot.example.json`의 `t_spectrometer`(rel 28 → 31)도 같이.
   같이 걸린 **이름 충돌**도 정리할 것 —
   `campaigns/yeosu_2026/hot_cavity_t/scripts/02_backcast_all.py`는 핫 col 6174를
   `T_spt`라 부르는데 `raw_parser`는 같은 열을 `tempcell1`이라 한다.
@@ -1210,7 +1210,7 @@ python tools/test_raw_layout.py
 
 ### 건드리지 않은 것
 
-`oculus/`(conc_monitor·profiles·watcher·state_log·run_oculus)와 `core/profile.py`의
+`vigil/`(conc_monitor·profiles·watcher·state_log·run_vigil)와 `core/profile.py`의
 워킹트리 변경은 **사용자 병렬 작업**이라 커밋에서 제외했다.
 
 ---
@@ -1250,7 +1250,7 @@ python tools/test_raw_layout.py
 
 ### 미완료 — 다음에 이어받을 것
 
-(현재 없음 — 위 항목까지 완료된 상태. `docs/Oculus_설계_2026-07.md` §7·§8을 보면 Oculus
+(현재 없음 — 위 항목까지 완료된 상태. `docs/Vigil_설계_2026-07.md` §7·§8을 보면 Oculus
 M0~M3도 이후 완료됨. NIER 제출(R0, 8/14 마감) 관련은 별도 워크플로,
 `docs/NO2_인젝션_실험_핸드오프_2026-08.md` 참조.)
 

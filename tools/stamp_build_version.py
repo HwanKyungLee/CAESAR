@@ -5,7 +5,7 @@
 "결과 파일 헤더의 해시로 checkout해서 재현한다"는 장치가 통째로 무력해진다.
 
 사용:
-    python tools/stamp_build_version.py && pyinstaller Oculus.spec
+    python tools/stamp_build_version.py && pyinstaller Vigil.spec
 
 생성 파일은 `.gitignore` 대상이다(빌드 산출물). 심을 값이 재현 불가
 (`-dirty`/`-unknown`/`nogit`)면 **거부**한다 — 그런 빌드로 만든 결과는 어차피

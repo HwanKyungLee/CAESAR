@@ -2,7 +2,7 @@
 #
 # 왜 생겼나 (2026-09-15): 이게 없어서 저장소는 설치 불가능한 스크립트 더미였고,
 # 97개 파일이 `sys.path.insert(0, ROOT)`로 임포트를 뚫고 있었다. 저널 리뷰어가
-# 클론해서 `pip install -e .` 한 줄로 core/gui/oculus를 임포트할 수 있어야 한다.
+# 클론해서 `pip install -e .` 한 줄로 core/gui/vigil를 임포트할 수 있어야 한다.
 #
 # 기존 sys.path 해킹은 이번에 일괄 제거하지 않았다 — 설치돼 있으면 무해한
 # no-op이고, 97파일 동시 수정은 진행 중인 GUI 분해 작업과 충돌한다. 새 코드는
@@ -39,11 +39,11 @@ dependencies = { file = ["requirements.txt"] }
 packages = [
     "core",
     "gui", "gui.ui_plot_maker",
-    "oculus", "oculus.monitors", "oculus.dashboard",
+    "vigil", "vigil.monitors", "vigil.dashboard",
 ]
 
 [tool.setuptools.package-data]
-oculus = ["profiles/*.json", "profiles/*.md"]
+vigil = ["profiles/*.json", "profiles/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

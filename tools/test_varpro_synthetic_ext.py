@@ -45,7 +45,7 @@ from core.engine import UniversalEngine       # noqa: E402
 REF_DIRS = [os.environ.get("AUGUR_WVCAL_DIR", ""),
             os.path.join(ROOT, "tests", "data", "wv_cal_roi1"),
             os.path.join(ROOT, "reference_data", "wv_cal", "roi1"),
-            os.path.join(ROOT, "dist", "oculus_deps", "wv_cal", "roi1")]
+            os.path.join(ROOT, "dist", "vigil_deps", "wv_cal", "roi1")]
 REFDIR = None
 REF_FILES = [("NO2", "Ref_NO2_Dynamic-ILS-Applied.dat"),
              ("CHOCHO", "Ref_CHOCHO_Dynamic-ILS-Applied.dat"),

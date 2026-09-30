@@ -18,7 +18,7 @@ CRLF 변환 때문에 sha256이 어긋나 실패하고 있었다(.gitattributes�
     pytest -k raw_parser       # 하나만
     python tools/test_x.py     # 예전처럼 단독 실행도 그대로 된다
 
-새 자체검증 스크립트를 `tools/`나 `oculus/`에 `test_*.py`로 추가하면 **자동으로**
+새 자체검증 스크립트를 `tools/`나 `vigil/`에 `test_*.py`로 추가하면 **자동으로**
 이 스위트에 포함된다. CI에 줄을 추가할 필요가 없다 — 그게 원래 문제였다.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ import sys
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCAN_DIRS = ("core", "gui", "oculus", "tools", "diagnostics", "calibration",
+SCAN_DIRS = ("core", "gui", "vigil", "tools", "diagnostics", "calibration",
              "benchmark")
 
 # 제외 — {상대경로: 사유}. 늘리기 전에 "정말 테스트가 아닌가"를 먼저 의심할 것.

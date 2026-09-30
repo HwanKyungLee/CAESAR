@@ -1,6 +1,6 @@
 """CCD 포화 감지 회귀 — `raw_parser.count_saturated` 와 문턱의 단일 출처를 지킨다.
 
-왜: Oculus 는 `profile.is_saturated`(adc_max 64000)로 포화를 잡는데 **Augur 본
+왜: Vigil 는 `profile.is_saturated`(adc_max 64000)로 포화를 잡는데 **Augur 본
 파이프라인엔 검사가 아예 없었다** — 65535 스펙트럼이 경고 없이 α·피팅에 들어갔고
 인젝션 실험에서 사람이 수동 체크리스트로 잡았다(보고서 §4-G).
 
@@ -34,8 +34,8 @@ def test_nan_is_not_saturation():
     assert count_saturated(spec) == 1
 
 
-def test_threshold_matches_oculus_profiles():
-    """문턱이 Oculus 프로파일의 `saturation.adc_max` 와 갈리지 않는지.
+def test_threshold_matches_vigil_profiles():
+    """문턱이 Vigil 프로파일의 `saturation.adc_max` 와 갈리지 않는지.
 
     두 프로그램이 같은 계기의 같은 현상을 다른 숫자로 판정하면, 어느 쪽 경보를
     믿어야 하는지 아무도 모르게 된다(원칙 3).
@@ -43,8 +43,8 @@ def test_threshold_matches_oculus_profiles():
     import glob
     import json
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    profs = glob.glob(os.path.join(root, "oculus", "profiles", "caesar_*.example.json"))
-    assert profs, "oculus 프로파일 예제를 못 찾았다 — 경로가 바뀌었나?"
+    profs = glob.glob(os.path.join(root, "vigil", "profiles", "caesar_*.example.json"))
+    assert profs, "vigil 프로파일 예제를 못 찾았다 — 경로가 바뀌었나?"
     seen = []
     for p in profs:
         with open(p, encoding="utf-8") as fh:
@@ -64,6 +64,6 @@ def test_empty_and_scalar_safe():
 if __name__ == "__main__":
     test_counts_only_above_threshold()
     test_nan_is_not_saturation()
-    test_threshold_matches_oculus_profiles()
+    test_threshold_matches_vigil_profiles()
     test_empty_and_scalar_safe()
     print(f"OK: saturation threshold {SATURATION_ADC_MAX:.0f} ADC verified")

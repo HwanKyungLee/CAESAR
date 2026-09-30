@@ -5,7 +5,7 @@
      (채널 블록·HK 절대열·kind, 그리고 HK 맵 **객체 동일성** — 기존 코드가 `is`로 본다)
   2. 미등록 ncols는 구조적 폴백으로 간다(HK는 추측하지 않는다 = 빈 맵).
   3. 같은 ncols 중복 등록은 **조용히 덮지 않는다** — 다른 캠페인의 HK로 파싱하는 사고 방지.
-  4. Oculus 캠페인 프로파일(`oculus/profiles/*.json`)로 레이아웃을 등록할 수 있고,
+  4. Vigil 캠페인 프로파일(`vigil/profiles/*.json`)로 레이아웃을 등록할 수 있고,
      그 결과 채널 블록이 내장 표와 **일치**한다(= 한 파일로 양쪽을 몰 수 있다).
   5. 단위 환산은 **core가 단일 출처** — 프로파일이 반올림한 scale을 적어놔도 core 값을 쓴다.
   6. `tools/channel_map.json`의 채널→wavecal 폴더가 캠페인 프로파일과 **일치**한다
@@ -211,8 +211,8 @@ def test_cold_6174_layout(d):
 
 
 def test_cold_6174_profile():
-    """Oculus가 6174 파일을 배정할 수 있어야 한다 — 없으면 5일치가 감시 사각지대."""
-    print("[4-B] Oculus 프로파일이 6174를 라우팅한다")
+    """Vigil이 6174 파일을 배정할 수 있어야 한다 — 없으면 5일치가 감시 사각지대."""
+    print("[4-B] Vigil 프로파일이 6174를 라우팅한다")
     from core.profile import ProfileSet
 
     ps = ProfileSet.load_default()
@@ -255,13 +255,13 @@ def test_register_guard():
         RP.CAMPAIGN_LAYOUTS.pop(99991, None)
 
 
-def test_oculus_profile_adapter():
-    print("[4] Oculus 캠페인 프로파일로 등록")
+def test_vigil_profile_adapter():
+    print("[4] Vigil 캠페인 프로파일로 등록")
     saved = dict(RP.CAMPAIGN_LAYOUTS)
     try:
         for fn, ncols in (("caesar_cold.example.json", 6179),
                           ("caesar_hot.example.json", 6181)):
-            path = os.path.join(_ROOT, "oculus", "profiles", fn)
+            path = os.path.join(_ROOT, "vigil", "profiles", fn)
             if not os.path.exists(path):
                 check("프로파일 존재: %s" % fn, False, path)
                 continue
@@ -309,7 +309,7 @@ def test_autoload_new_campaign(d):
     import json
     import shutil
 
-    src = os.path.join(_ROOT, "oculus", "profiles", "caesar_cold.example.json")
+    src = os.path.join(_ROOT, "vigil", "profiles", "caesar_cold.example.json")
     if not os.path.exists(src):
         check("원본 프로파일 존재", False, src)
         return
@@ -323,7 +323,7 @@ def test_autoload_new_campaign(d):
     prof["match"]["filename_glob"] = "*Demo*.dat"
     pdir = os.path.join(d, "profiles")
     os.makedirs(pdir, exist_ok=True)
-    shutil.copy(os.path.join(_ROOT, "oculus", "profiles", "_schema.json"), pdir)
+    shutil.copy(os.path.join(_ROOT, "vigil", "profiles", "_schema.json"), pdir)
     with open(os.path.join(pdir, "caesar_next.json"), "w", encoding="utf-8") as fh:
         json.dump(prof, fh, ensure_ascii=False)
 
@@ -360,7 +360,7 @@ def main() -> int:
     test_cold_6174_layout(d)
     test_cold_6174_profile()
     test_register_guard()
-    test_oculus_profile_adapter()
+    test_vigil_profile_adapter()
     test_channel_map_matches_profiles()
     test_autoload_new_campaign(d)
     if _FAIL:

@@ -17,8 +17,8 @@
 
 - **Augur** (구 "CAESAR Pro"): BBCEAS 미량기체 분석 GUI. raw → α → DOAS 피팅 → 농도.
   개요: [`docs/Augur_소개_2026-07.md`](docs/Augur_소개_2026-07.md), 사용법: [`README.md`](README.md).
-- **Oculus** (`oculus/`): 측정 중 실시간 감시 프로그램(별도 진입점, 이 저장소 안에 패키지로 존재).
-  설계: [`docs/Oculus_설계_2026-07.md`](docs/Oculus_설계_2026-07.md) — 로드맵 M0~M4, M0(프로파일 계층)는 구현됨.
+- **Vigil** (구 "Oculus", 2026-09-30 개명, `vigil/`): 측정 중 실시간 감시 프로그램(별도 진입점, 이 저장소 안에 패키지로 존재).
+  설계: [`docs/Vigil_설계_2026-07.md`](docs/Vigil_설계_2026-07.md) — 로드맵 M0~M4, M0(프로파일 계층)는 구현됨.
 
 ## 작업 시작 전 필독 — 하는 일에 따라 갈라짐
 
@@ -28,7 +28,7 @@
 | 작업 종류 | 먼저 읽을 문서 |
 |---|---|
 | 핏세팅 자동 최적화 (`core/fit_optimizer.py`, `param_optimizer.py`, `fitset_builder.py`, `tools/optimize_*`, `tools/build_fitset.py`) | [`docs/fit_optimizer_handoff.md`](docs/fit_optimizer_handoff.md) 전체, 특히 **§15(알고리즘 명세)·§2-B(신뢰 3계층)·§16(Center 모드)** |
-| Oculus (실시간 감시) | [`docs/Oculus_설계_2026-07.md`](docs/Oculus_설계_2026-07.md) 전체 |
+| Vigil (실시간 감시) | [`docs/Vigil_설계_2026-07.md`](docs/Vigil_설계_2026-07.md) 전체 |
 | 그 외 Augur GUI/코어 일반 작업 | [`docs/HANDOFF.md`](docs/HANDOFF.md)(최신 세션 노트) + `README.md`의 폴더구조·임포트구조 |
 | ANs/ANs 퇴화·NIER 제출 관련 | [`docs/ANs_분석_핸드오프_2026-07-23.md`](docs/ANs_분석_핸드오프_2026-07-23.md) |
 | NO2 인젝션 실험(g 축퇴·핫채널 30% 결손 해결) | [`docs/NO2_인젝션_실험_핸드오프_2026-08.md`](docs/NO2_인젝션_실험_핸드오프_2026-08.md) 전체 |
@@ -95,7 +95,7 @@ python tools/ci_import_smoke.py               # 전 모듈 임포트 스모크
 python tools/validate_plotmaker.py            # 시각화 수정 시
 ```
 
-새 자체검증을 만들면 `tools/`나 `oculus/`에 `test_*.py`로 두면 된다 —
+새 자체검증을 만들면 `tools/`나 `vigil/`에 `test_*.py`로 두면 된다 —
 `tests/test_script_suite.py`가 자동으로 주워서 CI에서 돌린다. CI 파일은 안 건드려도 된다.
 
 ## 메모리 스코프 주의

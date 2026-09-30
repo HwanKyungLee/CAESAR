@@ -41,7 +41,7 @@ jobs:
         run: pip install -r requirements.txt
 
       # 패키지로 설치까지 되는지 확인 — pyproject.toml이 깨지면 여기서 빨간불.
-      # (리뷰어/외부 사용자는 `pip install -e .` 한 줄로 core/gui/oculus를 임포트한다)
+      # (리뷰어/외부 사용자는 `pip install -e .` 한 줄로 core/gui/vigil를 임포트한다)
       - name: Install package (editable)
         run: |
           pip install -e . --no-deps

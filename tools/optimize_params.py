@@ -67,7 +67,7 @@ def verify_channel_map_against_profiles(key2wldir=None, key2label=None, profiles
     """channel_map의 채널→wavecal 폴더가 **캠페인 프로파일과 같은지** 대조.
 
     같은 매핑이 두 파일에 있으면 언젠가 어긋난다 — 실제로 2026-09-14에 ch 번호와 roi
-    번호를 같은 번호끼리 짝지어 `tools/channel_map.json`과 Oculus 프로파일 **둘 다**
+    번호를 같은 번호끼리 짝지어 `tools/channel_map.json`과 Vigil 프로파일 **둘 다**
     반대로 들어가 있었다(2026 여수는 roi1=PNs, roi2=ANs로 ch와 번호가 반대).
 
     기준은 **캠페인 프로파일**이다(계측기 진실). channel_map은 기계별 경로를 담는 파일이라
