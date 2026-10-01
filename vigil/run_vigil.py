@@ -76,31 +76,51 @@ def _hk_value(prof, row, key):
 class VigilApp:
     """감시 루프 상태 컨테이너. QTimer가 매 tick `.tick()`을 부른다."""
 
-    def __init__(self, watch_dir: str, profile_dir: str, state_dir: str,
+    def __init__(self, watch_dir, profile_dir: str, state_dir: str,
                  dashboard=None, max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
                  backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC, retire_after_sec: float = RETIRE_AFTER_SEC,
                  cursor_save_interval_sec: float = CURSOR_SAVE_INTERVAL_SEC):
-        self.watch_dir = watch_dir
+        """watch_dir 은 None 이어도 된다 — 대시보드의 폴더 버튼으로 나중에 정한다(set_watch_dir)."""
         self.profiles = ProfileSet.load(profile_dir)
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
-        self.watcher = Watcher(watch_dir, self.profiles, self.cursor,
-                               max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
-                               cursor_save_interval_sec=cursor_save_interval_sec)
+        self._watcher_kw = dict(max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
+                                cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec
         self.paused = False                # 대시보드 Stop — 정지 중엔 tick 이 아무것도 읽지 않는다
         self._tick_errors = 0              # 연속 tick 예외 수(성공하면 0)
+        self.dashboard = dashboard
+        self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
+        self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
+        self.watch_dir = None
+        self.watcher = None
+        self._reset_state()
+        if watch_dir:
+            self.set_watch_dir(watch_dir)
+
+    def set_watch_dir(self, watch_dir: str) -> None:
+        """감시 폴더를 정하거나 바꾼다(대시보드 폴더 버튼). 커서는 파일 절대경로 키라 그대로 이어지고,
+        이전 폴더의 파일별 상태·감시기 기준선·추세는 비운다 — 다른 계기·캠페인의 데이터와 섞이지 않게."""
+        if self.watcher is not None:
+            self.cursor.flush()
+        self.watch_dir = watch_dir
+        self.watcher = Watcher(watch_dir, self.profiles, self.cursor, **self._watcher_kw)
+        self._reset_state()
+        msg = f"Watch folder: {watch_dir}"
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="watch_dir", watch_dir=watch_dir)
+
+    def _reset_state(self) -> None:
+        """폴더별 상태 — 처음 만들 때와 폴더를 바꿀 때."""
+        self._tick_errors = 0
         self._backlog_logged = False
         self._was_catching_up = False
-        self.dashboard = dashboard
-
         self._last_arrival = None          # 전체 최신 관측 벽시계 시각
         self._files_seen: dict = {}        # {path: arrival_time}
         self._routed_ids: set = set()
         self._hk_status: dict = {}         # {path: (status, msg, metrics)} — 최신 HK 판정
         self._hk_last_status: dict = {}    # {path: status} — 로그 중복 방지용
         self._r_monitors: dict = {}        # {(profile_id, channel_id): RMonitor}
-        self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
         self._r_by_channel: dict = {}      # {(profile_id, channel_id): (status, msg, metrics)}
         self._r_status: dict = {}          # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._r_last_status: dict = {}     # {path: status} — 로그 중복 방지용
@@ -109,7 +129,6 @@ class VigilApp:
         self._lamp_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._lamp_last_status: dict = {}
         self._conc_monitors: dict = {}     # {(profile_id, channel_id): ConcMonitor}
-        self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
         self._conc_by_channel: dict = {}   # {(profile_id, channel_id): (status, msg, metrics)}
         self._conc_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._conc_last_status: dict = {}  # {path: status} — 로그 중복 방지용
@@ -292,8 +311,8 @@ class VigilApp:
     def tick(self) -> None:
         """QTimer 슬롯. PyQt6 는 슬롯에서 새어 나간 예외에 프로세스를 abort 하므로, 여기서 다
         받아 로그에 남기고 배지에 띄운 뒤 다음 tick 을 계속 돈다 — 감시기가 조용히 사라지는
-        것이 가장 나쁜 실패다. 정지(pause) 중엔 아무것도 하지 않는다."""
-        if self.paused:
+        것이 가장 나쁜 실패다. 정지(pause) 중이거나 아직 폴더가 없으면 아무것도 하지 않는다."""
+        if self.paused or self.watcher is None:
             return
         try:
             self._tick()
@@ -414,22 +433,16 @@ def _default_state_dir() -> str:
     return default_state_dir(_ROOT)
 
 
-def _resolve_watch_dir(requested, qs=None):
-    """감시 폴더를 정한다. 고정 감시 폴더는 두지 않는다 — 사람이 매번 고른다(2026-10-01).
-    `--dir` 로 명시했고 존재하면 그것(무인 자동 실행용). 아니면 폴더 선택 창을 띄운다 — 지난번 고른
-    폴더에서 **열기만** 하고 자동으로 그 폴더를 쓰지는 않는다. 취소하면 None.
+def pick_watch_dir(parent=None, qs=None):
+    """대시보드 폴더 버튼 — 폴더 선택 창. 고정 감시 폴더는 두지 않고 사람이 고른다(2026-10-01).
+    지난번 고른 폴더에서 **열기만** 한다(자동으로 쓰지 않는다). 고르면 기억하고 경로를, 취소하면 None.
     `qs` 는 테스트용 설정 저장소(기본 QSettings("CAESAR", "vigil")). QApplication 이 있어야 한다."""
     from PyQt6.QtCore import QSettings
-    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+    from PyQt6.QtWidgets import QFileDialog
     qs = qs if qs is not None else QSettings("CAESAR", "vigil")
-    if requested and os.path.isdir(requested):
-        qs.setValue("watch_dir", os.path.abspath(requested))
-        return requested
     last = qs.value("watch_dir", "", type=str)
-    if requested:
-        QMessageBox.warning(None, "Vigil", f"Watch folder not found:\n{requested}\n\nChoose the raw folder to monitor.")
     start = last if last and os.path.isdir(last) else os.path.expanduser("~")
-    chosen = QFileDialog.getExistingDirectory(None, "Vigil — choose the raw .dat folder to monitor", start)
+    chosen = QFileDialog.getExistingDirectory(parent, "Vigil — choose the raw .dat folder to monitor", start)
     if not chosen:
         return None
     qs.setValue("watch_dir", chosen)
@@ -507,12 +520,11 @@ def main(argv=None) -> int:
     _pre = threading.Thread(target=_prewarm, daemon=True)
     _pre.start()
 
-    # 감시 폴더: 인자 → 없거나 사라졌으면 폴더 선택 창(지난번 폴더가 기본값). 2026-10-01 전엔 --dir 이
-    # 필수라, 바로가기(.bat)에 박힌 폴더가 없는 PC 에선 콘솔에 'not found' 만 뜨고 Vigil 이 안 켜졌다.
-    args.dir = _resolve_watch_dir(args.dir)
-    if not args.dir:
-        log.info("no watch folder chosen — exiting")
-        return 1
+    # 감시 폴더: 시작할 때 묻지 않는다 — 대시보드의 'Choose folder…' 버튼으로 고른다(2026-10-01).
+    # --dir 은 무인 실행용으로만(없거나 사라진 폴더면 무시하고 버튼으로 고르게 한다).
+    if args.dir and not os.path.isdir(args.dir):
+        log.warning("watch folder not found: %s — choose one with the folder button", args.dir)
+        args.dir = None
 
     # 한 PC 에 Vigil 두 개 금지 — 같은 cursors.json·status.jsonl 에 두 프로세스가 쓰고 CPU 도 두 배.
     lock = QLockFile(os.path.join(args.state_dir, "vigil.lock"))
@@ -531,7 +543,7 @@ def main(argv=None) -> int:
     splash.pump()
     splash.step("engine", f"Vigil v{__version__}")
 
-    splash.step("watch", args.dir)
+    splash.step("watch", args.dir or "not set — choose with the folder button", "ok" if args.dir else "skip")
     _cursors = os.path.join(args.state_dir, "cursors.json")
     _resume = os.path.isfile(_cursors)
     splash.step("state", f"{os.path.basename(args.state_dir)} · "
@@ -542,13 +554,13 @@ def main(argv=None) -> int:
     splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
 
     from vigil.dashboard.dashboard_window import DashboardWindow
-    win = DashboardWindow(title=f"Vigil — {args.dir}")
+    win = DashboardWindow(title="Vigil")
     core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win,
                     max_bytes_per_tick=int(args.max_mb_per_tick * 2**20),
                     backlog_age_sec=(args.backlog_age_min * 60 if args.backlog_age_min >= 0 else None))
     splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
-    win.log_line(f"watching {args.dir} (poll {args.poll_sec:.1f}s, "
-                f"{len(core.profiles)} profile(s) loaded)")
+    win.log_line(f"poll {args.poll_sec:.1f}s, {len(core.profiles)} profile(s) loaded")
+    win.set_watch_dir(args.dir)
 
     # 모션은 여기서부터 — 위의 준비(git·대시보드 생성)는 메인 스레드를 막으므로 첫 장면에서
     # 끝낸다(실측 0.2–0.4 s 정지가 세 번). 농도 감시기(scipy·피팅 엔진 ≈ 1 s)는 Qt 를 안
@@ -563,10 +575,23 @@ def main(argv=None) -> int:
     timer.start(int(args.poll_sec * 1000))
     app.aboutToQuit.connect(core.shutdown)
     win.run_toggled.connect(lambda running: core.resume() if running else core.pause())
-    if not args.autostart:
-        # 기본은 정지 상태로 켠다 — 폴더·설정을 확인하고 사람이 Start 를 누를 때 읽기 시작.
-        core.pause("Started paused — press Start to begin monitoring (use --autostart to start immediately)")
+
+    def _on_folder_chosen(path):
+        # 폴더를 바꾸면 정지 상태로 — 새 폴더를 확인하고 사람이 Start 를 누를 때 읽기 시작.
+        core.pause("Watch folder changed — press Start to begin monitoring")
         win.set_running(False)
+        core.set_watch_dir(path)
+        win.reset_views()
+        win.set_watch_dir(path)
+        win.log_line(f"watching {path}")
+    win.folder_requested.connect(lambda: (lambda p: p and _on_folder_chosen(p))(pick_watch_dir(win)))
+
+    if not args.autostart or not args.dir:
+        # 기본은 정지 상태로 켠다 — 폴더를 고르고(또는 확인하고) 사람이 Start 를 누를 때 읽기 시작.
+        core.pause("Started paused — choose a folder and press Start (use --dir and --autostart for unattended runs)")
+        win.set_running(False)
+    if args.dir:
+        win.log_line(f"watching {args.dir}")
 
     win.log_line(f"log: {log_path}")
     win.show()

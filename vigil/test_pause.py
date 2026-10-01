@@ -87,6 +87,7 @@ def main():
         check("정지·재개가 state_log 에 한 번씩", kinds.count("control") == 2, kinds.count("control"))
 
         win = DashboardWindow(title="t")
+        win.set_watch_dir(d)   # 폴더가 없으면 배지는 '폴더를 고르라'는 안내다(2026-10-01) — 정지 배지는 폴더가 있을 때
         got = []
         win.run_toggled.connect(got.append)
         win._toggle_run()

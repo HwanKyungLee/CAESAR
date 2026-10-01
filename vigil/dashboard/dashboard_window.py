@@ -50,6 +50,7 @@ _ALARM_COLOR = VIGIL.p0
 
 class DashboardWindow(QMainWindow):
     run_toggled = pyqtSignal(bool)   # Start/Stop 버튼 → True=감시 중, False=정지
+    folder_requested = pyqtSignal()  # 'Choose folder…' 버튼 — 고르는 창은 run_vigil 이 띄운다
 
     def __init__(self, title: str = "Vigil — Pipeline Health"):
         super().__init__()
@@ -72,14 +73,26 @@ class DashboardWindow(QMainWindow):
         self.btn_run = QPushButton("■ Stop")
         self.btn_run.setMinimumWidth(110)
         self.btn_run.setStyleSheet(
-            f"font-size:15px; font-weight:600; padding:10px; color:{VIGIL.text};"
-            f" background:{VIGIL.button}; border:1px solid {VIGIL.rule};")
+            f"QPushButton {{ font-size:15px; font-weight:600; padding:10px; color:{VIGIL.text};"
+            f" background:{VIGIL.button}; border:1px solid {VIGIL.rule}; }}"
+            f" QPushButton:disabled {{ color:{VIGIL.footer}; background:{VIGIL.surface}; }}")
         self.btn_run.setToolTip("Pause/resume monitoring — raw keeps accumulating while paused; on resume it reads the backlog")
         self.btn_run.clicked.connect(self._toggle_run)
+        # 감시 폴더 — 고정 폴더 없이 사람이 고른다. 고르기 전엔 Start 를 못 누른다.
+        self.btn_folder = QPushButton("Choose folder…")
+        self.btn_folder.setMinimumWidth(150)
+        self.btn_folder.setStyleSheet(self.btn_run.styleSheet())
+        self.btn_folder.setToolTip("Choose the raw .dat folder to monitor (searched recursively)")
+        self.btn_folder.clicked.connect(self.folder_requested.emit)
+        self.lbl_folder = QLabel("No folder selected")
+        self.lbl_folder.setStyleSheet(f"color:{VIGIL.dim}; padding:0 4px;")
         top = QHBoxLayout()
         top.addWidget(self.badge, stretch=1)
+        top.addWidget(self.btn_folder)
         top.addWidget(self.btn_run)
         lay.addLayout(top)
+        lay.addWidget(self.lbl_folder)
+        self._watch_dir = None
 
         grid = QGridLayout()
         lay.addLayout(grid, stretch=1)
@@ -151,11 +164,46 @@ class DashboardWindow(QMainWindow):
         """버튼·배지만 맞춘다(시그널 없음) — 시작 상태를 정할 때."""
         self._paused = not running
         self.btn_run.setText("■ Stop" if running else "▶ Start")
-        if not running:
+        if not running and not getattr(self, "_watch_dir", None):
+            self.badge.setText("○  Choose the raw folder to monitor — 'Choose folder…' at the right")
+            self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
+            self.setWindowTitle(self._base_title)
+        elif not running:
             # 정지 배지는 '경보'가 아니라 '사용자가 멈춤' — 경보색을 쓰지 않는다
             self.badge.setText("⏸  Monitoring paused — press Start to read (from the backlog)")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
             self.setWindowTitle(f"[paused] {self._base_title}")
+
+    def set_watch_dir(self, path) -> None:
+        """감시 폴더 표시. 폴더가 없으면 Start 를 막고 배지로 안내한다."""
+        self._watch_dir = path or None
+        self.btn_run.setEnabled(bool(path))
+        self.btn_folder.setText("Change folder…" if path else "Choose folder…")
+        self.lbl_folder.setText(f"Watching: {path}" if path else "No folder selected")
+        self.lbl_folder.setToolTip(path or "")
+        self._base_title = f"Vigil — {path}" if path else "Vigil"
+        if not path:
+            self.badge.setText("○  Choose the raw folder to monitor — 'Choose folder…' at the right")
+            self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
+            self.setWindowTitle(self._base_title)
+        elif self._paused:
+            self.set_running(False)      # 배지·제목을 새 폴더 기준으로
+
+    def reset_views(self) -> None:
+        """폴더를 바꿀 때 — 이전 폴더의 그래프·표·로그 줄을 비운다(다른 데이터와 섞이지 않게)."""
+        for pw, title in ((self.p_conc, "Concentration — shown after the ZA (I₀) segment"),
+                          (self.p_r, "R — shown after ZA/He calibration completes"),
+                          (self.p_hk, "HK — waiting for first row")):
+            if pw.plotItem.legend is not None:
+                pw.plotItem.legend.clear()
+            pw.clear()
+            pw.setTitle(title, color=VIGIL.dim, size="10pt")
+        self._curve_items.clear()
+        self._threshold_items.clear()
+        self._color_of.clear()
+        self._color_idx = 0
+        self.table.setRowCount(0)
+        self._last_status = None
 
     def _toggle_run(self) -> None:
         self.set_running(self._paused)

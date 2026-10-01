@@ -1,7 +1,7 @@
 # Augur / Vigil desktop shortcuts with the emblem icons (icons/*.ico).
 # Run once per PC from the repo root:   powershell -ExecutionPolicy Bypass -File tools\make_shortcuts.ps1
-# The shortcuts start .venv\Scripts\pythonw.exe directly (no console flash). Vigil asks which raw
-# folder to monitor every time it starts (no fixed watch folder). Re-running overwrites them.
+# The shortcuts start .venv\Scripts\pythonw.exe directly (no console flash). In Vigil you pick the raw
+# folder with the dashboard's Choose folder button (no fixed watch folder). Re-running overwrites them.
 $repo = Split-Path -Parent $PSScriptRoot
 $desk = [Environment]::GetFolderPath('Desktop')
 $py = Join-Path $repo '.venv\Scripts\pythonw.exe'
@@ -9,7 +9,7 @@ if (-not (Test-Path $py)) { Write-Error "not found: $py (create the .venv first)
 $ws = New-Object -ComObject WScript.Shell
 $items = @(
   @{ Name = 'Augur'; Args = 'main.py';            Icon = 'icons\augur.ico'; Desc = 'Augur - BBCEAS trace-gas analysis' },
-  @{ Name = 'Vigil'; Args = 'vigil\run_vigil.py'; Icon = 'icons\vigil.ico'; Desc = 'Vigil - live instrument monitor (asks for the raw folder)' }
+  @{ Name = 'Vigil'; Args = 'vigil\run_vigil.py'; Icon = 'icons\vigil.ico'; Desc = 'Vigil - live instrument monitor (choose the raw folder with the dashboard button)' }
 )
 foreach ($it in $items) {
   $lnk = $ws.CreateShortcut((Join-Path $desk ($it.Name + '.lnk')))

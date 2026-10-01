@@ -22,6 +22,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 스크립트로 실행하면 vigil/ 이 sys.path 맨 앞에 들어가 vigil/profile.py 가 표준 모듈 profile 을 가린다
+# (pyqtgraph → cProfile 이 깨진다) — run_vigil.py 의 __main__ 과 같은 처리.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path = [p for p in sys.path if os.path.abspath(p) != _HERE]
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
@@ -185,33 +189,49 @@ def test_priority():
 
 
 def test_watch_dir_picker():
-    print("[7] 감시 폴더 — 고정 폴더 없이 사람이 고른다(2026-10-01)")
+    print("[7] 감시 폴더 — 시작할 때 묻지 않고 대시보드 버튼으로 고른다(2026-10-01)")
     from PyQt6.QtCore import QSettings
-    from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
-    from vigil.run_vigil import _resolve_watch_dir
+    from PyQt6.QtWidgets import QApplication, QFileDialog
+    from vigil.run_vigil import pick_watch_dir
+    from vigil.dashboard.dashboard_window import DashboardWindow
     _app = QApplication.instance() or QApplication([])
     with tempfile.TemporaryDirectory() as d:
         qs = QSettings(os.path.join(d, "vigil.ini"), QSettings.Format.IniFormat)   # 실제 설정은 안 건드림
         a, b = os.path.join(d, "rawA"), os.path.join(d, "rawB")
         os.makedirs(a); os.makedirs(b)
         calls = []
-        orig = (QFileDialog.getExistingDirectory, QMessageBox.warning)
-        QMessageBox.warning = staticmethod(lambda *x, **k: None)
+        orig = QFileDialog.getExistingDirectory
         try:
             QFileDialog.getExistingDirectory = staticmethod(lambda _p, _t, start: (calls.append(start), b)[1])
-            check("--dir 가 있으면 그대로(무인 실행)", _resolve_watch_dir(a, qs) == a and not calls)
-            got = _resolve_watch_dir(None, qs)
-            check("인자 없으면 선택 창 → 고른 폴더", got == b and len(calls) == 1, f"{got} {calls}")
+            check("버튼 → 선택 창 → 고른 폴더", pick_watch_dir(None, qs) == b and len(calls) == 1)
             calls.clear()
-            got = _resolve_watch_dir(None, qs)
-            check("다음 실행도 **선택 창이 뜨고**(자동 시작 안 함), 지난 폴더에서 열린다",
-                  len(calls) == 1 and calls[0] == b, str(calls))
-            calls.clear()
-            check("없는 --dir → 경고 후 선택 창", _resolve_watch_dir(os.path.join(d, "gone"), qs) == b and len(calls) == 1)
+            pick_watch_dir(None, qs)
+            check("다음엔 지난 폴더에서 열린다(자동 사용은 안 함)", calls == [b], str(calls))
             QFileDialog.getExistingDirectory = staticmethod(lambda *x: "")
-            check("취소하면 None(조용히 종료)", _resolve_watch_dir(None, qs) is None)
+            check("취소하면 None", pick_watch_dir(None, qs) is None)
         finally:
-            QFileDialog.getExistingDirectory, QMessageBox.warning = (staticmethod(orig[0]), staticmethod(orig[1]))
+            QFileDialog.getExistingDirectory = staticmethod(orig)
+
+        print("[8] 폴더 없이 시작 → 버튼으로 정하고 바꾸기")
+        dash = DashboardWindow(title="Vigil")
+        app = VigilApp(None, DEFAULT_PROFILE_DIR, os.path.join(d, "st"), dashboard=dash)
+        try:
+            app.tick()
+            check("폴더 없이 tick 해도 아무 일 없음", app.watcher is None and app._tick_errors == 0)
+        except Exception as e:            # noqa: BLE001
+            check("폴더 없이 tick 해도 아무 일 없음", False, repr(e))
+        dash.set_watch_dir(None)
+        check("폴더 없으면 Start 비활성", not dash.btn_run.isEnabled() and "Choose" in dash.btn_folder.text())
+        app.set_watch_dir(a)
+        dash.set_watch_dir(a)
+        check("폴더 정하면 Start 활성·표시", dash.btn_run.isEnabled() and a in dash.lbl_folder.text())
+        app._files_seen["x.dat"] = datetime.now()
+        app._r_by_channel[("p", "c")] = (OK, "m", {})
+        app.set_watch_dir(b)
+        check("폴더 바꾸면 이전 폴더 상태를 비운다",
+              app.watch_dir == b and not app._files_seen and not app._r_by_channel)
+        dash.reset_views()
+        check("대시보드 그래프·표 비움", dash.table.rowCount() == 0 and not dash._curve_items)
 
 
 def main():
