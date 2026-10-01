@@ -379,6 +379,18 @@ class AnalysisRunMixin:
                 step_ch = step_limit_val
                 kq_ch = self.spin_kalman_q.value(); kr_ch = self.spin_kalman_r.value()
 
+            if pmax - pmin < 2:
+                # A window outside the wavelength calibration collapses to px 0-0; the worker used
+                # to treat that as "no slice" and silently fit the whole alpha range (UX audit
+                # 2026-10-02: DOF 658 -> 2036, NO2 3.24 -> 1.85 ppb, reported as success).
+                rng = (f"{fnm_lo_ch:g}-{fnm_hi_ch:g} nm" if funit_ch != 'px' else "")
+                QMessageBox.warning(
+                    self, "Fit range outside wavelength calibration",
+                    f"CH{ch}: fit range {rng} maps to px {pmin}-{pmax} — no usable pixels.\n"
+                    "Check the fit range against this channel's wavelength calibration.")
+                self.b_run.setEnabled(True)
+                return
+
             w = AnalysisWorker(
                 eng_ch, files_for_ch, pmin, pmax,
                 p0_ch, (lo_ch, hi_ch), interval, delay_ms,
