@@ -4,6 +4,11 @@
 "이 결과는 cold 로 피팅됐다"는 거짓 기록이 남고, 그건 침묵보다 나쁘다. 그래서
 경계 조건을 못박는다. 데이터 불필요(합성 축).
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

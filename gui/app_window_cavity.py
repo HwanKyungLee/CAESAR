@@ -1089,7 +1089,9 @@ class CavityTabMixin:
             except Exception as e:
                 QMessageBox.critical(self, "FWHM Best-Match", f"α folder load failed:\n{e}")
                 return
-            alpha_label = f"{os.path.basename(self._fwhm_alpha_folder.rstrip('/\\'))} (mean of {n_files} files)"
+            # f-string 밖에서 — f-string 안의 역슬래시는 3.12+ 문법이라 3.11 에선 SyntaxError(2026-10-01)
+            _folder_name = os.path.basename(self._fwhm_alpha_folder.rstrip('/\\'))
+            alpha_label = f"{_folder_name} (mean of {n_files} files)"
         else:
             if self.rb_fwhm_alpha_file.isChecked():
                 alpha_path = self._fwhm_alpha_file_path

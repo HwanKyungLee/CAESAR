@@ -6,6 +6,11 @@
      조용히 아무 값이나 내놓으면 게이트 0 판정이 통째로 거짓이 된다.
   3) 최소 xlsx 리더가 날짜 서식 셀을 datetime 으로 돌려주는가.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import datetime as dt
 import os
 import sys

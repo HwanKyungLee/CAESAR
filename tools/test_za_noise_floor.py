@@ -9,6 +9,11 @@
   4. `deconvolve` 는 제곱차이고, 표본 요동으로 음수가 될 자리에서 0 으로 접는다
      (sqrt 에서 nan 이 나면 표 전체가 조용히 비어버린다).
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

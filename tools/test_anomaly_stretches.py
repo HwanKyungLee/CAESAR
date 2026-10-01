@@ -6,6 +6,11 @@
 아니라 배열 순서를 보면 공백 너머를 한 구간으로 붙인다.
 """
 from __future__ import annotations
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 import os
 import sys

@@ -25,7 +25,10 @@ authors = [{ name = "HwanKyungLee" }]
 dynamic = ["dependencies"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
+# 앱 본체엔 필요 없고 특정 도구만 쓰는 의존성 — 필요한 사람만 `pip install -e .[zenodo]` 식으로.
+zenodo = ["requests"]          # tools/zenodo_deposit.py (Zenodo 업로드)
+campaigns = ["scikit-learn"]   # campaigns/yeosu_2026/hot_cavity_t (Hot 캐비티 온도 GBR 모델)
 
 [project.urls]
 Repository = "https://github.com/HwanKyungLee/CAESAR"
@@ -51,3 +54,13 @@ testpaths = ["tests"]
 # 가드 안에서 돌고, gui/test_fit_dialog.py는 아예 테스트가 아니다).
 # tests/test_script_suite.py가 서브프로세스로 하나씩 돌린다.
 addopts = "-q"
+
+[tool.ruff]
+# 린트는 **실제 버그만** 잡는 규칙으로 시작한다(2026-10-01). 스타일 규칙을 켜면 기존 코드 수천 줄이
+# 걸려 진짜 신호가 묻힌다. 처음 켰을 때 잡힌 것: gui/app_window_cavity.py 의 3.12+ 전용 f-string
+# (requires-python 3.11 인데 3.11 에선 SyntaxError) — target-version 이 그 선언을 지키게 한다.
+target-version = "py311"
+extend-exclude = ["diagnostics", "paper", "campaigns", "benchmark", "calibration"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]   # 문법 오류 · 잘못된 비교 · 문장 오류 · 정의 안 된 이름

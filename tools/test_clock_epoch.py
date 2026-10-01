@@ -9,6 +9,11 @@
 raw 데이터가 없어도 돌도록 열수는 가짜 행으로 흉내낸다. E: 가 붙어 있으면
 실제 경계 파일(2026-05-29-010/011)로 보정 후 전진하는지까지 확인한다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

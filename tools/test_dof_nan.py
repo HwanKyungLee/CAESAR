@@ -4,6 +4,11 @@
 그건 "오차가 이만큼"이라는 주장이고, 읽는 쪽은 그걸 '작은 오차'로 받는다.
 n−p ≤ 0 이면 σ̂²는 큰 게 아니라 **정의되지 않는다**.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

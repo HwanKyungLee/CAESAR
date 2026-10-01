@@ -5,6 +5,11 @@
 나머지는 문턱이 절대값이 아니라 그 런의 블록 중앙값 대비 비율이라는 것,
 그리고 판정을 핏창 안에서만 한다는 것.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 
