@@ -28,6 +28,10 @@ import pyqtgraph as pg
 from gui.result_viewer_io import (load_result_time_gas, detect,
                                   detect_sep, load_fit_table,
                                   flag_of, qc_hidden_mask, flag_color, FLAG_KEYS)
+
+# 레인 선(26만 점급)은 화면에서 솎아 그린다(규칙·근거: gui/pg_perf.py). 클릭용 점(ScatterPlotItem)은
+# 그대로 전부, Export/Stats는 원본 그대로.
+from gui.pg_perf import make_fast as _fast, BIG as _BIG
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
@@ -831,7 +835,17 @@ class ResultViewerWidget(QWidget):
             pw.hide()
 
     def _plot_fit(self, path):
-        t = self._load_fit_table(path)
+        # 같은 파일(경로·수정시각·크기)이면 파싱 결과를 재사용 — 가스 전환·Hide QC·K·시프트를
+        # 바꿀 때마다 26만 행을 다시 읽었다(매번 ~3 s, 2026-10-01 실측). 파일이 바뀌면 다시 읽는다.
+        try:
+            key = (os.path.abspath(path), os.path.getmtime(path), os.path.getsize(path))
+        except OSError:
+            key = None
+        if key is not None and self._fit_cache is not None and getattr(self, "_fit_cache_key", None) == key:
+            t = self._fit_cache
+        else:
+            t = self._load_fit_table(path)
+            self._fit_cache_key = key
         self._fit_cache = t
         self._sync_gas_combo(list(t["gases"].keys()))
         sel = self._gas_combo.currentText() or "All"
@@ -869,8 +883,14 @@ class ResultViewerWidget(QWidget):
 
         stats = []
         self._scatters = []
+        # 화면 솎아내기 배율은 '지금 보이는 x 범위'로 정해진다(gui/pg_perf.py) — 큰 파일이면
+        # 그리기 전에 데이터 범위로 잡아둬야 첫 계산부터 맞는다. 다 그린 뒤 자동 범위로 되돌린다.
+        fin_x = x[np.isfinite(x)]
+        pre_range = (len(x) > _BIG and fin_x.size > 1 and fin_x.max() > fin_x.min())
         for i, (kind, g) in enumerate(lanes_spec):
             pw = self._lane(kind, i, n_lanes)
+            if pre_range:
+                pw.getViewBox().setXRange(float(fin_x.min()), float(fin_x.max()), padding=0)
             self._set_time_axis(pw, has_time)
             if i == n_lanes - 1:
                 pw.setLabel("bottom", xlabel)
@@ -892,9 +912,12 @@ class ResultViewerWidget(QWidget):
                             pw.addItem(pg.ErrorBarItem(
                                 x=xs[::step], y=ys[::step], height=2 * es[::step],
                                 pen=pg.mkPen(col, width=1)))
-                pw.plot(x, y, pen=pg.mkPen(col, width=1.2))
+                _fast(pw.plot(x, y, pen=pg.mkPen(col, width=1.2)))
                 # 점 색 = flag. 값을 지우는 게 아니라 **표시만** 다르게 한다.
-                brushes = [pg.mkBrush(self._FLAG_COLOR[f] or col) for f in flags]
+                # 브러시는 flag마다 **한 개를 공유**한다 — 점마다 새 QBrush를 만들면 pyqtgraph가
+                # 점마다 심볼을 다시 그려 26만 점×가스 4에서 90 s가 걸렸다(실측, 공유 시 레인당 ~1 s).
+                shared = {k: pg.mkBrush(c or col) for k, c in self._FLAG_COLOR.items()}
+                brushes = [shared[f] for f in flags]
                 sc = pg.ScatterPlotItem(x=x, y=y, size=5, brush=brushes,
                                         pen=None, hoverable=True)
                 sc.sigClicked.connect(self._on_lane_points_clicked)
@@ -909,16 +932,18 @@ class ResultViewerWidget(QWidget):
             elif kind == "shsq":
                 sh, sq = t.get("shift"), t.get("squeeze")
                 if sh is not None:
-                    pw.plot(x, sh, pen=pg.mkPen(_PALETTE[0], width=1.2), name="Shift (px)")
+                    _fast(pw.plot(x, sh, pen=pg.mkPen(_PALETTE[0], width=1.2), name="Shift (px)"))
                 if sq is not None:
                     # squeeze는 1.0 근처라 shift(px)와 축이 다르다 → 1을 뺀 편차로 겹친다
-                    pw.plot(x, np.asarray(sq, float) - 1.0,
-                            pen=pg.mkPen(_PALETTE[4], width=1.2), name="Squeeze - 1")
+                    _fast(pw.plot(x, np.asarray(sq, float) - 1.0,
+                                  pen=pg.mkPen(_PALETTE[4], width=1.2), name="Squeeze - 1"))
                 pw.setLabel("left", "Shift px / Sq-1")
 
             else:  # rms
-                pw.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=1.2), name="RMS")
+                _fast(pw.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=1.2), name="RMS"))
                 pw.setLabel("left", "RMS (cm^-1)")
+            if pre_range:
+                pw.getViewBox().enableAutoRange(x=True)   # 미리 잡은 범위 → 예전처럼 자동 범위
         self._hide_extra_lanes(n_lanes)
 
         # 스택을 쓰는 동안 예전 2단 플롯은 숨긴다(다른 종류 파일은 그쪽을 계속 쓴다)

@@ -12,6 +12,33 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-01 (5) — 큰 데이터 렉: Result Lab 90 s → 10.5 s, Dates 병합 39 s → 1.7 s
+
+사용자 보고("큰 데이터 넣으니 Result Lab·Plot Maker가 렉"). 30일 × 2채널 × 20 s = 26만 행, 가스 4종
+리포트 형식 합성 데이터로 단계별 실측(재현: 아래 표의 각 단계는 `load_fit_table`·`merge_results`·
+`ResultViewerWidget._reload`·`PlotMakerWidget` 렌더 + 화면 페인트).
+
+| 단계 | 전 | 후 | 원인 → 고친 것 |
+|---|---|---|---|
+| Dates 병합 `merge_results` | 38.7 s | **1.7 s** | 파일 하나 더할 때마다 쌓인 행 전부 재정렬(파일 수의 제곱) → 열 목록 먼저, 행마다 한 번. 같은 열 구성이면 정렬 생략 |
+| 파싱 `load_fit_table` | 6.6 s | **2.7 s** | 행마다 strptime 2회 → `parse_row_time`에 `fromisoformat` 빠른 길(두 형식과 **모양이 같은** 문자열만), 숫자 열 통째 변환. `load_fit_table`이 복사본 대신 `parse_row_time` 단일 출처를 쓴다 |
+| Result Lab 그리기 | 90.0 s | **10.5 s** | 점마다 새 QBrush → pyqtgraph가 점마다 심볼 재렌더(104만 회) → flag별 브러시 공유. 선은 화면 peak 솎아내기 |
+| Result Lab 가스 전환·Hide QC·K | 30.1 s | **2.1 s** | 위 + 같은 파일(경로·mtime·크기)이면 파싱 결과 재사용 |
+| Plot Maker 시계열 | 7.5 s | **2.8 s** | 26만 마커를 범위 바뀔 때마다 재생성 → 큰 시리즈(>2만 점)만 화면 peak 솎아내기 |
+
+- **pyqtgraph 0.14 함정 둘**(`gui/pg_perf.py`에 근거와 함께): ① `pw.plot(..., autoDownsample=True)`처럼
+  **생성 인자로 준 솎아내기는 조용히 무시**된다 — 만든 뒤 `setDownsampling()`을 불러야 켜진다.
+  ② 켜도 첫 계산은 '지금 보이는 x 범위'(기본 0~1)로 해서 배율 1 → 그리기 전에 x 범위를 데이터 범위로
+  잡아두고, 큰 시리즈는 **빈 아이템 → 솎아내기 → 뷰에 붙이기 → 데이터** 순서로 만든다. `clipToView`는
+  PlotWidget에서 AttributeError라 안 쓴다.
+- peak = 구간마다 최솟값·최댓값 → 스파이크는 화면에서도 남는다. 확대하면 모든 점. **Publish·Export·
+  통계는 원본 전부**. Result Lab 클릭용 점(누른 점을 정확히 아는 산점도)은 솎지 않는다(레인당 ~0.5 s 남음).
+- 동일성 확인: `tools/test_parse_row_time.py`(경계 29 + 무작위 6만 — 3.14 `fromisoformat`이 `24:00`을
+  받아주는 차이를 여기서 잡아 막았다), `tools/test_merge_results.py`(예전 구현을 기준으로 24경우),
+  수정 전 `load_fit_table`과 배열 단위 대조(이상값 파일·옛 alpha-fit·26만 행 모두 동일),
+  30일 실제 크기 병합 동일(새 1.7 s / 옛 33 s).
+- 남은 것: Plot Maker 산점도 26만 점 ~2 s/렌더(x가 시간이 아니라 솎아내기 부적합), 파싱 2.7 s.
+
 ## 2026-10-01 (4) — Result Lab · Plot Maker 데이터 자유도 로드맵 완주 (D0→D3, M-P·M1·M2)
 
 전 과정·결정·잡은 함정은 [`ResultLab_PlotMaker_데이터자유도_설계_2026-10-01.md`](ResultLab_PlotMaker_데이터자유도_설계_2026-10-01.md).

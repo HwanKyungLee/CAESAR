@@ -26,6 +26,23 @@ def parse_when(s: str | None, end: bool = False):
 
 
 def parse_row_time(ts: str):
+    """결과 행의 시각 문자열 → naive datetime(없으면 None). 결과 파일 시각 파싱의 단일 출처.
+
+    빠른 길: 정확히 `YYYY-mm-dd HH:MM:SS` 또는 `…SS.ffffff`(1~6자리) **모양**인 문자열만
+    `datetime.fromisoformat`(C 구현)로 — strptime 두 번 시도가 26만 행 파일에서 ~10 s였다.
+    모양이 다르면(한 자리 월, 꼬리 문자 등) 예전 strptime 경로 그대로라 결과가 같다
+    (`tools/test_parse_row_time.py`가 대조)."""
+    s = ts[:26]
+    n = len(s)
+    if (n >= 19 and s[4] == '-' and s[7] == '-' and s[10] == ' ' and s[13] == ':'
+            and s[16] == ':' and (n == 19 or (n > 20 and s[19] == '.' and s[20:].isdigit()))
+            and s[:4].isdigit() and s[5:7].isdigit() and s[8:10].isdigit()
+            and s[11:13].isdigit() and s[14:16].isdigit() and s[17:19].isdigit()
+            and s[11:13] < '24'):      # fromisoformat(3.14)은 24:00을 다음날 0시로 받는다 — strptime은 거부
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            pass
     for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
         try:
             return datetime.strptime(ts[:26], fmt)
@@ -174,18 +191,34 @@ def merge_results(files: list[str], dedup: bool = True):
     """
     comments, colhdr, rows = read_result(files[0])
     columns = colhdr.split('\t')
-    for fp in files[1:]:
-        _, ch2, r2 = read_result(fp)
-        other = ch2.split('\t')
-        for c in other:
-            if c not in columns:
-                columns.append(c)
+    if len(files) > 1:
+        # 열 목록을 먼저 다 모으고(첫 파일 순서 + 새 열은 처음 나온 순서대로) 행마다 **한 번만**
+        # 맞춘다. 예전엔 파일 하나를 더할 때마다 쌓인 모든 행을 다시 맞춰 파일 수의 제곱으로
+        # 느려졌다(30일 26만 행 39 s, 2026-10-01 실측). 결과는 같다(tools/test_merge_results.py).
+        parts = [(colhdr.split('\t'), rows)]
+        for fp in files[1:]:
+            _, ch2, r2 = read_result(fp)
+            other = ch2.split('\t')
+            for c in other:
+                if c not in columns:
+                    columns.append(c)
+            parts.append((other, r2))
+        uniq = len(set(columns)) == len(columns)
+
         def align(line, src):
             vals = line.split('\t')
             by_name = dict(zip(src, vals))
             return '\t'.join(by_name.get(c, '') for c in columns)
-        rows = [(t, align(line, columns[:len(colhdr.split('\t'))])) for t, line in rows]
-        rows += [(t, align(line, other)) for t, line in r2]
+        rows = []
+        for src, rs in parts:
+            if uniq and src == columns:
+                # 이미 최종 배치 — 칸 수가 모자란 행만 이름 맞춤과 같은 결과(빈 칸)로 채운다
+                n = len(columns)
+                for t, line in rs:
+                    k = line.count('\t') + 1
+                    rows.append((t, line if k == n else align(line, src)))
+            else:
+                rows += [(t, align(line, src)) for t, line in rs]
         colhdr = '\t'.join(columns)
 
     # First-file rows may need padding even when no later file introduced columns.
@@ -203,7 +236,11 @@ def merge_results(files: list[str], dedup: bool = True):
         ci = cols.index('Channel') if 'Channel' in cols else None
         seen = {}   # (epoch, channel) → 마지막 등장 인덱스(나중 파일 우선)
         for i, (t, line) in enumerate(rows):
-            ch = line.split('\t')[ci] if (ci is not None and ci < len(line.split('\t'))) else ''
+            if ci is None:
+                ch = ''
+            else:
+                p = line.split('\t', ci + 1)
+                ch = p[ci] if ci < len(p) else ''
             seen[(t, ch)] = i      # 같은 키면 뒤(나중 파일)가 덮어씀
         keep_idx = set(seen.values())
         n_dup = len(rows) - len(keep_idx)

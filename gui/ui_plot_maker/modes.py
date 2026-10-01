@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from gui.theme import AUGUR
 from gui.result_viewer_io import flag_color, FLAG_KEYS
+from gui.pg_perf import make_fast, BIG
 
 from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
                    mathtext_to_html)
@@ -608,17 +609,31 @@ class TimeSeriesMode(PlotMode):
         if s.kind == "step" and sym is not None:
             # 계단은 좌표를 편 상태라 그 위에 마커를 찍으면 점이 두 배가 된다 →
             # 선은 편 좌표로, 마커는 원래 점 위치에 따로.
-            curve = pg.PlotDataItem(xs, ys, pen=pen, name=name)
-            self._make_clickable(curve, s.label)
-            self._add_pg(host, vb, curve, name)
-            self._add_pg(host, vb, pg.PlotDataItem(s.x, s.y, pen=None, symbol=sym,
-                                                   symbolSize=s.msize, symbolBrush=col,
-                                                   symbolPen=None), None)
+            curve = self._add_curve(host, vb, xs, ys, name, s.label, pen=pen)
+            self._add_curve(host, vb, s.x, s.y, None, None, pen=None, symbol=sym,
+                            symbolSize=s.msize, symbolBrush=col, symbolPen=None)
             return
-        curve = pg.PlotDataItem(xs, ys, pen=pen, name=name, symbol=sym,
-                                symbolSize=s.msize, symbolBrush=col, symbolPen=None)
-        self._make_clickable(curve, s.label)
-        self._add_pg(host, vb, curve, name)
+        self._add_curve(host, vb, xs, ys, name, s.label, pen=pen, symbol=sym,
+                        symbolSize=s.msize, symbolBrush=col, symbolPen=None)
+
+    def _add_curve(self, host, vb, xs, ys, name, label, **style):
+        """곡선 하나 추가. 큰 시리즈(gui/pg_perf.BIG 초과)는 화면에서만 peak 솎아내기를 켜는데,
+        **데이터 없이 만들고 → 솎아내기 켜고 → 뷰에 붙인 뒤 → 데이터를 넣는다.** 데이터와 함께
+        만들면 뷰에 붙기도 전에 전체 점으로 마커를 한 번 만들어 버린다(26만 점에서 수 초, 실측).
+        작은 시리즈는 예전과 똑같이 만든다. Publish(mpl)는 언제나 원본 전부."""
+        n = 0 if xs is None else len(xs)
+        if n > BIG:
+            curve = make_fast(pg.PlotDataItem(name=name, **style), force=True)
+            if label is not None:
+                self._make_clickable(curve, label)
+            self._add_pg(host, vb, curve, name)
+            curve.setData(xs, ys)
+        else:
+            curve = pg.PlotDataItem(xs, ys, name=name, **style)
+            if label is not None:
+                self._make_clickable(curve, label)
+            self._add_pg(host, vb, curve, name)
+        return curve
 
     @staticmethod
     def _add_pg(host, vb, item, legend_name):
@@ -725,6 +740,14 @@ class TimeSeriesMode(PlotMode):
         host.enable_right_axis(use_right)
         any_time = any(s.extra["has_time"] for s in specs)
         tspan = self._tspan(specs)
+        big = [s for s in specs if s.x is not None and len(s.x) > BIG]
+        if big:
+            # 솎아내기 배율은 '지금 보이는 x 범위'로 정해진다 — 그리기 전에 데이터 범위로 잡아둬야
+            # 첫 계산부터 맞는다(기본 0~1이면 배율 1 = 전체 점). autoscale()이 끝에서 다시 맞춘다.
+            xs_all = np.concatenate([np.asarray(s.x, float) for s in big])
+            xs_all = xs_all[np.isfinite(xs_all)]
+            if xs_all.size > 1 and xs_all.max() > xs_all.min():
+                host.p1.getViewBox().setXRange(float(xs_all.min()), float(xs_all.max()), padding=0)
         for s in specs:
             # errorbar는 밴드 대신 캡 막대로 그린다(_draw_pg_series) — 둘 다 그리면 중복
             if s.err_lo is not None and s.kind != "errorbar":

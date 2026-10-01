@@ -160,6 +160,42 @@ def read_alpha_trace(path, want_id=None):
     return wave, np.array(ids, dtype=float), a
 
 
+def _col_float(rows, j):
+    """행 목록의 j번째 칸 → float 배열(없거나 못 읽으면 NaN). 열 통째로 numpy가 읽고, 한 칸이라도
+    못 읽는 열만 예전처럼 칸마다 float() — 결과는 같고 26만 행에서 열당 수십 배 빠르다."""
+    n = len(rows)
+    if j is None:
+        return np.full(n, np.nan)
+    vals = [r[j] if j < len(r) else "" for r in rows]
+    try:
+        return np.array(vals, dtype=float)
+    except ValueError:
+        out = np.full(n, np.nan)
+        for k, v in enumerate(vals):
+            try:
+                out[k] = float(v)
+            except ValueError:
+                pass
+        return out
+
+
+def _col_time(rows, j, cut=True):
+    """행 목록의 j번째 칸 → epoch초 배열(core.result_io.parse_row_time 단일 출처). 못 읽으면 NaN.
+    cut=False면 26자를 넘는 문자열은 읽지 않는다(옛 alpha-fit 경로가 잘라 읽지 않았던 규칙 유지)."""
+    from core.result_io import parse_row_time
+    ts = np.full(len(rows), np.nan)
+    if j is None:
+        return ts
+    for k, r in enumerate(rows):
+        if j < len(r):
+            s = r[j].strip()
+            if s and (cut or len(s) <= 26):
+                d = parse_row_time(s)
+                if d is not None:
+                    ts[k] = d.timestamp()
+    return ts
+
+
 def load_fit_table(path):
     """fit 표 파싱 — 3가지 포맷 지원.
     ① 구 alpha-fit: row_idx T_C P_mbar <gases> rms_cm-1
@@ -199,25 +235,9 @@ def load_fit_table(path):
             gases = [c for c in hdr if (c + "_Smooth") in idx]   # 구 포맷 호환
 
         def colf_r(j):
-            out = np.full(len(rows), np.nan)
-            for k, r in enumerate(rows):
-                if j is not None and j < len(r):
-                    try:
-                        out[k] = float(r[j])
-                    except ValueError:
-                        pass
-            return out
+            return _col_float(rows, j)
 
-        ts = np.full(len(rows), np.nan)
-        ti = idx.get("Time")
-        for k, r in enumerate(rows):
-            if ti is not None and ti < len(r) and r[ti].strip():
-                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-                    try:
-                        ts[k] = _dt.datetime.strptime(r[ti].strip()[:26], fmt).timestamp()
-                        break
-                    except ValueError:
-                        pass
+        ts = _col_time(rows, idx.get("Time"))
         si = idx.get("Status")
         status = [r[si] if (si is not None and si < len(r)) else "" for r in rows]
         chi = idx.get("Channel")
@@ -246,14 +266,7 @@ def load_fit_table(path):
     gas_cols = list(range(p_i + 1, rms_i))   # P_mbar 다음 ~ rms 직전 = 가스들
 
     def colf(j):
-        out = np.full(len(rows), np.nan)
-        for k, r in enumerate(rows):
-            if j is not None and j < len(r):
-                try:
-                    out[k] = float(r[j])
-                except ValueError:
-                    pass
-        return out
+        return _col_float(rows, j)
 
     out = {"row_idx": colf(idx.get("row_idx", 0)), "T": colf(idx.get("T_C")),
            "P": colf(p_i), "rms": colf(rms_i), "doy": colf(idx.get("doy")),
@@ -265,15 +278,7 @@ def load_fit_table(path):
     # datetime 컬럼 → epoch 초(시간축용)
     di = idx.get("datetime")
     if di is not None:
-        ts = np.full(len(rows), np.nan)
-        for k, r in enumerate(rows):
-            if di < len(r) and r[di].strip():
-                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-                    try:
-                        ts[k] = _dt.datetime.strptime(r[di].strip(), fmt).timestamp()
-                        break
-                    except ValueError:
-                        pass
+        ts = _col_time(rows, di, cut=False)
         if np.isfinite(ts).any():
             out["time"] = ts
     return out
