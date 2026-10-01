@@ -89,6 +89,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     격자 끔이 실제 Publish 그림에 들어가나 · autosize 해제 (2026-10-01)
 40. Preview 모덜리스 : 싱글턴 · 무변화면 안 그림 · 바뀐 뒤 한 박자 동안 그대로면 다시 그림 ·
     시리즈 스타일 변경도 감지 · 렌더 오류는 팝업 아닌 창 안 (M-P, 2026-10-01)
+41. 패널 계약 : 6개 모드 render_mpl(fig, ax)가 받은 패널 안에만 그리나 · 옆 패널 x 라벨·
+    눈금 무손상(autofmt_xdate 류 금지) · 분할 시계열은 패널 칸을 쪼갠다 (M1, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1778,6 +1780,57 @@ def c_preview_modeless():
         return "FAIL", "렌더 오류가 창 안에 표시 안 됨"
     dlg.close()
     return "PASS", "모덜리스·싱글턴 · 무변화 시 안 그림 · 변화 후 한 박자 뒤 갱신 · 스타일 변경 감지 · 오류는 창 안"
+
+
+# ── 41. 모드는 받은 패널 안에만 그린다 (M1) ─────────────────────────────────
+@check("M1: 6개 모드 render_mpl(fig, ax) — 받은 패널 안에만, 옆 패널 무손상 (분할 시계열 포함)")
+def c_render_into_panel():
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._series.append(["fixture:CHOCHO", "L", None, None])
+    ts._refresh_list()
+    bad = []
+    for split in (False, True):
+        ts._chk_split.setChecked(split)
+        for i, m in enumerate(w._modes):
+            if split and m.key != "timeseries":
+                continue
+            w._mode_combo.setCurrentIndex(i)
+            for attr in ("_c", "_cx", "_cy"):
+                c = getattr(m, attr, None)
+                if c is not None and not c.currentText():
+                    c.setCurrentText("fixture:NO2")
+            # 위 = 남의 패널, 아래 = 모드 패널. autofmt_xdate는 '아래 행이 아닌' 축의 x 라벨을
+            # 숨기므로 이 배치에서 그림 전체 호출이 있으면 위 패널이 망가져 걸린다.
+            fig = Figure(figsize=(6, 8)); FigureCanvasAgg(fig)
+            other, panel = fig.subplots(2, 1)
+            other.set_xlabel("keep me"); other.plot([0, 1], [0, 1])
+            cell = panel.get_position()
+            try:
+                m.render_mpl(fig, panel)
+            except NotImplementedError:
+                continue
+            fig.canvas.draw()
+            tag = m.key + ("_split" if split else "")
+            if other.get_xlabel() != "keep me" or not other.xaxis.label.get_visible():
+                bad.append(f"{tag}: 옆 패널 x 라벨이 사라짐")
+            if not any(t.get_visible() and t.get_text() for t in other.get_xticklabels()):
+                bad.append(f"{tag}: 옆 패널 눈금 숫자가 숨겨짐(autofmt_xdate 류)")
+            for a in fig.axes:
+                if a is other:
+                    continue
+                p = a.get_position()
+                if p.y1 > cell.y1 + 0.02:      # 패널 칸 위로 삐져나옴 = 그림 전체 축(add_subplot(111) 류)
+                    bad.append(f"{tag}: 모드가 패널 밖에 축을 만듦 (y1 {p.y1:.2f} > {cell.y1:.2f})")
+            if split and len([a for a in fig.axes if a is not other]) != 2:
+                bad.append(f"{tag}: 분할이 패널 안에서 2칸으로 안 쪼개짐 ({len(fig.axes) - 1})")
+    if bad:
+        return "FAIL", "; ".join(bad)
+    return "PASS", "6개 모드 + 분할 시계열이 받은 패널 안에만 · 옆 패널 라벨·눈금 무손상"
 
 
 def main():

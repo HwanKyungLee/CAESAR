@@ -749,12 +749,18 @@ class TimeSeriesMode(PlotMode):
                             + "".join(f" · {s.display_name}: flag colours {s.extra['flag_note']}"
                                       for s in specs if s.extra.get("flag_note")))
 
-    def _render_mpl_split(self, specs, fig):
+    def _render_mpl_split(self, specs, fig, ax=None):
         """Publish 분할: 시리즈마다 패널 1개(세로 스택, x축 공유). 종별 분리 그림.
-        specs는 render_mpl()이 이미 _resolve_specs()로 만들어둔 것 — 재계산 안 함."""
+        specs는 render_mpl()이 이미 _resolve_specs()로 만들어둔 것 — 재계산 안 함.
+        ax(조판 패널)가 오면 그 패널 칸을 다시 쪼갠다 — 그림 전체를 차지하지 않는다."""
         import matplotlib.dates as mdates
         import datetime as _dt
-        axes = fig.subplots(len(specs), 1, sharex=True, squeeze=False)[:, 0]
+        if ax is None:
+            axes = fig.subplots(len(specs), 1, sharex=True, squeeze=False)[:, 0]
+        else:
+            gs = ax.get_subplotspec().subgridspec(len(specs), 1, hspace=0.08)
+            ax.remove()
+            axes = gs.subplots(sharex=True, squeeze=False)[:, 0]
         any_time = any(s.extra["has_time"] for s in specs)
         tspan = self._tspan(specs)
         night_on = ((self._chk_night.isChecked() if hasattr(self, "_chk_night") else False)
@@ -780,16 +786,17 @@ class TimeSeriesMode(PlotMode):
             if tspan[0] is not None:    # x축 공유 → 마지막 패널에 tight xlim(양 끝 공백 제거)
                 axes[-1].set_xlim(_dt.datetime.fromtimestamp(tspan[0]),
                                   _dt.datetime.fromtimestamp(tspan[1]))
-            fig.autofmt_xdate()
+            self._fmt_xdate(fig, [axes[-1]], owns_fig=ax is None)
 
-    def render_mpl(self, fig):
+    def render_mpl(self, fig, ax=None):
         specs = self._resolve_specs()
         if (self._chk_split.isChecked() if hasattr(self, "_chk_split") else False) and len(specs) > 1:
-            self._render_mpl_split(specs, fig)
+            self._render_mpl_split(specs, fig, ax)
             return
         import matplotlib.dates as mdates
         host = self.host
-        ax = fig.add_subplot(111)
+        owns_fig = ax is None
+        ax = self._target_ax(fig, ax)
         ax_r = None
         any_time = any(s.extra["has_time"] for s in specs)
         tspan = self._tspan(specs)
@@ -832,7 +839,7 @@ class TimeSeriesMode(PlotMode):
             if tspan[0] is not None:
                 ax.set_xlim(datetime.fromtimestamp(tspan[0]),
                             datetime.fromtimestamp(tspan[1]))
-            fig.autofmt_xdate()
+            self._fmt_xdate(fig, [ax], owns_fig)
         if hl:
             ax.legend(hl, ll, loc="best", fontsize=9)
 
@@ -1040,9 +1047,9 @@ class ScatterMode(PlotMode):
             host.set_status("Not enough finite points for regression.")
         host.autoscale()
 
-    def render_mpl(self, fig):
+    def render_mpl(self, fig, ax=None):
         host = self.host
-        ax = fig.add_subplot(111)
+        ax = self._target_ax(fig, ax)
         xy = self._xy()
         if xy is None:
             ax.set_title("Scatter — pick X and Y")
@@ -1148,9 +1155,9 @@ class AllanMode(PlotMode):
         host.set_status(f"optimal averaging ≈ {taus[imin]:.0f} s  (min Allan dev {ad[imin]:.3g})")
         host.autoscale()
 
-    def render_mpl(self, fig):
+    def render_mpl(self, fig, ax=None):
         host = self.host
-        ax = fig.add_subplot(111)
+        ax = self._target_ax(fig, ax)
         res = host.resolve(self._c.currentText())
         out = None
         if res:
@@ -1362,9 +1369,9 @@ class HeatmapMode(PlotMode):
         host.autoscale()
         host.set_status(f"{len(names)} columns")
 
-    def render_mpl(self, fig):
+    def render_mpl(self, fig, ax=None):
         mat = self._matrix()
-        ax = fig.add_subplot(111)
+        ax = self._target_ax(fig, ax)
         if mat is None:
             ax.set_title("Correlation heatmap — need ≥2 columns")
             return
@@ -1498,9 +1505,9 @@ class HistogramMode(PlotMode):
         host.autoscale()
         host.set_status(f"n={h['v'].size}  μ={h['mu']:.4g}  median={h['md']:.4g}  σ={h['sd']:.4g}")
 
-    def render_mpl(self, fig):
+    def render_mpl(self, fig, ax=None):
         host = self.host
-        ax = fig.add_subplot(111)
+        ax = self._target_ax(fig, ax)
         h = self._resolve_hist()
         if h is None:
             ax.set_title("Histogram — pick a column")
@@ -1681,9 +1688,9 @@ class DiurnalMode(PlotMode):
         host.autoscale()
         host.set_status(f"{col} diurnal · n={int(cnt.sum())} (band = 25–75%)")
 
-    def render_mpl(self, fig):
+    def render_mpl(self, fig, ax=None):
         host = self.host
-        ax = fig.add_subplot(111)
+        ax = self._target_ax(fig, ax)
         out = self._resolve_specs()
         if out is None:
             ax.set_title("Diurnal — needs a time axis")

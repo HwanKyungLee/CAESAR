@@ -183,7 +183,16 @@ Plot Maker 설정(`.pmcfg.json`)은 데이터셋을 `이름 → 경로`로 저�
   - 그리는 함수는 Publish와 같은 `_build_publish_fig` → 미리보기 = 저장 파일. 렌더 오류는 팝업이 아니라
     창 상단 줄에(자동 갱신 중 메시지박스 폭탄 금지).
   - 덤: `_save_cfg`의 dict 조립을 `config_dict()`로 뽑았다(지문과 저장이 같은 출처).
-- **M1** `render_mpl(fig)` → `render_mpl(fig, ax)`
+- **M1** `render_mpl(fig)` → `render_mpl(fig, ax)` — **완료(2026-10-01, 검증 41번)**
+  - 6개 모드 `render_mpl(fig, ax=None)`. ax=None이면 예전 그대로(그림 전체), ax가 오면 그 패널 안에만.
+    베이스 `PlotMode._target_ax`·`_fmt_xdate`를 쓰고 모드는 그림 전체 호출을 직접 하지 않는다.
+  - **함정 하나**: `fig.autofmt_xdate()`는 "맨 아래 행이 아닌 축"의 x 라벨을 **그림 전체에서** 숨긴다 →
+    패널 모드에선 그 축만 돌린다(그림을 통째로 가졌을 땐 예전 호출 그대로 — 출력 불변).
+  - 분할 시계열은 패널 칸을 `subgridspec`으로 다시 쪼갠다. 컬러바는 이미 `ax=`라 패널 단위.
+  - `_apply_axes_mpl(fig, axes=None)` — M2가 패널 축만 넘길 수 있게.
+  - **바이트 동일 확인**: 6개 모드 + 분할의 Publish SVG sha1이 M1 전후 7개 모두 같다.
+    검증 41번이 옛 동작을 실제로 잡는지도 변형 시험으로 확인했다(autofmt_xdate·add_subplot(111)로
+    바꾸면 FAIL, 되돌리면 PASS).
 - **M2** Composer (패널 그리드, (a)(b)(c), 공유축, inset) — 결정 (B)
 
 ### 끼워 넣을 작은 것

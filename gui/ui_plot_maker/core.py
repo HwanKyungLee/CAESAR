@@ -295,9 +295,31 @@ class PlotMode:
     def render(self):
         raise NotImplementedError
 
-    def render_mpl(self, fig):
-        """출판용 matplotlib 렌더(고화질 PNG/PDF/SVG). 미지원 모드는 NotImplementedError."""
+    def render_mpl(self, fig, ax=None):
+        """출판용 matplotlib 렌더(고화질 PNG/PDF/SVG). 미지원 모드는 NotImplementedError.
+
+        ax=None → 그림 전체가 이 모드 것(예전 그대로). ax가 오면 **그 패널 안에만** 그린다 —
+        조판(M2)에서 한 그림에 모드 여러 개를 놓기 위한 계약(M1). 모드는 그림 전체를 건드리는
+        호출(`fig.add_subplot`, `fig.autofmt_xdate`, `fig.subplots`)을 직접 하지 말고
+        `_target_ax`·`_fmt_xdate`를 쓴다."""
         raise NotImplementedError
+
+    @staticmethod
+    def _target_ax(fig, ax):
+        """그릴 축 — 받은 패널이 있으면 그것, 없으면 그림 전체에 하나."""
+        return ax if ax is not None else fig.add_subplot(111)
+
+    @staticmethod
+    def _fmt_xdate(fig, axes, owns_fig):
+        """날짜 눈금 기울이기. 그림을 통째로 가졌으면 예전처럼 `fig.autofmt_xdate()`(출력 불변),
+        패널이면 **그 축들만** 돌린다 — autofmt_xdate는 그림의 다른 패널 x 라벨까지 숨긴다."""
+        if owns_fig:
+            fig.autofmt_xdate()
+            return
+        for a in axes:
+            for lb in a.get_xticklabels():
+                lb.set_rotation(30)
+                lb.set_ha("right")
 
     def csv_table(self):
         """CSV 내보내기용 (headers, rows) 반환. 지원 안 하면 None."""

@@ -1626,9 +1626,10 @@ class PlotMakerWidget(QWidget):
         sz = self._lbl_size.value() if hasattr(self, "_lbl_size") else 0
         return max(sz - 2, 6) if sz > 0 else 0
 
-    def _apply_axes_mpl(self, fig):
-        """Publish(matplotlib)에도 동일한 축 범위/로그 적용."""
-        axes = fig.axes
+    def _apply_axes_mpl(self, fig, axes=None):
+        """Publish(matplotlib)에도 동일한 축 범위/로그 적용.
+        axes=None → 그림의 모든 축(예전 그대로). 조판(M2)은 패널 하나의 축들만 넘긴다."""
+        axes = list(axes) if axes is not None else fig.axes
         if not axes:
             return
         ax = axes[0]
