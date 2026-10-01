@@ -595,14 +595,10 @@ class DataIO:
         Returns (pixel_idx, intensity_raw, state_flag=FLAG_AMBIENT, env_t, env_p).
         """
         first_px, t_idx, p_idx, px_start, _wave = DataIO._alpha_layout(filepath)
-        data_rows = []
         try:
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    s = line.strip()
-                    if not s or s.startswith('#') or s.startswith('row_idx'):
-                        continue
-                    data_rows.append(s)
+            # 파일당 1회 읽기(캐시, 같은 거르기 규칙) — 예전엔 행 하나를 꺼낼 때마다 파일 전체를
+            # 다시 읽어 행 수의 제곱으로 느려졌다(2026-10-02).
+            data_rows = DataIO._alpha_file(filepath)[2]
         except Exception as e:
             raise RuntimeError(
                 f"HK Data Load Failed ({os.path.basename(filepath)}): {e}")
@@ -1109,11 +1105,14 @@ class DataIO:
         if not parts:
             return None
         if dt_idx is not None and dt_idx < len(parts):
-            for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
-                try:
-                    return datetime.strptime(parts[dt_idx], fmt)
-                except (ValueError, IndexError):
-                    pass
+            # 시각 파싱 단일 출처(core.result_io.parse_row_time — 같은 두 형식, 빠른 길 포함).
+            # 그 함수는 앞 26자만 보는데 여기는 예전에 자르지 않았다 → 26자 이하만 넘겨 결과를 같게.
+            s = parts[dt_idx]
+            if len(s) <= 26:
+                from core.result_io import parse_row_time
+                d = parse_row_time(s)
+                if d is not None:
+                    return d
         if doy_idx is not None and doy_idx < len(parts):
             try:
                 yr = DataIO._file_year(filepath) or 2026

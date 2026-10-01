@@ -159,6 +159,7 @@ class MonitorWidget(QWidget):
         self.p_rms.setLabel('left', 'RMS')
         for p in [self.p_sh, self.p_sq, self.p_rms]:
             p.setClipToView(True)
+            p.setDownsampling(auto=True, mode="peak")   # 큰 런에서 전 점 마커 → 화면 솎아내기(gui/pg_perf.py)
             p.showGrid(x=True, y=True)
             p.setLabel('bottom', 'Time')
             p.addLegend(offset=(10, 10))
@@ -604,13 +605,14 @@ class MonitorWidget(QWidget):
     def _conc_time_x(result_dict, row_index):
         """result_dict['Time']('%Y-%m-%d %H:%M:%S') → epoch초(시간축용). 실패 시 None."""
         ts = str(result_dict.get('Time', ''))
-        for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
-            try:
-                from datetime import datetime as _dt
-                return _dt.strptime(ts, fmt).timestamp()
-            except (ValueError, TypeError):
-                pass
-        return None
+        # 시각 파싱 단일 출처(core.result_io.parse_row_time — 같은 두 형식 + 빠른 길). rebuild_trend/
+        # rebuild_conc가 결과 전부를 돌며 부르므로 행마다 strptime 두 번이 쌓였다. 그 함수는 앞
+        # 26자만 보는데 여기는 예전에 자르지 않았다 → 26자 이하만 넘겨 결과를 같게.
+        if len(ts) > 26:
+            return None
+        from core.result_io import parse_row_time
+        d = parse_row_time(ts)
+        return d.timestamp() if d is not None else None
 
     def setup_conc_plots(self, gas_list):
         """RUN 시작 시 — 레퍼런스 가스마다 농도 시계열 플롯 1개씩(채널별 곡선) 재구성."""
@@ -626,6 +628,9 @@ class MonitorWidget(QWidget):
             p.setLabel('bottom', 'Time')
             p.showGrid(x=True, y=True)
             p.setClipToView(True)
+            # 캠페인 규모(수십만 점)에서 모든 점에 마커를 그리던 것 — 화면 peak 솎아내기(gui/pg_perf.py).
+            # 그래프 단위로 건다(이 그래프의 곡선은 전부 시간순 시계열). 클릭은 원본 전부로 판정.
+            p.setDownsampling(auto=True, mode="peak")
             p.addLegend(offset=(10, 10))
             self._conc_plots[gas] = p
             self._conc_curves[gas] = {}
@@ -635,7 +640,7 @@ class MonitorWidget(QWidget):
                 curve = p.plot(pen=pen, symbol='o', symbolSize=4,
                                symbolBrush=col, name=f"CH{ch}")
                 curve.sigPointsClicked.connect(
-                    lambda _c, pts, _ev, g=gas, c=ch: self._on_conc_click(g, c, pts))
+                    lambda _c, pts, ev, g=gas, c=ch: self._on_conc_click(g, c, pts, ev))
                 self._conc_curves[gas][ch] = curve
                 self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
         # 가스 선택 콤보 갱신
@@ -763,17 +768,36 @@ class MonitorWidget(QWidget):
                 d = self._conc_data[gas][ch]
                 self._conc_curves[gas][ch].setData(d['x'], d['y'])
 
-    def _on_conc_click(self, gas, ch, pts):
+    def _on_conc_click(self, gas, ch, pts, ev=None):
         """Clicked Conc point → its result dict (for the stored-fit replay).
 
-        Matched by position, not spot index: with clipToView the scatter only holds
-        the visible slice, so its indices don't line up with _conc_data."""
+        Matched by position, not spot index: with clipToView/downsampling the scatter only
+        holds a visible, thinned slice, so its indices don't line up with _conc_data.
+        With screen downsampling (peak) a drawn spot can be a bin representative (bin-start x,
+        bin-min y), so matching x first could open the wrong scan — match the **mouse position**
+        (ev) to the nearest real point in **screen-pixel distance** instead (gui/pg_perf)."""
         d = self._conc_data.get(gas, {}).get(ch)
         if not pts or not d or not d['r']:
             return
+        p = self._conc_plots.get(gas)
+        vb = p.getViewBox() if p is not None else None
         pos = pts[0].pos()
+        if ev is not None and vb is not None:
+            try:
+                pos = vb.mapSceneToView(ev.scenePos())
+            except Exception:                       # noqa: BLE001 — fall back to the spot
+                pos = pts[0].pos()
         px, py = pos.x(), pos.y()
-        k = min(range(len(d['x'])), key=lambda i: (abs(d['x'][i] - px), abs(d['y'][i] - py)))
+        k = None
+        if vb is not None and vb.width() > 0 and vb.height() > 0:
+            from gui.pg_perf import nearest_index
+            x = np.asarray(d['x'], float)
+            y = np.asarray(d['y'], float)
+            (x0, x1), (y0, y1) = vb.viewRange()
+            k = nearest_index(x, y, np.argsort(x, kind="stable"), px, py,
+                              (x1 - x0) / vb.width(), (y1 - y0) / vb.height(), radius_px=12.0)
+        if k is None:                               # 화면 정보가 없을 때(테스트 등) — 예전 규칙
+            k = min(range(len(d['x'])), key=lambda i: (abs(d['x'][i] - px), abs(d['y'][i] - py)))
         self.conc_point_clicked.emit(d['r'][k])
 
     def _export_conc_png(self):

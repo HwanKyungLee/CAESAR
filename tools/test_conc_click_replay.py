@@ -41,6 +41,56 @@ def test_conc_click_returns_clicked_result():
     app.processEvents()
 
 
+class _Ev:
+    def __init__(self, scene_pos):
+        self._s = scene_pos
+
+    def scenePos(self):
+        return self._s
+
+
+def test_conc_click_with_downsampling_hits_the_spike():
+    """큰 런(화면 peak 솎아내기) — 화면 점은 구간 대표값이라, x부터 맞추면 스파이크를 눌러도
+    그 구간의 첫 스캔이 열릴 수 있다. 마우스 위치에서 화면 픽셀로 가장 가까운 **원본 점**이어야 한다."""
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtWidgets import QApplication
+    from gui.monitor_widget import MonitorWidget
+    from core.engine import UniversalEngine
+    import numpy as np
+
+    app = QApplication.instance() or QApplication([])
+    m = MonitorWidget(UniversalEngine())
+    m.resize(1200, 800); m.show()
+    m.setup_conc_plots(["NO2"])
+    n = 60000
+    rng = np.random.default_rng(0)
+    vals = 5 + 0.1 * rng.normal(size=n)
+    spike = 41234
+    vals[spike] = 50.0
+    from datetime import datetime, timedelta
+    t0 = datetime(2026, 5, 20)
+    res = [{'File': f"a.dat [{i:05d}]", 'Channel': 1,
+            'Time': f"{t0 + timedelta(seconds=20 * i):%Y-%m-%d %H:%M:%S}", 'NO2': float(vals[i])}
+           for i in range(n)]
+    got = []
+    m.conc_point_clicked.connect(got.append)
+    m.rebuild_conc(res)
+    m.tabs.setCurrentWidget(m.tab_conc)
+    p = m._conc_plots["NO2"]
+    p.getViewBox().autoRange()
+    app.processEvents()
+    curve = m._conc_curves["NO2"][1]
+    shown = len(curve.getData()[0]) if curve.getData()[0] is not None else 0
+    assert 0 < shown < n, f"솎아내기가 안 걸림({shown} of {n})"
+    d = m._conc_data["NO2"][1]
+    vb = p.getViewBox()
+    scene = vb.mapViewToScene(QPointF(d['x'][spike], d['y'][spike]))
+    m._on_conc_click("NO2", 1, [_Pt(d['x'][spike - 3], 5.0)], _Ev(scene))
+    assert got[-1] is res[spike], ("스파이크 클릭이 다른 스캔을 열었다",
+                                   got[-1]['File'], res[spike]['File'])
+
+
 if __name__ == "__main__":
     test_conc_click_returns_clicked_result()
+    test_conc_click_with_downsampling_hits_the_spike()
     print("ok")
