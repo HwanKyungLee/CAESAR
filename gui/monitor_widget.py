@@ -189,6 +189,7 @@ class MonitorWidget(QWidget):
             self._trend_data[1]['x'], self._trend_data[1]['sh'], \
             self._trend_data[1]['sq'], self._trend_data[1]['rms']
         
+        self.glw_trend.scene().sigMouseClicked.connect(self._on_trend_scene_click)
         layout.addWidget(self.glw_trend)
         self.tabs.addTab(self.tab_trend, "Trend (Fast)")
 
@@ -592,6 +593,7 @@ class MonitorWidget(QWidget):
         layout.addLayout(bar)
 
         self.glw_conc = pg.GraphicsLayoutWidget()
+        self.glw_conc.scene().sigMouseClicked.connect(self._on_conc_scene_click)
         layout.addWidget(self.glw_conc)
         # gas → PlotItem,  gas → {ch: curve},  gas → {ch: {'x':[], 'y':[]}}
         self._conc_plots  = {}
@@ -632,11 +634,8 @@ class MonitorWidget(QWidget):
             self._conc_data[gas] = {}
             for ch, col in self._CONC_CH_COLORS.items():
                 pen = pg.mkPen(col, width=1.5)
-                curve = p.plot(pen=pen, symbol='o', symbolSize=4,
-                               symbolBrush=col, name=f"CH{ch}")
-                curve.sigPointsClicked.connect(
-                    lambda _c, pts, _ev, g=gas, c=ch: self._on_conc_click(g, c, pts))
-                self._conc_curves[gas][ch] = curve
+                self._conc_curves[gas][ch] = p.plot(pen=pen, symbol='o', symbolSize=4,
+                                                    symbolBrush=col, name=f"CH{ch}")
                 self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
         # 가스 선택 콤보 갱신
         if hasattr(self, 'cb_conc_gas'):
@@ -763,18 +762,74 @@ class MonitorWidget(QWidget):
                 d = self._conc_data[gas][ch]
                 self._conc_curves[gas][ch].setData(d['x'], d['y'])
 
-    def _on_conc_click(self, gas, ch, pts):
-        """Clicked Conc point → its result dict (for the stored-fit replay).
+    # Click → replay. A click picks the nearest point (in screen pixels) of the
+    # plot under the cursor, so it need not land on the 4 px symbol itself — but
+    # only within _CLICK_PX, so a click on empty space selects nothing.
+    _CLICK_PX = 8
 
-        Matched by position, not spot index: with clipToView the scatter only holds
-        the visible slice, so its indices don't line up with _conc_data."""
-        d = self._conc_data.get(gas, {}).get(ch)
-        if not pts or not d or not d['r']:
+    def _nearest_point(self, plot, series, scene_pos, log_y=False):
+        """(key, index) of the point in `series` {key: (xs, ys)} nearest to
+        scene_pos on `plot`, or None if the click is off the plot or > _CLICK_PX away."""
+        if plot.scene() is None:          # not in the current layout (Show gas filter)
+            return None
+        vb = plot.getViewBox()
+        rect = vb.sceneBoundingRect()
+        if not rect.contains(scene_pos):
+            return None
+        (x0, x1), (y0, y1) = vb.viewRange()
+        best = None
+        for key, (xs, ys) in series.items():
+            if not len(xs):
+                continue
+            x = np.asarray(xs, dtype=float)
+            y = np.asarray(ys, dtype=float)
+            if log_y:
+                y = np.log10(np.where(y > 0, y, 1e-9))   # same floor as _redraw_trend
+            sx = rect.left() + (x - x0) / (x1 - x0) * rect.width()
+            sy = rect.bottom() - (y - y0) / (y1 - y0) * rect.height()
+            d2 = (sx - scene_pos.x()) ** 2 + (sy - scene_pos.y()) ** 2
+            i = int(np.nanargmin(d2))
+            if best is None or d2[i] < best[0]:
+                best = (d2[i], key, i)
+        if best is None or best[0] > self._CLICK_PX ** 2:
+            return None
+        return best[1], best[2]
+
+    def _on_conc_scene_click(self, ev):
+        """Conc plot click → result dict of the nearest point (Step and Fast alike)."""
+        if ev.button() != Qt.MouseButton.LeftButton:
             return
-        pos = pts[0].pos()
-        px, py = pos.x(), pos.y()
-        k = min(range(len(d['x'])), key=lambda i: (abs(d['x'][i] - px), abs(d['y'][i] - py)))
-        self.conc_point_clicked.emit(d['r'][k])
+        pos = ev.scenePos()
+        for gas, plot in self._conc_plots.items():
+            data = self._conc_data.get(gas, {})
+            hit = self._nearest_point(plot, {ch: (d['x'], d['y']) for ch, d in data.items()}, pos)
+            if hit:
+                ch, k = hit
+                self.conc_point_clicked.emit(data[ch]['r'][k])
+                return
+
+    def _on_trend_scene_click(self, ev):
+        """Shift/Squeeze/RMS click → the result at that channel + time.
+
+        Trend data holds no result dicts (Step trend is a 20 fps sample of the
+        worker's scans), so look the scan up by x in the Conc data, which holds
+        every result in both Step and Fast."""
+        if ev.button() != Qt.MouseButton.LeftButton or not self._conc_gases:
+            return
+        pos = ev.scenePos()
+        for plot, key, log_y in ((self.p_sh, 'sh', False), (self.p_sq, 'sq', False),
+                                 (self.p_rms, 'rms', True)):
+            hit = self._nearest_point(
+                plot, {ch: (td['x'], td[key]) for ch, td in self._trend_data.items()}, pos, log_y)
+            if not hit:
+                continue
+            ch, k = hit
+            tx = self._trend_data[ch]['x'][k]
+            d = self._conc_data[self._conc_gases[0]].get(ch)
+            if d and d['r']:
+                j = min(range(len(d['x'])), key=lambda i: abs(d['x'][i] - tx))
+                self.conc_point_clicked.emit(d['r'][j])
+            return
 
     def _export_conc_png(self):
         """현재 농도 그래프(보이는 레이아웃)를 PNG로 저장."""
