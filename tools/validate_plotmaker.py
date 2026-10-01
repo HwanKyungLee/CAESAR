@@ -91,6 +91,9 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     시리즈 스타일 변경도 감지 · 렌더 오류는 팝업 아닌 창 안 (M-P, 2026-10-01)
 41. 패널 계약 : 6개 모드 render_mpl(fig, ax)가 받은 패널 안에만 그리나 · 옆 패널 x 라벨·
     눈금 무손상(autofmt_xdate 류 금지) · 분할 시계열은 패널 칸을 쪼갠다 (M1, 2026-10-01)
+42. Composer : 패널 조각으로 그림 · 편집기·화면 무오염 · Edit 연결(추가 직후엔 안 묶임) · inset ·
+    룩(눈금 크기) 전 패널 공통·inset은 작게 · x 공유 · 높이 비율 · 설정 왕복 · 끄면 단일 (M2, 2026-10-01)
+43. R축(twinx)·컬러바 눈금은 오른쪽에만 — 왼쪽 숫자 옆에 겹쳐 찍히던 버그의 가드 (2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1831,6 +1834,134 @@ def c_render_into_panel():
     if bad:
         return "FAIL", "; ".join(bad)
     return "PASS", "6개 모드 + 분할 시계열이 받은 패널 안에만 · 옆 패널 라벨·눈금 무손상"
+
+
+# ── 42. Composer: 다중 패널 조판 (M2) ──────────────────────────────────────
+@check("Composer: 패널 조각으로 그림·편집기 무오염·편집 연결·inset·x 공유·비율·룩 공통·설정 왕복")
+def c_composer():
+    import json
+    w = _widget_with_fixture()
+    keys = [m.key for m in w._modes]
+    ts = w._modes[keys.index("timeseries")]
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None]); ts._refresh_list()
+    w._mode_combo.setCurrentIndex(keys.index("timeseries"))
+    w._ed_title.setText("TS panel"); w.custom["title"] = "TS panel"
+    comp = w.composer
+    comp.add_current()                                           # (a)
+    sc = w._modes[keys.index("scatter")]
+    w._mode_combo.setCurrentIndex(keys.index("scatter"))
+    sc._cx.setCurrentText("fixture:NO2"); sc._cy.setCurrentText("fixture:CHOCHO")
+    w._ed_title.setText("SC panel"); w.custom["title"] = "SC panel"
+    comp.add_current()                                           # (b)
+    if [p["cell"] for p in comp.panels] != [[0, 0, 1, 1], [0, 1, 1, 1]] or not comp.active():
+        return "FAIL", f"빈 칸 배치 이상: {[p.get('cell') for p in comp.panels]}"
+    if comp.editing is not None:
+        return "FAIL", "추가 직후 편집기가 패널에 묶임 — 다음 화면 변경이 그 패널을 덮어쓴다"
+
+    n_screen = len(w.p1.items)
+    axes_before = w._axes_state()
+    fig = w._build_publish_fig()
+    main = [a for a in fig.axes if a.get_label() != "<colorbar>" and getattr(a, "_colorbar", None) is None]
+    titles = sorted(a.get_title() for a in main)
+    if titles != ["SC panel", "TS panel"]:
+        return "FAIL", f"패널 제목이 자기 조각을 안 따름: {titles}"
+    letters = sorted(a.get_title(loc="left") for a in main if a.get_title(loc="left"))
+    if letters != ["(a)", "(b)"]:
+        return "FAIL", f"패널 글자 이상: {letters}"
+    if w._mode is not sc or w.custom["title"] != "SC panel" or w._axes_state() != axes_before:
+        return "FAIL", "조판 그리기가 편집기 상태(모드·라벨·축)를 바꿔 놓음"
+    if len(w.p1.items) != n_screen:
+        return "FAIL", "조판 그리기가 화면(pg)을 건드림"
+
+    comp.edit(0)                                                  # (a) 편집 → 편집기가 시계열로
+    if w._mode is not ts or w.custom["title"] != "TS panel":
+        return "FAIL", "Edit이 패널을 편집기에 안 실음"
+    w._ed_title.setText("TS v2"); w.custom["title"] = "TS v2"
+    titles = sorted(a.get_title() for a in w._build_publish_fig().axes if a.get_title())
+    if titles != ["SC panel", "TS v2"]:
+        return "FAIL", f"편집 중 변경이 그 패널로 안 들어감: {titles}"
+
+    # inset: (c)를 (a) 안에
+    comp.add_current()
+    comp.set_position(2, inset={"in": 0, "rect": [0.6, 0.6, 0.35, 0.35]})
+    fig = w._build_publish_fig(); fig.canvas.draw()
+    every = list(fig.axes) + [c for a in fig.axes for c in getattr(a, "child_axes", [])]
+    tsx = [a for a in every if a.get_title() == "TS v2"]
+    if len(tsx) != 2:
+        return "FAIL", f"inset 패널이 안 그려짐 ({len(tsx)})"
+    big, small = sorted(tsx, key=lambda a: a.get_position().width, reverse=True)
+    bb, sb = big.get_position(), small.get_position()
+    if not (bb.x0 <= sb.x0 and sb.x1 <= bb.x1 + 1e-6 and bb.y0 <= sb.y0 and sb.y1 <= bb.y1 + 1e-6):
+        return "FAIL", "inset이 꽂힌 패널 밖에 있음"
+
+    # 룩(눈금 크기)은 그림 전체 — 패널을 찍은 뒤 바꿔도 모든 패널에
+    w._tick_size.setValue(7)
+    fig = w._build_publish_fig()
+    sizes = {round(t.get_fontsize()) for a in fig.axes for t in a.get_yticklabels() if t.get_text()}
+    if sizes != {7}:
+        return "FAIL", f"룩(눈금 7 pt)이 전 패널에 안 먹음: {sizes}"
+    ins = [c for a in fig.axes for c in getattr(a, "child_axes", [])]
+    isz = {round(t.get_fontsize()) for a in ins for t in a.get_yticklabels() if t.get_text()}
+    if not ins or not isz or max(isz) >= 7:
+        return "FAIL", f"inset 눈금 글자가 주 패널보다 작지 않음: {isz}"
+
+    # x 공유 + 높이 비율: 시계열 두 개를 위아래로
+    w2 = _widget_with_fixture()
+    ts2 = w2._modes[[m.key for m in w2._modes].index("timeseries")]
+    ts2.options_widget()
+    c2 = w2.composer
+    c2.rows, c2.cols, c2.sharex, c2.hratios = 2, 1, True, "2,1"
+    for col in ("NO2", "CHOCHO"):
+        ts2._series[:] = [[f"fixture:{col}", "L", None, None]]; ts2._refresh_list()
+        c2.add_current()
+    fig = w2._build_publish_fig(); fig.canvas.draw()
+    ax_top, ax_bot = sorted([a for a in fig.axes], key=lambda a: -a.get_position().y1)[:2]
+    if ax_top.get_xlim() != ax_bot.get_xlim():
+        return "FAIL", "x 공유가 안 됨"
+    if any(t.get_visible() and t.get_text() for t in ax_top.get_xticklabels()):
+        return "FAIL", "x 공유인데 위 패널 x 눈금 숫자가 남음"
+    hr = ax_top.get_position().height / ax_bot.get_position().height
+    if not 1.6 < hr < 2.4:
+        return "FAIL", f"높이 비율 2:1 아님 ({hr:.2f})"
+
+    # 설정 왕복
+    cfg = json.loads(json.dumps(w.config_dict(), default=str))
+    w3 = _widget_with_fixture()
+    w3.composer.from_config(cfg["compose"])
+    f3 = w3._build_publish_fig()
+    t3 = sorted(a.get_title() for a in list(f3.axes) + [c for a in f3.axes for c in a.child_axes]
+                if a.get_title())
+    if t3 != ["SC panel", "TS v2", "TS v2"] or w3.composer.editing != comp.editing:
+        return "FAIL", f"조판 설정 왕복 실패: {t3}"
+    # 끄면 예전 단일 그림
+    comp.on = False
+    if len([a for a in w._build_publish_fig().axes if a.get_label() != "<colorbar>"]) != 1:
+        return "FAIL", "조판을 껐는데 단일 그림으로 안 돌아옴"
+    return "PASS", ("2패널+inset · 제목·(a)(b) · 편집기/화면 무오염 · Edit 연결·변경 반영 · inset 위치 · "
+                    f"룩 공통 · x 공유·높이 {hr:.2f}:1 · 설정 왕복 · 끄면 단일")
+
+
+# ── 43. 오른쪽 축(twinx) 눈금이 왼쪽에 겹쳐 찍히지 않는다 ─────────────────────
+@check("R축 눈금은 오른쪽에만 — 왼쪽 축 숫자 옆에 겹쳐 찍히지 않음 (Publish)")
+def c_twin_ticks_right_only():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series[:] = [["fixture:NO2", "L", None, None], ["fixture:CHOCHO", "R", None, None]]
+    ts._refresh_list()
+    fig = w._build_publish_fig(); fig.canvas.draw()
+    right = [a for a in fig.axes if a.yaxis.get_label_position() == "right"]
+    if len(right) != 1:
+        return "FAIL", f"R축이 안 생김 ({len(right)})"
+    t = right[0].yaxis.get_major_ticks()[0]
+    if t.label1.get_visible() or not t.label2.get_visible():
+        return "FAIL", "R축 눈금 숫자가 왼쪽에 찍힘(또는 오른쪽에 없음) — 왼쪽 축 숫자와 겹친다"
+    w._chk_yticks.setChecked(False)              # 숫자 끄기도 R축에 같은 규칙
+    fig = w._build_publish_fig(); fig.canvas.draw()
+    right = [a for a in fig.axes if a.yaxis.get_label_position() == "right"][0]
+    if right.yaxis.get_major_ticks()[0].label2.get_visible():
+        return "FAIL", "Y 숫자 끄기가 R축에 안 먹음"
+    return "PASS", "R축 눈금은 오른쪽에만 · 숫자 끄기도 R축에 적용"
 
 
 def main():

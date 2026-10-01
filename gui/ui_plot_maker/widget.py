@@ -167,6 +167,8 @@ class PlotMakerWidget(QWidget):
         self._undo_slot = None   # 가벼운 1단계 undo(전체 스택 아님) — 방금 지운 것만 기억
         self._modes = [cls(self) for cls in _MODES]
         self._mode = self._modes[0]
+        from .composer import Composer
+        self.composer = Composer(self)   # 다중 패널 조판(M2) — Layout 탭
         self._init_ui()
         self._rebuild_mode_options()
         self.setAcceptDrops(True)   # 탐색기에서 파일을 창에 끌어놓으면 선반에 추가
@@ -572,6 +574,7 @@ class PlotMakerWidget(QWidget):
         ])
         xv.addStretch(1)
         self._tabs.addTab(_scroll(tab_exp), "Export")
+        self._tabs.addTab(_scroll(self.composer.widget()), "Layout")
 
         split.addWidget(self._tabs)
 
@@ -1710,6 +1713,13 @@ class PlotMakerWidget(QWidget):
                     a.set_xlabel("")
                 if hide_yl:
                     a.set_ylabel("")
+                if a.yaxis.get_label_position() == "right":
+                    # 오른쪽 축(twinx): 오른쪽 눈금만. 전엔 left/labelleft를 같이 켜서 R축 눈금
+                    # 숫자가 **왼쪽 축 숫자 옆에 겹쳐** 찍혔다(2026-10-01 조판 렌더로 발견 —
+                    # 단일 그림 Publish에도 있던 버그). x는 주 축 것이라 건드리지 않는다.
+                    a.tick_params(axis="y", which="both", right=my, labelright=sy,
+                                  direction=tdir, length=abs(tick_px))
+                    continue
                 a.tick_params(axis="x", which="both", bottom=mx, labelbottom=sx,
                               direction=tdir, length=abs(tick_px))
                 a.tick_params(axis="y", which="both", left=my, labelleft=sy,
@@ -2565,11 +2575,20 @@ class PlotMakerWidget(QWidget):
         self._apply_mpl_rc(matplotlib)
         fig = Figure(figsize=(self._fig_w.value(), self._fig_h.value()))
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
-        self._mode.render_mpl(fig)
-        self._apply_axes_mpl(fig)
-        # 조용한 시각 조작 금지 — 전역이든 데이터셋별이든 시프트가 걸렸으면 그림에 적는다.
         notes = []
-        if self.time_shift_hours:
+        composing = self.composer.active()
+        if composing:                     # 다중 패널(M2) — 패널마다 자기 조각으로 그린다
+            self.composer.build_fig(fig)
+            from .composer import LETTERS
+            sh = [f"({LETTERS[i % 26]}) {p.get('time_shift_hours', 0):+g}h"
+                  for i, p in enumerate(self.composer.panels) if p.get("time_shift_hours")]
+            if sh:
+                notes.append("time shift applied (display only): " + ", ".join(sh))
+        else:
+            self._mode.render_mpl(fig)
+            self._apply_axes_mpl(fig)
+        # 조용한 시각 조작 금지 — 전역이든 데이터셋별이든 시프트가 걸렸으면 그림에 적는다.
+        if self.time_shift_hours and not composing:
             notes.append(f"time shift {self.time_shift_hours:+g}h applied (display only)")
         ds_sh = [f"{n} {ds.shift_h:+g}h" for n, ds in self.shelf.items() if ds.shift_h]
         if ds_sh:
@@ -2577,7 +2596,10 @@ class PlotMakerWidget(QWidget):
         if notes:
             fig.text(0.995, 0.005, " · ".join(notes),
                      ha="right", va="bottom", fontsize=7, color="#b00")
-        fig.tight_layout()
+        if composing:
+            self.composer.tight(fig)      # inset이 있으면 tight_layout이 경고만 낸다
+        else:
+            fig.tight_layout()
         return fig
 
     def render_preview_png(self, dpi=110):
@@ -2807,6 +2829,23 @@ class PlotMakerWidget(QWidget):
                           self._lbl_size.value())
         return json.dumps(cfg, sort_keys=True, ensure_ascii=False, default=str)
 
+    def _axes_state(self):
+        """축 탭 상태 dict — 설정 파일 "axes"·조판 패널이 같은 형식을 쓴다."""
+        return {"xmin": self._ax_xmin.text(), "xmax": self._ax_xmax.text(),
+                "ymin": self._ax_ymin.text(), "ymax": self._ax_ymax.text(),
+                "rmin": self._ax_rmin.text(), "rmax": self._ax_rmax.text(),
+                "logx": self._chk_logx.isChecked(), "logy": self._chk_logy.isChecked(),
+                "grid": self._chk_grid.isChecked(), "grid_minor": self._chk_grid_minor.isChecked(),
+                "tick_x": self._tick_x.text(), "tick_y": self._tick_y.text(),
+                "tick_x_anchor": self._tick_x_anchor.text(),
+                "tick_size": self._tick_size.value(),
+                "tick_dir": self._tick_dir.currentIndex(),
+                "tick_len": self._tick_len.value(),
+                "xlabel_on": self._chk_xlabel.isChecked(), "ylabel_on": self._chk_ylabel.isChecked(),
+                "xticks_on": self._chk_xticks.isChecked(), "yticks_on": self._chk_yticks.isChecked(),
+                "xtickmarks_on": self._chk_xtickmarks.isChecked(),
+                "ytickmarks_on": self._chk_ytickmarks.isChecked()}
+
     def config_dict(self):
         """`.pmcfg.json`에 쓰는 dict — 그림을 재현하는 전부(데이터 레시피·모드·라벨·축·주석)."""
         return {
@@ -2820,26 +2859,47 @@ class PlotMakerWidget(QWidget):
             "time_shift_h": self._shift_spin.value(),
             "labels": dict(self.custom),
             "label_style": self.label_style,
-            "axes": {"xmin": self._ax_xmin.text(), "xmax": self._ax_xmax.text(),
-                     "ymin": self._ax_ymin.text(), "ymax": self._ax_ymax.text(),
-                     "rmin": self._ax_rmin.text(), "rmax": self._ax_rmax.text(),
-                     "logx": self._chk_logx.isChecked(), "logy": self._chk_logy.isChecked(),
-                     "grid": self._chk_grid.isChecked(), "grid_minor": self._chk_grid_minor.isChecked(),
-                     "tick_x": self._tick_x.text(), "tick_y": self._tick_y.text(),
-                     "tick_x_anchor": self._tick_x_anchor.text(),
-                     "tick_size": self._tick_size.value(),
-                     "tick_dir": self._tick_dir.currentIndex(),
-                     "tick_len": self._tick_len.value(),
-                     "xlabel_on": self._chk_xlabel.isChecked(), "ylabel_on": self._chk_ylabel.isChecked(),
-                     "xticks_on": self._chk_xticks.isChecked(), "yticks_on": self._chk_yticks.isChecked(),
-                     "xtickmarks_on": self._chk_xtickmarks.isChecked(),
-                     "ytickmarks_on": self._chk_ytickmarks.isChecked()},
+            "axes": self._axes_state(),
             "fig_size": [self._fig_w.value(), self._fig_h.value()], "dpi": self._dpi_spin.value(),
             "mode_cfg": {m.key: m.to_config() for m in self._modes},
             # 주석은 데이터 좌표에 묶인 '그 그림만의 것'이라 style 템플릿이 아니라
             # 여기(plot config)에 저장한다. 전엔 아예 저장되지 않아 불러오면 사라졌다.
             "annots": [self._annot_norm(a) for a in self._annots],
+            "compose": self.composer.to_config(),     # 다중 패널 조판(M2)
         }
+
+    def _set_axes_widgets(self, axc, block=False):
+        """축 탭 위젯에 axes dict(설정 파일·조판 패널과 같은 형식)를 채운다.
+        block=True면 신호를 막는다 — 조판이 패널마다 잠시 끼워 넣고 되돌릴 때 화면을 다시 안 그리게."""
+        from PyQt6.QtCore import QSignalBlocker
+        _bl = [QSignalBlocker(w) for w in self._axes_widgets()] if block else []
+        self._ax_xmin.setText(str(axc.get("xmin", ""))); self._ax_xmax.setText(str(axc.get("xmax", "")))
+        self._ax_ymin.setText(str(axc.get("ymin", ""))); self._ax_ymax.setText(str(axc.get("ymax", "")))
+        self._ax_rmin.setText(str(axc.get("rmin", ""))); self._ax_rmax.setText(str(axc.get("rmax", "")))
+        self._chk_logx.setChecked(bool(axc.get("logx", False)))
+        self._chk_logy.setChecked(bool(axc.get("logy", False)))
+        self._chk_grid.setChecked(bool(axc.get("grid", True)))
+        self._chk_grid_minor.setChecked(bool(axc.get("grid_minor", False)))
+        self._tick_x.setText(str(axc.get("tick_x", ""))); self._tick_y.setText(str(axc.get("tick_y", "")))
+        self._tick_x_anchor.setText(str(axc.get("tick_x_anchor", "")))
+        self._tick_size.setValue(int(axc.get("tick_size", 0)))
+        self._tick_dir.setCurrentIndex(int(axc.get("tick_dir", 0)))
+        self._tick_len.setValue(int(axc.get("tick_len", 0)))
+        self._chk_xlabel.setChecked(bool(axc.get("xlabel_on", True)))
+        self._chk_ylabel.setChecked(bool(axc.get("ylabel_on", True)))
+        self._chk_xticks.setChecked(bool(axc.get("xticks_on", True)))
+        self._chk_yticks.setChecked(bool(axc.get("yticks_on", True)))
+        # 구버전 설정(눈금선 키 없음)은 당시 동작(숫자와 함께 on/off)을 따라감
+        self._chk_xtickmarks.setChecked(bool(axc.get("xtickmarks_on", axc.get("xticks_on", True))))
+        self._chk_ytickmarks.setChecked(bool(axc.get("ytickmarks_on", axc.get("yticks_on", True))))
+        del _bl
+
+    def _axes_widgets(self):
+        return [self._ax_xmin, self._ax_xmax, self._ax_ymin, self._ax_ymax, self._ax_rmin,
+                self._ax_rmax, self._chk_logx, self._chk_logy, self._chk_grid, self._chk_grid_minor,
+                self._tick_x, self._tick_y, self._tick_x_anchor, self._tick_size, self._tick_dir,
+                self._tick_len, self._chk_xlabel, self._chk_ylabel, self._chk_xticks,
+                self._chk_yticks, self._chk_xtickmarks, self._chk_ytickmarks]
 
     def _load_cfg(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load plot config", "",
@@ -2898,26 +2958,7 @@ class PlotMakerWidget(QWidget):
                 self.label_style[k] = {"pos": tuple(pos) if pos else None,
                                        "size": v.get("size"), "color": v.get("color")}
             self._sync_label_style_widgets()
-        axc = cfg.get("axes", {})
-        self._ax_xmin.setText(str(axc.get("xmin", ""))); self._ax_xmax.setText(str(axc.get("xmax", "")))
-        self._ax_ymin.setText(str(axc.get("ymin", ""))); self._ax_ymax.setText(str(axc.get("ymax", "")))
-        self._ax_rmin.setText(str(axc.get("rmin", ""))); self._ax_rmax.setText(str(axc.get("rmax", "")))
-        self._chk_logx.setChecked(bool(axc.get("logx", False)))
-        self._chk_logy.setChecked(bool(axc.get("logy", False)))
-        self._chk_grid.setChecked(bool(axc.get("grid", True)))
-        self._chk_grid_minor.setChecked(bool(axc.get("grid_minor", False)))
-        self._tick_x.setText(str(axc.get("tick_x", ""))); self._tick_y.setText(str(axc.get("tick_y", "")))
-        self._tick_x_anchor.setText(str(axc.get("tick_x_anchor", "")))
-        self._tick_size.setValue(int(axc.get("tick_size", 0)))
-        self._tick_dir.setCurrentIndex(int(axc.get("tick_dir", 0)))
-        self._tick_len.setValue(int(axc.get("tick_len", 0)))
-        self._chk_xlabel.setChecked(bool(axc.get("xlabel_on", True)))
-        self._chk_ylabel.setChecked(bool(axc.get("ylabel_on", True)))
-        self._chk_xticks.setChecked(bool(axc.get("xticks_on", True)))
-        self._chk_yticks.setChecked(bool(axc.get("yticks_on", True)))
-        # 구버전 설정(눈금선 키 없음)은 당시 동작(숫자와 함께 on/off)을 따라감
-        self._chk_xtickmarks.setChecked(bool(axc.get("xtickmarks_on", axc.get("xticks_on", True))))
-        self._chk_ytickmarks.setChecked(bool(axc.get("ytickmarks_on", axc.get("yticks_on", True))))
+        self._set_axes_widgets(cfg.get("axes", {}))
         fsz = cfg.get("fig_size")
         if isinstance(fsz, (list, tuple)) and len(fsz) == 2:
             self._chk_autosize.setChecked(False)   # 저장된 크기 유지(자동 덮어쓰기 끔)
@@ -2932,6 +2973,8 @@ class PlotMakerWidget(QWidget):
                 self._mode_combo.setCurrentIndex(i)
                 break
         self._on_transform_changed()
+        if "compose" in cfg:          # 없는 옛 설정은 지금 조판을 건드리지 않는다
+            self.composer.from_config(cfg.get("compose"))
         if missing:
             self.set_status(f"Loaded · missing datasets: {', '.join(missing)}")
         else:
