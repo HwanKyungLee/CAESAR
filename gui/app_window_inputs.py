@@ -200,6 +200,7 @@ class InputsAlphaMixin:
         self._alpha_rt_map     = dict(rt_map or {})   # {raw채널 -> R(t) npz 경로} 채널별
         self._alpha_dark       = getattr(self, 'dark_data', None)
         self._alpha_done_msgs  = []
+        self._alpha_failed     = []          # [(label, reason)] — any entry = failed run
         self._alpha_status_cb  = status_cb   # 팝업 진행표시(옵션)
         self._alpha_user_done_cb = done_cb   # 팝업 완료콜백(옵션)
         self._alpha_progress_cb = progress_cb  # 팝업 진행바(done, total) 콜백(옵션)
@@ -322,10 +323,21 @@ class InputsAlphaMixin:
     def _start_next_alpha_export(self):
         if not getattr(self, '_alpha_queue', None):
             done = getattr(self, '_alpha_done_msgs', [])
-            self.status.setText(f"Alpha export complete  {self._alpha_out_dir}")
+            failed = list(getattr(self, '_alpha_failed', []))
+            if failed:
+                self.status.setText("Alpha export FAILED for "
+                                    + ", ".join(lbl for lbl, _ in failed))
+            else:
+                self.status.setText(f"Alpha export complete  {self._alpha_out_dir}")
             cb = getattr(self, '_alpha_user_done_cb', None)
             if cb:   # Alpha Generator 팝업이 띄운 경우 콜백으로 알림(자체 메시지)
-                cb(self._alpha_out_dir, list(done))
+                cb(self._alpha_out_dir, list(done), failed)
+            elif failed:
+                QMessageBox.critical(
+                    self, "Alpha Export failed",
+                    "Failed channel(s):\n" + "\n".join(f"[{l}] {r}" for l, r in failed) +
+                    f"\n\n{len(done) - len(failed)} of {len(done)} channel(s) saved to:\n"
+                    f"{self._alpha_out_dir}")
             else:
                 QMessageBox.information(
                     self, "Alpha Export complete",
@@ -334,7 +346,8 @@ class InputsAlphaMixin:
                     "Filename: {source}_{channel}_alpha_trace.dat\n"
                     "Usable in Result Viewer / Analysis (RUN).")
             # close-the-loop: 생성한 폴더를 Pipeline Health에 자동 연결 → 점검 까먹지 않게.
-            self._alpha_qc_after_export(self._alpha_out_dir)
+            if len(failed) < len(done):      # at least one channel produced output
+                self._alpha_qc_after_export(self._alpha_out_dir)
             return
         cfg = self._alpha_queue.pop(0)
         self._alpha_status(f"Alpha [{cfg['label']}] computing (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
@@ -418,6 +431,7 @@ class InputsAlphaMixin:
     def _on_alpha_channel_done(self, result, label):
         if str(result).startswith("ERROR"):
             self._alpha_done_msgs.append(f"  [{label}] failed: {result}")
+            self._alpha_failed.append((label, str(result)))
             self.status.setText(f"Alpha [{label}] failed")
         else:
             self._alpha_done_msgs.append(f"[{label}] ")

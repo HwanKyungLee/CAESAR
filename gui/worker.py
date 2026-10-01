@@ -2095,10 +2095,16 @@ class AlphaExportWorker(QThread):
         self.is_running = False
 
     def run(self):
+        self._cleanup_spool = None   # set by _run_inner once the spool exists
         try:
             self._run_inner()
         except Exception as e:
             self.finished.emit(f"ERROR: {e}")
+        finally:
+            # Covers the exception path too (a failed run used to leave a ~58 MB+ spool
+            # in %TEMP% every time). Idempotent, so paths that already cleaned up are fine.
+            if self._cleanup_spool is not None:
+                self._cleanup_spool()
 
     def _run_inner(self):
         os.makedirs(self.output_dir, exist_ok=True)
@@ -2149,7 +2155,8 @@ class AlphaExportWorker(QThread):
         import glob as _glob
         import tempfile as _tf
         # 지난 런이 흘린 스풀 회수 — 이 파일은 파일당 수십 GB 로 자란다(핫 1314파일
-        # = 38 GB). `_cleanup_spool()` 은 정상·중단·예외 경로를 다 덮지만 **프로세스가
+        # = 38 GB). `_cleanup_spool()` runs on the normal/abort paths here and on the
+        # exception path from run()'s finally, but **프로세스가
         # 죽으면(GUI 강제종료·크래시) 못 돈다**. 실제로 2026-09-19 에 %TEMP% 에서 죽은
         # 스풀 138 GB 가 발견됐다. 지금 쓰는 스풀을 만들기 직전에 옛것을 치운다 —
         # 다른 인스턴스가 쓰는 중이면 Windows 가 삭제를 거부하므로 자연히 건너뛴다.
@@ -2177,6 +2184,7 @@ class AlphaExportWorker(QThread):
                 os.remove(_amb_spool_path)
             except OSError:
                 pass
+        self._cleanup_spool = _cleanup_spool
 
         # Per-file calibration header info
         calib_info_per_file = {}   # fp → string describing first good R-cal in file

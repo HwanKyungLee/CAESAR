@@ -396,6 +396,7 @@ class AlphaGeneratorDialog(QDialog):
             return
         self._btn_gen.setEnabled(False)
         self._pbar.setValue(0)
+        self._pbar.setFormat("%p%")
         self._lbl_status.setText("Starting α generation…")
         ok = self._app.export_alpha_files(
             file_list=self._raw_files,
@@ -422,8 +423,18 @@ class AlphaGeneratorDialog(QDialog):
         """알파 생성 진행바(%). app가 (pct, 100)으로 호출."""
         self._pbar.setValue(max(0, min(100, int(pct))))
 
-    def _on_done(self, out_dir, msgs):
+    def _on_done(self, out_dir, msgs, failed=()):
         self._btn_gen.setEnabled(True)
+        if failed:
+            names = ", ".join(lbl for lbl, _ in failed)
+            self._pbar.setFormat("Failed")
+            self._lbl_status.setText(f"FAILED: {names}")
+            QMessageBox.critical(
+                self, "Alpha generation failed",
+                f"{len(failed)} of {len(msgs)} channel(s) failed:\n"
+                + "\n".join(f"[{lbl}] {reason}" for lbl, reason in failed)
+                + f"\n\n{len(msgs) - len(failed)} channel(s) saved to:\n{out_dir}")
+            return
         self._pbar.setValue(100)
         self._lbl_status.setText("Done")
         QMessageBox.information(
