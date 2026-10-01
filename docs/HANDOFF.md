@@ -77,8 +77,9 @@
   Cancel(되돌리기) 하나 → Parameters 그리드의 **Properties 버튼을 뺐고**, 표는 **기본 접힘**(`▶`).
   접혀 있어도 그 위 `Sh/Sq:` 요약 줄이 기체별 설정을 보여준다. 표 편집은 즉시 `ref_props`에 반영되고
   다음 RUN/Test Fit부터 적용(이미 나온 결과는 안 바뀜).
-- `open_ref_properties`·`RefPropertiesDialog`는 **남아 있다**(메인 창에서 열 길은 없음).
-  `test_app_window_smoke`의 표면 목록과 `test_ref_properties_table`이 붙잡고 있어서다 — 완전히 지우려면 둘도 같이.
+- `open_ref_properties`·`RefPropertiesDialog`는 **10-02에 삭제**(`e015128`). `test_app_window_smoke` 표면 목록과
+  `test_ref_properties_table`의 다이얼로그 테스트도 같이 지웠다. 파일 이름 `gui/ref_properties_dialog.py`는 import
+  경로를 안 흔들려고 그대로 — 안에는 이제 `RefPropertiesTable` 위젯만 있다.
 - **칸 너비 버그(10-02)**: 팝업용 고정폭(T_ref/dσ/dT/Bands 합 360 px) + 나머지 Stretch 조합이 좁은 메인 패널에선
   Shift/Squeeze 칸을 ~20 px로 눌러 값이 안 보였다(표가 인라인으로 나온 C1 때부터 있던 문제). 칸별 너비 +
   가로 스크롤로 바꿈. offscreen 캡처로 확인(`QT_QPA_FONTDIR=C:/Windows/Fonts` 안 주면 글자가 □로 나온다).
