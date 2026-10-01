@@ -85,14 +85,12 @@ class RefPropertiesTable(QWidget):
             "Active Bands (nm)",
         ])
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        # Fixed-width columns: T_ref, dσ/dT, Active Bands
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        hdr.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(5, 90)
-        self.table.setColumnWidth(6, 110)
-        self.table.setColumnWidth(7, 160)
+        # Per-column widths + horizontal scroll. Stretch next to 360 px of fixed columns
+        # squeezed the mode/param columns to ~20 px in the narrow main-window panel.
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hdr.setStretchLastSection(True)
+        for col, w in enumerate((70, 75, 95, 75, 75, 70, 85, 150)):
+            self.table.setColumnWidth(col, w)
         
         # Synchronized variable name with UniversalEngine
         self.gas_list = gas_list
