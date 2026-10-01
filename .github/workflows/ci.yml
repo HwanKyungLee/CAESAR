@@ -47,12 +47,18 @@ jobs:
           pip install -e . --no-deps
           pip install pytest
 
+      # 아래 검증 단계들은 서로 독립이다 — 하나가 빨간불이어도 나머지는 끝까지 돈다
+      # (`if: !cancelled()`). 2026-09-15~10-01 동안 임포트 스모크 하나가 실패하면서
+      # 뒤의 pytest·plotmaker 가 2주 넘게 아예 안 돌았던 걸 되풀이하지 않으려는 것.
+      # 잡 결과는 그대로다 — 어느 단계든 실패하면 빨간불.
+
       # 전 모듈 임포트 스모크 — core/gui/tools/diagnostics/calibration 의 모든 .py
       - name: Import smoke test
         run: python tools/ci_import_smoke.py
 
       # 데이터 비의존 파이프라인 검증 (Rayleigh King factor 골든값 등)
       - name: validate_pipeline --no-data
+        if: ${{ !cancelled() }}
         run: python tools/validate_pipeline.py --no-data
 
       # 저장소의 `test_*.py` **전부** + core 자체검증 모듈 (44개, ~30초).
@@ -64,8 +70,10 @@ jobs:
       # 이 파일은 안 건드려도 된다. 각 테스트가 무엇을 지키는지는 그 테스트의
       # docstring에, 제외 2건과 사유는 test_script_suite.py에 있다.
       - name: Test suite (pytest)
+        if: ${{ !cancelled() }}
         run: pytest
 
       # Plot Maker pg/mpl 패리티 검증 (offscreen, 합성 데이터 24항목)
       - name: validate_plotmaker
+        if: ${{ !cancelled() }}
         run: python tools/validate_plotmaker.py

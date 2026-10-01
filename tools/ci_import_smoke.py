@@ -58,6 +58,20 @@ EXCLUDE = {
     "diagnostics/qdoas_crossval_2026-09/compare_hot_ans_negshift.py":
         "QDOAS 교차검증 최종판 — __main__ 가드 없이 최상위 실행(원자료 필요, 저장소에 없음)",
     "tools/plot_ans_clean.py": "발표/제출용 그림 스크립트 — 최상위에서 데이터 로드",
+    # 2026-09-28~30 AMT 숫자 산출 기록(다른 PC `C:\GHL\...` 경로 하드코딩). 숫자가 동결된
+    # 산출물이라 고쳐 쓰지 않고 그대로 보존한다 — 2026-09-15 이후 CI 가 여기서 막혀 pytest 가
+    # 2주간 안 돌았다(2026-10-01 복구).
+    "diagnostics/runtime_2026-09-30/qtstub_run.py":
+        "런타임 측정 래퍼 — 최상위에서 sys.modules 의 PyQt6 를 MagicMock 으로 바꿔치기(같은 프로세스의 "
+        "뒤 모듈 임포트를 오염시킴) + argv[1] 필요",
+    "diagnostics/h2h_qdoas_2026-09/h1_prior.py": "AMT 산출 기록 — 최상위에서 C:\\GHL 데이터 로드·파일 쓰기",
+    "diagnostics/hot_scale_2026-09-30/analysis.py": "AMT 산출 기록 — 최상위에서 C:\\GHL 엑셀 로드",
+    "diagnostics/reprocess_2026-09-28/cold_shift_slopes.py":
+        "AMT 산출 기록 — 최상위에서 C:\\GHL FitSet 로드 + core.window_designer 를 빈 모듈로 바꿔치기",
+    "diagnostics/reprocess_2026-09-28/fit_run.py":
+        "AMT 산출 기록 — 최상위에서 C:\\GHL FitSet 로드 + core.window_designer 를 빈 모듈로 바꿔치기",
+    "diagnostics/reprocess_2026-09-28/fit_run_roi.py":
+        "AMT 산출 기록 — 최상위에서 C:\\GHL FitSet 로드 + core.window_designer 를 빈 모듈로 바꿔치기",
 }
 
 # 폴더째 제외 — 일회성 검증 아카이브(결론은 FINDINGS.md에 박제, 코드는 보존용)
@@ -141,6 +155,11 @@ def main():
         # 임포트 중 출력은 버리고, 모듈이 sys.stdout/stderr를 바꾸거나 닫아도
         # (session_log tee 등) 스모크 자체는 살아남도록 매번 복구한다.
         buf = _SmokeBuf()
+        # 진단 스크립트 중엔 최상위에서 sys.modules 의 PyQt6·core 모듈을 가짜로 바꿔치기하는
+        # 것이 있다(reprocess_2026-09-28/alpha_run.py 의 qtstub 등). 한 프로세스에서 차례로
+        # 임포트하므로 그대로 두면 뒤 모듈이 가짜를 받아 엉뚱하게 실패하거나, 반대로 만능
+        # MagicMock 이 진짜 깨진 임포트를 가린다 — 매번 바꿔치기된 항목을 되돌린다.
+        modules_before = dict(sys.modules)
         try:
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
                 import_one(rel)
@@ -149,6 +168,9 @@ def main():
             failed.append((rel, traceback.format_exc(limit=3)))
         finally:
             sys.stdout, sys.stderr = real_out, real_err
+            for name, mod in modules_before.items():
+                if sys.modules.get(name) is not mod:
+                    sys.modules[name] = mod
         if failed and failed[-1][0] == rel:
             print(f"  FAIL  {rel}")
     print(f"\nimport smoke: {ok} OK · {len(failed)} FAIL · {skipped} SKIP")

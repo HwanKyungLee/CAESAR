@@ -10,9 +10,9 @@ The draft shows a reserved DOI immediately; check it on the website, then publis
 record and its DOI cannot be deleted, only versioned.
 """
 import argparse, json, os, sys
-import requests
 
 def main():
+    import requests   # 업로드 때만 필요 — requirements.txt 에 없어 최상위에 두면 CI 임포트 스모크가 깨진다
     ap = argparse.ArgumentParser()
     ap.add_argument("--meta", required=True)
     ap.add_argument("--file", action="append", default=[])

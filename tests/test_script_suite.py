@@ -85,7 +85,10 @@ def test_script(rel):
                QT_QPA_PLATFORM="offscreen",   # GUI 위젯 계약 테스트용
                MPLBACKEND="Agg",
                PYTHONIOENCODING="utf-8")
+    # stdin=DEVNULL: Windows 에서 pytest 의 fd 캡처가 stdin 핸들을 바꿔 두면 상속이 깨져
+    # 모든 스크립트가 'WinError 6 핸들이 잘못되었습니다'로 실패한다(로컬 pytest 전멸).
     proc = subprocess.run([sys.executable, rel], cwd=ROOT, env=env,
+                          stdin=subprocess.DEVNULL,
                           capture_output=True, text=True, errors="replace",
                           timeout=TIMEOUT_S)
     if proc.returncode != 0:
