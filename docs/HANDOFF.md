@@ -45,6 +45,28 @@
 3. raw `_row_cache`가 LRU-1에 락이 없다 — 두 채널 QThread가 서로 다른 raw를 동시에 직접 핏하면 서로 지워
    매 행 재파싱할 수 있다(코드상 추정, 미측정).
 
+## 2026-10-01 (6) ~ 10-02 — Properties 팝업 버튼 제거, Reference policy 표로 단일화 (`1652dfc`, `46390ee`)
+
+사용자 요청: "Properties랑 Reference policy가 겹친다, 하나만 — 레퍼런스 폴리시 쪽, 기본 닫힘으로".
+
+- 두 UI는 같은 `RefPropertiesTable` 위젯으로 같은 `ref_props`를 편집하고 있었다. 팝업에만 있던 건
+  Cancel(되돌리기) 하나 → Parameters 그리드의 **Properties 버튼을 뺐고**, 표는 **기본 접힘**(`▶`).
+  접혀 있어도 그 위 `Sh/Sq:` 요약 줄이 기체별 설정을 보여준다. 표 편집은 즉시 `ref_props`에 반영되고
+  다음 RUN/Test Fit부터 적용(이미 나온 결과는 안 바뀜).
+- `open_ref_properties`·`RefPropertiesDialog`는 **남아 있다**(메인 창에서 열 길은 없음).
+  `test_app_window_smoke`의 표면 목록과 `test_ref_properties_table`이 붙잡고 있어서다 — 완전히 지우려면 둘도 같이.
+- **칸 너비 버그(10-02)**: 팝업용 고정폭(T_ref/dσ/dT/Bands 합 360 px) + 나머지 Stretch 조합이 좁은 메인 패널에선
+  Shift/Squeeze 칸을 ~20 px로 눌러 값이 안 보였다(표가 인라인으로 나온 C1 때부터 있던 문제). 칸별 너비 +
+  가로 스크롤로 바꿈. offscreen 캡처로 확인(`QT_QPA_FONTDIR=C:/Windows/Fonts` 안 주면 글자가 □로 나온다).
+- 검증: `tools/test_ref_policy_panel.py` 신설 — 실제 키 입력으로 표를 고치고 ① 기본 접힘 ② 안 건드린 표
+  (`ref_props == {}`)의 엔진 기본값 = 표가 보여주는 기본값 ③ 편집 → `ref_props`·요약 줄 ④ `AnalysisWorker`가
+  받는 경계(Limit/Link/Fix/squeeze)·active bands ⑤ 채널 시나리오 복원·Test Fit [Apply] → 표 재구성을 확인.
+  **T_ref·dσ/dT는 엔진 전달까지만** 봤고 실데이터 핏으로 농도 반영은 확인 안 했다.
+- **이 PC(`C:\GHL\CAESAR`)의 git 환경**: `git fetch` 뒤 "could not write multi-pack-index: Permission denied"는
+  권한이 아니라 **다른 프로세스가 `multi-pack-index`를 열고 있어서**다(워크트리 5개가 오브젝트를 공유하고 Claude
+  세션이 여럿 떠 있음 — 잡은 프로세스는 특정 못 함). `git config --local maintenance.auto false`로 자동 정리를 껐다.
+  세션을 다 닫았을 때 가끔 `git maintenance run --task=gc`. 되돌리기는 `git config --local --unset maintenance.auto`.
+
 ## 2026-10-01 (5) — 큰 데이터 렉: Result Lab 90 s → 10.5 s, Dates 병합 39 s → 1.7 s
 
 사용자 보고("큰 데이터 넣으니 Result Lab·Plot Maker가 렉"). 30일 × 2채널 × 20 s = 26만 행, 가스 4종
