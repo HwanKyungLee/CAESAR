@@ -55,7 +55,7 @@ def run_current(files, ch=1):
     t0 = time.perf_counter()
     for fp in files:
         _xtr((fp, PX[0], PX[1], ch))
-        DataIO._row_cache.clear()          # 파일 간 행캐시는 원래도 LRU-1
+        DataIO.clear_row_cache()           # 파일 간 행캐시는 원래도 LRU-1
     return time.perf_counter() - t0
 
 
@@ -77,7 +77,7 @@ def run_prefetch(files, ch=1, depth=2):
         if fp is None:
             break
         _xtr((fp, PX[0], PX[1], ch))
-        DataIO._row_cache.clear()
+        DataIO.clear_row_cache()
     th.join()
     return time.perf_counter() - t0
 
@@ -94,7 +94,7 @@ def run_two_channels(files):
     for fp in files:
         _xtr((fp, PX[0], PX[1], 1))
         _xtr((fp, PX[0], PX[1], 2))        # 같은 파일 — 행캐시가 살아 있어 재읽기 없음
-        DataIO._row_cache.clear()
+        DataIO.clear_row_cache()
     return time.perf_counter() - t0
 
 

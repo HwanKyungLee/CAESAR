@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import threading
+import weakref
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -45,14 +46,21 @@ class DataIO:
     # ── Araon Mega-Matrix row cache ─────────────────────────────────────────
     # Without caching, _read_row_raw scans from line 0 every call → O(n²) for
     # n-row files.  The cache stores the entire file as a list[np.ndarray] keyed
-    # by (filepath, mtime).  Stays in memory only for the most-recently-used file
-    # (LRU-1) so a folder of many files doesn't exhaust RAM.
+    # by (filepath, mtime).  Each thread keeps only its most-recently-used file
+    # (LRU-1 per thread) so a folder of many files doesn't exhaust RAM.
     # 헤더행 T/P를 끌어올 때 앞쪽으로 몇 행까지 볼지. 헤더행은 파일당 1행이라
     # 보통 +1 에서 끝난다 — 여유는 재시작으로 헤더가 연달아 찍히는 경우 대비.
     _HK_BORROW_LOOKAHEAD = 5
 
-    _row_cache: dict = {}   # { (path, mtime): [row0_arr, row1_arr, ...] }
-    _cached_key: tuple | None = None  # key of the currently cached file
+    # 스레드별 LRU-1 (2026-10-02). 전역 LRU-1 은 두 채널 QThread 가 서로 다른 raw 를
+    # 번갈아 읽으면 서로의 캐시를 지워 매 행 파일 전체를 재파싱했다(락도 없었다). 이제 각
+    # 스레드가 자기 '현재 파일' 하나만 강하게 쥐고(_row_tls), 전역 표는 약참조라 같은 파일은
+    # 스레드끼리 공유된다. 메모리 = 동시에 쓰이는 서로 다른 파일 수(단일 스레드면 종전과
+    # 같이 1개). 스레드가 다른 파일로 넘어가거나 끝나면 아무도 안 쥔 항목은 바로 사라진다.
+    _row_cache = weakref.WeakValueDictionary()   # { (path, mtime): _RowList }
+    _row_tls = threading.local()
+    _row_lock = threading.Lock()
+    _row_load_locks: dict = {}                   # key → Lock: 같은 파일을 두 스레드가 동시에 파싱 안 하게
 
     # alpha_trace 파일 텍스트 캐시 (2026-10-01). 핏 루프는 스캔마다
     # `load_alpha_trace_row_full`(파일 전체 읽기) + `parse_alpha_row_time`(두 번 열기) +
@@ -126,27 +134,56 @@ class DataIO:
     def _load_file_to_cache(filepath: str) -> list:
         """Read the entire Mega-Matrix file into a list of row arrays (once per file).
 
-        Uses an LRU-1 cache keyed by (filepath, mtime) so re-reading the same
-        file within one session is O(1).  Switching to a different file evicts the
-        old entry to keep memory usage bounded.
+        Per-thread LRU-1 keyed by (filepath, mtime): re-reading the same file is
+        O(1); a thread switching files drops its old one. Threads reading
+        different files no longer evict each other; threads reading the same
+        file share one parsed copy (and only one of them parses it).
         """
         try:
             mtime = os.path.getmtime(filepath)
         except OSError:
             mtime = 0.0
         key = (filepath, mtime)
+        tls = DataIO._row_tls
 
-        if DataIO._cached_key == key and key in DataIO._row_cache:
-            return DataIO._row_cache[key]
+        mine = getattr(tls, "rows", None)
+        if mine is not None and getattr(tls, "key", None) == key:
+            return mine
+        with DataIO._row_lock:
+            rows = DataIO._row_cache.get(key)
+            if rows is None:
+                load_lock = DataIO._row_load_locks.setdefault(key, threading.Lock())
+        if rows is None:
+            with load_lock:
+                rows = DataIO._row_cache.get(key)      # 기다리는 동안 다른 스레드가 읽었을 수 있다
+                if rows is None:
+                    tls.rows = tls.key = None          # 이 스레드의 옛 파일을 먼저 놓아 메모리 2배 방지
+                    rows = DataIO._parse_file_rows(filepath)
+                    with DataIO._row_lock:
+                        DataIO._row_cache[key] = rows
+            with DataIO._row_lock:
+                if DataIO._row_load_locks.get(key) is load_lock:
+                    del DataIO._row_load_locks[key]
+        tls.rows, tls.key = rows, key
+        return rows
 
-        # Evict previous cached file to free memory
-        DataIO._row_cache.clear()
+    @staticmethod
+    def clear_row_cache():
+        """raw 행 캐시를 비운다(이 스레드가 쥔 것 + 전역 표). 측정 스크립트용."""
+        DataIO._row_tls.rows = DataIO._row_tls.key = None
+        with DataIO._row_lock:
+            DataIO._row_cache.clear()
 
+    class _RowList(list):
+        """약참조가 되는 list (WeakValueDictionary 값용)."""
+
+    @staticmethod
+    def _parse_file_rows(filepath: str) -> "DataIO._RowList":
         # 모든 비어있지 않은 라인 수집
         with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
             lines = [s for s in (ln.strip() for ln in fh) if s]
 
-        rows: list = []
+        rows = DataIO._RowList()
         if lines:
             split0 = lines[0].split('\t')
             META, CH = DataIO._META_COLS, DataIO._CH_PIXELS
@@ -177,9 +214,6 @@ class DataIO:
             else:
                 for ln in lines:
                     rows.append(DataIO._parse_line_to_array(ln))
-
-        DataIO._row_cache[key] = rows
-        DataIO._cached_key = key
         return rows
 
     @staticmethod
