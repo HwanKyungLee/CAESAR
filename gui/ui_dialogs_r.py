@@ -223,9 +223,9 @@ class RCalibratorDialog(QDialog):
         self._chk_auto_npz = QCheckBox("Auto-update α R(t) npz")
         self._chk_auto_npz.setChecked(True)
         self._chk_auto_npz.setToolTip(
-            "Start 계산 결과를 R_<channel>.npz에 자동 증분 머지합니다(재스캔 없음).\n"
-            "기존 npz가 있으면 새 knot만 시간순 머지+중복제거(덮어쓰지 않음),\n"
-            "없으면 새로 만듭니다. 끄면 Start가 npz를 건드리지 않습니다.")
+            "Incrementally merge Start results into R_<channel>.npz (no rescan).\n"
+            "If the npz exists, only new knots are merged in time order and de-duplicated (no overwrite);\n"
+            "otherwise it is created. When off, Start does not touch the npz.")
         btn_row.addWidget(self._chk_auto_npz)
 
         # 이미 npz에 계산돼 있는 파일은 다시 스캔하지 않음(속도). 트렌드 플롯은
@@ -233,9 +233,9 @@ class RCalibratorDialog(QDialog):
         self._chk_skip_done = QCheckBox("Skip already-computed")
         self._chk_skip_done.setChecked(True)
         self._chk_skip_done.setToolTip(
-            "npz의 processed_files에 이미 있는 파일은 다시 계산하지 않습니다(재실행·연장이 빨라짐).\n"
-            "전체 트렌드는 기존 {channel}_R_trend.dat을 불러와 새 결과와 합쳐 표시합니다.\n"
-            "끄면 선택 범위 전체를 매번 다시 계산합니다.")
+            "Files already in the npz processed_files are not recomputed (faster reruns/extensions).\n"
+            "The full trend loads the existing {channel}_R_trend.dat and merges it with new results.\n"
+            "When off, the whole selected range is recomputed every time.")
         btn_row.addWidget(self._chk_skip_done)
 
         # 평소엔 Start(auto-update 체크) 하나로 npz가 증분 관리된다. Rebuild는
@@ -792,11 +792,11 @@ class RCalibratorDialog(QDialog):
             names = "\n".join(f"  • {_os.path.basename(p)}" for p in existing)
             ans = QMessageBox.warning(
                 self, "Rebuild npz — overwrite?",
-                "다음 npz를 처음부터 다시 계산해 **덮어씁니다**(증분 아님):\n"
+                "The following npz will be recomputed from scratch and **overwritten** (not incremental):\n"
                 f"{names}\n\n"
-                "평소 추가는 Start의 'Auto-update α R(t) npz'로 충분합니다.\n"
-                "설정(cavity/RL/R-window)을 바꿨거나 npz가 손상된 경우에만 사용하세요.\n\n"
-                "계속할까요?",
+                "For routine additions, Start's 'Auto-update α R(t) npz' is enough.\n"
+                "Use this only if settings (cavity/RL/R-window) changed or the npz is corrupted.\n\n"
+                "Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel)
             if ans != QMessageBox.StandardButton.Yes:
@@ -907,9 +907,9 @@ class RCalibratorDialog(QDialog):
         msg.setWindowTitle("Verify npz")
         msg.setIcon(QMessageBox.Icon.Warning if any_issue else QMessageBox.Icon.Information)
         msg.setText(
-            ("아래 항목을 확인하세요. 빈 날·미계산 파일은 그 구간 R이 보간으로만 "
-             "채워짐을 뜻합니다.\n해당 날짜/파일을 Start로 계산하면 자동 삽입됩니다.\n\n"
-             if any_issue else "모든 채널 npz가 깨끗합니다 (빈 날·미계산 파일 없음).\n\n")
+            ("Review the items below. Missing days / uncomputed files mean R in those spans is "
+             "interpolated only.\nComputing those dates/files with Start inserts them automatically.\n\n"
+             if any_issue else "All channel npz files are clean (no missing days or uncomputed files).\n\n")
             + "\n".join(summary_lines))
         if detail_lines:
             msg.setDetailedText("\n".join(detail_lines))
@@ -995,9 +995,9 @@ class RCalibratorDialog(QDialog):
         if gap_lines:
             QMessageBox.warning(
                 self, "Missing days in R(t)",
-                "아래 날짜는 npz에 데이터(knot)가 없어 알파에서 R이 보간으로만 "
-                "채워집니다.\n해당 날짜 데이터를 나중에 계산해 Start하면 자동으로 "
-                "중간에 삽입됩니다.\n\n" + "\n\n".join(gap_lines))
+                "The dates below have no data (knots) in the npz, so R in alpha is "
+                "interpolated only.\nComputing those dates later with Start inserts them "
+                "automatically.\n\n" + "\n\n".join(gap_lines))
 
         all_r = [r["r_mean"] * 100 for ch in channels for r in ch["results"]]
         if all_r:

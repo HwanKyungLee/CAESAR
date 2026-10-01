@@ -60,7 +60,7 @@ class _DraggableLabel(pg.TextItem):
             fy = (rect.bottom() - new_pos.y()) / rect.height() if rect.height() else 0.5
             st = self.host.label_style.setdefault(self.key, {})
             st["pos"] = (float(fx), float(fy))
-            self.host.set_status(f"'{self.key}' 라벨 위치 이동됨 — Reset positions로 되돌릴 수 있음")
+            self.host.set_status(f"'{self.key}' label moved — use Reset positions to undo")
 
 
 # 리샘플 콤보 라벨 → 초. 0 = 원본 유지. Custom은 옆 스핀박스(분)로 사용자가 직접 지정.
@@ -77,11 +77,11 @@ _LEGEND_MPL = {"auto": "best", "TL": "upper left", "TR": "upper right",
 # 색 계열 프리셋: 계통색 하나 고르면 그 계열 톤들로 자동 배색.
 # 값 = 대표(중간 톤). 여러 시리즈/곡선은 _family_shades로 진↔연 퍼뜨림.
 _FAMILIES = {
-    "빨강": "#E53935", "주황": "#FB8C00", "노랑": "#F9A825", "초록": "#43A047",
-    "청록": "#00ACC1", "파랑": "#1E88E5", "남색": "#3949AB", "보라": "#8E24AA",
-    "분홍": "#D81B60", "갈색": "#6D4C41", "회색": "#757575",
+    "Red": "#E53935", "Orange": "#FB8C00", "Yellow": "#F9A825", "Green": "#43A047",
+    "Teal": "#00ACC1", "Blue": "#1E88E5", "Indigo": "#3949AB", "Purple": "#8E24AA",
+    "Pink": "#D81B60", "Brown": "#6D4C41", "Gray": "#757575",
 }
-_PALETTE_AUTO = "자동(종별)"
+_PALETTE_AUTO = "Auto (by species)"
 
 # 범주형(categorical) 팔레트 — _FAMILIES처럼 한 색의 진↔연이 아니라, **서로 구분되는
 # 색 목록**을 시리즈 순서대로 쓴다.
@@ -94,14 +94,14 @@ _PALETTE_AUTO = "자동(종별)"
 # 논문 폭은 Copernicus(ACP·AMT) 규정에서: 최소 8 cm, 단컬럼 8.3 cm(3.27 in),
 # 양컬럼 17 cm(6.69 in), 300 dpi. 높이는 흔한 비율의 출발점일 뿐 — 손으로 바꾸면 된다.
 _PUBLISH_PRESETS = {
-    "논문 1컬럼 (8.3 cm)": (3.27, 2.45, 300),
-    "논문 2컬럼 (17 cm)": (6.69, 3.94, 300),
-    "발표 슬라이드 (16:9)": (13.33, 7.50, 150),
-    "보고서 (와이드)": (10.0, 5.5, 200),
+    "Paper, 1 column (8.3 cm)": (3.27, 2.45, 300),
+    "Paper, 2 columns (17 cm)": (6.69, 3.94, 300),
+    "Slide (16:9)": (13.33, 7.50, 150),
+    "Report (wide)": (10.0, 5.5, 200),
 }
 
 _CATEGORICAL = {
-    "Okabe-Ito (색각안전)": ["#000000", "#E69F00", "#56B4E9", "#009E73",
+    "Okabe-Ito (colorblind-safe)": ["#000000", "#E69F00", "#56B4E9", "#009E73",
                              "#F0E442", "#0072B2", "#D55E00", "#CC79A7"],
 }
 
@@ -127,10 +127,10 @@ _RECOMMENDED_SIZE = {
 
 # 테마 프리셋: 한 번에 폰트/선두께/범례/팔레트 톤을 맞춤. _apply_theme에서 사용.
 _THEMES = {
-    "기본":  {"font": 0,  "line": 2, "legend": 0,  "grid": True},
-    "논문":  {"font": 11, "line": 1, "legend": 9,  "grid": True},
+    "Default":  {"font": 0,  "line": 2, "legend": 0,  "grid": True},
+    "Paper":  {"font": 11, "line": 1, "legend": 9,  "grid": True},
     "PPT":   {"font": 16, "line": 3, "legend": 15, "grid": True},
-    "다크":  {"font": 13, "line": 2, "legend": 12, "grid": True},
+    "Dark":  {"font": 13, "line": 2, "legend": 12, "grid": True},
 }
 
 
@@ -205,11 +205,11 @@ class PlotMakerWidget(QWidget):
         # ── 상단: 핵심 액션만 (세부는 전부 좌측 탭으로) ──
         bar = FlowLayout(spacing=6)
         for txt, fn, tip in (
-                ("Add data", self._add_data, "결과 파일(.dat/.csv)을 선반에 추가"),
+                ("Add data", self._add_data, "Add result files (.dat/.csv) to the shelf"),
                 ("By date", self._add_data_by_date,
-                 "일별 핏 버킷에서 기간·시리즈를 골라 자동 머지해 선반에 추가"),
-                ("Preview", self._preview_publish, "출력(Publish) 그대로 미리보기"),
-                ("Publish", self._export_publish, "고화질 PNG / 벡터 PDF·SVG 저장")):
+                 "Pick a date range and series from daily fit buckets, auto-merge, and add to the shelf"),
+                ("Preview", self._preview_publish, "Preview exactly as Publish will output"),
+                ("Publish", self._export_publish, "Save high-res PNG / vector PDF·SVG")):
             b = QPushButton(txt); b.setToolTip(tip); b.clicked.connect(fn)
             bar.addWidget(b)
         root.addLayout(bar)
@@ -222,22 +222,22 @@ class PlotMakerWidget(QWidget):
         tab_data = QWidget(); dv = QVBoxLayout(tab_data)
         drow = QHBoxLayout()
         b_add2 = QPushButton("Add"); b_add2.clicked.connect(self._add_data)
-        b_date2 = QPushButton("By date"); b_date2.setToolTip("일별 핏 버킷에서 기간 선택  자동 머지 추가")
+        b_date2 = QPushButton("By date"); b_date2.setToolTip("Pick a date range from daily fit buckets and auto-merge")
         b_date2.clicked.connect(self._add_data_by_date)
-        b_rm = QPushButton("Remove"); b_rm.setToolTip("선택 데이터셋 제거")
+        b_rm = QPushButton("Remove"); b_rm.setToolTip("Remove selected dataset")
         b_rm.clicked.connect(self._remove_data)
         drow.addWidget(b_add2); drow.addWidget(b_date2); drow.addWidget(b_rm); dv.addLayout(drow)
-        dv.addWidget(QLabel("Data shelf — 컬럼 선택 후 Style 탭에서 추가"))
+        dv.addWidget(QLabel("Data shelf — select columns, then add them in the Style tab"))
         self._tree_search = QLineEdit()
-        self._tree_search.setPlaceholderText("데이터셋·컬럼 검색")
+        self._tree_search.setPlaceholderText("Search datasets/columns")
         self._tree_search.setClearButtonEnabled(True)
         self._tree_search.textChanged.connect(self._filter_tree)
         dv.addWidget(self._tree_search)
         self._tree = QTreeWidget()
         self._tree.setHeaderHidden(True)
         self._tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
-        self._tree.setToolTip("컬럼 더블클릭 = 바로 플롯(현재 모드에). 여러 개는 선택 후 Style 탭에서 추가.\n"
-                              "파일을 이 창에 끌어놓아도 추가됨.")
+        self._tree.setToolTip("Double-click a column = plot it now (current mode). For several, select them and add in the Style tab.\n"
+                              "Files dropped onto this window are added too.")
         self._tree.itemDoubleClicked.connect(self._on_tree_double_click)
         dv.addWidget(self._tree, 1)
         mrow = QHBoxLayout(); mrow.addWidget(QLabel("Mode"))
@@ -254,13 +254,13 @@ class PlotMakerWidget(QWidget):
         self._res_custom_spin = QDoubleSpinBox()
         self._res_custom_spin.setRange(0.1, 1440.0); self._res_custom_spin.setValue(2.0)
         self._res_custom_spin.setSuffix(" min"); self._res_custom_spin.setDecimals(1)
-        self._res_custom_spin.setToolTip("Resample=Custom일 때 평균 낼 구간(분)")
+        self._res_custom_spin.setToolTip("Averaging interval (min) when Resample = Custom")
         self._res_custom_spin.setEnabled(False)
         self._res_custom_spin.valueChanged.connect(self._on_transform_changed)
         trow.addWidget(self._res_custom_spin)
         trow.addWidget(QLabel("Smooth"))
         self._smooth_spin = QSpinBox(); self._smooth_spin.setRange(1, 999); self._smooth_spin.setValue(1)
-        self._smooth_spin.setToolTip("rolling 평균 점 수(1=끔)")
+        self._smooth_spin.setToolTip("Rolling-mean window in points (1 = off)")
         self._smooth_spin.valueChanged.connect(self._on_transform_changed)
         trow.addWidget(self._smooth_spin); dv.addLayout(trow)
         trow2 = QHBoxLayout()
@@ -268,8 +268,8 @@ class PlotMakerWidget(QWidget):
         self._shift_spin = QDoubleSpinBox()
         self._shift_spin.setRange(-72.0, 72.0); self._shift_spin.setValue(0.0)
         self._shift_spin.setSuffix(" h"); self._shift_spin.setDecimals(2); self._shift_spin.setSingleStep(1.0)
-        self._shift_spin.setToolTip("시간축 전체를 +/-시간만큼 이동해서 표시(원본 파일은 그대로, 화면만 보정).\n"
-                                    "장비 시계 오차/타임존 불일치를 눈으로 맞춰볼 때 사용.")
+        self._shift_spin.setToolTip("Shift the whole time axis by +/- hours for display (source file unchanged, display only).\n"
+                                    "Use it to eyeball instrument clock drift or time-zone mismatch.")
         self._shift_spin.valueChanged.connect(self._on_transform_changed)
         trow2.addWidget(self._shift_spin); trow2.addStretch(1); dv.addLayout(trow2)
         self._tabs.addTab(_scroll(tab_data), "Data")
@@ -281,31 +281,31 @@ class PlotMakerWidget(QWidget):
         self._palette_combo.addItems([_PALETTE_AUTO] + list(_CATEGORICAL.keys())
                                      + list(_FAMILIES.keys()))
         self._palette_combo.setToolTip(
-            "'자동(종별)' = 종 이름 기반 색(ANs 초록 등).\n"
-            "'Okabe-Ito (색각안전)' = 세 색각이상에서 모두 구분되는 표준 8색을\n"
-            "   시리즈 순서대로. 논문·발표용 기본으로 권장.\n"
-            "   (5번째 노랑은 흰 배경 가는 선에서 흐릿 — 시리즈 5개 넘으면 확인)\n"
-            "그 밖의 계통색 = 그 색의 진↔연 톤으로 자동 배색.")
+            "'Auto (by species)' = color from the species name (e.g. ANs green).\n"
+            "'Okabe-Ito (colorblind-safe)' = standard 8 colors distinguishable under all three\n"
+            "   color-vision deficiencies, in series order. Recommended default for papers/talks.\n"
+            "   (5th color, yellow, is faint as a thin line on white — check if > 5 series)\n"
+            "Other color families = automatic dark↔light shades of that color.")
         self._palette_combo.activated.connect(
             lambda *_: self._apply_palette(self._palette_combo.currentText()))
         prow.addWidget(self._palette_combo, 1); sv.addLayout(prow)
         thr = QHBoxLayout(); thr.addWidget(QLabel("Theme"))
         self._theme_combo = QComboBox(); self._theme_combo.addItems(list(_THEMES.keys()))
-        self._theme_combo.setToolTip("룩 프리셋: 폰트·선두께·범례·그리드를 한 번에(색과 무관)")
+        self._theme_combo.setToolTip("Look preset: font, line width, legend and grid in one go (colors unaffected)")
         self._theme_combo.activated.connect(lambda *_: self._on_theme_combo_changed())
         thr.addWidget(self._theme_combo, 1); sv.addLayout(thr)
         crow = QHBoxLayout()
         self._btn_colors = QPushButton("Colors")
-        self._btn_colors.setToolTip("현재 모드의 고정 색요소(Scatter/Allan/Histogram/Diurnal).\n"
-                                    "Time series는 아래 시리즈별  Color 사용.")
+        self._btn_colors.setToolTip("Fixed color elements of the current mode (Scatter/Allan/Histogram/Diurnal).\n"
+                                    "For Time series, use the per-series Color below.")
         self._btn_colors.clicked.connect(self._edit_colors)
         self._btn_colors.setEnabled(bool(self._mode.color_keys()))
         self._btn_cursor = QPushButton("Cursor"); self._btn_cursor.setCheckable(True)
-        self._btn_cursor.setToolTip("데이터 커서(크로스헤어): 마우스 위치 x·y 표시")
+        self._btn_cursor.setToolTip("Data cursor (crosshair): shows x·y at the mouse position")
         self._btn_cursor.toggled.connect(self._toggle_cursor)
         b_annot = QPushButton("Annotate")
-        b_annot.setToolTip("주석 레이어: 세로/가로선 · 구간 음영 · 텍스트 · 화살표 · 사각형\n"
-                           "그래프를 클릭해 위치를 찍는다(2점짜리는 두 번). 라벨은 mathtext 문법.")
+        b_annot.setToolTip("Annotation layer: vertical/horizontal lines · shaded spans · text · arrows · rectangles\n"
+                           "Click the plot to place (twice for 2-point kinds). Labels use mathtext syntax.")
         b_annot.clicked.connect(self._edit_annotations)
         crow.addWidget(self._btn_colors); crow.addWidget(self._btn_cursor); crow.addWidget(b_annot)
         sv.addLayout(crow)
@@ -321,7 +321,7 @@ class PlotMakerWidget(QWidget):
         # ═══════════ Axes 탭 ═══════════
         tab_axes = QWidget(); av = QVBoxLayout(tab_axes)
         gb2 = QGroupBox("Range (blank = auto)")
-        gb2.setToolTip("값을 해석 못하면 빨간 테두리로 표시됨(무시된 채 조용히 auto로 넘어가지 않음).")
+        gb2.setToolTip("Unparseable values get a red border (never silently fall back to auto).")
         fl2 = QFormLayout(gb2)
         self._ax_xmin = QLineEdit(); self._ax_xmax = QLineEdit()
         self._ax_ymin = QLineEdit(); self._ax_ymax = QLineEdit()
@@ -338,20 +338,20 @@ class PlotMakerWidget(QWidget):
         # 날짜범위 프리셋 — 매주 X min/max를 손으로 타이핑하던 걸 원클릭으로.
         # 왼쪽 패널이 좁아 버튼 3개+스핀박스를 한 줄에 다 못 넣는다(실제 GUI에서
         # "✕ 초기화"가 잘려서 안 보였던 걸 발견 → 2줄로 분리, 2026-07-03).
-        b_full = QPushButton("전체(일단위)")
-        b_full.setToolTip("선반의 전체 데이터 범위를 하루 경계(00:00)에 맞춰 X에 채움\n"
-                          "— 박사님 그림 규약(x 양끝 tight)과 동일한 결과.")
+        b_full = QPushButton("All (whole days)")
+        b_full.setToolTip("Fill X with the full shelf data range, snapped to day boundaries (00:00)\n"
+                          "— same as the lab figure convention (tight x limits).")
         b_full.clicked.connect(self._preset_x_full)
         fl2.addRow("", b_full)
         rowXp = QHBoxLayout()
-        b_recent = QPushButton("최근")
+        b_recent = QPushButton("Last")
         self._preset_days = QSpinBox(); self._preset_days.setRange(1, 90); self._preset_days.setValue(7)
-        self._preset_days.setSuffix("일")
-        b_recent.setToolTip("데이터의 마지막 날로부터 N일 전(00:00)까지를 X에 채움.")
+        self._preset_days.setSuffix(" d")
+        b_recent.setToolTip("Fill X with the last N days of data (from 00:00, N days before the last day).")
         b_recent.clicked.connect(lambda: self._preset_x_recent(self._preset_days.value()))
         rowXp.addWidget(b_recent); rowXp.addWidget(self._preset_days)
-        b_clear = QPushButton("초기화")
-        b_clear.setToolTip("X 범위를 비움(auto로 되돌림).")
+        b_clear = QPushButton("Clear")
+        b_clear.setToolTip("Clear the X range (back to auto).")
         b_clear.clicked.connect(self._preset_x_clear)
         rowXp.addWidget(b_clear)
         fl2.addRow("", rowXp)
@@ -374,58 +374,58 @@ class PlotMakerWidget(QWidget):
         grow = QHBoxLayout()
         self._chk_grid = QCheckBox("major"); self._chk_grid.setChecked(True)
         self._chk_grid_minor = QCheckBox("minor (Publish only)")
-        self._chk_grid_minor.setToolTip("pyqtgraph 화면은 세부눈금 자동표시만 지원 — 별도\n"
-                                        "on/off 불가. Publish(matplotlib)에만 적용됩니다.")
+        self._chk_grid_minor.setToolTip("The pyqtgraph view only auto-shows minor ticks — no separate\n"
+                                        "on/off. Applies to Publish (matplotlib) only.")
         self._chk_grid.toggled.connect(self._on_axes_changed)
         self._chk_grid_minor.toggled.connect(self._on_axes_changed)
         grow.addWidget(self._chk_grid); grow.addWidget(self._chk_grid_minor); grow.addStretch(1)
         flg.addRow("Grid", grow)
-        self._tick_x = QLineEdit(); self._tick_x.setPlaceholderText("auto (시간축=일수, 예: 1)")
-        self._tick_y = QLineEdit(); self._tick_y.setPlaceholderText("auto (예: 0.5)")
-        self._tick_x.setToolTip("X 눈금 간격. 시간축이면 '일' 단위(1=매일 00:00 눈금). 빈칸=자동.\n"
-                                "정확한 간격은 Publish/Preview에서 확인하세요(화면은 근사치).")
-        self._tick_y.setToolTip("Y 눈금 간격(값 단위). 빈칸=자동.\n"
-                                "정확한 간격은 Publish/Preview에서 확인하세요(화면은 근사치).")
+        self._tick_x = QLineEdit(); self._tick_x.setPlaceholderText("auto (time axis = days, e.g. 1)")
+        self._tick_y = QLineEdit(); self._tick_y.setPlaceholderText("auto (e.g. 0.5)")
+        self._tick_x.setToolTip("X tick spacing. On a time axis, in days (1 = a tick every 00:00). Blank = auto.\n"
+                                "Check the exact spacing in Publish/Preview (the screen is approximate).")
+        self._tick_y.setToolTip("Y tick spacing (in data units). Blank = auto.\n"
+                                "Check the exact spacing in Publish/Preview (the screen is approximate).")
         self._tick_x.editingFinished.connect(self._on_axes_changed)
         self._tick_y.editingFinished.connect(self._on_axes_changed)
         trow_x = QHBoxLayout()
         trow_x.addWidget(self._tick_x, 1)
         self._tick_x_anchor = QLineEdit()
-        self._tick_x_anchor.setPlaceholderText("앵커 (예: 06-29)")
-        self._tick_x_anchor.setToolTip("시간축 눈금의 기준 날짜 — 여기 적은 날짜부터 좌측 간격(일)씩 눈금.\n"
-                                       "예: 앵커 06-29 + 간격 7 → 06-29, 07-06, 07-13… (앞쪽으로도 06-22, 06-15…)\n"
-                                       "빈칸 = 자동 배치(달력 기준). 화면·Publish 동일 적용.")
+        self._tick_x_anchor.setPlaceholderText("Anchor (e.g. 06-29)")
+        self._tick_x_anchor.setToolTip("Reference date for time-axis ticks — ticks every N days (left field) from this date.\n"
+                                       "e.g. anchor 06-29 + spacing 7 → 06-29, 07-06, 07-13… (and back: 06-22, 06-15…)\n"
+                                       "Blank = automatic (calendar-based). Applies to screen and Publish.")
         self._tick_x_anchor.editingFinished.connect(self._on_axes_changed)
         trow_x.addWidget(self._tick_x_anchor, 1)
         flg.addRow("X tick", trow_x)
         flg.addRow("Y tick", self._tick_y)
         srow = QHBoxLayout()
-        self._tick_dir = QComboBox(); self._tick_dir.addItems(["바깥(out)", "안(in)"])
-        self._tick_dir.setToolTip("눈금선 방향 — 그래프 바깥쪽 또는 안쪽. 화면·Publish 동일 적용.")
+        self._tick_dir = QComboBox(); self._tick_dir.addItems(["Out", "In"])
+        self._tick_dir.setToolTip("Tick direction — outside or inside the axes. Applies to screen and Publish.")
         self._tick_dir.currentIndexChanged.connect(self._on_axes_changed)
         srow.addWidget(self._tick_dir)
-        srow.addWidget(QLabel("길이"))
+        srow.addWidget(QLabel("Length"))
         self._tick_len = QSpinBox()
         self._tick_len.setRange(0, 20); self._tick_len.setValue(0)
         self._tick_len.setSpecialValueText("auto"); self._tick_len.setSuffix(" px")
-        self._tick_len.setToolTip("눈금선 길이(0=auto≈5px). 화면·Publish 동일 적용.")
+        self._tick_len.setToolTip("Tick length (0 = auto ≈ 5 px). Applies to screen and Publish.")
         self._tick_len.valueChanged.connect(self._on_axes_changed)
         srow.addWidget(self._tick_len); srow.addStretch(1)
-        flg.addRow("Tick 선", srow)
+        flg.addRow("Tick marks", srow)
         av.addWidget(gbg)
         # 축 라벨·눈금 표시 토글 (끄면 아예 안 그림)
-        gbsh = QGroupBox("Show (끄면 숨김)")
+        gbsh = QGroupBox("Show (uncheck to hide)")
         flsh = QFormLayout(gbsh)
-        self._chk_xlabel = QCheckBox("label"); self._chk_xticks = QCheckBox("숫자")
-        self._chk_ylabel = QCheckBox("label"); self._chk_yticks = QCheckBox("숫자")
-        self._chk_xtickmarks = QCheckBox("눈금선"); self._chk_ytickmarks = QCheckBox("눈금선")
+        self._chk_xlabel = QCheckBox("label"); self._chk_xticks = QCheckBox("Tick labels")
+        self._chk_ylabel = QCheckBox("label"); self._chk_yticks = QCheckBox("Tick labels")
+        self._chk_xtickmarks = QCheckBox("Ticks"); self._chk_ytickmarks = QCheckBox("Ticks")
         for c in (self._chk_xlabel, self._chk_xticks, self._chk_ylabel, self._chk_yticks,
                   self._chk_xtickmarks, self._chk_ytickmarks):
             c.setChecked(True); c.toggled.connect(self._on_axes_changed)
-        self._chk_xlabel.setToolTip("X축 이름(예: Time) 표시")
-        self._chk_xticks.setToolTip("X축 눈금 숫자/날짜(텍스트) 표시")
-        self._chk_xtickmarks.setToolTip("X축 눈금선(짧은 금) 표시 — 숫자를 꺼도 눈금선만 남길 수 있음")
-        self._chk_ytickmarks.setToolTip("Y축 눈금선(짧은 금) 표시 — 숫자를 꺼도 눈금선만 남길 수 있음")
+        self._chk_xlabel.setToolTip("Show the X-axis title (e.g. Time)")
+        self._chk_xticks.setToolTip("Show X-axis tick labels (numbers/dates)")
+        self._chk_xtickmarks.setToolTip("Show X-axis tick marks — can keep the marks with tick labels hidden")
+        self._chk_ytickmarks.setToolTip("Show Y-axis tick marks — can keep the marks with tick labels hidden")
         rxs = QHBoxLayout(); rxs.addWidget(self._chk_xlabel); rxs.addWidget(self._chk_xticks)
         rxs.addWidget(self._chk_xtickmarks); rxs.addStretch(1)
         rys = QHBoxLayout(); rys.addWidget(self._chk_ylabel); rys.addWidget(self._chk_yticks)
@@ -442,24 +442,24 @@ class PlotMakerWidget(QWidget):
         fll = QFormLayout(gbl)
         self._legend_combo = QComboBox()
         self._legend_combo.addItems(["auto", "TL", "TR", "BL", "BR", "off"])
-        self._legend_combo.setToolTip("범례 위치 (auto=데이터 안 가리게 자동 · TL/TR/BL/BR · off=숨김)")
+        self._legend_combo.setToolTip("Legend position (auto = placed clear of data · TL/TR/BL/BR · off = hidden)")
         self._legend_combo.currentIndexChanged.connect(self._on_legend_changed)
         fll.addRow("Position", self._legend_combo)
         self._legend_size = QSpinBox()
         self._legend_size.setRange(0, 40); self._legend_size.setValue(0)
         self._legend_size.setSpecialValueText("auto"); self._legend_size.setSuffix(" pt")
-        self._legend_size.setToolTip("범례 글자 크기 (0=auto). Publish에 적용.")
+        self._legend_size.setToolTip("Legend font size (0 = auto). Applies to Publish.")
         self._legend_size.valueChanged.connect(self._on_legend_changed)
         fll.addRow("Size", self._legend_size)
         gv.addWidget(gbl)
         gb = QGroupBox("Labels (override, blank=auto)")
-        gb.setToolTip("수식 표기는 mathtext 문법 — 화면·Publish 양쪽에 똑같이 나옵니다.\n"
+        gb.setToolTip("Math uses mathtext syntax — rendered identically on screen and in Publish.\n"
                       "  NO$_2$        → NO₂\n"
                       "  $\\mu$g m$^{-3}$ → μg m⁻³\n"
                       "  $\\times$10$^{-9}$ → ×10⁻⁹\n"
-                      "범례 이름(시리즈 ✎ Rename)과 주석 라벨에도 같은 문법을 씁니다.\n"
-                      "⚠ 한 라벨에 한글과 $…$를 **같이** 쓰면 한글이 □로 깨집니다\n"
-                      "   (matplotlib 수식 엔진에 한글이 없음). 둘 중 하나만 쓰세요.")
+                      "The same syntax works in legend names (series ✎ Rename) and annotation labels.\n"
+                      "⚠ Mixing Korean text and $…$ in **one** label renders the Korean as □\n"
+                      "   (matplotlib's math engine has no Hangul glyphs). Use one or the other.")
         fl = QFormLayout(gb)
         self._label_style_widgets = {}
         self._ed_title = QLineEdit(); self._ed_x = QLineEdit()
@@ -471,18 +471,18 @@ class PlotMakerWidget(QWidget):
         self._lbl_size = QSpinBox()
         self._lbl_size.setRange(0, 40); self._lbl_size.setValue(0)
         self._lbl_size.setSpecialValueText("auto"); self._lbl_size.setSuffix(" pt")
-        self._lbl_size.setToolTip("전역 기본 글자 크기(0=auto). 각 라벨 옆 Size가 0이면 이 값을 씀.")
+        self._lbl_size.setToolTip("Global default font size (0 = auto). Used by any label whose Size is 0.")
         self._lbl_size.valueChanged.connect(self._on_labels_changed)
         fl.addRow("Font size (default)", self._lbl_size)
         self._tick_size = QSpinBox()
         self._tick_size.setRange(0, 40); self._tick_size.setValue(0)
         self._tick_size.setSpecialValueText("auto"); self._tick_size.setSuffix(" pt")
-        self._tick_size.setToolTip("눈금 숫자/날짜 글자 크기 (0=auto: 전역 Font size−2).\n"
-                                   "화면 미리보기·Publish 모두 적용.")
+        self._tick_size.setToolTip("Tick label font size (0 = auto: global Font size − 2).\n"
+                                   "Applies to the screen preview and Publish.")
         self._tick_size.valueChanged.connect(self._on_labels_changed)
         fl.addRow("Tick size", self._tick_size)
         btn_reset_pos = QPushButton("↺ Reset positions")
-        btn_reset_pos.setToolTip("드래그로 옮긴 라벨 위치를 전부 기본 자리로 되돌림(크기/색은 유지)")
+        btn_reset_pos.setToolTip("Reset all dragged label positions to default (size/color kept)")
         btn_reset_pos.clicked.connect(self.reset_label_positions)
         fl.addRow("", btn_reset_pos)
         gv.addWidget(gb)
@@ -494,32 +494,32 @@ class PlotMakerWidget(QWidget):
         gbs = QGroupBox("Publish size")
         fls = QFormLayout(gbs)
         self._preset_combo = QComboBox()
-        self._preset_combo.addItems(["(직접 지정)"] + list(_PUBLISH_PRESETS.keys()))
+        self._preset_combo.addItems(["(Custom)"] + list(_PUBLISH_PRESETS.keys()))
         self._preset_combo.setToolTip(
-            "목적별 크기·해상도 프리셋. 논문 폭은 Copernicus(ACP·AMT) 기준\n"
-            "— 단컬럼 8.3 cm, 양컬럼 17 cm, 300 dpi (최소 폭 8 cm 규정).\n"
-            "고르면 '모드별 권장 크기 자동'은 꺼진다(모드 바꿀 때 덮어쓰지 않게).")
+            "Size/resolution presets by purpose. Paper widths follow Copernicus (ACP·AMT)\n"
+            "— single column 8.3 cm, double column 17 cm, 300 dpi (min. width 8 cm).\n"
+            "Choosing one turns off 'Auto size per mode' (so mode changes don't overwrite it).")
         self._preset_combo.activated.connect(
             lambda *_: self._apply_publish_preset(self._preset_combo.currentText()))
-        fls.addRow("프리셋", self._preset_combo)
+        fls.addRow("Preset", self._preset_combo)
         self._dpi_spin = QSpinBox()
         self._dpi_spin.setRange(72, 1200); self._dpi_spin.setValue(300); self._dpi_spin.setSingleStep(50)
-        self._dpi_spin.setToolTip("Publish PNG 해상도(벡터 PDF/SVG는 무관). PPT=150~200, 논문=300~600")
+        self._dpi_spin.setToolTip("Publish PNG resolution (not used for vector PDF/SVG). PPT = 150–200, paper = 300–600")
         fls.addRow("DPI (PNG)", self._dpi_spin)
         szr = QHBoxLayout()
         self._fig_w = QDoubleSpinBox(); self._fig_w.setRange(2.0, 40.0); self._fig_w.setValue(10.0)
-        self._fig_w.setSingleStep(0.5); self._fig_w.setDecimals(2); self._fig_w.setToolTip("가로(인치)")
+        self._fig_w.setSingleStep(0.5); self._fig_w.setDecimals(2); self._fig_w.setToolTip("Width (in)")
         self._fig_h = QDoubleSpinBox(); self._fig_h.setRange(1.5, 40.0); self._fig_h.setValue(5.5)
-        self._fig_h.setSingleStep(0.5); self._fig_h.setDecimals(2); self._fig_h.setToolTip("세로(인치)")
+        self._fig_h.setSingleStep(0.5); self._fig_h.setDecimals(2); self._fig_h.setToolTip("Height (in)")
         szr.addWidget(QLabel("W")); szr.addWidget(self._fig_w)
         szr.addWidget(QLabel("H")); szr.addWidget(self._fig_h)
         fls.addRow("Size (in)", szr)
-        self._chk_autosize = QCheckBox("모드별 권장 크기 자동")
+        self._chk_autosize = QCheckBox("Auto size per mode")
         self._chk_autosize.setChecked(True)
-        self._chk_autosize.setToolTip("모드 바꿀 때 그래프 종류에 맞는 권장 W×H로 자동 설정\n"
-                                      "(시계열=와이드, diurnal=정사각 등). 끄면 수동 유지.")
-        b_fit = QPushButton("지금 권장크기 적용")
-        b_fit.setToolTip("현재 모드의 권장 크기를 바로 적용")
+        self._chk_autosize.setToolTip("On mode change, set the recommended W×H for that plot type\n"
+                                      "(time series = wide, diurnal = square, etc.). Off = keep manual size.")
+        b_fit = QPushButton("Apply recommended size")
+        b_fit.setToolTip("Apply the current mode's recommended size now")
         b_fit.clicked.connect(lambda: self._apply_recommended_size(force=True))
         fls.addRow(self._chk_autosize)
         fls.addRow(b_fit)
@@ -535,23 +535,23 @@ class PlotMakerWidget(QWidget):
                 lay.addWidget(b)
             xv.addWidget(gb)
 
-        _btn_group("이미지 내보내기", [
-            ("Publish (PNG/PDF/SVG)", self._export_publish, "matplotlib 고화질 출력"),
-            ("Batch Publish (종별 일괄)", self._batch_publish,
-             "Time series/Diurnal 시리즈 목록의 각 컬럼을 종별 PNG로 한 번에 저장\n"
-             "— 매주 종마다 반복 Publish하던 걸 자동화. 목록은 Style 탭 TimeSeries 것을 씀."),
-            ("Quick PNG (화면 그대로)", self._export_png, "pyqtgraph 2400px 빠른 캡처"),
+        _btn_group("Export image", [
+            ("Publish (PNG/PDF/SVG)", self._export_publish, "matplotlib high-res output"),
+            ("Batch Publish (per species)", self._batch_publish,
+             "Save each column of the Time series/Diurnal series list as its own PNG in one go\n"
+             "— automates the weekly per-species Publish. Uses the Time series list in the Style tab."),
+            ("Quick PNG (as on screen)", self._export_png, "Quick pyqtgraph capture (2400 px)"),
             ("Copy to clipboard (Ctrl+C)", self._copy_to_clipboard,
-             "파일 저장 없이 바로 복사 → PPT/문서에 Ctrl+V"),
+             "Copy without saving a file → Ctrl+V into PPT/documents"),
         ])
-        _btn_group("데이터 내보내기", [
-            ("Export CSV", self._export_csv, "현재 모드 데이터 CSV"),
+        _btn_group("Export data", [
+            ("Export CSV", self._export_csv, "Current mode data as CSV"),
         ])
-        _btn_group("설정 저장·불러오기", [
-            ("Save config", self._save_cfg, "플롯 전체 저장(데이터+축+라벨+색) — MATLAB .fig 역할"),
-            ("Load config", self._load_cfg, "저장한 플롯 설정 불러오기"),
-            ("Save style", self._save_template, "룩만(색·폰트·범례·야간음영) 템플릿 저장"),
-            ("Load style", self._load_template, "저장한 룩을 현재 플롯에 적용"),
+        _btn_group("Save / load settings", [
+            ("Save config", self._save_cfg, "Save the whole plot (data + axes + labels + colors) — like a MATLAB .fig"),
+            ("Load config", self._load_cfg, "Load a saved plot config"),
+            ("Save style", self._save_template, "Save the look only (colors, fonts, legend, night shading) as a template"),
+            ("Load style", self._load_template, "Apply a saved look to the current plot"),
         ])
         xv.addStretch(1)
         self._tabs.addTab(_scroll(tab_exp), "Export")
@@ -661,13 +661,13 @@ class PlotMakerWidget(QWidget):
     # 안 넣었다 — pg는 줌하면 어긋나고(화면≠출력), 그 용도는 M2 Composer의 패널
     # 자동 라벨이 더 싸게 해결한다.
     _ANNOT_KINDS = {
-        "vline": ("세로선 (x)", 1, True),
-        "hline": ("가로선 (y)", 1, True),
-        "vspan": ("세로 구간 음영 (x1~x2)", 2, True),
-        "hspan": ("가로 구간 음영 (y1~y2)", 2, True),
-        "text":  ("텍스트", 1, False),
-        "arrow": ("화살표 (점 → 라벨)", 2, False),
-        "rect":  ("사각형", 2, False),
+        "vline": ("Vertical line (x)", 1, True),
+        "hline": ("Horizontal line (y)", 1, True),
+        "vspan": ("Vertical shaded span (x1–x2)", 2, True),
+        "hspan": ("Horizontal shaded span (y1–y2)", 2, True),
+        "text":  ("Text", 1, False),
+        "arrow": ("Arrow (point → label)", 2, False),
+        "rect":  ("Rectangle", 2, False),
     }
 
     @staticmethod
@@ -832,7 +832,7 @@ class PlotMakerWidget(QWidget):
         import datetime as _dt
         dlg = QDialog(self)
         dlg.setModal(False)
-        dlg.setWindowTitle("Annotations — 선·구간·텍스트·화살표")
+        dlg.setWindowTitle("Annotations — lines · spans · text · arrows")
         dlg.resize(520, 380)
         v = QVBoxLayout(dlg)
         lst = QListWidget()
@@ -872,8 +872,8 @@ class PlotMakerWidget(QWidget):
         lst.itemChanged.connect(on_checked)
         refresh()
         self._annot_dlg_refresh = refresh   # _on_plot_clicked가 클릭 추가 후 여기 갱신
-        v.addWidget(QLabel("현재 주석 — 체크 해제 = 숨김(삭제 아님) · 선택 후 Remove\n"
-                           "라벨은 mathtext 문법 사용 가능"))
+        v.addWidget(QLabel("Current annotations — uncheck = hide (not delete) · select, then Remove\n"
+                           "Labels support mathtext syntax"))
         v.addWidget(lst, 1)
 
         row = QHBoxLayout()
@@ -881,12 +881,12 @@ class PlotMakerWidget(QWidget):
         cb = QComboBox()
         for _k in _kinds:
             cb.addItem(self._ANNOT_KINDS[_k][0])
-        cb.setToolTip("텍스트·화살표·사각형은 좌표가 2개 이상 필요해 **그래프 클릭**으로만 만듭니다.\n"
-                      "화살표: 첫 클릭=가리킬 점, 둘째 클릭=라벨 자리.")
+        cb.setToolTip("Text, arrows and rectangles need 2+ coordinates, so they are created only by **clicking the plot**.\n"
+                      "Arrow: 1st click = point to mark, 2nd click = label position.")
 
         def cur_kind():
             return _kinds[max(0, cb.currentIndex())]
-        ed_lab = QLineEdit(); ed_lab.setPlaceholderText("라벨(선택)")
+        ed_lab = QLineEdit(); ed_lab.setPlaceholderText("Label (optional)")
         cstate = {"c": "#d32f2f"}
         b_col = QPushButton("Col"); b_col.setFixedWidth(34)
         b_col.setStyleSheet(f"background:{cstate['c']};color:white;")
@@ -897,30 +897,30 @@ class PlotMakerWidget(QWidget):
                 cstate["c"] = c.name()
                 b_col.setStyleSheet(f"background:{c.name()};color:white;")
         b_col.clicked.connect(pick_col)
-        b_pick = QPushButton("그래프에서 클릭해 찍기")
-        b_pick.setToolTip("누르고 그래프의 원하는 위치를 클릭하면 그 자리에 주석이 생김.\n"
-                          "2점이 필요한 종류는 두 번 클릭. 우클릭하면 취소.")
+        b_pick = QPushButton("Click on plot to place")
+        b_pick.setToolTip("Press, then click the desired spot on the plot to add the annotation there.\n"
+                          "Two-point kinds need two clicks. Right-click to cancel.")
 
         def start_pick():
             kind = cur_kind()
             nm, need, _ = self._ANNOT_KINDS[kind]
             self._annot_pick = {"kind": kind, "label": ed_lab.text().strip(),
                                 "color": cstate["c"], "pts": []}
-            self.set_status(f"그래프를 {need}번 클릭하면 '{nm}' 추가 — 우클릭=취소")
+            self.set_status(f"Click the plot {need}× to add '{nm}' — right-click = cancel")
         b_pick.clicked.connect(start_pick)
         row.addWidget(cb); row.addWidget(ed_lab, 1); row.addWidget(b_col); row.addWidget(b_pick)
         v.addLayout(row)
 
         row1b = QHBoxLayout()
-        ed_val = QLineEdit(); ed_val.setPlaceholderText("값1 — 숫자, 시간축 x는 'MM-DD HH:MM'")
-        ed_val2 = QLineEdit(); ed_val2.setPlaceholderText("값2 (구간일 때)")
+        ed_val = QLineEdit(); ed_val.setPlaceholderText("Value 1 — number; for a time x-axis use 'MM-DD HH:MM'")
+        ed_val2 = QLineEdit(); ed_val2.setPlaceholderText("Value 2 (for spans)")
         b_add = QPushButton("+ Add (typed)")
 
         def add():
             kind = cur_kind()
             nm, need, typed_ok = self._ANNOT_KINDS[kind]
             if not typed_ok:
-                self.set_status(f"'{nm}'는 좌표가 x·y 둘 다 필요해 그래프 클릭으로만 추가합니다.")
+                self.set_status(f"'{nm}' needs both x and y, so it can only be added by clicking the plot.")
                 return
             is_x = kind in ("vline", "vspan")
 
@@ -933,7 +933,7 @@ class PlotMakerWidget(QWidget):
             p2 = ((self._parse_annot_x(ed_val2.text()) if is_x else _num(ed_val2.text()))
                   if need == 2 else None)
             if p1 is None or (need == 2 and p2 is None):
-                self.set_status("주석 값 파싱 실패 — 숫자(시간축 x는 날짜시각) 또는 위의 클릭 찍기 사용.")
+                self.set_status("Could not parse the annotation value — enter a number (date-time for a time x-axis) or use click-to-place above.")
                 return
             rec = {"kind": kind, "label": ed_lab.text().strip(), "color": cstate["c"]}
             rec["x1" if is_x else "y1"] = p1
@@ -1001,7 +1001,7 @@ class PlotMakerWidget(QWidget):
         훅만 마련해두고, 향후 breaking change는 여기 한 곳에 추가."""
         v = st.get("_version", 1)
         if v > self._STYLE_VERSION:
-            self.set_status(f"이 스타일은 더 새 버전(v{v})에서 저장됨 — 일부가 무시될 수 있음.")
+            self.set_status(f"This style was saved by a newer version (v{v}) — some settings may be ignored.")
             return st
         st["_version"] = self._STYLE_VERSION
         return st
@@ -1013,7 +1013,7 @@ class PlotMakerWidget(QWidget):
         breaking change가 생기면 여기 한 곳에 추가하면 됨."""
         v = cfg.get("_version", 1)
         if v > self._CFG_VERSION:
-            self.set_status(f"이 설정은 더 새 버전(v{v})에서 저장됨 — 일부 기능이 무시될 수 있음.")
+            self.set_status(f"This config was saved by a newer version (v{v}) — some features may be ignored.")
             return cfg
         cfg["_version"] = self._CFG_VERSION
         return cfg
@@ -1097,7 +1097,7 @@ class PlotMakerWidget(QWidget):
                 json.dump(self._gather_style(), f, ensure_ascii=False, indent=2)
             self.set_status(f"Style saved: {os.path.basename(out)}")
         except Exception as e:
-            QMessageBox.warning(self, "Style", f"저장 실패:\n{e}")
+            QMessageBox.warning(self, "Style", f"Save failed:\n{e}")
 
     def _load_template(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load style template", "",
@@ -1109,7 +1109,7 @@ class PlotMakerWidget(QWidget):
             with open(path, encoding="utf-8") as f:
                 st = json.load(f)
         except Exception as e:
-            QMessageBox.warning(self, "Style", f"불러오기 실패:\n{e}")
+            QMessageBox.warning(self, "Style", f"Load failed:\n{e}")
             return
         st = self._migrate_style(st)
         self._apply_style(st)
@@ -1166,24 +1166,24 @@ class PlotMakerWidget(QWidget):
             return
         if ev.button() == Qt.MouseButton.RightButton:
             self._annot_pick = None
-            self.set_status("마커 추가 취소됨")
+            self.set_status("Marker placement cancelled")
             return
         if not self.p1.sceneBoundingRect().contains(ev.scenePos()):
             return
         mp = self.p1.vb.mapSceneToView(ev.scenePos())
         kind = self._annot_pick["kind"]
-        nm, need, _ = self._ANNOT_KINDS.get(kind, ("주석", 1, True))
+        nm, need, _ = self._ANNOT_KINDS.get(kind, ("Annotation", 1, True))
         pts = self._annot_pick.setdefault("pts", [])
         pts.append((float(mp.x()), float(mp.y())))
         if len(pts) < need:      # 2점짜리는 한 번 더 받는다
-            self.set_status(f"'{nm}' — {need - len(pts)}점 더 클릭 (우클릭=취소)")
+            self.set_status(f"'{nm}' — click {need - len(pts)} more point(s) (right-click = cancel)")
             return
         self._annots.append(self._annot_from_points(
             kind, pts, self._annot_pick.get("label", ""),
             self._annot_pick.get("color", "#d32f2f")))
         self._annot_pick = None
         self._mode.render()
-        self.set_status(f"주석 추가됨: {nm}")
+        self.set_status(f"Annotation added: {nm}")
         refresh = getattr(self, "_annot_dlg_refresh", None)
         if refresh:
             try:
@@ -1308,14 +1308,14 @@ class PlotMakerWidget(QWidget):
             if chk is not None:
                 chk.blockSignals(True); chk.setChecked(False); chk.blockSignals(False)
         self._mode.render()
-        self.set_status("라벨 위치 전부 기본값으로 리셋")
+        self.set_status("All label positions reset to default")
 
     def _edit_colors(self):
         """현재 모드의 color_keys() 요소들 색을 지정하는 다이얼로그(라이브 적용)."""
         keys = self._mode.color_keys()
         if not keys:
-            self.set_status("이 모드는 색 지정 요소가 없습니다 "
-                            "(Time series는 옵션 패널의  Color 사용).")
+            self.set_status("This mode has no color-assignable elements "
+                            "(for Time series, use Color in the options panel).")
             return
         from PyQt6.QtWidgets import (QDialog, QFormLayout, QDialogButtonBox,
                                      QColorDialog)
@@ -1432,7 +1432,7 @@ class PlotMakerWidget(QWidget):
         상태바는 '성공'이라 뜨는 모순이 있었다(2026-06-30 자체 감사에서 발견).
         여기서 미리 막고 이유를 알려준다."""
         if not self._time_axis:
-            self.set_status(f"'{self._mode.label}' 모드는 X축이 시간이 아니라 날짜 프리셋을 쓸 수 없습니다.")
+            self.set_status(f"'{self._mode.label}' mode has no time X axis — date presets don't apply.")
             return False
         return True
 
@@ -1443,14 +1443,14 @@ class PlotMakerWidget(QWidget):
             return
         lo, hi = self._data_time_range()
         if lo is None:
-            self.set_status("시간축 있는 데이터가 없습니다 — 먼저 데이터를 추가하세요.")
+            self.set_status("No data with a time axis — add data first.")
             return
         import datetime as _dt
         d0 = _dt.datetime.fromtimestamp(lo).replace(hour=0, minute=0, second=0, microsecond=0)
         d1 = (_dt.datetime.fromtimestamp(hi).replace(hour=0, minute=0, second=0, microsecond=0)
               + _dt.timedelta(days=1))
         self._set_x_range_text(d0, d1)
-        self.set_status(f"X 범위: {d0:%Y-%m-%d} ~ {d1:%Y-%m-%d} (전체, 일단위)")
+        self.set_status(f"X range: {d0:%Y-%m-%d} – {d1:%Y-%m-%d} (all, whole days)")
 
     def _preset_x_recent(self, days):
         """데이터 마지막 날 기준 최근 N일(00:00 경계)을 X에 채움."""
@@ -1458,19 +1458,19 @@ class PlotMakerWidget(QWidget):
             return
         lo, hi = self._data_time_range()
         if hi is None:
-            self.set_status("시간축 있는 데이터가 없습니다 — 먼저 데이터를 추가하세요.")
+            self.set_status("No data with a time axis — add data first.")
             return
         import datetime as _dt
         d1 = (_dt.datetime.fromtimestamp(hi).replace(hour=0, minute=0, second=0, microsecond=0)
               + _dt.timedelta(days=1))
         d0 = d1 - _dt.timedelta(days=days)
         self._set_x_range_text(d0, d1)
-        self.set_status(f"X 범위: 최근 {days}일 ({d0:%Y-%m-%d} ~ {d1:%Y-%m-%d})")
+        self.set_status(f"X range: last {days} d ({d0:%Y-%m-%d} – {d1:%Y-%m-%d})")
 
     def _preset_x_clear(self):
         self._ax_xmin.setText(""); self._ax_xmax.setText("")
         self._on_axes_changed()
-        self.set_status("X 범위 초기화(auto)")
+        self.set_status("X range cleared (auto)")
 
     def apply_axes(self):
         """사용자 지정 축 범위/로그를 현재 플롯에 적용(빈칸/미체크는 자동 유지).
@@ -1523,7 +1523,7 @@ class PlotMakerWidget(QWidget):
             try:
                 self.p1.getAxis("left").setTickSpacing(major=ty, minor=ty / 5.0)
             except Exception as e:
-                self.set_status(f"Y tick spacing 적용 실패(화면만, Publish는 정상): {e}")
+                self.set_status(f"Y tick spacing failed (screen only; Publish unaffected): {e}")
         tx = self._axis_val(self._tick_x)
         self._mark_invalid(self._tick_x, bool(self._tick_x.text().strip()) and not (tx and tx > 0))
         if tx and tx > 0 and not fx:
@@ -1537,7 +1537,7 @@ class PlotMakerWidget(QWidget):
                     step = tx * 86400.0 if self._time_axis else tx
                     self.p1.getAxis("bottom").setTickSpacing(major=step, minor=step / 2.0)
             except Exception as e:
-                self.set_status(f"X tick spacing 적용 실패(화면만, Publish는 정상): {e}")
+                self.set_status(f"X tick spacing failed (screen only; Publish unaffected): {e}")
         # 눈금 글자 크기 (화면) — Publish(_apply_axes_mpl)와 같은 규칙(_tick_pt)
         ts_pt = self._tick_pt()
         try:
@@ -1929,7 +1929,7 @@ class PlotMakerWidget(QWidget):
             return
         label = f"{data[1]}:{data[2]}"
         if self._mode.on_column_activated(label):
-            self.set_status(f"플롯: {label} ({self._mode.label})")
+            self.set_status(f"Plotted: {label} ({self._mode.label})")
 
     def _remove_data(self):
         names = set()
@@ -1942,7 +1942,7 @@ class PlotMakerWidget(QWidget):
         for n in names:
             self.shelf.pop(n, None)
         if names:
-            self.set_status(f"데이터셋 {len(names)}개 제거됨 — Ctrl+Z로 복원")
+            self.set_status(f"{len(names)} dataset(s) removed — Ctrl+Z to restore")
             self._refresh_tree()
             self._notify_modes()
 
@@ -1994,7 +1994,7 @@ class PlotMakerWidget(QWidget):
 
     def undo_last(self):
         if self._undo_slot is None:
-            self.set_status("되돌릴 작업이 없습니다.")
+            self.set_status("Nothing to undo.")
             return
         kind, payload = self._undo_slot
         self._undo_slot = None
@@ -2006,7 +2006,7 @@ class PlotMakerWidget(QWidget):
                     restored += 1
             self._refresh_tree()
             self._notify_modes()
-            self.set_status(f"데이터셋 {restored}개 복원됨")
+            self.set_status(f"{restored} dataset(s) restored")
         elif kind == "timeseries_series":
             ts = next((m for m in self._modes if m.key == "timeseries"), None)
             if ts is not None:
@@ -2017,7 +2017,7 @@ class PlotMakerWidget(QWidget):
                     ts._refresh_list()
                 if self.is_active_mode(ts):
                     ts.render()
-                self.set_status(f"↩ 시리즈 {len(payload)}개 복원됨")
+                self.set_status(f"↩ {len(payload)} series restored")
 
     # ── 창 상태 기억(QSettings — dlg_dir.py와 같은 네임스페이스 관례) ──────
     def _save_window_state(self):
@@ -2042,6 +2042,8 @@ class PlotMakerWidget(QWidget):
             except (TypeError, ValueError):
                 pass
         theme = self._qs.value("plotmaker/theme", None)
+        # 2026-10-01 UI 영어화 이전에 저장된 한글 테마 이름도 복원한다.
+        theme = {"기본": "Default", "논문": "Paper", "다크": "Dark"}.get(theme, theme)
         if theme and hasattr(self, "_theme_combo"):
             i = self._theme_combo.findText(theme)
             if i >= 0:
@@ -2075,8 +2077,8 @@ class PlotMakerWidget(QWidget):
         w, h, dpi = pre
         self._chk_autosize.setChecked(False)
         self._fig_w.setValue(w); self._fig_h.setValue(h); self._dpi_spin.setValue(dpi)
-        self.set_status(f"Publish 프리셋: {name} — {w}×{h} in @ {dpi} dpi "
-                        f"(모드별 권장 크기 자동 해제됨)")
+        self.set_status(f"Publish preset: {name} — {w}×{h} in @ {dpi} dpi "
+                        f"(Auto size per mode turned off)")
 
     def _apply_recommended_size(self, force=False):
         """현재 모드에 맞는 권장 Publish 크기(W×H 인치)를 적용.
@@ -2092,7 +2094,7 @@ class PlotMakerWidget(QWidget):
         self._fig_w.setValue(wh[0]); self._fig_h.setValue(wh[1])
         self._fig_w.blockSignals(False); self._fig_h.blockSignals(False)
         if force:
-            self.set_status(f"권장 크기 적용: {wh[0]}×{wh[1]} in ({self._mode.label})")
+            self.set_status(f"Recommended size applied: {wh[0]}×{wh[1]} in ({self._mode.label})")
 
     def _apply_palette(self, family):
         """색 계열 프리셋 → 현재 모드 색을 그 계열 톤으로 자동 배색.
@@ -2106,7 +2108,7 @@ class PlotMakerWidget(QWidget):
                     s[2] = None
             if mode.color_keys():
                 mode.colors.clear()
-            self.set_status("색: 자동(종별)로 복귀")
+            self.set_status("Color: back to Auto (by species)")
             self._mode.render()
             return
         # 범주형(Okabe-Ito 등)은 목록을 순서대로 돌려 쓰고, 계통색은 진↔연 톤을 만든다.
@@ -2132,7 +2134,7 @@ class PlotMakerWidget(QWidget):
                 shades = colors_for(len(keys))
                 for (key, _lab, _def), c in zip(keys, shades):
                     mode.colors[key] = c
-        self.set_status(f"색 계열 적용: {family}")
+        self.set_status(f"Color family applied: {family}")
         self._mode.render()
 
     def _apply_theme(self, name):
@@ -2154,7 +2156,7 @@ class PlotMakerWidget(QWidget):
             for lab in [s[0] for s in getattr(ts, "_series", [])]:
                 st = ts._styles.setdefault(lab, {})
                 st["width"] = int(th["line"])
-        self.set_status(f"테마 적용: {name}")
+        self.set_status(f"Theme applied: {name}")
         self._mode.render()
 
     def _on_transform_changed(self, *_):
@@ -2181,20 +2183,20 @@ class PlotMakerWidget(QWidget):
         row.addWidget(line_edit, 1)
         sp = QSpinBox(); sp.setRange(0, 40); sp.setSpecialValueText("−"); sp.setSuffix("pt")
         sp.setFixedWidth(58)
-        sp.setToolTip("이 라벨만 글자 크기(0=전역 Font size 사용)")
+        sp.setToolTip("Font size for this label only (0 = use global Font size)")
         sp.valueChanged.connect(lambda v, k=key: self._on_label_style_changed(k))
         row.addWidget(sp)
         btn = QPushButton("C"); btn.setFixedWidth(26)
-        btn.setToolTip("이 라벨 글자색 지정(왼쪽 클릭=고르기)")
+        btn.setToolTip("Set this label's text color (left-click to pick)")
         btn.clicked.connect(lambda _, k=key, b=btn: self._pick_label_color(k, b))
         row.addWidget(btn)
         btn_rst = QPushButton("↺"); btn_rst.setFixedWidth(22)
-        btn_rst.setToolTip("이 라벨의 크기·색을 자동으로 되돌림")
+        btn_rst.setToolTip("Reset this label's size and color to auto")
         btn_rst.clicked.connect(lambda _, k=key: self._reset_label_style(k))
         row.addWidget(btn_rst)
         chk = QCheckBox("Pin")
-        chk.setToolTip("체크하면 그래프 안쪽·바깥 여백 어디든 마우스로 드래그해 놓을 수 있음.\n"
-                      "위치는 화면 비율로 저장되어 화면·Publish가 항상 같은 자리에 그림.")
+        chk.setToolTip("When checked, drag it anywhere inside the plot or into the margins.\n"
+                      "Position is stored as a fraction of the view, so screen and Publish always match.")
         chk.toggled.connect(lambda on, k=key: self.toggle_label_free_pos(k, on))
         row.addWidget(chk)
         self._label_style_widgets[key] = {"size": sp, "color_btn": btn, "free_chk": chk}
@@ -2317,7 +2319,7 @@ class PlotMakerWidget(QWidget):
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_agg import FigureCanvasAgg
         except Exception as e:
-            QMessageBox.warning(self, "Publish", f"matplotlib 사용 불가: {e}")
+            QMessageBox.warning(self, "Publish", f"matplotlib unavailable: {e}")
             return None
         self._apply_mpl_rc(matplotlib)
         fig = Figure(figsize=(self._fig_w.value(), self._fig_h.value()))
@@ -2343,7 +2345,7 @@ class PlotMakerWidget(QWidget):
             buf.seek(0)
         except NotImplementedError:
             QMessageBox.information(self, "Preview",
-                                   "이 모드는 아직 고화질 출력을 지원하지 않습니다.")
+                                   "This mode does not support high-res output yet.")
             return
         except Exception as e:
             QMessageBox.warning(self, "Preview", f"Failed: {e}")
@@ -2354,10 +2356,10 @@ class PlotMakerWidget(QWidget):
         pix.loadFromData(buf.getvalue(), "PNG")
         mixed = self._mixed_hangul_mathtext()
         if mixed:
-            self.set_status(f"⚠ 한글+수식이 섞인 라벨 {len(mixed)}개 — 한글이 □로 깨집니다"
-                            f" (예: {mixed[0][:20]}). 한글 라벨에서 $…$를 빼세요.")
+            self.set_status(f"⚠ {len(mixed)} label(s) mix Korean text and math — the Korean renders as □"
+                            f" (e.g. {mixed[0][:20]}). Remove $…$ from Korean labels.")
         dlg = QDialog(self)
-        dlg.setWindowTitle("Publish preview — 출력 그대로 (저장은  Publish)")
+        dlg.setWindowTitle("Publish preview — exactly as output (save with Publish)")
         lay = QVBoxLayout(dlg)
         sa = QScrollArea(); sa.setWidgetResizable(True)
         lbl = QLabel(); lbl.setPixmap(pix)
@@ -2406,17 +2408,17 @@ class PlotMakerWidget(QWidget):
             msg = f"Published: {os.path.basename(out)} [{ext}{extra}]"
             mixed = self._mixed_hangul_mathtext()
             if mixed:
-                msg += (f"  ⚠ 한글+수식이 섞인 라벨 {len(mixed)}개는 한글이 □로 깨집니다"
-                        f" (예: {mixed[0][:20]}) — 한글 라벨에서 $…$를 빼세요.")
+                msg += (f"  ⚠ {len(mixed)} label(s) mixing Korean text and math will render the Korean as □"
+                        f" (e.g. {mixed[0][:20]}) — remove $…$ from Korean labels.")
             if ext == "EPS":
                 # PostScript에는 알파 채널이 없다 — 반투명이 불투명하게 찍힌다.
                 # 조용히 다른 그림이 나가는 것보다 말해주는 게 낫다.
-                msg += ("  ⚠ EPS는 투명도를 지원하지 않습니다 — 에러밴드·야간음영·"
-                        "area/band 채움이 불투명하게 나옵니다. 투명도가 필요하면 PDF로.")
+                msg += ("  ⚠ EPS does not support transparency — error bands, night shading and "
+                        "area/band fills come out opaque. Use PDF if you need transparency.")
             self.set_status(msg)
         except NotImplementedError:
             QMessageBox.information(self, "Publish",
-                                   "이 모드는 아직 고화질 출력을 지원하지 않습니다.")
+                                   "This mode does not support high-res output yet.")
         except Exception as e:
             QMessageBox.warning(self, "Publish", f"Failed: {e}")
 
@@ -2428,13 +2430,13 @@ class PlotMakerWidget(QWidget):
         ts = next((m for m in self._modes if m.key == "timeseries"), None)
         if ts is None or not ts._series:
             QMessageBox.information(self, "Batch Publish",
-                "Style 탭에서 Time series에 시리즈를 먼저 추가하세요 — 그 목록이 배치 대상입니다.")
+                "Add series to Time series in the Style tab first — that list is what gets batched.")
             return
         if self._mode.key not in ("timeseries", "diurnal"):
             QMessageBox.information(self, "Batch Publish",
-                "Batch Publish는 Time series·Diurnal 모드에서만 지원합니다(Data 탭에서 모드 전환).")
+                "Batch Publish works only in Time series and Diurnal modes (switch mode in the Data tab).")
             return
-        out_dir = QFileDialog.getExistingDirectory(self, "Batch Publish — 저장 폴더 선택")
+        out_dir = QFileDialog.getExistingDirectory(self, "Batch Publish — choose output folder")
         if not out_dir:
             return
 
@@ -2453,7 +2455,7 @@ class PlotMakerWidget(QWidget):
                     try:
                         fig = self._build_publish_fig()
                         if fig is None:
-                            failed.append(f"{lab}: figure 생성 실패"); continue
+                            failed.append(f"{lab}: figure creation failed"); continue
                         col = lab.split(":", 1)[-1]
                         path = os.path.join(out_dir, f"timeseries_{col}.png")
                         fig.savefig(path, dpi=dpi, bbox_inches="tight")
@@ -2470,12 +2472,12 @@ class PlotMakerWidget(QWidget):
                 for lab in cols:
                     dm._c.setCurrentText(lab)
                     if dm._c.currentText() != lab:   # 콤보에 없는 컬럼(시간축 없음 등) 스킵
-                        failed.append(f"{lab}: diurnal 콤보에 없음(시간축 없는 컬럼?)")
+                        failed.append(f"{lab}: not in the diurnal list (column without a time axis?)")
                         continue
                     try:
                         fig = self._build_publish_fig()
                         if fig is None:
-                            failed.append(f"{lab}: figure 생성 실패"); continue
+                            failed.append(f"{lab}: figure creation failed"); continue
                         col = lab.split(":", 1)[-1]
                         path = os.path.join(out_dir, f"diurnal_{col}.png")
                         fig.savefig(path, dpi=dpi, bbox_inches="tight")
@@ -2486,10 +2488,10 @@ class PlotMakerWidget(QWidget):
                 dm._c.setCurrentIndex(orig_index)   # -1(선택없음)도 그대로 복원됨
                 dm.render()
 
-        msg = f"{len(saved)}개 저장됨: {', '.join(saved)}" if saved else "저장된 파일 없음"
+        msg = f"{len(saved)} saved: {', '.join(saved)}" if saved else "No files saved"
         if failed:
-            msg += f"\n실패/건너뜀 {len(failed)}개: {'; '.join(failed)}"
-        self.set_status(f"Batch Publish: {len(saved)}개 저장" + (f", {len(failed)}개 실패" if failed else ""))
+            msg += f"\nFailed/skipped ({len(failed)}): {'; '.join(failed)}"
+        self.set_status(f"Batch Publish: {len(saved)} saved" + (f", {len(failed)} failed" if failed else ""))
         QMessageBox.information(self, "Batch Publish", msg)
 
     def _export_png(self):
@@ -2515,7 +2517,7 @@ class PlotMakerWidget(QWidget):
             ex = pgex.ImageExporter(self.p1)
             ex.parameters()["width"] = 2400
             ex.export(copy=True)
-            self.set_status("클립보드에 복사됨 (Ctrl+V로 붙여넣기)")
+            self.set_status("Copied to clipboard (paste with Ctrl+V)")
         except Exception as e:
             QMessageBox.warning(self, "Copy", f"Failed: {e}")
 
@@ -2524,7 +2526,7 @@ class PlotMakerWidget(QWidget):
         table = self._mode.csv_table()
         if not table:
             QMessageBox.information(self, "CSV",
-                                   "현재 모드/선택에 내보낼 데이터가 없습니다.")
+                                   "Nothing to export for the current mode/selection.")
             return
         headers, rows = table
         out, _ = QFileDialog.getSaveFileName(self, "Export CSV",

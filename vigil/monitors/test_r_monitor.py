@@ -133,7 +133,7 @@ def test_quality_gate_blocks_bad_contrast():
         rm.observe("he_inject", bad, 25.0, 1013.25)
     r = rm.observe("sampling", bad, 25.0, 1013.25)
     check("품질게이트 실패 → P1(실패 1회)", r[0] == P1, f"got {r[0]}: {r[1]}")
-    check("메시지에 실패 언급", "실패" in r[1], r[1])
+    check("메시지에 실패 언급", "failed" in r[1], r[1])
 
 
 def main():

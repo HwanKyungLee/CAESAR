@@ -28,7 +28,7 @@ _LEVEL = {   # status → (모양, 글자, 색)
     P2:   ("▲", "P2", VIGIL.p2),
     P1:   ("◆", "P1", VIGIL.p1),
     P0:   ("■", "P0", VIGIL.p0),
-    SKIP: ("○", "대기", VIGIL.skip),
+    SKIP: ("○", "waiting", VIGIL.skip),
 }
 _BADGE_BASE = " font-size:18px; font-weight:600; padding:12px 16px;"
 _BADGE_STYLE = {
@@ -66,7 +66,7 @@ class DashboardWindow(QMainWindow):
         lay = QVBoxLayout(root)
 
         self._base_title = title
-        self.badge = QLabel(f"{_LEVEL[SKIP][0]}  초기화 중…")
+        self.badge = QLabel(f"{_LEVEL[SKIP][0]}  Initializing…")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
         self.btn_run = QPushButton("■ Stop")
@@ -74,7 +74,7 @@ class DashboardWindow(QMainWindow):
         self.btn_run.setStyleSheet(
             f"font-size:15px; font-weight:600; padding:10px; color:{VIGIL.text};"
             f" background:{VIGIL.button}; border:1px solid {VIGIL.rule};")
-        self.btn_run.setToolTip("감시 정지/재개 — 정지 중에도 raw 는 쌓이고, 재개하면 밀린 줄부터 이어 읽는다")
+        self.btn_run.setToolTip("Pause/resume monitoring — raw keeps accumulating while paused; on resume it reads the backlog")
         self.btn_run.clicked.connect(self._toggle_run)
         top = QHBoxLayout()
         top.addWidget(self.badge, stretch=1)
@@ -88,21 +88,21 @@ class DashboardWindow(QMainWindow):
         self.p_conc.setLabel('left', 'Concentration (ppb)')
         self.p_conc.addLegend(offset=(10, 10))
         self.p_conc.showGrid(x=True, y=True, alpha=0.2)
-        self.p_conc.setTitle("농도 — ZA(I₀) 구간이 지나면 표시", color=VIGIL.dim, size="10pt")
+        self.p_conc.setTitle("Concentration — shown after the ZA (I₀) segment", color=VIGIL.dim, size="10pt")
         grid.addWidget(self.p_conc, 0, 0)
 
         self.p_r = pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')})
         self.p_r.setLabel('left', 'R')
         self.p_r.addLegend(offset=(10, 10))
         self.p_r.showGrid(x=True, y=True, alpha=0.2)
-        self.p_r.setTitle("R — ZA/He 교정이 끝나면 표시", color=VIGIL.dim, size="10pt")
+        self.p_r.setTitle("R — shown after ZA/He calibration completes", color=VIGIL.dim, size="10pt")
         grid.addWidget(self.p_r, 0, 1)
 
         self.p_hk = pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')})
         self.p_hk.setLabel('left', 'HK')
         self.p_hk.addLegend(offset=(10, 10))
         self.p_hk.showGrid(x=True, y=True, alpha=0.2)
-        self.p_hk.setTitle("HK — 첫 행 대기 중", color=VIGIL.dim, size="10pt")
+        self.p_hk.setTitle("HK — waiting for first row", color=VIGIL.dim, size="10pt")
         grid.addWidget(self.p_hk, 1, 0)
 
         self.table = QTableWidget(0, len(_COLUMNS))
@@ -153,9 +153,9 @@ class DashboardWindow(QMainWindow):
         self.btn_run.setText("■ Stop" if running else "▶ Start")
         if not running:
             # 정지 배지는 '경보'가 아니라 '사용자가 멈춤' — 경보색을 쓰지 않는다
-            self.badge.setText("⏸  감시 정지됨 — Start 를 누르면 읽기 시작(밀린 줄부터)")
+            self.badge.setText("⏸  Monitoring paused — press Start to read (from the backlog)")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
-            self.setWindowTitle(f"[정지] {self._base_title}")
+            self.setWindowTitle(f"[paused] {self._base_title}")
 
     def _toggle_run(self) -> None:
         self.set_running(self._paused)

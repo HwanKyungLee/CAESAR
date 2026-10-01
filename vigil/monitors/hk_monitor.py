@@ -37,14 +37,14 @@ def evaluate_hk(profile: Profile, row, phase: Optional[str] = None):
         field = profile.hk.field(key)
         label = field.label or key
         if not math.isfinite(val):
-            issues.append(f"{label} 결측(NaN)")
+            issues.append(f"{label} missing (NaN)")
             worst = worse(worst, P2)
             continue
         if sev == SEVERITY_ALARM:
-            issues.append(_fmt(label, val, field.unit) + " 밴드이탈")
+            issues.append(_fmt(label, val, field.unit) + " out of band")
             worst = worse(worst, P1)
         elif sev == SEVERITY_WARN:
-            issues.append(_fmt(label, val, field.unit) + " 경계")
+            issues.append(_fmt(label, val, field.unit) + " near limit")
             worst = worse(worst, P2)
 
     sig_channels = profile.signal_channels()
@@ -57,14 +57,14 @@ def evaluate_hk(profile: Profile, row, phase: Optional[str] = None):
             continue
     if saturated:
         if sig_channels and len(saturated) == len(sig_channels):
-            issues.append(f"전 채널 CCD 포화: {', '.join(saturated)}")
+            issues.append(f"CCD saturated on all channels: {', '.join(saturated)}")
             worst = worse(worst, P0)
         else:
-            issues.append(f"CCD 포화: {', '.join(saturated)}")
+            issues.append(f"CCD saturated: {', '.join(saturated)}")
             worst = worse(worst, P1)
 
     metrics = {"n_fields": len(readings), "n_issues": len(issues),
               "saturated_channels": saturated, "readings": readings}
     if not issues:
-        return OK, f"HK 정상 ({len(readings)}개 필드)", metrics
+        return OK, f"HK normal ({len(readings)} fields)", metrics
     return worst, "; ".join(issues), metrics

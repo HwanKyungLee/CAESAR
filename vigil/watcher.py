@@ -161,8 +161,8 @@ class Watcher:
             self._warn_duplicate_basenames(list(files))
             if len(files) > HUGE_TREE_FILES and not self.huge_tree:
                 self.huge_tree = len(files)
-                log.warning("감시 폴더에 %s 파일이 %d개 — raw 가 아닌 분석 산출물이 섞인 듯하다. "
-                            "전체 나열 %.1f s → %.0f s 마다만 한다. raw 폴더만 가리킬 것: %s",
+                log.warning("watch folder has %s %d files — analysis outputs (not raw) seem mixed in. "
+                            "Full listing took %.1f s → now only every %.0f s. Point it at the raw folder only: %s",
                             self.file_glob, len(files), dur, interval, self.watch_dir)
         else:
             for d in self._hot_dirs:
@@ -276,12 +276,12 @@ class Watcher:
                 self._warned_dupes.add(name)
                 if shown < 20:                        # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
                     shown += 1
-                    log.warning("같은 파일명이 %d곳에 있다 — 같은 스캔을 중복 수집한다: %s | %s",
+                    log.warning("same file name in %d places — the same scan is collected twice: %s | %s",
                                 len(group), name, " | ".join(group))
                 else:
                     hidden += 1
         if hidden:
-            log.warning("같은 파일명 중복 %d건 더(생략) — 감시 폴더를 raw 폴더로 좁힐 것", hidden)
+            log.warning("%d more duplicate file names (omitted) — narrow the watch folder to the raw folder", hidden)
 
 
     def poll(self) -> list:

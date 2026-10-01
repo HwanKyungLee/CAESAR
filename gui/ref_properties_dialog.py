@@ -135,7 +135,7 @@ class RefPropertiesTable(QWidget):
                 # 앵커한다. Limit은 항상 0에서 출발해 step_limit씩 걸어 들어가므로, 0에서 먼
                 # 실제 shift(예: 핫 -5.25px)를 쓰려면 범위가 0을 품어야 해 그만큼 느슨해졌다.
                 w_center = QLineEdit("0.0, 1.0" if mode != "Center" else str(val))
-                w_center.setPlaceholderText("중심, 반폭  (예: -5.25, 1.9)")
+                w_center.setPlaceholderText("center, half-width  (e.g. -5.25, 1.9)")
                 stack.addWidget(w_center)
 
                 # Set initial visible page based on the current mode

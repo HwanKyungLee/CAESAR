@@ -83,7 +83,7 @@ if __name__ == '__main__':
         _new = autoload_campaign_layouts()
         splash.step("layouts", f"{len(CAMPAIGN_LAYOUTS)} known ({len(_new)} from profiles)")
     except Exception as _e:   # noqa: BLE001
-        print(f"[main] 캠페인 레이아웃 자동등록 건너뜀: {_e}")
+        print(f"[main] skipped campaign layout auto-registration: {_e}")
         splash.step("layouts", f"{type(_e).__name__}", "fail")
 
     # 지난 세션에 남긴 사용자 설정 — 창이 같은 키로 다시 읽는다(gui/app_window.py).

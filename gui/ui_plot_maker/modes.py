@@ -56,7 +56,7 @@ class TimeSeriesMode(PlotMode):
         b_del = QPushButton("− Remove")
         b_c.clicked.connect(self._pick_color)
         b_s.clicked.connect(self._edit_style)
-        b_s.setToolTip("선 두께·점선/실선·마커 모양/크기")
+        b_s.setToolTip("Line width · dashed/solid · marker shape/size")
         b_n.clicked.connect(self._rename)
         b_del.clicked.connect(self._remove)
         row2.addWidget(b_c)
@@ -69,15 +69,15 @@ class TimeSeriesMode(PlotMode):
         from PyQt6.QtCore import QTime
         nrow = QHBoxLayout()
         self._chk_night = QCheckBox("Night")
-        self._chk_night.setToolTip("저녁~새벽 구간 음영(일별). 시각·색 지정 가능.\n"
-                                   "시간축이 있을 때만 적용.")
+        self._chk_night.setToolTip("Shade evening-to-dawn hours (daily). Times and color are configurable.\n"
+                                   "Applies only with a time axis.")
         self._chk_night.toggled.connect(lambda *_: self.render())
         self._te_ns = QTimeEdit(QTime(*self._night_start)); self._te_ns.setDisplayFormat("HH:mm")
         self._te_ne = QTimeEdit(QTime(*self._night_end)); self._te_ne.setDisplayFormat("HH:mm")
         for te in (self._te_ns, self._te_ne):
             te.setFixedWidth(62)
             te.timeChanged.connect(lambda *_: self._sync_night())
-        b_nc = QPushButton("Col"); b_nc.setFixedWidth(30); b_nc.setToolTip("음영 색")
+        b_nc = QPushButton("Col"); b_nc.setFixedWidth(30); b_nc.setToolTip("Shading color")
         b_nc.clicked.connect(self._pick_night_color)
         nrow.addWidget(self._chk_night)
         nrow.addWidget(self._te_ns); nrow.addWidget(QLabel("→")); nrow.addWidget(self._te_ne)
@@ -85,23 +85,23 @@ class TimeSeriesMode(PlotMode):
         nrow.addStretch(1)
         lay.addLayout(nrow)
         self._chk_err = QCheckBox("± Error band (1σ)")
-        self._chk_err.setToolTip("각 시리즈에 fit 1σ 오차({gas}_Error) 음영밴드.\n"
-                                 "오차 컬럼이 있는 시리즈에만 표시.")
+        self._chk_err.setToolTip("Shaded band of the fit 1σ error ({gas}_Error) for each series.\n"
+                                 "Shown only for series that have an error column.")
         self._chk_err.toggled.connect(lambda *_: self.render())
         lay.addWidget(self._chk_err)
         self._chk_split = QCheckBox("Split into panels (Publish)")
-        self._chk_split.setToolTip("내보내기( Publish) 시 시리즈를 종별 패널(세로 스택, x축 공유)로\n"
-                                   "분리. 화면 미리보기는 겹쳐 표시(논문그림용).")
+        self._chk_split.setToolTip("On export (Publish), split series into per-species panels (vertical stack, shared x).\n"
+                                   "The on-screen preview stays overlaid. (For paper figures.)")
         self._chk_split.toggled.connect(
-            lambda on: self.host.set_status("Split panels: Publish 시 적용됨" if on else ""))
+            lambda on: self.host.set_status("Split panels: applied on Publish" if on else ""))
         lay.addWidget(self._chk_split)
         from PyQt6.QtWidgets import QAbstractItemView
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self._list.setToolTip("선반에서 컬럼 선택 후 [+ Left/Right Y].\n"
-                              "체크박스 = 보이기/숨기기(삭제 아님),\n"
-                              "더블클릭 = 좌↔우 전환, 우클릭 = 빠른 메뉴,\n"
-                              "드래그 = 그리는 순서(범례·겹침순서) 변경, Delete = 제거.")
+        self._list.setToolTip("Select columns on the shelf, then [+ Left/Right Y].\n"
+                              "Checkbox = show/hide (not delete),\n"
+                              "double-click = swap left↔right, right-click = quick menu,\n"
+                              "drag = change drawing order (legend/stacking), Delete = remove.")
         self._list.itemDoubleClicked.connect(self._toggle_axis)
         self._list.itemChanged.connect(self._on_item_checked)
         self._list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -192,7 +192,7 @@ class TimeSeriesMode(PlotMode):
         self.render()
         if keep_undo:
             n = len(sel)
-            self.host.set_status(f"{n}개 시리즈 제거됨 — Ctrl+Z로 복원")
+            self.host.set_status(f"{n} series removed — Ctrl+Z to restore")
 
     def _toggle_axis(self, item):
         s = self._series_by_id(item.data(Qt.ItemDataRole.UserRole))
@@ -205,7 +205,7 @@ class TimeSeriesMode(PlotMode):
         from PyQt6.QtWidgets import QColorDialog
         sel = self._selected_series()
         if not sel:
-            self.host.set_status("색을 바꿀 시리즈를 목록에서 선택하세요.")
+            self.host.set_status("Select a series in the list to change its color.")
             return
         c = QColorDialog.getColor()
         if not c.isValid():
@@ -219,12 +219,12 @@ class TimeSeriesMode(PlotMode):
         from PyQt6.QtWidgets import QInputDialog
         sel = self._selected_series()
         if not sel:
-            self.host.set_status("이름을 바꿀 시리즈를 목록에서 선택하세요.")
+            self.host.set_status("Select a series in the list to rename it.")
             return
         s = sel[0]
         cur = s[3] or self._auto_name(s[0])
         text, ok = QInputDialog.getText(self._w, "Series name",
-                                        "범례 이름 (빈칸 = 자동):", text=cur)
+                                        "Legend name (blank = auto):", text=cur)
         if not ok:
             return
         s[3] = text.strip() or None
@@ -240,9 +240,9 @@ class TimeSeriesMode(PlotMode):
             disp = self._display(lab, name)
             st = self._style_of(lab)
             it = QListWidgetItem(f"[{axis}] {disp}")
-            it.setToolTip(f"{lab}\n체크 해제 = 그림에서만 숨김(삭제 아님) · "
-                          f"드래그로 순서 변경 · Delete로 제거\n"
-                          f"그래프에서 선을 직접 클릭해도 스타일 창이 열립니다")
+            it.setToolTip(f"{lab}\nUncheck = hide from the plot only (not delete) · "
+                          f"drag to reorder · Delete to remove\n"
+                          f"Clicking a line in the plot also opens the style dialog")
             pix = QPixmap(14, 14); pix.fill(QColor(self._effective_color(lab, color, name)))
             it.setIcon(QIcon(pix))
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -369,9 +369,9 @@ class TimeSeriesMode(PlotMode):
 
     # 표현 방식(kind). 색·선스타일과 직교 — "무엇으로 그리나"만 고른다.
     KINDS = ["line", "marker", "step", "bar", "area", "band", "errorbar"]
-    _KIND_TIP = ("line=선 · marker=점만 · step=계단 · bar=막대 · area=0까지 채움\n"
-                 "band=**목록의 바로 다음 시리즈**와의 사이를 채움(순서는 드래그로 바꿈)\n"
-                 "errorbar=오차막대(캡). ± Error band 체크가 켜져 있어야 값이 있음")
+    _KIND_TIP = ("line = line · marker = points only · step = steps · bar = bars · area = fill to 0\n"
+                 "band = fill to the **next series in the list** (drag to reorder)\n"
+                 "errorbar = error bars (caps). Needs ± Error band checked to have values")
     _STYLE_DEFAULT = {"width": 2, "dash": "solid", "marker": "o", "msize": 3,
                       "kind": "line", "alpha": 1.0, "visible": True}
 
@@ -391,7 +391,7 @@ class TimeSeriesMode(PlotMode):
     def _edit_style(self):
         sel = self._selected_series()
         if not sel:
-            self.host.set_status("스타일을 바꿀 시리즈를 목록에서 선택하세요.")
+            self.host.set_status("Select a series in the list to change its style.")
             return
         lab = sel[0][0]
         st0 = self._style_of(lab)
@@ -408,11 +408,11 @@ class TimeSeriesMode(PlotMode):
         cb_m = QComboBox()
         cb_m.addItems(["none", "o", "s", "t", "t1", "d", "+", "x", "star", "p", "h"])
         cb_m.setCurrentText(st0["marker"])
-        cb_m.setToolTip("o=원 s=사각 t=세모 t1=역세모 d=마름모 +=십자 x=엑스 star=별 p=오각 h=육각")
+        cb_m.setToolTip("o=circle s=square t=triangle t1=inverted triangle d=diamond +=plus x=cross star=star p=pentagon h=hexagon")
         sp_m = QSpinBox(); sp_m.setRange(2, 20); sp_m.setValue(st0["msize"])
         sp_a = QDoubleSpinBox(); sp_a.setRange(0.05, 1.0); sp_a.setSingleStep(0.05)
         sp_a.setDecimals(2); sp_a.setValue(st0["alpha"])
-        sp_a.setToolTip("불투명도(1=불투명). 시리즈가 겹쳐 뒤가 안 보일 때 낮춤.")
+        sp_a.setToolTip("Opacity (1 = opaque). Lower it when overlapping series hide each other.")
         form.addRow("Type", cb_k)
         form.addRow("Line width", sp_w)
         form.addRow("Line style", cb_d)
@@ -820,7 +820,7 @@ class ScatterMode(PlotMode):
         lay.addWidget(QLabel("Y:"))
         lay.addWidget(self._cy)
         self._chk_ct = QCheckBox("Color by time")
-        self._chk_ct.setToolTip("점을 시각 순서대로 색칠(시간축 있을 때)")
+        self._chk_ct.setToolTip("Color points in time order (when there is a time axis)")
         self._chk_ct.toggled.connect(lambda *_: self.render())
         lay.addWidget(self._chk_ct)
         lay.addStretch(1)
@@ -973,7 +973,7 @@ class AllanMode(PlotMode):
         self._c.currentIndexChanged.connect(lambda *_: self.render())
         lay.addWidget(QLabel("Signal:"))
         lay.addWidget(self._c)
-        lay.addWidget(QLabel("최적 적분시간 = 곡선 최저점.\n−½ 기울기 = 백색잡음(평균화 이득)."))
+        lay.addWidget(QLabel("Optimal integration time = curve minimum.\n−½ slope = white noise (averaging gain)."))
         lay.addStretch(1)
         self.on_shelf_changed()
         return w
@@ -1097,15 +1097,15 @@ class HeatmapMode(PlotMode):
         w, lay, is_new = self._new_options_widget()
         if not is_new:
             return w
-        lay.addWidget(QLabel("선반에서 컬럼 2개 이상 선택\n(없으면 전체 컬럼 사용).\n"
-                             "시간축이 있으면 첫 컬럼 시각격자에 맞춰 정렬."))
+        lay.addWidget(QLabel("Select 2+ columns on the shelf\n(none = use all columns).\n"
+                             "With a time axis, aligned to the first column's time grid."))
         row = QHBoxLayout()
         b_pin = QPushButton("Pin selection")
-        b_pin.setToolTip("현재 트리에서 선택된 컬럼들을 고정 — 이후 트리 선택이 바뀌어도\n"
-                         "이 집합을 계속 사용하고, 설정 저장/불러오기에도 보존됨.")
+        b_pin.setToolTip("Pin the columns currently selected in the tree — this set stays in use even if\n"
+                         "the tree selection changes, and is kept by config save/load.")
         b_pin.clicked.connect(self._pin_selection)
         b_unpin = QPushButton("Unpin")
-        b_unpin.setToolTip("고정 해제 — 다시 트리 선택을 실시간으로 따라감.")
+        b_unpin.setToolTip("Unpin — follow the live tree selection again.")
         b_unpin.clicked.connect(self._unpin_selection)
         row.addWidget(b_pin); row.addWidget(b_unpin)
         lay.addLayout(row)
@@ -1121,13 +1121,13 @@ class HeatmapMode(PlotMode):
 
     def _update_pin_label(self):
         if hasattr(self, "_lbl_pin"):
-            self._lbl_pin.setText(f"{len(self._pinned_cols)}개 컬럼 핀됨"
-                                  if self._pinned_cols else "핀 없음 (트리 선택 사용)")
+            self._lbl_pin.setText(f"{len(self._pinned_cols)} column(s) pinned"
+                                  if self._pinned_cols else "No pin (using tree selection)")
 
     def _pin_selection(self):
         cols = list(dict.fromkeys(self.host.selected_columns()))
         if not cols:
-            self.host.set_status("핀할 컬럼이 없습니다 — Data 탭에서 트리 선택 후 다시 시도.")
+            self.host.set_status("No columns to pin — select some in the Data tab tree and try again.")
             return
         self._pinned_cols = cols
         self._update_pin_label()
@@ -1201,7 +1201,7 @@ class HeatmapMode(PlotMode):
         host.set_time_axis(False)
         mat = self._matrix()
         if mat is None:
-            host.set_status("상관 히트맵: 컬럼 2개 이상 필요.")
+            host.set_status("Correlation heatmap: needs 2+ columns.")
             host.p1.setTitle("Correlation heatmap — need ≥2 columns")
             return
         names, C = mat
@@ -1293,7 +1293,7 @@ class HistogramMode(PlotMode):
         self._bins.valueChanged.connect(lambda *_: self.render())
         lay.addWidget(self._bins)
         self._chk_lod = QCheckBox("Show ≈3σ (LOD)")
-        self._chk_lod.setToolTip("평균+3σ 위치에 검출한계 추정선")
+        self._chk_lod.setToolTip("Estimated detection-limit line at mean + 3σ")
         self._chk_lod.toggled.connect(lambda *_: self.render())
         lay.addWidget(self._chk_lod)
         lay.addStretch(1)
@@ -1431,15 +1431,15 @@ class DiurnalMode(PlotMode):
         self._shift = QSpinBox()
         self._shift.setRange(-12, 14)
         self._shift.setValue(0)
-        self._shift.setToolTip("로컬 시각에 더할 시간(예: 데이터가 UTC면 KST=+9)")
+        self._shift.setToolTip("Hours to add to local time (e.g. UTC data → KST = +9)")
         self._shift.valueChanged.connect(lambda *_: self.render())
         lay.addWidget(self._shift)
-        self._chk_wrap = QCheckBox("하루 닫기 (024h)")
-        self._chk_wrap.setToolTip("0시 값을 24시에 복제해 하루 주기를 닫음 → 선이 오른쪽 끝까지\n"
-                                  "이어져 '23~24시 빈 곳' 착시 제거. (데이터는 그대로 0–23시 24개)")
+        self._chk_wrap = QCheckBox("Close day (0–24 h)")
+        self._chk_wrap.setToolTip("Copy the 0 h value to 24 h to close the daily cycle → the line reaches the right edge,\n"
+                                  "removing the false '23–24 h gap'. (Data unchanged: 24 values, 0–23 h)")
         self._chk_wrap.toggled.connect(lambda *_: self.render())
         lay.addWidget(self._chk_wrap)
-        lay.addWidget(QLabel("선 = 중앙값/평균,\n밴드 = 25–75 백분위수."))
+        lay.addWidget(QLabel("Line = median/mean,\nband = 25–75th percentile."))
         lay.addStretch(1)
         self.on_shelf_changed()
         return w
@@ -1527,7 +1527,7 @@ class DiurnalMode(PlotMode):
         host.set_time_axis(False)
         out = self._resolve_specs()
         if out is None:
-            host.set_status("시간축이 있는 컬럼을 고르세요.")
+            host.set_status("Pick a column with a time axis.")
             host.p1.setTitle("Diurnal — needs a time axis")
             return
         specs, col, cnt = out

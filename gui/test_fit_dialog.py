@@ -207,7 +207,7 @@ def _format_v2_plan(plan: dict) -> str:
             f"<p><b>Mission:</b> {plan.get('mission_id', '?')}<br>"
             f"<b>Candidates:</b> {len(plan.get('candidates', []))}<br>"
             f"<b>Plan hash:</b> {plan.get('plan_hash', '?')}</p>"
-            "<p>이 계획은 후보 범위만 고정합니다. 실제 피팅/추천/Apply를 수행하지 않습니다.</p>")
+            "<p>This plan only freezes candidate ranges. It does not run any actual fitting, recommendation, or Apply.</p>")
 
 
 def _format_v2_recommendation(recommendation: dict) -> str:
@@ -216,11 +216,11 @@ def _format_v2_recommendation(recommendation: dict) -> str:
     status = recommendation.get("status")
     if status not in {"MISSION_RECOMMENDED", "PROVISIONAL", "ABSTAIN"}:
         raise ValueError("unknown V2 recommendation status")
-    candidate = recommendation.get("candidate_id") or "없음"
+    candidate = recommendation.get("candidate_id") or "none"
     return (f"<h3>V2 recommendation: {status}</h3>"
             f"<p><b>Candidate:</b> {candidate}<br><b>Scope:</b> {recommendation.get('scope', '?')}</p>"
-            "<p style='color:#C62828; font-weight:bold;'>새 FitSet 저장은 별도 Export 버튼을 눌러야 하며, "
-            "현재 FitSet·채널 설정은 자동 변경하지 않습니다.</p>")
+            "<p style='color:#C62828; font-weight:bold;'>Saving a new FitSet requires the separate Export button; "
+            "the current FitSet and channel settings are not changed automatically.</p>")
 
 
 class _ExplorerBatchWorker(QThread):
@@ -297,7 +297,7 @@ class _TestFitOptimizerWorker(QThread):
 
     def _run_inner(self):
         TOTAL = 9
-        self.progress.emit(0, TOTAL, "표본 스캔 로딩…")
+        self.progress.emit(0, TOTAL, "Loading sample scans…")
 
         # ── 24개 균등표본(파일당 첫 행) + 최대 40개 연속표본(첫 파일들에서 연속 행) ──
         n_files = len(self.files)
@@ -316,7 +316,7 @@ class _TestFitOptimizerWorker(QThread):
             alpha, T_C, P_mbar = rows[0]
             scans.append((wave, alpha, T_C, P_mbar))
         if not scans:
-            self.finished.emit({"error": "표본 스캔을 하나도 읽지 못했습니다(알파 파일 형식 확인)."})
+            self.finished.emit({"error": "Could not read any sample scans (check the alpha file format)."})
             return
 
         consec = []
@@ -331,8 +331,8 @@ class _TestFitOptimizerWorker(QThread):
 
         px_min, px_max = _resolve_px_bounds(self.px_unit, self.px_lo, self.px_hi, wave_ref, px_start)
         if px_max - px_min < 10:
-            self.finished.emit({"error": f"핏창이 너무 좁습니다(px {px_min}-{px_max}) — "
-                                         "현재 채널의 fit range 설정을 확인하세요."})
+            self.finished.emit({"error": f"Fit window too narrow (px {px_min}-{px_max}) — "
+                                         "check the current channel's fit range setting."})
             return
 
         eng, rp, target = self.eng, self.ref_props, self.target
@@ -343,11 +343,11 @@ class _TestFitOptimizerWorker(QThread):
         # 이 알파 파일 로컬 도메인이라 별도로 변환해서 넘긴다(_alpha_px_to_engine_px 참조).
         eng_px_min, eng_px_max = _alpha_px_to_engine_px(wave_ref, px_min, px_max, eng)
 
-        self.progress.emit(1, TOTAL, "기준선 평가…")
+        self.progress.emit(1, TOTAL, "Evaluating baseline…")
         base = PO.evaluate(scans, eng, fitter, rp, px_min, px_max, poly0, step_limit,
                            target, allow_negative_gas=self.allow_negative_gas)
 
-        self.progress.emit(2, TOTAL, "다항식 차수 탐색… (차수마다 shift 재탐색, 가장 오래 걸리는 단계)")
+        self.progress.emit(2, TOTAL, "Searching polynomial degree… (re-searches shift per degree; slowest step)")
         POLYS = [2, 3, 4, 5, 6, 8]
         rec_poly, ladder = PO.optimize_poly_joint(scans, eng, fitter, rp, px_min, px_max,
                                                   POLYS, step_limit, target,
@@ -355,7 +355,7 @@ class _TestFitOptimizerWorker(QThread):
                                                   allow_negative_gas=self.allow_negative_gas)
         poly_for_rest = rec_poly if rec_poly is not None else poly0
 
-        self.progress.emit(3, TOTAL, "Shift 범위 추천…")
+        self.progress.emit(3, TOTAL, "Recommending shift range…")
         sh = PO.recommend_shift(scans, eng, fitter, rp, px_min, px_max, poly_for_rest,
                                 target, allow_negative_gas=self.allow_negative_gas)
         # squeeze/step_limit/link/health는 shift 추천 **이전**의 stale 값(예: 경계에 잘린
@@ -363,20 +363,20 @@ class _TestFitOptimizerWorker(QThread):
         # 전부 틀렸을지 모르는 shift 위에서 평가되어 자기 결과도 같이 오염된다.
         rp_after_shift = _rp_with_recommended_shift(rp, target, sh)
 
-        self.progress.emit(4, TOTAL, "Squeeze 범위 추천…")
+        self.progress.emit(4, TOTAL, "Recommending squeeze range…")
         sq = PO.recommend_squeeze(scans, eng, fitter, rp_after_shift, px_min, px_max, poly_for_rest,
                                   target, step_limit=step_limit,
                                   allow_negative_gas=self.allow_negative_gas)
 
-        self.progress.emit(5, TOTAL, "step_limit 추천…")
+        self.progress.emit(5, TOTAL, "Recommending step_limit…")
         if consec:
             st = PO.recommend_step_limit(consec, eng, fitter, rp_after_shift, px_min, px_max,
                                          poly_for_rest, target,
                                          allow_negative_gas=self.allow_negative_gas)
         else:
-            st = dict(value=None, reason="연속 스캔 표본 부족(파일이 1개뿐이거나 행이 없음)")
+            st = dict(value=None, reason="Not enough consecutive scans (only one file, or no rows)")
 
-        self.progress.emit(6, TOTAL, "보조 레퍼런스 Link/Independent 판정…")
+        self.progress.emit(6, TOTAL, "Deciding Link/Independent for secondary references…")
         links = []
         for g in eng.gas_list:
             if g == target:
@@ -387,7 +387,7 @@ class _TestFitOptimizerWorker(QThread):
                 target=target, step_limit=step_limit,
                 eng_px_min=eng_px_min, eng_px_max=eng_px_max))
 
-        self.progress.emit(7, TOTAL, "물리 건전성 점검(상수종)…")
+        self.progress.emit(7, TOTAL, "Checking physical health (constant species)…")
         try:
             health = FP.fitted_amount_health(scans, eng, fitter, rp_after_shift, px_min, px_max,
                                              poly_for_rest, step_limit, target=target,
@@ -396,7 +396,7 @@ class _TestFitOptimizerWorker(QThread):
             health = {"error": str(e)}
         has_theoretical_anchor = FP.theoretical_amount(target, scans[0][2], scans[0][3]) is not None
 
-        self.progress.emit(8, TOTAL, "조립 및 검증…")
+        self.progress.emit(8, TOTAL, "Assembling and validating…")
         proposed_ref_props = _assemble_ref_props(rp, eng.gas_list, target, sh, sq, links)
         proposed_step_limit = float(st["value"]) if st.get("value") else None
         cfg_check = {
@@ -406,7 +406,7 @@ class _TestFitOptimizerWorker(QThread):
         }
         validate_problems = validate_fitset(cfg_check, target)
 
-        self.progress.emit(TOTAL, TOTAL, "완료")
+        self.progress.emit(TOTAL, TOTAL, "Done")
         self.finished.emit({
             "base": base, "poly": {"rec": rec_poly, "ladder": ladder},
             "shift": sh, "squeeze": sq, "step_limit": st, "secondary": links,
@@ -435,11 +435,11 @@ def _format_explorer_review(review: dict) -> str:
 
     def _summary(label: str, value: dict | None) -> str:
         if value is None:
-            return f"<b>{label}:</b> 없음"
+            return f"<b>{label}:</b> none"
         needed = ("candidate_id", "attempts", "boundary_attempts", "median_ppb", "seed_max_delta_ppb")
         if not isinstance(value, dict) or any(key not in value for key in needed):
             raise ValueError(f"{label} summary is incomplete")
-        return (f"<b>{label}:</b> 후보 {value['candidate_id']} · {value['attempts']} attempts · "
+        return (f"<b>{label}:</b> candidate {value['candidate_id']} · {value['attempts']} attempts · "
                 f"median {float(value['median_ppb']):.4g} ppb · boundary "
                 f"{value['boundary_attempts']} · seed Δmax "
                 f"{float(value['seed_max_delta_ppb']):.3g} ppb")
@@ -454,14 +454,14 @@ def _format_explorer_review(review: dict) -> str:
     relative_html = ("<p><b>Session-relative validation:</b> " +
                      ", ".join(f"{item.get('file', '?')} ({item.get('candidate_count', '?')} plateau)"
                                for item in session_relative) +
-                     " — 절대농도 보정에는 사용하지 않음.</p>") if session_relative else ""
+                     " — not used for absolute concentration correction.</p>") if session_relative else ""
     return (f"<h3>Explorer verdict: {verdict}</h3>"
             f"<p><b>Reason:</b> {reason}</p>"
             f"<p>{_summary('Stage 2', review.get('stage2'))}<br>"
             f"{_summary('Holdout', review.get('holdout'))}</p>{relative_html}"
             "<p style='color:#C62828; font-weight:bold;'>"
-            "이 카드는 증거를 표시할 뿐이며 현재 FitSet·채널 설정을 자동 변경하지 않습니다. "
-            "현재 데이터가 이 보고서의 mission/data와 일치하는지는 사용자가 확인해야 합니다.</p>")
+            "This card only displays evidence; it does not change the current FitSet or channel settings automatically. "
+            "You must confirm that the current data matches this report's mission/data.</p>")
 
 
 class TestFitDialog(QDialog):
@@ -568,7 +568,7 @@ class TestFitDialog(QDialog):
             # 계산되는 기하학적 퇴화)은 서로 다른 원인이라 마크를 분리한다 — 둘 다 나쁘면 구조적
             # 문제, |ac1|만 나쁘면 탐색 문제일 가능성이 높다는 진단 힌트가 된다.
             collinear = np.isfinite(multi_r) and multi_r > PO.POLY_COLLIN_R_MAX
-            marks = ("퇴화?" if degenerate else "") + ("공선성?" if collinear else "")
+            marks = ("degenerate?" if degenerate else "") + ("collinear?" if collinear else "")
             mark = f" {marks}" if marks else ("" if r["poly"] == rec_poly else "")
             style = "color:#E65100;font-weight:bold" if (degenerate or collinear) else (
                 "font-weight:bold" if r["poly"] == rec_poly else "")
@@ -659,12 +659,12 @@ class TestFitDialog(QDialog):
         degenerate_all = np.isfinite(best_ac1) and best_ac1 > _AC1_DEGENERATE_THRESHOLD
         if degenerate_all:
             self._add_result_label(
-                "<b> 모든 poly 후보의 잔차가 백색이 아닙니다</b> (최선도 |ac1|="
-                f"{best_ac1:.2f}, 진짜 핏은 보통 0.03~0.08) — §16-B에서 확인된 "
-                "<b>퇴화 분기</b>(통계적으로만 좋아 보이는 가짜 해, 실제 O4 오염 사례에서도 "
-                "동일 패턴)와 일치합니다. 이 표본에서 나온 농도·shift 추천은 <b>신뢰하지 말 것</b> "
-                "— shift 탐색 범위를 좁히거나(현재 설정된 물리적으로 타당한 범위 근처로), 핏창/레퍼런스를 "
-                "재검토한 뒤 다시 시도하세요.", err=True)
+                "<b> Residuals are not white for any poly candidate</b> (best |ac1|="
+                f"{best_ac1:.2f}; a genuine fit is usually 0.03~0.08) — consistent with the "
+                "<b>degenerate branch</b> identified in §16-B (a spurious solution that only looks good statistically; "
+                "same pattern as the real O4 contamination case). <b>Do not trust</b> the concentration/shift "
+                "recommendations from this sample — narrow the shift search range (near the currently set, physically "
+                "plausible range) or review the fit window/references, then try again.", err=True)
 
         sh = result["shift"]
         cur_sh = self._app.ref_props.get(target, {})
@@ -705,8 +705,8 @@ class TestFitDialog(QDialog):
             self._add_result_label(f"<b>Physical health (coefficient CV):</b> {cv_txt}")
         if not result.get("has_theoretical_anchor", True):
             self._add_result_label(
-                f"<i>Note: {target}엔 절대량 물리 앵커가 없습니다(O4만 [O2]²로 있음) — 가장 강한 "
-                "T2 게이트(절대량 기각)는 여기서 작동하지 않고, 공선성·CV 게이트만 적용됩니다.</i>")
+                f"<i>Note: {target} has no absolute-amount physical anchor (only O4 has one, via [O2]²) — the strongest "
+                "T2 gate (absolute-amount rejection) does not apply here; only the collinearity and CV gates do.</i>")
 
         # poly 사다리 전체 판정(degenerate_all)뿐 아니라, 그 이후 shift/step_limit 각자의
         # 자체 판정(§16-B 문턱)도 있다 — poly는 통과했지만 shift 추천 자체가 퇴화 분기에
@@ -722,8 +722,8 @@ class TestFitDialog(QDialog):
                                        "the window) before applying.")
         elif any_degenerate:
             self._btn_apply.setEnabled(False)
-            self._btn_apply.setToolTip("잔차가 백색이 아님(|ac1| 높음) — 퇴화 분기로 의심되어 "
-                                       "Apply 비활성화. 위 경고 참조.")
+            self._btn_apply.setToolTip("Residuals are not white (high |ac1|) — suspected degenerate branch, "
+                                       "so Apply is disabled. See the warning above.")
         else:
             self._btn_apply.setEnabled(True)
             self._btn_apply.setToolTip("")
@@ -742,9 +742,9 @@ class TestFitDialog(QDialog):
         page = QWidget()
         lay = QVBoxLayout(page)
         note = QLabel(
-            "선택한 Explorer batch config로 실제 반복 피팅을 실행합니다. 사전검사 후에만 실행하고, "
-            "이 탭은 어떤 FitSet·채널 설정도 자동 적용하지 않습니다. config의 mission·채널·입력이 "
-            "현재 분석 의도와 맞는지는 사람이 확인해야 합니다.")
+            "Runs actual repeated fits with the selected Explorer batch config, only after a pre-check. "
+            "This tab never applies any FitSet or channel settings automatically. A person must confirm that the "
+            "config's mission, channels, and inputs match the current analysis intent.")
         note.setWordWrap(True)
         lay.addWidget(note)
 
@@ -776,8 +776,8 @@ class TestFitDialog(QDialog):
         self._explorer_run_edit.setPlaceholderText("Batch validation and execution output appears here.")
         lay.addWidget(self._explorer_run_edit, 1)
 
-        v2_note = QLabel("V2: 미션 JSON에서 후보 계획을 고정합니다. V2 plan은 아직 피팅을 실행하지 않으며, "
-                         "실제 반복 피팅/재개는 위의 기존 Batch Config 경로를 사용합니다.")
+        v2_note = QLabel("V2: freezes a candidate plan from a mission JSON. A V2 plan does not run any fitting yet; "
+                         "actual repeated fitting/resume uses the existing Batch Config path above.")
         v2_note.setWordWrap(True); v2_note.setStyleSheet("color:#455A64;")
         lay.addWidget(v2_note)
         v2_bar = QHBoxLayout()
@@ -792,7 +792,7 @@ class TestFitDialog(QDialog):
         v2_bar.addWidget(load_rec_btn)
         export_btn = QPushButton("Export V2 FitSet…")
         export_btn.setEnabled(False)
-        export_btn.setToolTip("V2 실행 증거와 설정 연결 검증이 완료될 때 활성화됩니다.")
+        export_btn.setToolTip("Enabled once V2 run evidence and settings linkage have been verified.")
         export_btn.clicked.connect(self._export_v2_fitset)
         v2_bar.addWidget(export_btn); v2_bar.addStretch(1)
         lay.addLayout(v2_bar)
@@ -812,8 +812,8 @@ class TestFitDialog(QDialog):
         self._explorer_review_edit.setReadOnly(True)
         self._explorer_review_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._explorer_review_edit.setHtml(
-            "<i>Review JSON을 불러오면 여기 표시됩니다. "
-            "tools/fit_explorer_review.py --output REPORT.json 으로 만들 수 있습니다.</i>")
+            "<i>Load a review JSON to show it here. "
+            "Create one with tools/fit_explorer_review.py --output REPORT.json.</i>")
         lay.addWidget(self._explorer_review_edit, 1)
         self._tabs.addTab(page, "Explorer")
 

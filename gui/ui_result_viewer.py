@@ -104,8 +104,8 @@ class ResultViewerWidget(QWidget):
         bar.addWidget(self._btn_folder)
         self._btn_dates = QPushButton("Dates")
         self._btn_dates.setToolTip(
-            "일별 핏 버킷({YYMMDD}/{neg}/{QC}/)에서 기간·시리즈를 골라 자동 머지해 열기.\n"
-            "머지 파일은 _derived/에 저장(캐시 재사용) — 원본 일별 파일은 그대로.")
+            "Pick a date range and series from daily fit buckets ({YYMMDD}/{neg}/{QC}/), auto-merge and open.\n"
+            "Merged files are saved in _derived/ (cached for reuse) — original daily files are untouched.")
         self._btn_dates.clicked.connect(self._open_by_date)
         bar.addWidget(self._btn_dates)
         bar.addWidget(QLabel("Type:"))
@@ -160,8 +160,8 @@ class ResultViewerWidget(QWidget):
         self._spin_shift.setSuffix(" h")
         self._spin_shift.setFixedWidth(70)
         self._spin_shift.setToolTip(
-            "그래프 표시만 +/-시간 이동(장비 시계 오차·타임존 불일치를 눈으로 맞춰볼 때).\n"
-            "Export/Merge/Stats/구간선택은 항상 원본(파일 그대로) 시각 기준 — 이 값에 영향받지 않음.")
+            "Shift the plot display only by +/- hours (to visually align instrument clock error or timezone mismatch).\n"
+            "Export/Merge/Stats/range selection always use the original file times — unaffected by this value.")
         self._spin_shift.valueChanged.connect(self._on_shift_changed)
         bar.addWidget(self._spin_shift)
 
@@ -179,9 +179,9 @@ class ResultViewerWidget(QWidget):
         fbar.addWidget(_grp("Analyze"))
         self._btn_calc = QPushButton("Calculator")
         self._btn_calc.setToolTip(
-            "데이터 계산기: 여러 결과 컬럼을 변수(A,B,C…)에 매핑하고 (A-B)/C 같은 수식으로\n"
-            "가공 → 미리보기 + CSV 저장. 교차 데이터셋은 시각격자에 자동 보간.\n"
-            "(NO2/PNs/ANs 채널차분도 여기서: PNs = PNsCh−Cold = 'B-A' 식으로)")
+            "Data calculator: map result columns to variables (A,B,C…) and combine them with expressions like (A-B)/C\n"
+            "→ preview + save CSV. Cross-dataset variables are auto-interpolated onto a time grid.\n"
+            "(NO2/PNs/ANs channel differences too: PNs = PNsCh−Cold = 'B-A')")
         self._btn_calc.clicked.connect(self._open_calculator)
         fbar.addWidget(self._btn_calc)
         self._btn_stats = QPushButton("Σ Stats")
@@ -189,8 +189,8 @@ class ResultViewerWidget(QWidget):
         self._btn_stats.clicked.connect(self._show_stats)
         fbar.addWidget(self._btn_stats)
         self._btn_to_pm = QPushButton("To Plot Maker")
-        self._btn_to_pm.setToolTip("선택(없으면 현재) 파일을 Plot Maker 선반으로 보내\n"
-                                   "겹쳐비교·Diurnal·산점도 등 자유 합성")
+        self._btn_to_pm.setToolTip("Send the selected (or current) files to the Plot Maker shelf\n"
+                                   "for overlays, diurnal plots, scatter plots, etc.")
         self._btn_to_pm.clicked.connect(self._to_plot_maker)
         fbar.addWidget(self._btn_to_pm)
 
@@ -1048,10 +1048,10 @@ class ResultViewerWidget(QWidget):
             r = refit_row(self._path, alpha_path, row_idx, saved_conc=saved,
                           saved_shift=_v("shift"), saved_squeeze=_v("squeeze"))
         except Exception as e:                      # noqa: BLE001
-            r = {"ok": False, "reason": "잔차 불가: %s" % e}
+            r = {"ok": False, "reason": "Residual unavailable: %s" % e}
         if not r.get("ok"):
             # 사유를 그대로 보여준다 — 빈 패널보다 "왜 없는지"가 중요하다.
-            self._pw_resid.setTitle(r.get("reason") or "잔차 불가")
+            self._pw_resid.setTitle(r.get("reason") or "Residual unavailable")
             return
 
         x = np.asarray(r["wave"], dtype=float)
@@ -1221,7 +1221,7 @@ class ResultViewerWidget(QWidget):
         """선택(없으면 현재) 결과파일을 Plot Maker 선반으로 보낸다."""
         paths = self._selected_paths()
         if not paths:
-            QMessageBox.information(self, "Plot Maker", "보낼 결과 파일을 먼저 여세요.")
+            QMessageBox.information(self, "Plot Maker", "Open a result file to send first.")
             return
         self.send_to_plotmaker.emit(paths)
 

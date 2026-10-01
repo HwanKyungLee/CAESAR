@@ -80,7 +80,7 @@ class IngestCursor:
         try:
             self._save()
         except OSError as e:
-            log.warning("커서 저장 실패(다음에 다시 시도): %s", e)
+            log.warning("cursor save failed (will retry next time): %s", e)
             return False
         self._dirty = False
         return True

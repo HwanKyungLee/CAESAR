@@ -719,7 +719,7 @@ class CavityTabMixin:
         files = sorted(glob.glob(os.path.join(folder, '**', '*_alpha_trace.dat'),
                                  recursive=True))
         if not files:
-            raise ValueError("폴더에 *_alpha_trace.dat 가 없습니다(하위폴더 포함 검색).")
+            raise ValueError("No *_alpha_trace.dat in folder (subfolders searched).")
         ref_wl, means = None, []
         for fp in files:
             try:
@@ -733,7 +733,7 @@ class CavityTabMixin:
             else:
                 means.append(np.interp(ref_wl, wl, a, left=np.nan, right=np.nan))
         if not means:
-            raise ValueError("읽을 수 있는 α 파일이 없습니다.")
+            raise ValueError("No readable α files.")
         alpha_mean = np.nanmean(np.array(means), axis=0)
         return ref_wl, alpha_mean, len(means)
 
@@ -770,7 +770,7 @@ class CavityTabMixin:
         if wave is not None and wave.size > 1:
             results.append(("wavecal", *HC.check_wavecal(wave)))
         else:
-            results.append(("wavecal", HC.SKIP, "웨이브칼 미로드 (Setup에서 로드)", {}))
+            results.append(("wavecal", HC.SKIP, "Wavecal not loaded (load it in Setup)", {}))
         gas_list = list(getattr(self.engine, 'gas_list', []) or [])
         if gas_list and wave is not None:
             refs = {}
@@ -783,7 +783,7 @@ class CavityTabMixin:
                         pass
             results.append(("references", *HC.check_references(refs, wl=wave)))
         else:
-            results.append(("references", HC.SKIP, "레퍼런스 미로드 (Setup에서 Lock)", {}))
+            results.append(("references", HC.SKIP, "References not loaded (Lock them in Setup)", {}))
         results.append(("rayleigh", *HC.check_rayleigh()))
         results.append(("R(t)", *HC.check_r(getattr(self, '_aqc_r_npz', None))))
         return results
@@ -797,7 +797,7 @@ class CavityTabMixin:
         files = sorted(glob.glob(os.path.join(folder, '**', '*_alpha_trace.dat'),
                                  recursive=True))
         if not files:
-            raise ValueError("폴더에 *_alpha_trace.dat 가 없습니다(하위폴더 포함).")
+            raise ValueError("No *_alpha_trace.dat in folder (including subfolders).")
         g_sum = g_cnt = g_min = g_max = wl_ref = None
         n_scans_total = 0
         per_file = []            # (name, n_scans, nan_frac, flat, mag)
@@ -982,7 +982,7 @@ class CavityTabMixin:
         data = getattr(self, '_aqc_plot_data', None)
         if not data:
             QMessageBox.information(self, "Pipeline Health",
-                "α 폴더를 지정하고 먼저  Run Pipeline Check를 실행하세요.")
+                "Choose an α folder and run Run Pipeline Check first.")
             return
         wl, mean, _lo, _hi = data
         lo_nm = float(self.spin_fit_start_nm.value())
@@ -992,8 +992,8 @@ class CavityTabMixin:
         m = np.isfinite(wl) & np.isfinite(mean) & (wl >= lo_nm) & (wl <= hi_nm)
         if not m.any():
             QMessageBox.information(self, "Pipeline Health",
-                f"핏범위 {lo_nm:.0f}~{hi_nm:.0f} nm 안에 데이터가 없습니다.\n"
-                "Setup의 fit start/end nm를 확인하세요.")
+                f"No data within the fit range {lo_nm:.0f}~{hi_nm:.0f} nm.\n"
+                "Check fit start/end nm in Setup.")
             return
         ys = mean[m]
         ylo, yhi = float(np.nanmin(ys)), float(np.nanmax(ys))

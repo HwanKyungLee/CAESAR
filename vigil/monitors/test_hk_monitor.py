@@ -113,7 +113,7 @@ def test_hk_missing():
     row[hot.hk.start_col + hot.hk.field("tempcell1").rel] = float("nan")
     status, msg, metrics = evaluate_hk(hot, row, phase="sampling")
     check("P2", status == P2, f"got {status}: {msg}")
-    check("메시지에 결측 언급", "결측" in msg, msg)
+    check("메시지에 결측 언급", "missing" in msg, msg)
 
 
 def test_hk_saturation():

@@ -1011,7 +1011,7 @@ def c_publish_fonts():
 @check("팔레트: Okabe-Ito 색각안전 배색")
 def c_okabe_ito():
     from gui.ui_plot_maker.widget import _CATEGORICAL
-    name = "Okabe-Ito (색각안전)"
+    name = "Okabe-Ito (colorblind-safe)"
     pal = _CATEGORICAL.get(name)
     if not pal or len(pal) != 8:
         return "FAIL", f"Okabe-Ito 팔레트가 없거나 8색이 아님: {pal}"
@@ -1029,7 +1029,7 @@ def c_okabe_ito():
     if got != want:
         return "FAIL", f"배색 불일치: {got[:4]}… (기대 {want[:4]}…)"
     # 계통색(단일 hue 진↔연) 경로가 안 깨졌나
-    w._apply_palette("파랑")
+    w._apply_palette("Blue")
     if ts._series[0][2] == pal[0]:
         return "FAIL", "계통색 팔레트가 Okabe-Ito 값을 그대로 둠(분기 오류)"
     return "PASS", f"8색 순서·순환 정확 · 콤보 노출 · 계통색 경로 무사"
@@ -1073,7 +1073,7 @@ def c_publish_preset_eps():
     w = _widget_with_fixture()
     ts = next(m for m in w._modes if m.key == "timeseries")
     ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None]); ts.render()
-    name = "논문 1컬럼 (8.3 cm)"
+    name = "Paper, 1 column (8.3 cm)"
     if name not in _PUBLISH_PRESETS:
         return "FAIL", f"프리셋 목록에 '{name}' 없음: {list(_PUBLISH_PRESETS)}"
     w._chk_autosize.setChecked(True)

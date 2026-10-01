@@ -77,10 +77,10 @@ class LampMonitor:
     def _evaluate(self, level: float, n_scans: int):
         metrics = {"I": level, "n_scans": n_scans, "n_history": len(self._history)}
         if not np.isfinite(level):
-            return P1, "램프 세기 산출 실패(NaN)", metrics
+            return P1, "lamp intensity computation failed (NaN)", metrics
         if len(self._history) < MIN_HISTORY_FOR_BASELINE:
             self._history.append(level)
-            return OK, (f"I={level:.0f} (기준선 축적 중 "
+            return OK, (f"I={level:.0f} (building baseline "
                         f"{len(self._history)}/{MIN_HISTORY_FOR_BASELINE})"), metrics
 
         hist = np.asarray(self._history, dtype=float)
@@ -91,11 +91,11 @@ class LampMonitor:
             self.warn_rel, ADAPT_FACTOR * float(np.percentile(np.abs(old / baseline - 1.0), ADAPT_PCTL)))
         metrics.update(baseline=baseline, rel=rel, warn_rel=warn)
         if baseline > 0 and level < self.dark_frac * baseline:
-            return P0, (f"램프 꺼짐/광경로 차단 의심 I={level:.0f} "
-                        f"(기준 {baseline:.0f}의 {level / baseline:.0%})"), metrics
+            return P0, (f"lamp off / light path blocked? I={level:.0f} "
+                        f"({level / baseline:.0%} of baseline {baseline:.0f})"), metrics
         self._history.append(level)
         if abs(rel) > self.alarm_rel:
-            return P1, f"램프 세기 계단 {rel:+.1%} (I={level:.0f}, 기준 {baseline:.0f})", metrics
+            return P1, f"lamp intensity step {rel:+.1%} (I={level:.0f}, baseline {baseline:.0f})", metrics
         if abs(rel) > warn:
-            return P2, f"램프 세기 변화 {rel:+.1%} (I={level:.0f}, 기준 {baseline:.0f})", metrics
+            return P2, f"lamp intensity change {rel:+.1%} (I={level:.0f}, baseline {baseline:.0f})", metrics
         return OK, f"I={level:.0f} ({rel:+.1%})", metrics

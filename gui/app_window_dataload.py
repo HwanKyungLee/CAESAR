@@ -79,7 +79,7 @@ class DataLoadMixin:
                         else:
                             _n_skip += 1
             if _n_skip:
-                self.status.setText(f"Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref 등)")
+                self.status.setText(f"Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref etc.)")
             # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지
             files = sorted(set(files), key=lambda f: (os.path.basename(f), f))
             if not files:
@@ -312,9 +312,9 @@ class DataLoadMixin:
             self._detected_channels = n
             ch_names = {1: "CH1", 2: "CH1+CH2", 3: "CH1+CH2+CH3"}
             ch_labels = {
-                1: "1채널  (Cold / single-cavity)",
-                2: "2채널  (Hot:  CH1 PNs 180°C  +  CH2 ANs 300°C)",
-                3: "3채널  (CH1 + CH2 + CH3)",
+                1: "1 channel  (Cold / single-cavity)",
+                2: "2 channels  (Hot:  CH1 PNs 180°C  +  CH2 ANs 300°C)",
+                3: "3 channels  (CH1 + CH2 + CH3)",
             }
             label = ch_labels.get(n, f"{n}CH")
             self.lbl_channel_info.setText(label)

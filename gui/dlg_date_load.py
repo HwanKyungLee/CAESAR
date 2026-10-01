@@ -147,7 +147,7 @@ class DateLoadDialog(QDialog):
         self._ed_base.editingFinished.connect(self._rescan)
         row.addWidget(self._ed_base, 1)
         b = QPushButton("...")
-        b.setToolTip("핏 버킷({핏config}/{YYMMDD}/{neg}/{QC}/ 또는 레거시 {YYMMDD}/...)이 있는 fitting 최상위 폴더")
+        b.setToolTip("Top-level fitting folder containing fit buckets ({fitconfig}/{YYMMDD}/{neg}/{QC}/ or legacy {YYMMDD}/...)")
         b.clicked.connect(self._browse)
         row.addWidget(b)
         v.addLayout(row)
@@ -198,7 +198,7 @@ class DateLoadDialog(QDialog):
         self._tree = scan_daily_tree(base)
         self._list.clear()
         if not self._tree:
-            self._lbl.setText("핏 버킷({핏config}/{YYMMDD}/{neg}/{QC}/*.dat 또는 레거시 {YYMMDD}/...)을 찾지 못했습니다 — 폴더를 확인하세요.")
+            self._lbl.setText("No fit buckets found ({fitconfig}/{YYMMDD}/{neg}/{QC}/*.dat or legacy {YYMMDD}/...) — check the folder.")
             return
         all_days = sorted({d for m in self._tree.values() for d in m})
         self._d0.setDate(_qdate(all_days[0]))
@@ -218,7 +218,7 @@ class DateLoadDialog(QDialog):
             it.setData(Qt.ItemDataRole.UserRole, key)
             self._list.addItem(it)
         self._lbl.setText(f"{len(self._tree)} series · {len(all_days)} day(s) available"
-                          "  — 체크한 시리즈를 기간으로 잘라 자동 머지합니다.")
+                          "  — checked series are trimmed to the date range and merged automatically.")
 
     def _toggle_all(self, on):
         st = Qt.CheckState.Checked if on else Qt.CheckState.Unchecked
@@ -235,7 +235,7 @@ class DateLoadDialog(QDialog):
                 for i in range(self._list.count())
                 if self._list.item(i).checkState() == Qt.CheckState.Checked]
         if not keys:
-            QMessageBox.information(self, "Load by date", "시리즈를 하나 이상 체크하세요.")
+            QMessageBox.information(self, "Load by date", "Check at least one series.")
             return
         paths, skipped, errors = [], [], []
         for key in keys:
@@ -246,14 +246,14 @@ class DateLoadDialog(QDialog):
                 continue
             (paths if p else skipped).append(p if p else key[1])
         if errors:
-            QMessageBox.warning(self, "Load by date", "머지 실패:\n" + "\n".join(errors))
+            QMessageBox.warning(self, "Load by date", "Merge failed:\n" + "\n".join(errors))
         if not paths:
             QMessageBox.information(self, "Load by date",
-                                    f"{d0}~{d1} 기간에 해당하는 파일이 없습니다.")
+                                    f"No files in the range {d0}~{d1}.")
             return
         if skipped:
             QMessageBox.information(self, "Load by date",
-                                    "기간 내 파일 없음(건너뜀): " + ", ".join(skipped))
+                                    "No files in range (skipped): " + ", ".join(skipped))
         dlg_dir("fitting_base", base)
         self.loaded_paths = paths
         self.accept()

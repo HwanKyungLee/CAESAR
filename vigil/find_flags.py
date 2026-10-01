@@ -92,16 +92,16 @@ def rows_around(transitions, context: int, only: set = None) -> set:
 
 
 def _fmt_hist(hist: dict) -> str:
-    return "  ".join(f"flag={k}:{v}행" for k, v in sorted(hist.items()))
+    return "  ".join(f"flag={k}:{v} rows" for k, v in sorted(hist.items()))
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="raw .dat flag 분포 조사 / 구간 추출")
-    ap.add_argument("target", help="raw .dat 파일 또는 폴더")
-    ap.add_argument("--extract", help="전환 지점 주변 행을 저장할 경로")
-    ap.add_argument("--context", type=int, default=2, help="전환 앞뒤 행 수 (기본 2)")
+    ap = argparse.ArgumentParser(description="Survey flag distribution in raw .dat / extract segments")
+    ap.add_argument("target", help="raw .dat file or folder")
+    ap.add_argument("--extract", help="path to save rows around flag transitions")
+    ap.add_argument("--context", type=int, default=2, help="rows before/after each transition (default 2)")
     ap.add_argument("--flag-col", type=int, default=DEFAULT_FLAG_COL)
-    ap.add_argument("--only", help="관심 flag 목록 (예: 500,510)")
+    ap.add_argument("--only", help="flags of interest (e.g. 500,510)")
     args = ap.parse_args(argv)
 
     only = {int(x) for x in args.only.split(",")} if args.only else None
@@ -109,51 +109,51 @@ def main(argv=None) -> int:
     if os.path.isdir(args.target):
         files = sorted(glob.glob(os.path.join(args.target, "*.dat")))
         if not files:
-            print(f"'{args.target}' 에 .dat 파일이 없습니다.")
+            print(f"No .dat files in '{args.target}'.")
             return 1
-        print(f"{len(files)}개 파일 조사 중...\n")
+        print(f"Scanning {len(files)} files...\n")
         interesting = []
         for p in files:
             r = scan_file(p, args.flag_col)
             others = {k: v for k, v in r["hist"].items() if k != 1}
-            mark = "  ★교정스캔 있음" if others else ""
-            print(f"  {os.path.basename(p):<40} {r['rows']:>6}행  {_fmt_hist(r['hist'])}{mark}")
+            mark = "  ★has calibration scan" if others else ""
+            print(f"  {os.path.basename(p):<40} {r['rows']:>6} rows  {_fmt_hist(r['hist'])}{mark}")
             if others:
                 interesting.append(p)
         print()
         if interesting:
-            print("★ 교정 스캔(ZA/He 등)이 든 파일:")
+            print("★ Files containing calibration scans (ZA/He etc.):")
             for p in interesting:
                 print(f"    {p}")
-            print("\n이 중 하나를 골라 --extract 로 뽑으세요:")
+            print("\nPick one of these and extract it with --extract:")
             print(f'    python vigil/find_flags.py "{interesting[0]}" --extract sample.dat')
         else:
-            print("대기 측정(flag=1)만 발견 — 이 폴더엔 교정 스캔이 없습니다.")
+            print("Only ambient measurement (flag=1) found — no calibration scans in this folder.")
         return 0
 
     if not os.path.isfile(args.target):
-        print(f"파일/폴더를 찾을 수 없습니다: {args.target}")
+        print(f"File/folder not found: {args.target}")
         return 1
 
     r = scan_file(args.target, args.flag_col)
-    print(f"파일: {r['path']}")
-    print(f"행 수: {r['rows']}")
-    print(f"flag 분포: {_fmt_hist(r['hist']) or '(없음)'}")
-    print(f"전환 지점: {len(r['transitions'])}개")
+    print(f"File: {r['path']}")
+    print(f"Rows: {r['rows']}")
+    print(f"Flag distribution: {_fmt_hist(r['hist']) or '(none)'}")
+    print(f"Transitions: {len(r['transitions'])}")
     for i, prev, new in r["transitions"][:20]:
-        print(f"    행 {i:>6}: {prev} → {new}")
+        print(f"    row {i:>6}: {prev} → {new}")
     if len(r["transitions"]) > 20:
-        print(f"    ... 외 {len(r['transitions']) - 20}개")
+        print(f"    ... and {len(r['transitions']) - 20} more")
 
     if args.extract:
         rows = rows_around(r["transitions"], args.context, only)
         if not rows:
             # 전환이 없으면 앞쪽 몇 행이라도 (구조 확인용)
             rows = set(range(0, min(5, r["rows"])))
-            print("\n전환 지점이 없어 앞 5행만 추출합니다.")
+            print("\nNo transitions — extracting the first 5 rows only.")
         n = extract_rows(args.target, rows, args.extract)
         size = os.path.getsize(args.extract)
-        print(f"\n추출 완료: {args.extract}  ({n}행, {size/1024/1024:.1f} MB)")
+        print(f"\nExtracted: {args.extract}  ({n} rows, {size/1024/1024:.1f} MB)")
     return 0
 
 

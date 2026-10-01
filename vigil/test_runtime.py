@@ -82,15 +82,15 @@ def test_tick_guard():
             check("예외가 밖으로 안 샌다", True)
         check("연속 실패 카운트", app._tick_errors == 2, f"{app._tick_errors}")
         check("배지 P1 '내부 오류'", dash.status and dash.status[-1][0] == P1
-              and "내부 오류" in dash.status[-1][1], f"{dash.status[-1:]}")
+              and "internal error" in dash.status[-1][1], f"{dash.status[-1:]}")
         recs = [json.loads(l) for l in open(os.path.join(d, "st", "status.jsonl"), encoding="utf-8")]
         check("상태 로그엔 연속 실패의 첫 번만", sum(r.get("kind") == "internal" for r in recs) == 1)
         app.watcher.poll = real_poll
         app.tick()
         check("복구되면 카운터 0", app._tick_errors == 0)
         recs = [json.loads(l) for l in open(os.path.join(d, "st", "status.jsonl"), encoding="utf-8")]
-        check("복구 기록", recs[-1]["status"] == OK and "복구" in recs[-1]["msg"] or
-              any("복구" in r["msg"] for r in recs))
+        check("복구 기록", recs[-1]["status"] == OK and "recovered" in recs[-1]["msg"] or
+              any("recovered" in r["msg"] for r in recs))
 
 
 def test_retire():

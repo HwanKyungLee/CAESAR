@@ -61,7 +61,7 @@ def test_baseline_accumulation():
     print("[2] 기준선 축적 중")
     lm = LampMonitor()
     r = _block(lm, 5000)
-    check("첫 블록 OK + 축적 문구", r[0] == OK and "축적" in r[1], r[1])
+    check("첫 블록 OK + 축적 문구", r[0] == OK and "building baseline" in r[1], r[1])
 
 
 def test_levels():

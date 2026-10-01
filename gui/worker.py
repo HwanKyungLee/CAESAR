@@ -538,8 +538,8 @@ class AnalysisWorker(QThread):
                 # print만 하면 사용자는 "결과 0건으로 정상 종료"로 본다.
                 # 재실행 여부를 사람이 정해야 하므로 반드시 화면에 남긴다.
                 self.status_msg.emit(
-                    f"ERROR: 병렬 핏 실패 — {type(e).__name__}: {e} "
-                    f"(결과 없음. 자세한 내용은 logs/session_*.log)")
+                    f"ERROR: parallel fit failed — {type(e).__name__}: {e} "
+                    f"(no results; see logs/session_*.log for details)")
                 self.finished.emit()
             return
         try: current_params = [ float(np.atleast_1d(p)[ 0 ]) for p in self.params ]
@@ -676,8 +676,8 @@ class AnalysisWorker(QThread):
                     if _n_sat:
                         # R 은 이후 모든 ambient 스캔에 곱해진다 — 조용히 넘기면 안 된다.
                         self.status_msg.emit(
-                            f"⚠ 포화 {_n_sat}px: ZA(flag {state_flag}) "
-                            f"{os.path.basename(file_path)}[{row_idx}] — R/I0 가 틀어질 수 있다")
+                            f"⚠ saturated {_n_sat}px: ZA(flag {state_flag}) "
+                            f"{os.path.basename(file_path)}[{row_idx}] — R/I0 may be biased")
                     self.result_ready.emit(result, i)
                     continue
 
@@ -697,8 +697,8 @@ class AnalysisWorker(QThread):
                     if _n_sat:
                         # 실측 유병률이 가장 높은 자리다(핫 flag510 21.4 %).
                         self.status_msg.emit(
-                            f"⚠ 포화 {_n_sat}px: He(flag {state_flag}) "
-                            f"{os.path.basename(file_path)}[{row_idx}] — R 이 틀어질 수 있다")
+                            f"⚠ saturated {_n_sat}px: He(flag {state_flag}) "
+                            f"{os.path.basename(file_path)}[{row_idx}] — R may be biased")
                     self.result_ready.emit(result, i)
                     continue
 
@@ -892,7 +892,7 @@ class AnalysisWorker(QThread):
                         if _n_masked > 0.05 * len(weights):
                             # 핏창의 5%를 넘으면 그 스캔의 농도는 남은 픽셀만으로 나온 것이다.
                             self.status_msg.emit(
-                                f"⚠ I≤0 마스킹 {_n_masked}/{len(weights)}px "
+                                f"⚠ I≤0 masked {_n_masked}/{len(weights)}px "
                                 f"({100.0 * _n_masked / len(weights):.1f}%) — "
                                 f"{os.path.basename(file_path)}[{row_idx}]")
 
@@ -1422,8 +1422,8 @@ class AnalysisWorker(QThread):
                         except Exception as e:
                             print(f"[ParallelFit] chunk error: {e}")
                             self.status_msg.emit(
-                                f"⚠ 청크 핏 실패 — {type(e).__name__}: {e} "
-                                f"(해당 스캔들은 결과에서 빠진다)")
+                                f"⚠ chunk fit failed — {type(e).__name__}: {e} "
+                                f"(those scans are dropped from the results)")
                             # 빠진 인덱스를 Skip으로 메워 emit이 막히지 않게(데이터 유실
                             # 대신 명시적 Skip 표시). 결과 dict 모양은 기존 Skip과 동일.
                             for (gi, _fp, _ridx) in fut_body.get(fut, ()):
@@ -1724,7 +1724,7 @@ def _reread_amb_plain(entries, spool_path, row_bytes, n_pix):
         # 에러가 없는 상태를 만들면 안 된다. 예외는 그 함수가 이미 붙잡아
         # (fp, None, 0, "ExcType: ...")로 보고한다.
         raise RuntimeError(
-            f"ambient 스풀 재읽기 실패 (seq {s0}..{s1}, {cnt}행): "
+            f"ambient spool re-read failed (seq {s0}..{s1}, {cnt} rows): "
             f"{type(e).__name__}: {e}") from e
     fp = entries[0][6] if len(entries[0]) > 6 else None   # 미사용(호환용) — 실제 fp는 호출부가 앎
     out = []
@@ -2465,9 +2465,9 @@ class AlphaExportWorker(QThread):
 
         if n_purge_skipped:
             self.status_msg.emit(
-                f"[purge settle] 교정 직후 {self.purge_settle_sec:.0f}초 ambient "
-                f"{n_purge_skipped}/{global_idx} 스캔 제외 — 캐비티에 ZA/He 가 남아 있어"
-                f" 농도가 1/4로 찍히던 구간이다 (raw 는 그대로, 헤더에 기록됨).")
+                f"[purge settle] excluded ambient scans within {self.purge_settle_sec:.0f} s after calibration: "
+                f"{n_purge_skipped}/{global_idx} — residual ZA/He in the cavity"
+                f" made concentrations read ~1/4 here (raw untouched, recorded in header).")
 
         if n_default_tp:
             self.status_msg.emit(
@@ -2478,13 +2478,13 @@ class AlphaExportWorker(QThread):
         # 포화 보고 — ZA/He 를 먼저, 더 세게. R/I0 를 거쳐 전 구간으로 번지기 때문이다.
         if n_sat_cal:
             self.status_msg.emit(
-                f"[WARN] CCD 포화: ZA/He 교정 스캔 {n_sat_cal}개 — 이 스캔들은 블록평균을"
-                f" 거쳐 R/I0 가 되므로 **이후 ambient α 전체**가 영향받을 수 있다"
-                f" (문턱 {SATURATION_ADC_MAX:.0f} ADC). 해당 구간 R 트렌드를 확인할 것.")
+                f"[WARN] CCD saturation: {n_sat_cal} ZA/He calibration scan(s) — these are block-averaged"
+                f" into R/I0, so **all subsequent ambient α** may be affected"
+                f" (threshold {SATURATION_ADC_MAX:.0f} ADC). Check the R trend for this period.")
         if n_sat_amb:
             self.status_msg.emit(
-                f"[WARN] CCD 포화: ambient 스캔 {n_sat_amb}/{global_idx}개 — 포화 픽셀은"
-                f" 흡수를 과소평가한다 (문턱 {SATURATION_ADC_MAX:.0f} ADC).")
+                f"[WARN] CCD saturation: {n_sat_amb}/{global_idx} ambient scan(s) — saturated pixels"
+                f" underestimate absorption (threshold {SATURATION_ADC_MAX:.0f} ADC).")
 
         # ── Block-average each ZA / He injection into one clean spectrum ──────
         # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.
@@ -2523,9 +2523,9 @@ class AlphaExportWorker(QThread):
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
         if n_za_drop or n_he_drop:
             self.status_msg.emit(
-                f"[I0 settle] 블록 선두 과도구간 제외: ZA {n_za_drop}/{n_za_raw} · "
-                f"He {n_he_drop}/{n_he_raw} 스캔 — 가스 전환 직후 캐비티가 아직 "
-                f"채워지는 구간이다 (raw 는 그대로, 헤더에 기록됨)."
+                f"[I0 settle] excluded block-leading transients: ZA {n_za_drop}/{n_za_raw} · "
+                f"He {n_he_drop}/{n_he_raw} scans — the cavity is still filling "
+                f"right after a gas switch (raw untouched, recorded in header)."
             )
 
         # §6.3 저광량 I0 knot 게이트. 기본 frac=0 → 한 블록도 안 빠진다(무변경).
@@ -2535,8 +2535,8 @@ class AlphaExportWorker(QThread):
         if _ll:
             if len(za_gidx) - len(_ll) < 2:
                 self.status_msg.emit(
-                    f"[I0 저광량] 게이트가 knot 을 {len(_ll)}/{len(za_gidx)}개 버리려 한다 "
-                    f"— 2개 미만이 남아 **적용하지 않는다**. frac 을 낮춰라.")
+                    f"[I0 low-light] gate would drop {len(_ll)}/{len(za_gidx)} knots "
+                    f"— fewer than 2 would remain, so it is **not applied**. Lower frac.")
             else:
                 n_ll_drop = len(_ll)
                 _keep = [i for i in range(len(za_gidx)) if i not in _ll]
@@ -2546,9 +2546,9 @@ class AlphaExportWorker(QThread):
                 za_t_list = [za_t_list[i] for i in _keep]
                 za_p_list = [za_p_list[i] for i in _keep]
                 self.status_msg.emit(
-                    f"[I0 저광량] ZA knot {n_ll_drop}/{n_ll_drop + len(_keep)}개 제외 "
-                    f"(핏창 중앙 카운트 < 블록중앙값의 {self.i0_low_light_frac:g}배) — "
-                    f"raw 는 그대로, 헤더에 기록됨.")
+                    f"[I0 low-light] excluded {n_ll_drop}/{n_ll_drop + len(_keep)} ZA knots "
+                    f"(fit-window center counts < {self.i0_low_light_frac:g}× block median) — "
+                    f"raw untouched, recorded in header.")
 
         # 강도 보정(dark·offset·stray) — 블록평균 후 한 번만. RUN 경로와 동일 물리.
         # 기본값(scale=1·offset=None·ε=0)에선 기존 'I−dark'와 byte-동일(무회귀).
@@ -2637,8 +2637,8 @@ class AlphaExportWorker(QThread):
                 # 만들어진다. 물리적으로 다른 처리인데 결과만 보면 구분이 안 된다.
                 _RC = None
                 self.status_msg.emit(
-                    f"[R(t)] ⚠ reflectance_calc 임포트 실패 ({type(_e_rc).__name__}: "
-                    f"{_e_rc}) — ZA 블록별 R(t) 생략, 단일 R(best_omr_d)로 진행")
+                    f"[R(t)] ⚠ reflectance_calc import failed ({type(_e_rc).__name__}: "
+                    f"{_e_rc}) — skipping per-ZA-block R(t), using single R(best_omr_d)")
             if _RC is not None:
                 _za_key, _za_sec_ok = resolve_time_axis(
                     za_gidx, za_sec, warn=self.status_msg.emit)
@@ -2674,8 +2674,8 @@ class AlphaExportWorker(QThread):
                     _knots.append((float(_za_key[_i]), _od))
                 if _pair_skipped:
                     self.status_msg.emit(
-                        f"[R(t)] ZA/He 페어 {_pair_skipped}/{len(za_gidx)}개가 품질 "
-                        f"미달로 제외됨 — knot {len(_knots)}개로 R(t) 구성")
+                        f"[R(t)] {_pair_skipped}/{len(za_gidx)} ZA/He pair(s) excluded for "
+                        f"failing quality checks — R(t) built from {len(_knots)} knot(s)")
                 if len(_knots) >= 2:
                     _knots.sort(key=lambda k: k[0])
                     _kg = np.array([k[0] for k in _knots], dtype=float)
@@ -2752,7 +2752,7 @@ class AlphaExportWorker(QThread):
                 # 병렬 쪽 _reread_amb_plain과 같은 이유로 예외. 여기선 run()이
                 # 받아서 finished.emit("ERROR: ...")로 GUI에 띄운다.
                 raise RuntimeError(
-                    f"ambient 스풀 재읽기 실패 ({os.path.basename(fp)}, "
+                    f"ambient spool re-read failed ({os.path.basename(fp)}, "
                     f"seq {s0}..{s1}): {type(e).__name__}: {e}") from e
             out = []
             for e in ents:

@@ -50,14 +50,14 @@ def install_crash_handlers(state_dir: str):
     """처리 안 된 예외는 로그로, 네이티브 크래시(segfault 등)는 vigil_crash.log 로.
     faulthandler 가 쓰는 파일 객체를 돌려준다 — 프로세스 끝까지 열어 둬야 한다."""
     def _hook(exc_type, exc, tb):
-        log.critical("처리 안 된 예외", exc_info=(exc_type, exc, tb))
+        log.critical("unhandled exception", exc_info=(exc_type, exc, tb))
     sys.excepthook = _hook
     try:
         fh = open(os.path.join(state_dir, "vigil_crash.log"), "a", encoding="utf-8")
         faulthandler.enable(fh)
         return fh
     except OSError as e:
-        log.warning("faulthandler 파일을 못 열었다: %s", e)
+        log.warning("could not open faulthandler file: %s", e)
         return None
 
 
@@ -133,4 +133,4 @@ def _copy_state(src: str, dst: str) -> None:
         s = os.path.join(src, fn)
         if os.path.isfile(s) and not os.path.exists(os.path.join(dst, fn)):
             shutil.copy2(s, os.path.join(dst, fn))
-    log.info("옛 상태 폴더 %s 의 커서·상태 로그를 %s 로 복사했다(원본은 그대로)", src, dst)
+    log.info("copied cursors and state log from old state folder %s to %s (originals kept)", src, dst)

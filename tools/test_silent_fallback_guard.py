@@ -249,7 +249,7 @@ def test_pass2_spool_failure_is_not_zero_rows():
         _reread_amb_plain(entries, "C:/__augur_no_such_dir__/amb.spool", 8, 2)
         ok = False
     except RuntimeError as e:
-        ok = "스풀" in str(e)
+        ok = "spool" in str(e)
     except Exception:
         ok = False
     check("스풀 재읽기 실패 → RuntimeError", ok)
@@ -273,9 +273,9 @@ def test_rt_degradation_is_announced():
     import gui.worker as w
     src = inspect.getsource(w)
     check("reflectance_calc 임포트 실패를 알린다",
-          "reflectance_calc 임포트 실패" in src)
+          "reflectance_calc import failed" in src)
     check("페어 스킵을 센다", "_pair_skipped" in src)
-    check("페어 스킵을 알린다", "미달로 제외됨" in src)
+    check("페어 스킵을 알린다", "failing quality checks" in src)
 
 
 def test_analysis_worker_can_report_failure():
@@ -296,8 +296,8 @@ def test_analysis_worker_can_report_failure():
     import inspect
     import gui.worker as gw
     src = inspect.getsource(gw)
-    check("병렬 핏 전체 실패를 알린다", "ERROR: 병렬 핏 실패" in src)
-    check("청크 실패를 알린다", "청크 핏 실패" in src)
+    check("병렬 핏 전체 실패를 알린다", "ERROR: parallel fit failed" in src)
+    check("청크 실패를 알린다", "chunk fit failed" in src)
 
     import gui.app_window_run as awr
     check("app_window_run이 status_msg를 연결한다",
@@ -323,8 +323,8 @@ def test_replay_engine_announces_differences():
                                     "mult": 0}]}
     host._build_engine_from_config(cfg)
     msg = host.status.text or ""
-    check("레퍼런스 누락이 화면에 뜬다", "NO2" in msg and "리플레이" in msg, msg)
-    check("원본과 다를 수 있다고 말한다", "같지 않을 수 있다" in msg, msg)
+    check("레퍼런스 누락이 화면에 뜬다", "NO2" in msg and "replay" in msg, msg)
+    check("원본과 다를 수 있다고 말한다", "may not match" in msg, msg)
 
     # 멀쩡한 cfg(레퍼런스 0개)면 아무 말 안 한다 — 경고 남발 방지
     host2 = _Host()

@@ -99,7 +99,7 @@ class RMonitor:
         from tools.reflectance_calc import ReflectanceCalculator
         if self.wave_nm is None:
             self._fail_streak += 1
-            return self._fail_status("wavecal 없음 — R 계산 불가(프로파일에 reflectance.wavecal_path 필요)")
+            return self._fail_status("no wavecal — cannot compute R (profile needs reflectance.wavecal_path)")
         calc = ReflectanceCalculator(cavity_len=self.cavity_len_cm, rl_factor=self.rl_factor)
         calc.add_za_spectrum(*self._last_za)
         calc.add_he_spectrum(*self._last_he)
@@ -118,18 +118,18 @@ class RMonitor:
         self._history.append(r_val)
 
         if len(self._history) < MIN_HISTORY_FOR_BASELINE:
-            return OK, f"R={r_val:.5f} (기준선 축적 중 {len(self._history)}/{MIN_HISTORY_FOR_BASELINE})", metrics
+            return OK, f"R={r_val:.5f} (building baseline {len(self._history)}/{MIN_HISTORY_FOR_BASELINE})", metrics
 
         baseline = float(np.median(list(self._history)[:-1]))
         drop = baseline - r_val
         metrics["baseline"] = baseline
         metrics["drop"] = drop
         if self.alarm_drop is not None and drop > self.alarm_drop:
-            return P1, f"R 급락 R={r_val:.5f} (기준 {baseline:.5f}, Δ{drop:.2e})", metrics
+            return P1, f"R sharp drop R={r_val:.5f} (baseline {baseline:.5f}, Δ{drop:.2e})", metrics
         if self.warn_drop is not None and drop > self.warn_drop:
-            return P2, f"R 완만한 하락 R={r_val:.5f} (기준 {baseline:.5f}, Δ{drop:.2e})", metrics
-        return OK, f"R={r_val:.5f} (기준 {baseline:.5f})", metrics
+            return P2, f"R gradual decline R={r_val:.5f} (baseline {baseline:.5f}, Δ{drop:.2e})", metrics
+        return OK, f"R={r_val:.5f} (baseline {baseline:.5f})", metrics
 
     def _fail_status(self, reason: str):
         status = P0 if self._fail_streak >= FAIL_STREAK_FOR_P0 else P1
-        return status, f"R 산출 실패({self._fail_streak}회 연속): {reason}", {"fail_streak": self._fail_streak}
+        return status, f"R computation failed ({self._fail_streak} in a row): {reason}", {"fail_streak": self._fail_streak}

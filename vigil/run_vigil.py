@@ -214,7 +214,7 @@ class VigilApp:
                     cm = ConcMonitor(fit_ch, ch.concentration)
                 except Exception as e:                # noqa: BLE001
                     self._conc_by_channel[key] = (
-                        P1, f"[{ch.label or ch.id}] 초기화 실패: {e}", {})
+                        P1, f"[{ch.label or ch.id}] init failed: {e}", {})
                     touched = True
                     continue
                 self._conc_monitors[key] = cm
@@ -255,20 +255,20 @@ class VigilApp:
             self._backlog_logged = True
             n, nbytes = w.skipped_backlog
             if n:
-                msg = (f"시작 시 오래된 raw {n}개 파일({nbytes / 1e6:.0f} MB)은 건너뛰고 끝에서 시작 "
-                       f"(커서 없음·{w.backlog_age_sec / 60:.0f}분 넘게 안 바뀜 — 지난 데이터는 Augur 몫)")
+                msg = (f"On start, skipped {n} old raw files ({nbytes / 1e6:.0f} MB) and began at their end "
+                       f"(no cursor, unchanged for over {w.backlog_age_sec / 60:.0f} min — past data is Augur's job)")
                 self.state_log.append(OK, msg, kind="ingest", skipped_files=n, skipped_bytes=nbytes)
                 if self.dashboard is not None:
                     self.dashboard.log_line(msg)
         if w.catching_up != self._was_catching_up:
             self._was_catching_up = w.catching_up
-            msg = (f"밀린 raw 따라잡는 중 (tick 당 {w.max_bytes_per_tick / 2**20:.0f} MB씩)"
-                   if w.catching_up else "따라잡기 끝 — 실시간")
+            msg = (f"Catching up on backlog raw ({w.max_bytes_per_tick / 2**20:.0f} MB per tick)"
+                   if w.catching_up else "Caught up — live")
             self.state_log.append(OK, msg, kind="ingest")
             if self.dashboard is not None:
                 self.dashboard.log_line(msg)
 
-    def pause(self, reason: str = "감시 정지(사용자 Stop)") -> None:
+    def pause(self, reason: str = "Monitoring paused (user Stop)") -> None:
         """대시보드 Stop. raw 는 계속 쌓이고 커서는 그 자리에 멈춘다 — resume 하면 밀린 줄부터
         (읽기 상한대로 나눠) 이어 읽는다. 정지 즉시 커서를 저장한다(정지한 채 창을 닫아도 안전)."""
         if self.paused:
@@ -281,7 +281,7 @@ class VigilApp:
         if not self.paused:
             return
         self.paused = False
-        self._note_control("감시 재개(사용자 Start) — 밀린 줄부터 이어 읽는다")
+        self._note_control("Monitoring resumed (user Start) — reading from the backlog onward")
 
     def _note_control(self, msg: str) -> None:
         log.info(msg)
@@ -299,8 +299,8 @@ class VigilApp:
             self._tick()
         except Exception as e:                # noqa: BLE001
             self._tick_errors += 1
-            log.exception("tick 실패 (%d회 연속)", self._tick_errors)
-            msg = f"Vigil 내부 오류 {self._tick_errors}회 연속: {type(e).__name__}: {e}"
+            log.exception("tick failed (%d in a row)", self._tick_errors)
+            msg = f"Vigil internal error, {self._tick_errors} in a row: {type(e).__name__}: {e}"
             if self._tick_errors == 1:        # 연속 실패의 첫 번만 상태 로그에(매초 쌓이지 않게)
                 self.state_log.append(P1, msg, kind="internal")
             if self.dashboard is not None:
@@ -309,11 +309,11 @@ class VigilApp:
                     if self._tick_errors == 1:
                         self.dashboard.log_line(msg)
                 except Exception:             # noqa: BLE001
-                    log.exception("오류 표시도 실패")
+                    log.exception("failed to report the error as well")
         else:
             if self._tick_errors:
-                log.info("tick 복구 (%d회 연속 실패 뒤)", self._tick_errors)
-                self.state_log.append(OK, f"Vigil 내부 오류 복구 ({self._tick_errors}회 뒤)",
+                log.info("tick recovered (after %d consecutive failures)", self._tick_errors)
+                self.state_log.append(OK, f"Vigil internal error recovered (after {self._tick_errors})",
                                       kind="internal")
             self._tick_errors = 0
 
@@ -330,7 +330,7 @@ class VigilApp:
                       self._lamp_last_status, self._conc_status, self._conc_last_status,
                       self.watcher._profile_cache):
                 d.pop(p, None)
-            log.info("파일 퇴역(%.0f분 새 행 없음): %s", self.retire_after_sec / 60, p)
+            log.info("retired file (no new rows for %.0f min): %s", self.retire_after_sec / 60, p)
 
     def _tick(self) -> None:
         events = self.watcher.poll()
@@ -415,20 +415,20 @@ def _default_state_dir() -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Vigil M0+M1+M2+M3 — raw 유입 + HK + R + 농도 실시간 감시")
-    ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
+    ap = argparse.ArgumentParser(description="Vigil M0+M1+M2+M3 — real-time monitoring of raw inflow + HK + R + concentration")
+    ap.add_argument("--dir", required=True, help="raw .dat folder to monitor (recursive)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
-                    help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")
+                    help=f"instrument profile folder (default {DEFAULT_PROFILE_DIR})")
     ap.add_argument("--state-dir", default=None,
-                    help="커서·로그 저장 폴더 (기본: 소스 실행은 <repo>/vigil_state, exe 는 %%LOCALAPPDATA%%\\Vigil)")
-    ap.add_argument("--poll-sec", type=float, default=1.0, help="폴링 주기(초, 기본 1.0)")
+                    help="folder for cursors and logs (default: <repo>/vigil_state when run from source, %%LOCALAPPDATA%%\\Vigil for the exe)")
+    ap.add_argument("--poll-sec", type=float, default=1.0, help="poll interval (s, default 1.0)")
     ap.add_argument("--autostart", action="store_true",
-                    help="켜자마자 감시 시작(무인 운용·재부팅 후 자동 실행용). 기본은 정지 상태로 켜져 Start 를 기다린다")
+                    help="start monitoring immediately (unattended use, auto-run after reboot). By default it opens paused and waits for Start")
     ap.add_argument("--max-mb-per-tick", type=float, default=DEFAULT_MAX_BYTES_PER_TICK / 2**20,
-                    help="tick 당 읽는 raw 상한(MB, 기본 %(default).0f) — 밀린 분량은 나눠 따라잡는다")
+                    help="max raw read per tick (MB, default %(default).0f) — backlog is caught up in chunks")
     ap.add_argument("--backlog-age-min", type=float, default=DEFAULT_BACKLOG_AGE_SEC / 60,
-                    help="시작 시 커서 없는 파일 중 이보다 오래 안 바뀐 건 건너뜀(분, 기본 %(default).0f). "
-                         "음수면 건너뛰지 않고 처음부터 읽음")
+                    help="on start, skip cursorless files unchanged for longer than this (min, default %(default).0f). "
+                         "Negative: skip nothing, read from the beginning")
     return ap
 
 
@@ -446,15 +446,15 @@ def main(argv=None) -> int:
     if args.state_dir is None:
         args.state_dir = _default_state_dir()
     if not os.path.isdir(args.dir):
-        print(f"감시 폴더 없음: {args.dir}", file=sys.stderr)
+        print(f"Watch folder not found: {args.dir}", file=sys.stderr)
         return 1
 
     from vigil import runtime
     log_path = runtime.setup_logging(args.state_dir)
     _crash_fh = runtime.install_crash_handlers(args.state_dir)   # noqa: F841 — 끝까지 열어 둔다
-    log.info("Vigil 시작 — dir=%s state=%s log=%s", args.dir, args.state_dir, log_path)
+    log.info("Vigil started — dir=%s state=%s log=%s", args.dir, args.state_dir, log_path)
     if runtime.lower_priority():
-        log.info("프로세스 우선순위: 보통 미만(LabVIEW 우선)")
+        log.info("process priority: below normal (LabVIEW first)")
     runtime.disable_quickedit()
 
     from PyQt6.QtCore import QLockFile, QTimer
@@ -467,9 +467,9 @@ def main(argv=None) -> int:
     # 한 PC 에 Vigil 두 개 금지 — 같은 cursors.json·status.jsonl 에 두 프로세스가 쓰고 CPU 도 두 배.
     lock = QLockFile(os.path.join(args.state_dir, "vigil.lock"))
     if not lock.tryLock(100):
-        log.error("이미 실행 중인 Vigil 이 있다 (%s) — 종료", args.state_dir)
-        QMessageBox.warning(None, "Vigil", "Vigil 이 이미 실행 중입니다.\n"
-                            f"(상태 폴더: {args.state_dir})")
+        log.error("another Vigil is already running (%s) — exiting", args.state_dir)
+        QMessageBox.warning(None, "Vigil", "Vigil is already running.\n"
+                            f"(state folder: {args.state_dir})")
         return 2
 
     # 스플래시 먼저 — 로그 줄은 실제로 끝난 부팅 단계만(gui/splash.py).
@@ -519,14 +519,14 @@ def main(argv=None) -> int:
     win.run_toggled.connect(lambda running: core.resume() if running else core.pause())
     if not args.autostart:
         # 기본은 정지 상태로 켠다 — 폴더·설정을 확인하고 사람이 Start 를 누를 때 읽기 시작.
-        core.pause("시작: 정지 상태 — Start 를 누르면 감시를 시작한다(바로 시작은 --autostart)")
+        core.pause("Started paused — press Start to begin monitoring (use --autostart to start immediately)")
         win.set_running(False)
 
     win.log_line(f"log: {log_path}")
     win.show()
     splash.finish(win)
     rc = app.exec()
-    log.info("Vigil 종료 (rc=%s)", rc)
+    log.info("Vigil exited (rc=%s)", rc)
     lock.unlock()
     return rc
 

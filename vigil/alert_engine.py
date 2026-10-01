@@ -23,17 +23,17 @@ def aggregate(results):
     """[(name, status, msg, metrics), ...] → (전체등급, 요약문). health_checks.overall()과 같은 역할,
     Vigil 자체 등급 어휘(P0/P1/P2)로. 빈 리스트면 SKIP."""
     if not results:
-        return SKIP, "판정 항목 없음"
+        return SKIP, "nothing to evaluate"
     worst = SKIP
     for _name, status, _msg, _metrics in results:
         worst = worse(worst, status)
     counts = {lvl: sum(1 for _n, s, *_ in results if s == lvl) for lvl in (P0, P1, P2, OK, SKIP)}
     if worst == P0:
-        return P0, f"P0 {counts[P0]}건 — 즉시 확인 필요 (P1 {counts[P1]}·P2 {counts[P2]})"
+        return P0, f"P0 ×{counts[P0]} — check now (P1 {counts[P1]} · P2 {counts[P2]})"
     if worst == P1:
-        return P1, f"P1 {counts[P1]}건 — 품질 위험 (P2 {counts[P2]})"
+        return P1, f"P1 ×{counts[P1]} — quality at risk (P2 {counts[P2]})"
     if worst == P2:
-        return P2, f"P2 {counts[P2]}건 — 주의·관찰"
+        return P2, f"P2 ×{counts[P2]} — watch"
     if worst == OK:
-        return OK, f"정상 — 전부 OK {counts[OK]}"
-    return SKIP, "판정 대기 중"
+        return OK, f"normal — all {counts[OK]} OK"
+    return SKIP, "waiting for data"

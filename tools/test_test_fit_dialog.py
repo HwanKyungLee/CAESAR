@@ -191,8 +191,8 @@ def test_explorer_review_is_read_only_contract():
         "apply": "FORBIDDEN_REQUIRES_EXPLICIT_HUMAN_ACTION",
     }
     html = _format_explorer_review(review)
-    check("조건부 verdict와 Apply 금지 표시", "MISSION_LOCAL_ONLY" in html and "자동 변경하지 않습니다" in html
-          and "절대농도 보정에는 사용하지 않음" in html)
+    check("조건부 verdict와 Apply 금지 표시", "MISSION_LOCAL_ONLY" in html and "not change" in html
+          and "not used for absolute concentration correction" in html)
     review["apply"] = "ALLOWED"
     try:
         _format_explorer_review(review)
@@ -224,10 +224,10 @@ def test_explorer_v2_gui_contract():
           export[2] == "export" and "--candidate-id" in export and "cand" in export)
     html = _format_v2_plan({"schema": "explorer-plan-v2", "status": "READY_FOR_STAGE0",
                             "mission_id": "opaque", "candidates": [], "plan_hash": "p"})
-    check("V2 plan은 실행/Apply가 아님", "실제 피팅" in html and "Apply" in html)
+    check("V2 plan은 실행/Apply가 아님", "actual fitting" in html and "Apply" in html)
     rec = {"schema": "explorer-recommendation-v2", "status": "PROVISIONAL", "candidate_id": "cand",
            "scope": "MISSION_LOCAL_FROZEN_PLAN_ONLY"}
-    check("V2 recommendation은 수동 export만 안내", "자동 변경하지 않습니다" in _format_v2_recommendation(rec))
+    check("V2 recommendation은 수동 export만 안내", "not changed automatically" in _format_v2_recommendation(rec))
 
 
 if __name__ == "__main__":

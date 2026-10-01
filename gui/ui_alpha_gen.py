@@ -268,11 +268,11 @@ class AlphaGeneratorDialog(QDialog):
                 self._raw_files.append(f)
                 self._list.addItem(os.path.basename(f))
         if skipped:
-            _shown = skipped if len(skipped) <= 8 else skipped[:8] + [f"… +{len(skipped)-8}개"]
+            _shown = skipped if len(skipped) <= 8 else skipped[:8] + [f"… +{len(skipped)-8} more"]
             QMessageBox.warning(
-                self, "측정 파일 아님 — 제외됨",
-                "다음 파일은 측정 파일 형식(YYYY-MM-DD-NNN)이 아니라 알파 입력에서 제외했습니다"
-                "(FWHM/Calib 등 분석 파일을 넣으면 알파가 오염됩니다):\n\n  " + "\n  ".join(_shown))
+                self, "Not measurement files — excluded",
+                "These files are not in measurement-file format (YYYY-MM-DD-NNN) and were excluded from alpha input "
+                "(analysis files such as FWHM/Calib would contaminate alpha):\n\n  " + "\n  ".join(_shown))
         self._lbl_status.setText(f"{len(self._raw_files)} raw file(s) selected")
         # 채널 수 감지 → 핏세팅 탭 매핑 행 갱신
         if self._raw_files:
