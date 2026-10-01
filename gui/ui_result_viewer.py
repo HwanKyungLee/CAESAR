@@ -1019,9 +1019,11 @@ class ResultViewerWidget(QWidget):
 
     def _on_lane_click(self, pw, ev):
         """레인 클릭 → 화면상 8 px 안의 **실제 데이터 점** 중 가장 가까운 행을 아래 패널에.
-        표시 좌표(x는 시간 시프트가 이미 들어간 값) 그대로 비교하므로 시프트 보정이 필요 없다."""
+        표시 좌표(x는 시간 시프트가 이미 들어간 값) 그대로 비교하므로 시프트 보정이 필요 없다.
+        No `ev.isAccepted()` check: the flag ScatterPlotItem accepts every click on a point,
+        so that check made the panel unreachable (2026-10-02 audit R1)."""
         from PyQt6.QtCore import Qt as _Qt
-        if ev.button() != _Qt.MouseButton.LeftButton or ev.double() or ev.isAccepted():
+        if ev.button() != _Qt.MouseButton.LeftButton or ev.double():
             return
         hit = getattr(self, "_lane_hits", {}).get(id(pw))
         if hit is None or not self._fit_cache or self._path is None:

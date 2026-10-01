@@ -149,6 +149,31 @@ def test_lanes_and_click(w):
     assert "row 2" in w._pw_detail.plotItem.titleLabel.text
 
 
+def test_real_click_opens_detail(w):
+    """A real mouse click on a plotted point must open Scan detail (2026-10-02 R1: the flag
+    ScatterPlotItem accepted the click and `_on_lane_click` returned on `ev.isAccepted()`,
+    so the panel never opened — the test above calls `_show_scan_detail` directly)."""
+    from PyQt6.QtCore import QPointF, Qt as _Qt
+    from PyQt6.QtTest import QTest
+    d = tempfile.mkdtemp()
+    fit = _write_fit(d)
+    _write_alpha(d, "260904_CH1_PNs_r3f8a1")
+    w.resize(1200, 900); w.show()
+    w._path = fit
+    w._reload()
+    QApplication.processEvents()
+    w._pw_detail.setTitle("untouched")
+    lane = w._lanes[0]
+    t = w._fit_cache
+    j = 1                                   # Unstable row — not hidden by Hide QC
+    sp = lane.getViewBox().mapViewToScene(QPointF(float(t["time"][j]), float(t["gases"]["NO2"][j])))
+    vp = lane.mapFromScene(sp)
+    QTest.mouseClick(lane.viewport(), _Qt.MouseButton.LeftButton, pos=vp)
+    QApplication.processEvents()
+    title = w._pw_detail.plotItem.titleLabel.text
+    assert "row 1" in title and "Unstable" in title, title
+
+
 def test_big_file_thinning_keeps_flag_share(w):
     """큰 파일(>2만 행)은 화면 칸마다 점 하나로 그린다 — 그래도 **flag 색 비율이 전부 그린 그림과
     같아야** 한다(2026-10-01: ok만 솎고 flag 점을 전부 덧그렸더니 2 %인 QC가 띠 전체를 덮어
@@ -228,6 +253,7 @@ def main() -> int:
     for fn, args in ((test_loader_exposes_shift_squeeze, ()),
                      (test_flag_classification, ()),
                      (test_lanes_and_click, (w,)),
+                     (test_real_click_opens_detail, (w,)),
                      (test_big_file_thinning_keeps_flag_share, (w,)),
                      (test_residual_refuses_without_meta, (w,)),
                      (test_non_fit_restores_old_plots, (w,))):
