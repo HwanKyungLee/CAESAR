@@ -83,6 +83,7 @@ class VigilApp:
                                max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
                                cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec
+        self.paused = False                # 대시보드 Stop — 정지 중엔 tick 이 아무것도 읽지 않는다
         self._tick_errors = 0              # 연속 tick 예외 수(성공하면 0)
         self._backlog_logged = False
         self._was_catching_up = False
@@ -262,10 +263,33 @@ class VigilApp:
             if self.dashboard is not None:
                 self.dashboard.log_line(msg)
 
+    def pause(self) -> None:
+        """대시보드 Stop. raw 는 계속 쌓이고 커서는 그 자리에 멈춘다 — resume 하면 밀린 줄부터
+        (읽기 상한대로 나눠) 이어 읽는다. 정지 즉시 커서를 저장한다(정지한 채 창을 닫아도 안전)."""
+        if self.paused:
+            return
+        self.paused = True
+        self.cursor.flush()
+        self._note_control("감시 정지(사용자 Stop)")
+
+    def resume(self) -> None:
+        if not self.paused:
+            return
+        self.paused = False
+        self._note_control("감시 재개(사용자 Start) — 밀린 줄부터 이어 읽는다")
+
+    def _note_control(self, msg: str) -> None:
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="control")
+        if self.dashboard is not None:
+            self.dashboard.log_line(msg)
+
     def tick(self) -> None:
         """QTimer 슬롯. PyQt6 는 슬롯에서 새어 나간 예외에 프로세스를 abort 하므로, 여기서 다
         받아 로그에 남기고 배지에 띄운 뒤 다음 tick 을 계속 돈다 — 감시기가 조용히 사라지는
-        것이 가장 나쁜 실패다."""
+        것이 가장 나쁜 실패다. 정지(pause) 중엔 아무것도 하지 않는다."""
+        if self.paused:
+            return
         try:
             self._tick()
         except Exception as e:                # noqa: BLE001
@@ -483,6 +507,7 @@ def main(argv=None) -> int:
     timer.timeout.connect(core.tick)
     timer.start(int(args.poll_sec * 1000))
     app.aboutToQuit.connect(core.shutdown)
+    win.run_toggled.connect(lambda running: core.resume() if running else core.pause())
 
     win.log_line(f"log: {log_path}")
     win.show()

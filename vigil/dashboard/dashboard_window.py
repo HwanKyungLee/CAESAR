@@ -10,11 +10,11 @@ import os
 from datetime import datetime
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QApplication, QGridLayout, QHeaderView, QLabel, QMainWindow, QTableWidget,
-    QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QPushButton,
+    QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from vigil.alert_engine import OK, P0, P1, P2, SKIP
@@ -44,8 +44,11 @@ _ALARM_COLOR = '#C62828'
 
 
 class DashboardWindow(QMainWindow):
+    run_toggled = pyqtSignal(bool)   # Start/Stop 버튼 → True=감시 중, False=정지
+
     def __init__(self, title: str = "Vigil — Pipeline Health"):
         super().__init__()
+        self._paused = False
         self.setWindowTitle(title)
         self.resize(1280, 800)
         self._last_status = None   # P0로의 전이에서만 소리내기 위한 상태 기억
@@ -60,7 +63,15 @@ class DashboardWindow(QMainWindow):
         self.badge = QLabel("⏳ 초기화 중…")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + " font-size:20px; font-weight:bold; padding:12px;")
-        lay.addWidget(self.badge)
+        self.btn_run = QPushButton("■ Stop")
+        self.btn_run.setMinimumWidth(110)
+        self.btn_run.setStyleSheet("font-size:15px; font-weight:bold; padding:10px;")
+        self.btn_run.setToolTip("감시 정지/재개 — 정지 중에도 raw 는 쌓이고, 재개하면 밀린 줄부터 이어 읽는다")
+        self.btn_run.clicked.connect(self._toggle_run)
+        top = QHBoxLayout()
+        top.addWidget(self.badge, stretch=1)
+        top.addWidget(self.btn_run)
+        lay.addLayout(top)
 
         grid = QGridLayout()
         lay.addLayout(grid, stretch=1)
@@ -123,8 +134,19 @@ class DashboardWindow(QMainWindow):
         return col
 
     # ── 공개 API — run_vigil의 poll 루프가 매 tick 호출 ─────────────────
+    def _toggle_run(self) -> None:
+        self._paused = not self._paused
+        self.btn_run.setText("▶ Start" if self._paused else "■ Stop")
+        if self._paused:
+            # 정지 배지는 '경보'가 아니라 '사용자가 멈춤' — 경보색을 쓰지 않는다
+            self.badge.setText("⏸ 감시 정지됨 — Start 를 누르면 밀린 줄부터 이어 읽는다")
+            self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + " font-size:20px; font-weight:bold; padding:12px;")
+        self.run_toggled.emit(not self._paused)
+
     def set_status(self, status: str, msg: str) -> None:
-        """종합 상태 배지 갱신(liveness + HK + R 등 전체 aggregate 결과)."""
+        """종합 상태 배지 갱신(liveness + HK + R 등 전체 aggregate 결과). 정지 중엔 무시한다."""
+        if self._paused:
+            return
         self.badge.setText(f"{_BADGE_ICON.get(status, '?')} {msg}")
         self.badge.setStyleSheet(
             _BADGE_STYLE.get(status, _BADGE_STYLE[SKIP])
