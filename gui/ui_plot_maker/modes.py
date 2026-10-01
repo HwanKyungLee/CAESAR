@@ -20,7 +20,7 @@ from gui.result_viewer_io import flag_color, FLAG_KEYS
 from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
                    mathtext_to_html)
 from .processing import (resample_mean, smooth, regress, allan_deviation,
-                         step_xy, bar_width, align_to)
+                         step_xy, bar_width, align_to, regress_deming)
 
 
 @register_mode
@@ -900,9 +900,51 @@ class ScatterMode(PlotMode):
         self._chk_ct.setToolTip("Color points in time order (when there is a time axis)")
         self._chk_ct.toggled.connect(lambda *_: self.render())
         lay.addWidget(self._chk_ct)
+        lay.addWidget(QLabel("Fit:"))
+        self._fit_combo = QComboBox()
+        self._fit_combo.addItems(self.FITS)
+        self._fit_combo.setToolTip(
+            "OLS = ordinary least squares (assumes X has no error).\n"
+            "Deming = errors in both X and Y — use it to compare two instruments/channels;\n"
+            "OLS slope is biased toward 0 when X is noisy.\n"
+            "  λ=1: equal error variance (orthogonal regression)\n"
+            "  λ from 1σ: λ = mean(σy²)/mean(σx²) from the columns' fit errors (falls back to λ=1)")
+        self._fit_combo.currentIndexChanged.connect(lambda *_: self.render())
+        lay.addWidget(self._fit_combo)
         lay.addStretch(1)
         self.on_shelf_changed()
         return w
+
+    FITS = ["OLS", "Deming (λ=1)", "Deming (λ from 1σ errors)"]
+
+    @staticmethod
+    def _fit_title(r):
+        slope, inter, r2, n, how = r
+        tag = "" if how == "OLS" else f"   [{how}]"     # OLS(기본)는 예전 제목 그대로
+        return f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}{tag}"
+
+    def _fit(self, xv, yv):
+        """선택한 방법으로 직선 적합 → (slope, intercept, r2, n, 방법 설명) 또는 None.
+        화면·Publish가 같은 함수를 쓴다(제목·범례 문자열까지)."""
+        method = self._fit_combo.currentText() if self._w else "OLS"
+        if method == "OLS":
+            r = regress(xv, yv)
+            return (*r, "OLS") if r else None
+        lam, how = 1.0, "λ=1"
+        if method.startswith("Deming (λ from"):
+            ex, ey = getattr(self, "_errs", (None, None))
+            if ex is not None and ey is not None:
+                m = np.isfinite(xv) & np.isfinite(yv) & np.isfinite(ex) & np.isfinite(ey)
+                vx = float(np.mean(ex[m] ** 2)) if m.any() else 0.0
+                vy = float(np.mean(ey[m] ** 2)) if m.any() else 0.0
+                if vx > 0 and vy > 0:
+                    lam, how = float(vy / vx), f"λ={vy / vx:.3g} from 1σ"
+                else:
+                    how = "λ=1 (no usable 1σ)"
+            else:
+                how = "λ=1 (no 1σ columns)"
+        r = regress_deming(xv, yv, lam)
+        return (*r, f"Deming {how}") if r else None
 
     def on_shelf_changed(self):
         if not self._w:
@@ -917,34 +959,44 @@ class ScatterMode(PlotMode):
         if not self._w:
             return {}
         return {"x": self._cx.currentText(), "y": self._cy.currentText(),
-                "color_time": self._chk_ct.isChecked()}
+                "color_time": self._chk_ct.isChecked(), "fit": self._fit_combo.currentText()}
 
     def from_config(self, cfg):
         if self._w:
             self._cx.setCurrentText(cfg.get("x", ""))
             self._cy.setCurrentText(cfg.get("y", ""))
             self._chk_ct.setChecked(bool(cfg.get("color_time", False)))
+            self._fit_combo.setCurrentText(cfg.get("fit", "OLS"))   # 옛 설정 = OLS
 
     def _xy(self):
         """선택한 X/Y → (xv, yv, tcolor). 다른 데이터셋이면 Y를 X 시각으로 정렬
         (core.align — 결손을 가로질러 잇지 않는다). tcolor=X시각(없으면 None)."""
         host = self.host
         self._align_info = None
-        rx = host.resolve(self._cx.currentText())
-        ry = host.resolve(self._cy.currentText())
+        self._errs = (None, None)
+        lx, ly = self._cx.currentText(), self._cy.currentText()
+        rx = host.resolve(lx)
+        ry = host.resolve(ly)
         if rx is None or ry is None:
             return None
         dx, cx, xv, tx = rx
         dy, cy, yv, ty = ry
+        ex, ey = host.error_of(lx), host.error_of(ly)     # Deming λ from 1σ 용
         if dx is not dy and tx is not None and ty is not None:
             # 예전 np.interp는 몇 시간 떨어진 두 점 사이도 직선으로 메워 짝지었다(부록 ④).
             yv, self._align_info = align_to(tx, ty, yv)
+            if ey is not None:
+                ey, _ = align_to(tx, ty, ey, max_gap=self._align_info["max_gap"])
             xv = xv.copy()
             tcolor = tx
         else:
             n = min(len(xv), len(yv))
             xv, yv = xv[:n], yv[:n]
+            ex = ex[:n] if ex is not None else None
+            ey = ey[:n] if ey is not None else None
             tcolor = tx[:n] if tx is not None else None
+        if ex is not None and ey is not None and len(ex) == len(xv) == len(ey):
+            self._errs = (np.asarray(ex, float), np.asarray(ey, float))
         return xv, yv, tcolor
 
     def render(self):
@@ -972,18 +1024,17 @@ class ScatterMode(PlotMode):
                          symbolBrush=_pt, symbolPen=None, name="data")
         host.pg_label("xlabel", host.lbl("xlabel", self._cx.currentText()))
         host.pg_label("ylabel", host.lbl("ylabel", self._cy.currentText()))
-        r = regress(xv, yv)
+        r = self._fit(xv, yv)
         if r:
-            slope, inter, r2, n = r
+            slope, inter, r2, n, how = r
             xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
             host.p1.plot(xline, slope * xline + inter,
-                         pen=pg.mkPen(self.color("fit", "#D32F2F"), width=2), name="fit")
-            host.pg_label("title", host.lbl("title",
-                          f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
+                         pen=pg.mkPen(self.color("fit", "#D32F2F"), width=2), name="fit" if how == "OLS" else f"fit ({how})")
+            host.pg_label("title", host.lbl("title", self._fit_title(r)))
             ai = getattr(self, "_align_info", None)
             gap = (f"  ·  {ai['n_gap']} X times left unpaired (Y gap > {ai['max_gap'] / 60:.3g} min)"
                    if ai and ai["n_gap"] else "")
-            host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}{gap}")
+            host.set_status(f"{how}: slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}{gap}")
         else:
             host.pg_label("title", host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")
@@ -1008,14 +1059,14 @@ class ScatterMode(PlotMode):
                        edgecolors="none", label="data")
         host.mpl_label(ax, "xlabel", host.lbl("xlabel", self._cx.currentText()))
         host.mpl_label(ax, "ylabel", host.lbl("ylabel", self._cy.currentText()))
-        r = regress(xv, yv)
+        r = self._fit(xv, yv)
         if r:
-            slope, inter, r2, n = r
+            slope, inter, r2, n, how = r
             xline = np.array([np.nanmin(xv[m]), np.nanmax(xv[m])])
             ax.plot(xline, slope * xline + inter, color=self.color("fit", "#D32F2F"), lw=2,
-                    label=f"y={slope:.4g}x+{inter:.4g}\n$R^2$={r2:.4f}, n={n}")
-            host.mpl_label(ax, "title", host.lbl("title",
-                           f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
+                    label=f"y={slope:.4g}x+{inter:.4g}" + ("" if how == "OLS" else f" ({how})")
+                    + f"\n$R^2$={r2:.4f}, n={n}")
+            host.mpl_label(ax, "title", host.lbl("title", self._fit_title(r)))
         else:
             host.mpl_label(ax, "title", host.lbl("title", "Scatter"))
         ax.grid(True, alpha=0.3)

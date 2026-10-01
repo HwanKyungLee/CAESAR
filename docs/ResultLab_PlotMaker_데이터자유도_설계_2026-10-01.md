@@ -182,6 +182,14 @@ Plot Maker 설정(`.pmcfg.json`)은 데이터셋을 `이름 → 경로`로 저�
 ### 끼워 넣을 작은 것
 
 - **Result Lab 구간 즉석 피팅**: Range 선택 구간에 평균±σ, OLS·Deming 기울기, r² — Σ Stats 옆.
+  - **완료(2026-10-01, 검증 38번)** — 설계에서 바뀐 것: Result Lab 구간은 **시계열**이라 거기서
+    의미 있는 건 X·Y 회귀가 아니라 **구간 추세**다. 그래서 둘로 나눴다.
+    ① Result Lab Σ Stats에 `trend /h ± SE` 열(직선 추세, ppb/h). SE는 잔차 독립 가정이라
+    자기상관이 있으면 과소평가 — 대화상자에 그렇게 적었다.
+    ② Plot Maker Scatter에 `Fit: OLS | Deming (λ=1) | Deming (λ from 1σ errors)`.
+    두 기기·채널 비교처럼 x에도 오차가 있으면 OLS 기울기가 0쪽으로 감쇠한다(합성 검증: 참 1.5에서
+    OLS 1.337, Deming 1.492). λ from 1σ = mean(σy²)/mean(σx²)(fit `_Error` 열; 다른 데이터셋이면
+    같은 결손 가드로 정렬). **기본은 OLS이고 제목·범례 문자열도 예전과 같다**(출력 무변경).
 - **Copernicus 스타일 프리셋**: 폰트·선 굵기·눈금·1/2컬럼 크기를 묶은 `.pmstyle.json` 하나 기본 동봉.
 
 ### D3. 내장 파이썬 콘솔 (탈출구, 맨 마지막)

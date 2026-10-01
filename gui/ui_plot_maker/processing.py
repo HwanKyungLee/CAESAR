@@ -72,6 +72,48 @@ def regress(x, y):
     return slope, inter, r2, int(m.sum())
 
 
+def regress_deming(x, y, lam=1.0):
+    """Deming 회귀 → (slope, intercept, r2, n) 또는 None. lam = σ_y² / σ_x²(오차분산 비).
+
+    두 기기·두 채널 비교처럼 **x에도 오차가 있으면** OLS 기울기는 0쪽으로 편향된다
+    (regression dilution). Deming은 두 축 오차를 같이 본다. lam=1이면 직교회귀(TLS).
+    r2는 OLS와 같은 Pearson r² — 적합 방법과 무관한 '얼마나 직선에 모였나'."""
+    m = np.isfinite(x) & np.isfinite(y)
+    if m.sum() < 3 or not (lam > 0):
+        return None
+    x, y = np.asarray(x, float)[m], np.asarray(y, float)[m]
+    mx, my = x.mean(), y.mean()
+    sxx = float(np.mean((x - mx) ** 2))
+    syy = float(np.mean((y - my) ** 2))
+    sxy = float(np.mean((x - mx) * (y - my)))
+    if sxy == 0 or sxx == 0:
+        return None
+    d = syy - lam * sxx
+    slope = (d + np.sqrt(d * d + 4 * lam * sxy * sxy)) / (2 * sxy)
+    inter = my - slope * mx
+    r2 = sxy * sxy / (sxx * syy) if syy > 0 else np.nan
+    return float(slope), float(inter), float(r2), int(m.sum())
+
+
+def trend_per_hour(t, y):
+    """시계열 직선 추세 → (기울기 /h, 표준오차 /h, n) 또는 None. t=epoch초.
+    표준오차는 잔차가 서로 독립이라는 가정의 값 — 자기상관이 있으면 **과소평가**된다."""
+    m = np.isfinite(t) & np.isfinite(y)
+    if m.sum() < 3:
+        return None
+    th = (np.asarray(t, float)[m] - np.nanmin(np.asarray(t, float)[m])) / 3600.0
+    yy = np.asarray(y, float)[m]
+    if np.ptp(th) <= 0:
+        return None
+    A = np.vstack([th, np.ones_like(th)]).T
+    coef, res, *_ = np.linalg.lstsq(A, yy, rcond=None)
+    n = len(yy)
+    resid = yy - A @ coef
+    s2 = float(resid @ resid) / (n - 2)
+    se = float(np.sqrt(s2 / np.sum((th - th.mean()) ** 2)))
+    return float(coef[0]), se, n
+
+
 def allan_deviation(t, y):
     """비중첩 Allan 편차. 시각으로 균일 격자에 보간 후 2의 거듭제곱 구간평균.
     반환 (taus[s], adev) 또는 None."""

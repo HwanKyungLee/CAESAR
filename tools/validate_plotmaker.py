@@ -83,6 +83,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 37. 정렬·Join : Scatter의 다른 데이터셋 짝짓기가 결손을 가로질러 잇지 않나 · Join(⋈)
     데이터셋이 같은 값을 내나 · 재료 필터 반영 · Join 위 파생 열 · 레시피 저장/왕복 ·
     재료 삭제 시 묵은 값 없이 ✗ (D1+, 2026-10-01)
+38. Deming·구간 추세 : x에도 오차가 있을 때 Deming이 OLS 감쇠를 보정하나(합성 참값) ·
+    기본 OLS 제목·범례 불변 · λ from 1σ · Result Lab Σ Stats 구간 추세 (2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1635,6 +1637,67 @@ def c_alignment_and_join():
         return "FAIL", f"트리에 Join 오류 표시 없음: {top}"
     return "PASS", (f"결손 {int(hole.sum())}점 안 메움(Scatter·Join 같은 값) · 안내 · Join 위 파생 열 · "
                     "재료 필터 반영 · 레시피 저장·왕복 · 재료 삭제 시 ✗")
+
+
+# ── 38. Scatter Deming 회귀 + Result Lab 구간 추세 ─────────────────────────
+@check("Deming 회귀(x 오차 편향 보정) · OLS 기본 불변 · λ from 1σ · Result Lab 구간 추세")
+def c_deming_and_trend():
+    from gui.ui_plot_maker.processing import regress, regress_deming, trend_per_hour
+    rng = np.random.default_rng(3)
+    true = rng.uniform(0, 20, 4000)
+    x = true + rng.normal(0, 2.0, true.size)        # x에도 오차 → OLS 기울기 감쇠
+    y = 1.5 * true + 1.0 + rng.normal(0, 2.0 * 1.5, true.size)
+    s_ols = regress(x, y)[0]
+    s_dem = regress_deming(x, y, lam=1.5 ** 2)[0]
+    if not (s_ols < 1.45 and abs(s_dem - 1.5) < 0.03):
+        return "FAIL", f"Deming 편향 보정 실패: OLS {s_ols:.3f} / Deming {s_dem:.3f} (참 1.5)"
+    tt = 1_750_000_000.0 + np.arange(200) * 120.0
+    tr = trend_per_hour(tt, 3.0 + 0.25 * (tt - tt[0]) / 3600 + rng.normal(0, 0.01, 200))
+    if not (abs(tr[0] - 0.25) < 0.002 and tr[1] > 0):
+        return "FAIL", f"구간 추세 틀림: {tr}"
+
+    # 모드: 기본 OLS 제목은 예전 그대로, Deming 선택 시 표기 + Publish + 설정 왕복
+    w = PlotMakerWidget()
+    from gui.ui_plot_maker import Dataset
+    n = true.size
+    ds = Dataset("dm", "<fixture:dm>", 1_750_000_000.0 + np.arange(n) * 60.0,
+                 {"A": x, "B": y}, errs={"A": np.full(n, 2.0), "B": np.full(n, 3.0)})
+    w.shelf["dm"] = ds; w._refresh_tree(); w._notify_modes()
+    sc = next(m for m in w._modes if m.key == "scatter")
+    sc.options_widget()
+    w._mode_combo.setCurrentIndex([m.key for m in w._modes].index("scatter"))
+    sc._cx.setCurrentText("dm:A"); sc._cy.setCurrentText("dm:B")
+    sc.render()
+    t_ols = sc._fit_title(sc._fit(*sc._xy()[:2]))
+    if "[" in t_ols or not t_ols.startswith("y = "):
+        return "FAIL", f"OLS 기본 제목이 바뀜: {t_ols}"
+    sc._fit_combo.setCurrentText("Deming (λ from 1σ errors)")
+    r = sc._fit(*sc._xy()[:2])
+    if "λ=2.25 from 1σ" not in r[4] or abs(r[0] - 1.5) > 0.03:
+        return "FAIL", f"λ from 1σ 실패: {r}"
+    if "Deming" not in w._status.text():
+        return "FAIL", "상태줄에 적합 방법 표기 없음"
+    fig = w._build_publish_fig()
+    if "Deming" not in fig.axes[0].get_title():
+        return "FAIL", "Publish 제목에 방법 표기 없음"
+    cfg = sc.to_config()
+    sc2 = type(sc)(w); sc2.options_widget(); sc2.from_config(cfg)
+    if sc2._fit_combo.currentText() != cfg["fit"]:
+        return "FAIL", "적합 방법 설정 왕복 실패"
+
+    # Result Lab Σ Stats 에 추세 열
+    import tempfile
+    from gui.ui_result_viewer import ResultViewerWidget
+    from PyQt6.QtWidgets import QPlainTextEdit
+    p = os.path.join(tempfile.mkdtemp(), "fixture_report.dat")
+    _write_report_fixture(p)
+    rv = ResultViewerWidget(); rv._path = p; rv._reload()
+    rv._show_stats()
+    eds = rv.findChildren(QPlainTextEdit)
+    if not eds or "trend /h" not in eds[-1].toPlainText():
+        return "FAIL", "Result Lab Stats에 구간 추세가 없음"
+    return "PASS", (f"OLS {s_ols:.3f} → Deming {s_dem:.3f} (참 1.5) · 추세 {tr[0]:.4f}/h (참 0.25) · "
+                    "OLS 제목 불변 · λ from 1σ · Publish 표기 · 설정 왕복 · Stats 추세 열")
 
 
 def main():

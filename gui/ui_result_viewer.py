@@ -1404,23 +1404,32 @@ class ResultViewerWidget(QWidget):
         lines = [f"File: {os.path.basename(t['path'])}",
                  f"Range: {rng}   (Hide QC {'ON' if self._chk_hide_qc.isChecked() else 'OFF'})",
                  "",
-                 f"{'gas':<10} {'n':>6} {'mean':>9} {'median':>9} {'σ':>8} {'min':>8} {'max':>8}"]
+                 f"{'gas':<10} {'n':>6} {'mean':>9} {'median':>9} {'σ':>8} {'min':>8} {'max':>8}"
+                 f"  {'trend /h':>10} {'± SE':>8}"]
+        from gui.ui_plot_maker.processing import trend_per_hour   # 구간 즉석 추세(직선)
+        tt = t.get("time")
         for g, y in t["gases"].items():
             v = y[sel]
             v = v[np.isfinite(v)]
             if v.size == 0:
                 lines.append(f"{g:<10} {0:>6}")
                 continue
+            tr = trend_per_hour(tt[sel], y[sel]) if tt is not None else None
+            trs = f"  {tr[0]:>10.4g} {tr[1]:>8.2g}" if tr else ""
             lines.append(f"{g:<10} {v.size:>6} {np.mean(v):>9.3f} {np.median(v):>9.3f} "
-                         f"{np.std(v):>8.3f} {np.min(v):>8.2f} {np.max(v):>8.2f}")
+                         f"{np.std(v):>8.3f} {np.min(v):>8.2f} {np.max(v):>8.2f}{trs}")
         r = t["rms"][sel]
         r = r[np.isfinite(r)]
         if r.size:
             lines.append("")
             lines.append(f"RMS median {np.median(r):.3e} / p95 {np.percentile(r, 95):.3e}")
+        lines.append("")
+        lines.append("trend = straight-line slope over the range (ppb per hour). ± SE assumes "
+                     "independent residuals —")
+        lines.append("with autocorrelated data (most time series) the real uncertainty is larger.")
         dlg = QDialog(self)
         dlg.setWindowTitle("Stats (ppb)")
-        dlg.resize(560, 340)
+        dlg.resize(720, 380)
         lay = QVBoxLayout(dlg)
         ed = QPlainTextEdit("\n".join(lines))
         ed.setReadOnly(True)
