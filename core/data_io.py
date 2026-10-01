@@ -1292,7 +1292,10 @@ def read_scans_via_dataio(fp, channel, min_peak=1000.0):
     (1=2053:4101, 2=4101:6149 — read_all_scans SPEC_DEFAULT/ANS와 일치 확인됨).
     중립 모듈(data_io, Qt·r_trend 비의존)에 둬 R Trend·알파 둘 다 순환없이 공유.
     반환: (za, he), 각 원소 (intensity[f64], T_c, P_mbar). 순수함수."""
-    _, flags, Ts, Ps, specs, _ = extract_raw_file_for_parallel((fp, 0, _RP_CH_PIXELS, channel))
+    # Pass 1 파싱 캐시를 거친다(core/alpha_cache.py) — 같은 raw·채널·픽셀범위면 알파 생성과 캐시를
+    # 나눠 쓰고, R을 다시 만들 때 raw를 안 읽는다. 반환은 extract_raw_file_for_parallel과 같다.
+    from core.alpha_cache import extract_cached
+    _, flags, Ts, Ps, specs, _ = extract_cached((fp, 0, _RP_CH_PIXELS, channel))
     za = []
     he = []
     for i in range(len(flags)):

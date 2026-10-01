@@ -2297,15 +2297,11 @@ class AlphaExportWorker(QThread):
             #    프리페치·파싱 프로세스를 건너뛴다. 처리 순서(gidx)는 파일 순서 그대로. ──
             from core import alpha_cache as _ac
             _use_cache = _ac.enabled() and getattr(self, 'use_pass1_cache', True)
-            _ckey, _hits = {}, set()
+            _hits = set()
             if _use_cache:
-                for _fp in _files:
-                    try:
-                        _ckey[_fp] = _ac.cache_key(_fp, self.channel, self.pixel_min, self.pixel_max)
-                    except OSError:
-                        continue
-                    if _ac.has(_ckey[_fp]):
-                        _hits.add(_fp)
+                # 정확한 범위 캐시, 또는 R 생성이 만든 전체 폭 캐시(잘라 쓰기가 안전할 때)
+                _hits = {fp for fp in _files
+                         if _ac.available(fp, self.channel, self.pixel_min, self.pixel_max)}
             _miss = [fp for fp in _files if fp not in _hits]
             n_cache_hit = n_cache_saved = 0
             # ── 콜드 HDD 대책: 디스크를 읽는 주체를 프리페치 스레드 **하나**로 모은다 ──
@@ -2367,16 +2363,18 @@ class AlphaExportWorker(QThread):
                     for _fp in _files:                 # 처리 순서 = 파일 순서(적중·미스 섞여도 같다)
                         if not self.is_running:
                             break
-                        _cached = _ac.load(_ckey[_fp]) if _fp in _hits else None
+                        _cached = (_ac.lookup(_fp, self.channel, self.pixel_min, self.pixel_max)
+                                   if _fp in _hits else None)
                         if _cached is not None:
                             n_cache_hit += 1
                             _flags, _Ts, _Ps, _specs, _secs = _cached
                         elif _fp in _hits:
-                            # 손상·키 불일치 — 그 자리에서 다시 파싱(드묾). 결과는 다시 저장한다.
+                            # 손상·키 불일치·잘라 쓰기 불안전 — 그 자리에서 다시 파싱(드묾)·저장.
                             try:
                                 _, _flags, _Ts, _Ps, _specs, _secs = _xtr(
                                     (_fp, self.pixel_min, self.pixel_max, self.channel))
-                                _ac.save(_ckey[_fp], _flags, _Ts, _Ps, _specs, _secs)
+                                _ac.store(_fp, self.channel, self.pixel_min, self.pixel_max,
+                                          _flags, _Ts, _Ps, _specs, _secs)
                                 n_cache_saved += 1
                             except Exception as e:
                                 self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
@@ -2390,8 +2388,9 @@ class AlphaExportWorker(QThread):
                                 self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
                                 _flags = None
                             _submit_next()
-                            if _flags is not None and _fp in _ckey:
-                                _ac.save(_ckey[_fp], _flags, _Ts, _Ps, _specs, _secs)
+                            if _flags is not None and _use_cache:
+                                _ac.store(_fp, self.channel, self.pixel_min, self.pixel_max,
+                                          _flags, _Ts, _Ps, _specs, _secs)
                                 n_cache_saved += 1
                         if _flags is None:
                             for _ri in _rpf[_fp]:

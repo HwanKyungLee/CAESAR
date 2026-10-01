@@ -29,6 +29,7 @@ from __future__ import annotations
 import glob
 import hashlib
 import os
+import threading
 
 import numpy as np
 
@@ -103,13 +104,19 @@ def has(key: str) -> bool:
 def load(key: str):
     """적중 시 (flags, Ts, Ps, specs, secs) — extract_raw_file_for_parallel 반환과 같은 dtype·모양.
     미스·손상·키 불일치면 None(호출측이 다시 파싱한다)."""
+    return _load(key)[0]
+
+
+def _load(key: str):
+    """(결과 튜플 | None, 잘라 쓰기 안전 여부)."""
     p = _path_for(key)
     if not os.path.exists(p):
-        return None
+        return None, False
     try:
         with np.load(p, allow_pickle=False) as z:
             if str(z['key']) != key or int(z['schema']) != SCHEMA:
-                return None
+                return None, False
+            sliceable = 'sliceable' in z.files and bool(z['sliceable'])
             flags = z['flags'].astype(np.int64, copy=False)
             Ts = z['Ts'].astype(np.float64, copy=False)
             Ps = z['Ps'].astype(np.float64, copy=False)
@@ -117,20 +124,73 @@ def load(key: str):
             secs = z['secs'].astype(np.float64, copy=False)
         n = len(flags)
         if not (len(Ts) == len(Ps) == len(secs) == n and specs.shape[0] == n):
-            return None
+            return None, False
         try:
             os.utime(p, None)                              # LRU: 최근 사용 표시
         except OSError:
             pass
-        return flags, Ts, Ps, specs, secs
+        return (flags, Ts, Ps, specs, secs), sliceable
     except Exception:                                      # noqa: BLE001 — 손상 → 다시 파싱
+        return None, False
+
+
+FULL = (0, 2048)        # 채널 블록 전체 폭(core.raw_parser CH_PIXELS) — R 생성이 이 폭으로 읽는다
+
+
+def _is_sliceable(pixel_min, pixel_max, flags, specs) -> bool:
+    """전체 폭 결과를 다른 픽셀 범위로 **잘라 써도 범위 파싱과 같은가**. 파서는 NaN을 뺀 뒤 범위를
+    자르므로, 어느 행에서든 NaN이 빠졌으면(폭이 2048이 아니거나, 길이가 달라 버려진 행 = 읽기 실패 행이
+    있으면) 잘라 쓴 결과가 범위 파싱과 달라질 수 있다 → 그때는 잘라 쓰지 않는다(정확한 범위 캐시만)."""
+    from core.data_io import RAW_LOAD_FAIL
+    return ((int(pixel_min), int(pixel_max)) == FULL and np.asarray(specs).ndim == 2
+            and np.asarray(specs).shape[1] == FULL[1]
+            and not np.any(np.asarray(flags) == RAW_LOAD_FAIL))
+
+
+def available(fp, channel, pixel_min, pixel_max) -> bool:
+    """적중 후보가 있나(정확한 범위 캐시, 또는 잘라 쓸 수 있을지 모를 전체 폭 캐시). 파일 크기만 보는
+    빠른 사전 검사 — 실제 사용 가능 여부는 lookup()이 정한다."""
+    try:
+        if has(cache_key(fp, channel, pixel_min, pixel_max)):
+            return True
+        return (int(pixel_min), int(pixel_max)) != FULL and has(cache_key(fp, channel, *FULL))
+    except OSError:
+        return False
+
+
+def lookup(fp, channel, pixel_min, pixel_max):
+    """(flags, Ts, Ps, specs, secs) 또는 None. 정확한 범위 캐시가 먼저, 없으면 **잘라 쓰기가 안전한**
+    전체 폭 캐시를 그 범위로 잘라서 — R 생성(전체 폭)이 만든 캐시를 알파(생성 px 범위)가 쓰는 길."""
+    try:
+        hit = load(cache_key(fp, channel, pixel_min, pixel_max))
+        if hit is not None or (int(pixel_min), int(pixel_max)) == FULL:
+            return hit
+        full_key = cache_key(fp, channel, *FULL)
+    except OSError:
         return None
+    full, sliceable = _load(full_key)
+    if full is None or not sliceable:
+        return None
+    flags, Ts, Ps, specs, secs = full
+    lo, hi = int(pixel_min), min(int(pixel_max), specs.shape[1])
+    return flags, Ts, Ps, np.ascontiguousarray(specs[:, lo:hi]), secs
 
 
-def save(key: str, flags, Ts, Ps, specs, secs) -> None:
-    """원자적 저장(tmp → replace). 실패는 조용히 무시 — 다음 런이 다시 파싱한다."""
+def store(fp, channel, pixel_min, pixel_max, flags, Ts, Ps, specs, secs) -> None:
+    """정확한 범위 키로 저장(전체 폭이면 잘라 쓰기 안전 여부도 같이)."""
+    try:
+        key = cache_key(fp, channel, pixel_min, pixel_max)
+    except OSError:
+        return
+    save(key, flags, Ts, Ps, specs, secs,
+         sliceable=_is_sliceable(pixel_min, pixel_max, flags, specs))
+
+
+def save(key: str, flags, Ts, Ps, specs, secs, sliceable=False) -> None:
+    """원자적 저장(tmp → replace). 실패는 조용히 무시 — 다음 런이 다시 파싱한다.
+    임시 파일 이름에 프로세스 번호를 붙인다 — R 생성은 자식 프로세스 여럿이 동시에 저장한다."""
     p = _path_for(key)
-    tmp = p[:-4] + '.tmp.npz'
+    tmp = f"{p[:-4]}.{os.getpid()}.{threading.get_ident()}.tmp.npz"
     try:
         specs = np.asarray(specs)
         u = None
@@ -140,6 +200,7 @@ def save(key: str, flags, Ts, Ps, specs, secs) -> None:
                 u = None                                   # 정수가 아니다 — float32 그대로
         os.makedirs(os.path.dirname(p), exist_ok=True)
         np.savez(tmp[:-4], key=np.array(key), schema=np.array(SCHEMA),
+                 sliceable=np.array(bool(sliceable)),
                  flags=np.asarray(flags), Ts=np.asarray(Ts), Ps=np.asarray(Ps),
                  specs=u if u is not None else specs.astype(np.float32), secs=np.asarray(secs))
         os.replace(tmp, p)
@@ -148,6 +209,22 @@ def save(key: str, flags, Ts, Ps, specs, secs) -> None:
             os.remove(tmp)
         except OSError:
             pass
+
+
+def extract_cached(task):
+    """`core.data_io.extract_raw_file_for_parallel`과 같은 인자·같은 반환 — 캐시를 거친다.
+    task = (path, pixel_min, pixel_max, channel). R 생성(`read_scans_via_dataio`)이 쓴다. 키가 알파 워커와
+    같아서 **알파와 R이 캐시를 나눠 쓴다**(같은 raw·채널·픽셀범위). 꺼져 있거나 키를 못 만들면 그냥 파싱."""
+    from core.data_io import extract_raw_file_for_parallel
+    path, pixel_min, pixel_max, channel = task
+    if enabled():
+        hit = lookup(path, channel, pixel_min, pixel_max)
+        if hit is not None:
+            return (path, *hit)
+    out = extract_raw_file_for_parallel(task)
+    if enabled():
+        store(path, channel, pixel_min, pixel_max, *out[1:])
+    return out
 
 
 def prune(limit: int | None = None) -> int:
