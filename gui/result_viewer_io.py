@@ -160,17 +160,38 @@ def read_alpha_trace(path, want_id=None):
     return wave, np.array(ids, dtype=float), a
 
 
-def _col_float(rows, j):
-    """행 목록의 j번째 칸 → float 배열(없거나 못 읽으면 NaN). 열 통째로 numpy가 읽고, 한 칸이라도
-    못 읽는 열만 예전처럼 칸마다 float() — 결과는 같고 26만 행에서 열당 수십 배 빠르다."""
-    n = len(rows)
+class _Grid:
+    """행 목록(list[list[str]])을 열 단위로 꺼내는 그릇 — `zip_longest`로 C 수준에서 한 번에 전치한다
+    (짧은 행은 빈 칸 "" = 예전 `r[j] if j < len(r) else ""`와 같은 뜻). 열마다 리스트를 다시 만들던 것이
+    26만 행에서 ~1 s였다. 열은 처음 꺼낼 때 object 배열로 바꿔 둔다."""
+
+    def __init__(self, rows, width):
+        from itertools import zip_longest
+        self.n = len(rows)
+        self.width = width
+        self._t = list(zip_longest(*rows, fillvalue="")) if rows else []
+        self._cache = {}
+
+    def col(self, j):
+        if j is None or j >= self.width or j >= len(self._t):
+            return np.full(self.n, "", dtype=object)
+        a = self._cache.get(j)
+        if a is None:
+            a = self._cache[j] = np.array(self._t[j], dtype=object)
+        return a
+
+
+def _col_float(grid, j):
+    """j번째 칸 → float 배열(없거나 못 읽으면 NaN). object 배열의 astype(float)은 원소마다 파이썬
+    float()을 C 루프에서 부른다 — 칸마다 float()과 **결과가 같고** 훨씬 빠르다. 한 칸이라도 못 읽는
+    열만 예전처럼 칸마다 시도한다."""
     if j is None:
-        return np.full(n, np.nan)
-    vals = [r[j] if j < len(r) else "" for r in rows]
+        return np.full(grid.n, np.nan)
+    vals = grid.col(j)
     try:
-        return np.array(vals, dtype=float)
-    except ValueError:
-        out = np.full(n, np.nan)
+        return vals.astype(float)
+    except (ValueError, TypeError):
+        out = np.full(grid.n, np.nan)
         for k, v in enumerate(vals):
             try:
                 out[k] = float(v)
@@ -179,48 +200,123 @@ def _col_float(rows, j):
         return out
 
 
-def _col_time(rows, j, cut=True):
-    """행 목록의 j번째 칸 → epoch초 배열(core.result_io.parse_row_time 단일 출처). 못 읽으면 NaN.
+def _local_offsets(naive_s):
+    """naive 로컬 시각(1970 기준 초, 정수) → 그 시각의 `datetime.timestamp() - naive` 오프셋(초).
+    시(hour) 단위로 한 번씩만 계산한다. 한 시간 안에서 오프셋이 바뀌는 시간(DST 전환 등)은 NaN —
+    호출측이 그 행만 행별 경로로 처리한다."""
+    import datetime as _dt
+    base = _dt.datetime(1970, 1, 1)
+    hours = naive_s // 3600
+    uh, inv = np.unique(hours, return_inverse=True)
+    off = np.empty(len(uh))
+    for i, h in enumerate(uh):
+        h = int(h)
+        a = (base + _dt.timedelta(seconds=h * 3600)).timestamp() - h * 3600
+        b = (base + _dt.timedelta(seconds=h * 3600 + 3599)).timestamp() - (h * 3600 + 3599)
+        off[i] = a if a == b else np.nan
+    return off[inv]
+
+
+def _col_time(grid, j, cut=True):
+    """j번째 칸 → epoch초 배열(못 읽으면 NaN). 시각 의미의 단일 출처는 core.result_io.parse_row_time.
+    빠른 길: `YYYY-mm-dd HH:MM:SS` 형식에 맞는 값은 pandas로 한꺼번에 읽고 로컬 오프셋을 시 단위로
+    더한다. 나머지(분수 초·이상한 모양·DST 전환 시간)는 예전처럼 parse_row_time 행별 경로 —
+    결과는 같다(tools/test_fit_table_fast.py가 행별 구현과 대조).
     cut=False면 26자를 넘는 문자열은 읽지 않는다(옛 alpha-fit 경로가 잘라 읽지 않았던 규칙 유지)."""
     from core.result_io import parse_row_time
-    ts = np.full(len(rows), np.nan)
-    if j is None:
+    ts = np.full(grid.n, np.nan)
+    if j is None or grid.n == 0:
         return ts
-    for k, r in enumerate(rows):
-        if j < len(r):
-            s = r[j].strip()
-            if s and (cut or len(s) <= 26):
-                d = parse_row_time(s)
-                if d is not None:
-                    ts[k] = d.timestamp()
+    import pandas as pd
+    s = pd.Series(grid.col(j), dtype=object).str.strip()
+    ln = s.str.len().to_numpy()
+    keep = ln > 0 if cut else (ln > 0) & (ln <= 26)
+    s26 = s.str.slice(0, 26)
+    dt = pd.to_datetime(s26.where(keep, None), format="%Y-%m-%d %H:%M:%S", errors="coerce")
+    ok = dt.notna().to_numpy() & keep
+    if ok.any():
+        naive = dt[ok].to_numpy(dtype="datetime64[s]").astype(np.int64)
+        off = _local_offsets(naive)
+        good = np.isfinite(off)
+        idx = np.flatnonzero(ok)
+        ts[idx[good]] = naive[good] + off[good]
+        ok[idx[~good]] = False          # DST 전환 시간 → 아래 행별 경로
+    sv = s.to_numpy()
+    for k in np.flatnonzero(keep & ~ok):
+        d = parse_row_time(sv[k])
+        if d is not None:
+            ts[k] = d.timestamp()
     return ts
 
 
+_FIT_CACHE = {}          # (절대경로, mtime_ns, 크기) → 파싱 결과 — 최근 몇 개만(LRU)
+_FIT_CACHE_MAX = 3
+
+
+def _copy_table(t):
+    """캐시된 결과를 넘길 때 배열·리스트를 복사 — 호출측이 고쳐 써도 캐시가 오염되지 않게."""
+    out = {}
+    for k, v in t.items():
+        if isinstance(v, np.ndarray):
+            out[k] = v.copy()
+        elif isinstance(v, dict):
+            out[k] = {g: (a.copy() if isinstance(a, np.ndarray) else a) for g, a in v.items()}
+        elif isinstance(v, list):
+            out[k] = list(v)
+        else:
+            out[k] = v
+    return out
+
+
 def load_fit_table(path):
+    """fit 표 파싱(캐시됨). 같은 파일(경로·수정시각·크기)을 다시 열면 다시 읽지 않는다 — Result Lab에서
+    연 파일을 Plot Maker로 보내거나 Dates로 같은 기간을 다시 열 때 26만 행 ~3 s가 반복됐다
+    (2026-10-02). 파일이 바뀌면 키가 달라져 다시 읽는다. 돌려주는 건 복사본."""
+    try:
+        st = os.stat(path)
+        key = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    if key is not None and key in _FIT_CACHE:
+        t = _FIT_CACHE.pop(key)
+        _FIT_CACHE[key] = t                      # 최근 사용으로(dict 순서 = LRU)
+        out = _copy_table(t)
+        out["path"] = path                       # 같은 파일을 다른 경로 문자열로 연 경우
+        return out
+    t = _load_fit_table_uncached(path)
+    if key is not None:
+        _FIT_CACHE[key] = t
+        while len(_FIT_CACHE) > _FIT_CACHE_MAX:
+            _FIT_CACHE.pop(next(iter(_FIT_CACHE)))
+    return _copy_table(t)
+
+
+def _load_fit_table_uncached(path):
     """fit 표 파싱 — 3가지 포맷 지원.
     ① 구 alpha-fit: row_idx T_C P_mbar <gases> rms_cm-1
     ② 신 alpha-fit: row_idx doy datetime T_C P_mbar <gases> rms_cm-1
     ③ GUI 분석 리포트: File [Ch] Time RMS … Status <gas blocks> Shift Squeeze
     반환: {'row_idx','T','P','rms','doy','time'(epoch초),'gases':{name:ndarray},
            'errs':{name:ndarray|None},'status':list|None,'path'}."""
-    import datetime as _dt
     hdr, rows = None, []
     is_report = False
     with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for ln in f:
-            s = ln.rstrip("\n")
-            if not s.strip() or s.startswith("#"):
-                continue
-            if hdr is None and s.lower().startswith("row_idx"):
-                hdr = s.split("\t")
-                continue
-            if hdr is None and s.startswith("File\t"):
-                hdr = s.split("\t")
-                is_report = True
-                continue
-            if hdr is None:
-                continue
-            rows.append(s.split("\t"))
+        lines = f.read().split("\n")
+    # 헤더 찾기(예전 한 줄씩 규칙 그대로) → 그 뒤 데이터 줄은 한 번에 거른다(줄마다 파이썬 분기가
+    # 26만 행에서 ~1 s였다). 거르는 규칙도 같다: 빈 줄·공백뿐인 줄·'#' 주석 줄은 건너뛴다.
+    h = None
+    for i, s in enumerate(lines):
+        if not s.strip() or s.startswith("#"):
+            continue
+        if s.lower().startswith("row_idx"):
+            hdr, h = s.split("\t"), i
+            break
+        if s.startswith("File\t"):
+            hdr, h, is_report = s.split("\t"), i, True
+            break
+    if hdr is not None:
+        rows = [s.split("\t") for s in lines[h + 1:]
+                if s and s[0] != "#" and not s.isspace()]
     if hdr is None or not rows:
         raise ValueError("No fit-result header/data rows found")
 
@@ -234,10 +330,12 @@ def load_fit_table(path):
         if not gases:
             gases = [c for c in hdr if (c + "_Smooth") in idx]   # 구 포맷 호환
 
-        def colf_r(j):
-            return _col_float(rows, j)
+        grid = _Grid(rows, len(hdr))
 
-        ts = _col_time(rows, idx.get("Time"))
+        def colf_r(j):
+            return _col_float(grid, j)
+
+        ts = _col_time(grid, idx.get("Time"))
         si = idx.get("Status")
         status = [r[si] if (si is not None and si < len(r)) else "" for r in rows]
         chi = idx.get("Channel")
@@ -265,8 +363,10 @@ def load_fit_table(path):
     p_i = idx.get("P_mbar", 2)
     gas_cols = list(range(p_i + 1, rms_i))   # P_mbar 다음 ~ rms 직전 = 가스들
 
+    grid = _Grid(rows, len(hdr))
+
     def colf(j):
-        return _col_float(rows, j)
+        return _col_float(grid, j)
 
     out = {"row_idx": colf(idx.get("row_idx", 0)), "T": colf(idx.get("T_C")),
            "P": colf(p_i), "rms": colf(rms_i), "doy": colf(idx.get("doy")),
@@ -278,7 +378,7 @@ def load_fit_table(path):
     # datetime 컬럼 → epoch 초(시간축용)
     di = idx.get("datetime")
     if di is not None:
-        ts = _col_time(rows, di, cut=False)
+        ts = _col_time(grid, di, cut=False)
         if np.isfinite(ts).any():
             out["time"] = ts
     return out

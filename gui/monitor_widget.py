@@ -159,6 +159,7 @@ class MonitorWidget(QWidget):
         self.p_rms.setLabel('left', 'RMS')
         for p in [self.p_sh, self.p_sq, self.p_rms]:
             p.setClipToView(True)
+            p.setDownsampling(auto=True, mode="peak")   # 큰 런에서 전 점 마커 → 화면 솎아내기(gui/pg_perf.py)
             p.showGrid(x=True, y=True)
             p.setLabel('bottom', 'Time')
             p.addLegend(offset=(10, 10))
@@ -606,13 +607,14 @@ class MonitorWidget(QWidget):
     def _conc_time_x(result_dict, row_index):
         """result_dict['Time']('%Y-%m-%d %H:%M:%S') → epoch초(시간축용). 실패 시 None."""
         ts = str(result_dict.get('Time', ''))
-        for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
-            try:
-                from datetime import datetime as _dt
-                return _dt.strptime(ts, fmt).timestamp()
-            except (ValueError, TypeError):
-                pass
-        return None
+        # 시각 파싱 단일 출처(core.result_io.parse_row_time — 같은 두 형식 + 빠른 길). rebuild_trend/
+        # rebuild_conc가 결과 전부를 돌며 부르므로 행마다 strptime 두 번이 쌓였다. 그 함수는 앞
+        # 26자만 보는데 여기는 예전에 자르지 않았다 → 26자 이하만 넘겨 결과를 같게.
+        if len(ts) > 26:
+            return None
+        from core.result_io import parse_row_time
+        d = parse_row_time(ts)
+        return d.timestamp() if d is not None else None
 
     def setup_conc_plots(self, gas_list):
         """RUN 시작 시 — 레퍼런스 가스마다 농도 시계열 플롯 1개씩(채널별 곡선) 재구성."""
@@ -628,6 +630,9 @@ class MonitorWidget(QWidget):
             p.setLabel('bottom', 'Time')
             p.showGrid(x=True, y=True)
             p.setClipToView(True)
+            # 캠페인 규모(수십만 점)에서 모든 점에 마커를 그리던 것 — 화면 peak 솎아내기(gui/pg_perf.py).
+            # 그래프 단위로 건다(이 그래프의 곡선은 전부 시간순 시계열). 클릭은 원본 전부로 판정.
+            p.setDownsampling(auto=True, mode="peak")
             p.addLegend(offset=(10, 10))
             self._conc_plots[gas] = p
             self._conc_curves[gas] = {}
@@ -769,7 +774,9 @@ class MonitorWidget(QWidget):
 
     def _nearest_point(self, plot, series, scene_pos, log_y=False):
         """(key, index) of the point in `series` {key: (xs, ys)} nearest to
-        scene_pos on `plot`, or None if the click is off the plot or > _CLICK_PX away."""
+        scene_pos on `plot`, or None if the click is off the plot or > _CLICK_PX away.
+        Uses the original data, so it is unaffected by screen downsampling (peak), whose
+        drawn spots are bin representatives (bin-start x, bin-min y)."""
         if plot.scene() is None:          # not in the current layout (Show gas filter)
             return None
         vb = plot.getViewBox()
@@ -777,6 +784,10 @@ class MonitorWidget(QWidget):
         if not rect.contains(scene_pos):
             return None
         (x0, x1), (y0, y1) = vb.viewRange()
+        sx = (x1 - x0) / rect.width()             # data units per screen pixel
+        sy = (y1 - y0) / rect.height()
+        at = vb.mapSceneToView(scene_pos)
+        from gui.pg_perf import nearest_index     # judged on ALL points, not the thinned drawn ones
         best = None
         for key, (xs, ys) in series.items():
             if not len(xs):
@@ -785,15 +796,14 @@ class MonitorWidget(QWidget):
             y = np.asarray(ys, dtype=float)
             if log_y:
                 y = np.log10(np.where(y > 0, y, 1e-9))   # same floor as _redraw_trend
-            sx = rect.left() + (x - x0) / (x1 - x0) * rect.width()
-            sy = rect.bottom() - (y - y0) / (y1 - y0) * rect.height()
-            d2 = (sx - scene_pos.x()) ** 2 + (sy - scene_pos.y()) ** 2
-            i = int(np.nanargmin(d2))
-            if best is None or d2[i] < best[0]:
-                best = (d2[i], key, i)
-        if best is None or best[0] > self._CLICK_PX ** 2:
-            return None
-        return best[1], best[2]
+            i = nearest_index(x, y, np.argsort(x, kind="stable"), at.x(), at.y(),
+                              sx, sy, radius_px=self._CLICK_PX)
+            if i is None:
+                continue
+            d2 = ((x[i] - at.x()) / sx) ** 2 + ((y[i] - at.y()) / sy) ** 2
+            if best is None or d2 < best[0]:
+                best = (d2, key, i)
+        return None if best is None else (best[1], best[2])
 
     def _on_conc_scene_click(self, ev):
         """Conc plot click → result dict of the nearest point (Step and Fast alike)."""
