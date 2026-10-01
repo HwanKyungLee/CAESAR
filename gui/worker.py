@@ -2292,6 +2292,22 @@ class AlphaExportWorker(QThread):
                 if _fp not in _rpf:
                     _rpf[_fp] = []; _files.append(_fp)
                 _rpf[_fp].append(_ri)
+            # ── Pass 1 파싱 캐시(core/alpha_cache.py) — 순수 파싱 결과만 캐시하므로 분류·퍼지·평균
+            #    세팅은 아래에서 매번 새로 적용된다(키에 세팅이 없어도 안전한 이유). 적중 파일은
+            #    프리페치·파싱 프로세스를 건너뛴다. 처리 순서(gidx)는 파일 순서 그대로. ──
+            from core import alpha_cache as _ac
+            _use_cache = _ac.enabled() and getattr(self, 'use_pass1_cache', True)
+            _ckey, _hits = {}, set()
+            if _use_cache:
+                for _fp in _files:
+                    try:
+                        _ckey[_fp] = _ac.cache_key(_fp, self.channel, self.pixel_min, self.pixel_max)
+                    except OSError:
+                        continue
+                    if _ac.has(_ckey[_fp]):
+                        _hits.add(_fp)
+            _miss = [fp for fp in _files if fp not in _hits]
+            n_cache_hit = n_cache_saved = 0
             # ── 콜드 HDD 대책: 디스크를 읽는 주체를 프리페치 스레드 **하나**로 모은다 ──
             # 실측(diagnostics/parallel_scaling_2026-09/measure_prefetch.py, 핫 raw 8파일):
             # 워커가 각자 파일을 열면 2.48 s/file(39.8 MB/s) — 헤드가 파일 사이를 오가며
@@ -2308,7 +2324,7 @@ class AlphaExportWorker(QThread):
             _pf_stop = _th.Event()
 
             _pf_th = _th.Thread(target=prefetch_into_page_cache,
-                                args=(_files, _pf_q, _pf_stop),
+                                args=(_miss, _pf_q, _pf_stop),      # 캐시 적중 파일은 디스크를 안 읽는다
                                 name='alpha-prefetch', daemon=True)
 
             def _pf_ready():
@@ -2323,14 +2339,15 @@ class AlphaExportWorker(QThread):
                 return False
 
 
-            _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _files]
+            _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _miss]
             # 워커 수 = GUI `CPU cores` 스핀(core.parallel). R calc 병렬파싱과 동일 출처.
             _nproc = max_workers()
             # 제출 창을 프리페치 선행 깊이에 맞춘다 — 창이 더 넓으면 워커가 캐시를
             # 앞질러 디스크를 직접 읽게 되고(=헤드 긁힘 복귀) 프리페치가 무의미해진다.
             _win = max(2, min(_nproc, _pf_q.maxsize + 1))
+            _hit_msg = (f" · cache hit {len(_hits)}/{len(_files)} (raw not read)" if _hits else "")
             self.status_msg.emit(
-                f"Pass 1 (parallel {_nproc} cores, prefetch): parsing {len(_files)} files…")
+                f"Pass 1 (parallel {_nproc} cores, prefetch): parsing {len(_miss)} files…{_hit_msg}")
             try:
                 _pf_th.start()
                 with _cf.ProcessPoolExecutor(max_workers=_nproc) as _ex:
@@ -2343,20 +2360,39 @@ class AlphaExportWorker(QThread):
                         if _ti >= len(_tasks):
                             return
                         _pf_ready()
-                        _futs.append((_files[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+                        _futs.append((_miss[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
 
                     while _ti < len(_tasks) and len(_futs) < _win:
                         _submit_next()
-                    while _futs:
+                    for _fp in _files:                 # 처리 순서 = 파일 순서(적중·미스 섞여도 같다)
                         if not self.is_running:
                             break
-                        _fp, _fut = _futs.popleft()
-                        try:
-                            _, _flags, _Ts, _Ps, _specs, _secs = _fut.result()
-                        except Exception as e:
-                            self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
-                            _flags = None
-                        _submit_next()
+                        _cached = _ac.load(_ckey[_fp]) if _fp in _hits else None
+                        if _cached is not None:
+                            n_cache_hit += 1
+                            _flags, _Ts, _Ps, _specs, _secs = _cached
+                        elif _fp in _hits:
+                            # 손상·키 불일치 — 그 자리에서 다시 파싱(드묾). 결과는 다시 저장한다.
+                            try:
+                                _, _flags, _Ts, _Ps, _specs, _secs = _xtr(
+                                    (_fp, self.pixel_min, self.pixel_max, self.channel))
+                                _ac.save(_ckey[_fp], _flags, _Ts, _Ps, _specs, _secs)
+                                n_cache_saved += 1
+                            except Exception as e:
+                                self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
+                                _flags = None
+                        else:
+                            _qfp, _fut = _futs.popleft()
+                            assert _qfp == _fp, (_qfp, _fp)   # 미스는 파일 순서대로 제출·소비된다
+                            try:
+                                _, _flags, _Ts, _Ps, _specs, _secs = _fut.result()
+                            except Exception as e:
+                                self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
+                                _flags = None
+                            _submit_next()
+                            if _flags is not None and _fp in _ckey:
+                                _ac.save(_ckey[_fp], _flags, _Ts, _Ps, _specs, _secs)
+                                n_cache_saved += 1
                         if _flags is None:
                             for _ri in _rpf[_fp]:
                                 global_idx += 1; self.progress.emit(global_idx)
@@ -2385,6 +2421,13 @@ class AlphaExportWorker(QThread):
                     _pf_q.get_nowait()      # put 에서 막혀 있으면 풀어준다
                 except Exception:
                     pass
+            if _use_cache:
+                _freed = _ac.prune()
+                _cn, _cb = _ac.usage()
+                self.status_msg.emit(
+                    f"[Pass 1 cache] {n_cache_hit} file(s) from cache (raw not read), {n_cache_saved} saved"
+                    f" · cache {_cn} files {_cb / 1e9:.1f} GB / limit {_ac.max_bytes() / 1e9:.0f} GB"
+                    + (f" · freed {_freed / 1e9:.1f} GB (least recently used)" if _freed else ""))
         else:
             # ── 순차 Pass 1 (폴백/검증용; 기존 로직 보존) ──
             for entry in expanded:
