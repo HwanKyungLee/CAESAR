@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -65,6 +66,31 @@ AUGUR = AugurTokens()
 VIGIL = VigilTokens()
 
 
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
+_fonts_registered: list = []
+
+
+def register_fonts() -> list:
+    """저장소 `fonts/` 의 브랜드 서체(Spectral · IBM Plex Sans/Mono, 모두 OFL — 라이선스 파일 동봉)를
+    이 프로세스에 등록한다. 설치 없이 쓰려는 것 — 다른 PC·현장 exe 에서도 같은 모양. 한 번만 돈다.
+    QGuiApplication 이 있어야 한다. 등록된 서체 이름 목록을 돌려준다(없으면 빈 목록 → 시스템 서체)."""
+    if _fonts_registered:
+        return _fonts_registered
+    from PyQt6.QtGui import QFontDatabase
+    fams = set()
+    try:
+        names = sorted(os.listdir(_FONTS_DIR))
+    except OSError:
+        names = []
+    for fn in names:
+        if fn.lower().endswith((".ttf", ".otf")):
+            fid = QFontDatabase.addApplicationFont(os.path.join(_FONTS_DIR, fn))
+            if fid >= 0:
+                fams.update(QFontDatabase.applicationFontFamilies(fid))
+    _fonts_registered.extend(sorted(fams))
+    return _fonts_registered
+
+
 def _palette(window, window_text, base, alt_base, text, button, button_text,
              highlight, highlighted_text, mid, dark, light, disabled_text, link, tooltip_base,
              tooltip_text, placeholder):
@@ -96,6 +122,7 @@ def _set_scheme(app, dark: bool) -> None:
 def apply_augur(app) -> None:
     """Augur: 종이·잉크. QApplication 직후, 창을 만들기 전에 부른다."""
     t = AUGUR
+    register_fonts()
     app.setStyle("Fusion")
     _set_scheme(app, dark=False)
     app.setPalette(_palette(
@@ -108,6 +135,11 @@ def apply_augur(app) -> None:
 def apply_vigil(app) -> None:
     """Vigil: 밤·등불. QApplication 직후, 대시보드를 만들기 전에 부른다."""
     t = VIGIL
+    if "IBM Plex Sans" in register_fonts():
+        # 브리프: Vigil 의 서체는 IBM Plex Sans. 한글 글리프는 Plex 에 없으니 맑은 고딕으로 넘긴다.
+        f = app.font()
+        f.setFamilies(["IBM Plex Sans", "Malgun Gothic"])
+        app.setFont(f)
     app.setStyle("Fusion")
     _set_scheme(app, dark=True)
     app.setPalette(_palette(
@@ -125,7 +157,7 @@ def apply_vigil(app) -> None:
 
 
 def mono_family() -> str:
-    """로그·숫자용 고정폭 글꼴 — 브랜드 서체(IBM Plex Mono)가 설치돼 있으면 그것, 없으면 Consolas."""
+    """로그·숫자용 고정폭 글꼴 — 브랜드 서체(IBM Plex Mono, register_fonts 로 등록)가 있으면 그것, 없으면 Consolas."""
     from PyQt6.QtGui import QFontDatabase
     fams = set(QFontDatabase.families())
     for f in ("IBM Plex Mono", "Cascadia Mono", "Consolas"):
