@@ -20,6 +20,7 @@ from core.data_io import DataIO
 from core.parallel import set_max_workers
 from core.paths import DEFAULT_CAMPAIGN
 from core.__version__ import __version__
+from gui.theme import channel_color   # 채널 색은 모든 Augur 그래프 공통
 from .ui_dialogs import *
 # 재수출 — 정의는 app_window_policy.py. tools/test_test_fit_dialog.py가 여기서 가져간다.
 from .app_window_policy import _scenario_gas_policy, _channel_worker_gas_policy  # noqa: F401
@@ -1230,9 +1231,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         else:
             channels = []
             for res, color, lbl in [
-                (cold_results,    '#2196F3', 'Cold'),
-                (hot_pns_results, '#FF6F00', 'Hot PNs'),
-                (hot_ans_results, '#D32F2F', 'Hot ANs'),
+                (cold_results,    channel_color(1), 'Cold'),
+                (hot_pns_results, channel_color(2), 'Hot PNs'),
+                (hot_ans_results, channel_color(3), 'Hot ANs'),
             ]:
                 if res:
                     channels.append({"label": lbl, "results": res, "color": color})
@@ -1282,9 +1283,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         else:
             channels = []
             for res, color, lbl in [
-                (cold_results,    '#2196F3', 'Cold'),
-                (hot_pns_results, '#FF6F00', 'Hot PNs'),
-                (hot_ans_results, '#D32F2F', 'Hot ANs'),
+                (cold_results,    channel_color(1), 'Cold'),
+                (hot_pns_results, channel_color(2), 'Hot PNs'),
+                (hot_ans_results, channel_color(3), 'Hot ANs'),
             ]:
                 if res:
                     channels.append({"label": lbl, "results": res, "color": color})

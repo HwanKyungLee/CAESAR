@@ -7,6 +7,8 @@ import datetime
 import time
 import numpy as np
 import pyqtgraph as pg
+
+from gui.theme import channel_color   # 채널 색은 모든 Augur 그래프 공통
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
@@ -161,7 +163,7 @@ class MonitorWidget(QWidget):
             p.addLegend(offset=(10, 10))
 
         # Channel colour palette  CH1=blue  CH2=orange  CH3=green
-        _CH_COLORS = {1: '#1f77b4', 2: '#ff7f0e', 3: '#2ca02c'}
+        _CH_COLORS = {ch: channel_color(ch) for ch in (1, 2, 3)}
 
         # _trend_curves[ch][metric] → PlotDataItem
         # _trend_data[ch][metric]   → list
@@ -563,7 +565,7 @@ class MonitorWidget(QWidget):
     # =========================================================
     # [Tab] 농도 시계열 (가스별 ppb) — 레퍼런스 넣은 기체 전부
     # =========================================================
-    _CONC_CH_COLORS = {1: '#1f77b4', 2: '#ff7f0e', 3: '#2ca02c'}
+    _CONC_CH_COLORS = {ch: channel_color(ch) for ch in (1, 2, 3)}   # gui/theme.py 공통 채널 색
 
     def init_tab_conc_pg(self):
         """가스별 농도(ppb) 시계열 탭. 가스 플롯은 RUN 시작 시 setup_conc_plots로 구성.

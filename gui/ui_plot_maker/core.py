@@ -13,8 +13,9 @@ import numpy as np
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 
 # 이름 기반 자동 배색용 결정적 해시 팔레트(모르는 종은 여기서 crc32로 하나 고름).
-_PALETTE = ["#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
-            "#0097A7", "#C2185B", "#5D4037", "#455A64", "#689F38"]
+# 값은 gui/theme.py 가 단일 출처(모든 Augur 그래프가 같은 색 체계를 쓴다).
+from gui.theme import NO2_IN_CELL as _NO2_IN_CELL, SERIES as _SERIES, SPECIES as _SPECIES
+_PALETTE = list(_SERIES)
 
 
 def _shade(hex_color, factor):
@@ -193,9 +194,7 @@ class PlotMode:
 
     # 종(species)→색. NO2는 어느 셀(ANs/PNs)이냐로 추가 구분. 캠페인-특정 채널
     # 매핑은 안 박음(종 색은 보편). 모든 모드 공용.
-    _SPECIES_COLORS = {"ans": "#2E7D32", "pns": "#EF6C00",
-                       "chocho": "#8E24AA", "glyoxal": "#8E24AA",
-                       "h2o": "#00838F", "o4": "#5D4037", "o3": "#C62828"}
+    _SPECIES_COLORS = {k: v for k, v in _SPECIES.items() if k != "no2"}
 
     def _auto_color(self, name):
         """이름 기반 결정적 색 — 같은 (종, 채널태그) 조합은 항상 같은 색.
@@ -215,12 +214,12 @@ class PlotMode:
         tag = tag_m.group(1).strip() if tag_m else ""
 
         if species == "no2" and "ans" in tag:
-            return "#1565C0"                      # NO2 in ANs cell — 확정색
+            return _NO2_IN_CELL["ans"]            # NO2 in ANs cell — 확정색
         if species == "no2" and "pns" in tag:
-            return "#E65100"                      # NO2 in PNs cell — 확정색
+            return _NO2_IN_CELL["pns"]            # NO2 in PNs cell — 확정색
 
         if species == "no2":
-            base = "#1976D2"                      # plain NO2
+            base = _SPECIES["no2"]                # plain NO2
         elif species in self._SPECIES_COLORS:
             base = self._SPECIES_COLORS[species]
         else:

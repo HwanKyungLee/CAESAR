@@ -66,6 +66,45 @@ AUGUR = AugurTokens()
 VIGIL = VigilTokens()
 
 
+# ── Augur 그래프 색 (2026-10-01) ─────────────────────────────────────────────
+# 예전엔 창마다 팔레트가 달라 같은 CH1 이 모니터에선 #1f77b4(tab10), R 대화상자·결과 뷰어에선
+# #2196F3(Material)였고, 농도 그래프는 기체 순서대로 색을 돌려 써서 NO₂ 가 창마다 다른 색이었다.
+# 기준은 Plot Maker 의 체계(가장 다듬어졌고 validate_plotmaker 가 값을 고정) — 그 값을 여기로
+# 옮겨 모든 Augur 그래프가 같이 쓴다. Plot Maker 그림의 색은 그대로다.
+
+# 범용 순서 팔레트(이름 없는 시리즈·모르는 기체의 해시 배색) — Plot Maker _PALETTE 와 같은 값.
+SERIES = ("#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
+          "#0097A7", "#C2185B", "#5D4037", "#455A64", "#689F38")
+
+# 채널 색 — CH1 파랑, CH2 주황, CH3 초록 … 어느 창에서든 같은 채널은 같은 색.
+# 빨강은 뒤로 미뤘다(3채널 화면에서 한 채널만 '오류'처럼 보이지 않게).
+CHANNELS = ("#2196F3", "#FF6F00", "#388E3C", "#7B1FA2", "#0097A7", "#D32F2F", "#795548")
+
+# 기체(종) 색 — 같은 기체는 어느 창·어느 채널이든 같은 계열. 키는 소문자 종 이름.
+SPECIES = {"no2": "#1976D2", "ans": "#2E7D32", "pns": "#EF6C00",
+           "chocho": "#8E24AA", "glyoxal": "#8E24AA",
+           "h2o": "#00838F", "o4": "#5D4037", "o3": "#C62828"}
+# NO₂ 를 셀별로 따로 그릴 때의 확정색(ANs 셀 / PNs 셀).
+NO2_IN_CELL = {"ans": "#1565C0", "pns": "#E65100"}
+
+
+def channel_color(ch: int) -> str:
+    """채널 번호(1부터) → 색. 번호가 목록보다 크면 순환."""
+    return CHANNELS[(max(int(ch), 1) - 1) % len(CHANNELS)]
+
+
+def species_color(name: str) -> str:
+    """기체 이름 → 색. 'NO2', 'NO2 (CH1)', 'chocho' 모두 받는다(괄호 앞이 종).
+    모르는 종은 이름 해시로 SERIES 에서 결정적으로 고른다(실행마다 같은 색). 이미 이름 있는 기체가
+    쓰는 색은 피한다 — 안 그러면 HONO 가 O₄ 와 같은 갈색이 되는 식으로 두 기체가 한 색이 된다."""
+    import zlib
+    species = (name or "").lower().split("(")[0].strip()
+    if species in SPECIES:
+        return SPECIES[species]
+    free = [c for c in SERIES if c not in SPECIES.values()] or list(SERIES)
+    return free[zlib.crc32(species.encode("utf-8")) % len(free)]
+
+
 _FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
 _fonts_registered: list = []
 

@@ -55,8 +55,8 @@ _KIND_KO = {
     "reference": "Reference",
     "concentration": "Concentration",
 }
-_PALETTE = ["#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
-            "#0097A7", "#C2185B", "#5D4037"]
+from gui.theme import SERIES as _SERIES, species_color
+_PALETTE = list(_SERIES)   # gui/theme.py 공통 팔레트
 
 
 class ResultViewerWidget(QWidget):
@@ -898,7 +898,7 @@ class ResultViewerWidget(QWidget):
                     continue
                 y = y.copy()
                 y[hide] = np.nan          # 'Hide QC'를 켠 경우에만 숨긴다
-                col = _PALETTE[names.index(g) % len(_PALETTE)]
+                col = species_color(g)   # 같은 기체는 어느 창에서든 같은 색(gui/theme.py)
                 if (getattr(self, '_chk_err', None) and self._chk_err.isChecked()):
                     err = (t.get("errs") or {}).get(g)
                     if err is not None:

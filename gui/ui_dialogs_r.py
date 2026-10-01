@@ -55,15 +55,8 @@ from gui.r_workers import (_LiveStream, _RTrendWorker, _RTExportWorker,
 
 
 # ── 채널 색상 팔레트 ─────────────────────────────────────────────────────────
-_CH_COLORS = [
-    '#2196F3',  # blue
-    '#FF6F00',  # orange
-    '#D32F2F',  # red
-    '#388E3C',  # green
-    '#7B1FA2',  # purple
-    '#0097A7',  # teal
-    '#795548',  # brown
-]
+from gui.theme import CHANNELS as _THEME_CHANNELS
+_CH_COLORS = list(_THEME_CHANNELS)   # 모든 Augur 그래프 공통 채널 색(gui/theme.py)
 
 
 class RCalibratorDialog(QDialog):
@@ -932,9 +925,9 @@ class RCalibratorDialog(QDialog):
             # Legacy format: map fixed 3 channels
             channels = []
             for res, color, name in [
-                (arg0, '#2196F3', 'Cold'),
-                (arg1, '#FF6F00', 'Hot PNs'),
-                (arg2, '#D32F2F', 'Hot ANs'),
+                (arg0, _CH_COLORS[0], 'Cold'),
+                (arg1, _CH_COLORS[1], 'Hot PNs'),
+                (arg2, _CH_COLORS[2], 'Hot ANs'),
             ]:
                 if res:
                     channels.append({"label": name, "results": res, "color": color})
