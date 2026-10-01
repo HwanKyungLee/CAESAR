@@ -55,10 +55,10 @@ def policy_floats(gas, kind, mode, raw, n):
         vals = None
     if vals is None or len(vals) != n:
         raise ValueError(
-            f"{gas}: {kind}_mode={mode} 인데 {kind}_val을 읽을 수 없다 "
-            f"({kind}_val={raw!r}, 기대: 콤마로 구분된 실수 {n}개). "
-            f"FitSet/레퍼런스 설정을 고칠 것 — 예전에는 여기서 조용히 기본값으로 "
-            f"갈아타서 '기록된 세팅'과 '실제 세팅'이 어긋났다."
+            f"{gas}: {kind}_mode={mode} but {kind}_val cannot be read "
+            f"({kind}_val={raw!r}, expected: {n} comma-separated numbers). "
+            f"Fix the FitSet/reference settings — this used to silently fall back to defaults, "
+            f"so the 'recorded settings' and the 'actual settings' diverged."
         )
     return vals
 

@@ -61,12 +61,12 @@ def test_check_references_scale_independent_flatness():
     normal_scale = structure * 1e-19    # 일반 기체 스케일
     o4_scale = structure * 1e-46        # O4 스케일(충돌유도흡수) — 절대값은 작지만 구조는 동일
     status, msg, m = check_references({"NO2": normal_scale, "O4": o4_scale}, wl=wl)
-    check("O4처럼 절대값 작아도 구조 있으면 평평 아님", status != FAIL or "평평" not in msg,
+    check("O4처럼 절대값 작아도 구조 있으면 평평 아님", status != FAIL or "flat" not in msg,
           f"{status}: {msg}")
 
     truly_flat = np.full(2048, 1e-46)   # 진짜 상수(퇴화) — 스케일과 무관하게 여전히 잡아야 함
     status, msg, m = check_references({"NO2": normal_scale, "O4_flat": truly_flat}, wl=wl)
-    check("진짜 평평(상수)한 건 여전히 FAIL", status == FAIL and "평평" in msg, f"{status}: {msg}")
+    check("진짜 평평(상수)한 건 여전히 FAIL", status == FAIL and "flat" in msg, f"{status}: {msg}")
 
 
 def test_check_references_other_paths():

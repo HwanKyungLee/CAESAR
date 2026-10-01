@@ -41,7 +41,7 @@ def main():
         print("PASS 정상 정렬: 경고 없음")
 
         sh, ws = _run(np.full((3, N), np.nan))
-        assert sh == 0.0 and any("정렬 실패" in m for m in ws), ws
+        assert sh == 0.0 and any("alignment failed" in m for m in ws), ws
         print("PASS 전 스캔 NaN: shift 0 + 실패 경고")
 
         mixed = np.vstack([good, np.full((1, N), np.nan)])
@@ -50,7 +50,7 @@ def main():
         print("PASS NaN 스캔 하나 섞임: 나머지로 정렬")
 
         sh, ws = _run(good, lo=-2.0, hi=2.0)
-        assert sh == 2.0 and any("경계" in m for m in ws), (sh, ws)
+        assert sh == 2.0 and any("boundary" in m for m in ws), (sh, ws)
         print("PASS 경계에 붙음: 경고")
     finally:
         WD.design_matrix = orig

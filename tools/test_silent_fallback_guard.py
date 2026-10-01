@@ -232,7 +232,7 @@ def test_residual_rho_does_not_default_to_zero():
         wd.residual_rho(eng, [np.zeros(vj.N_PIX)], [eng.gas_list[0]], 100, 300, 3)
         ok = False
     except RuntimeError as e:
-        ok = "자기상관" in str(e)
+        ok = "autocorrelation" in str(e)
     except Exception:
         ok = False
     finally:

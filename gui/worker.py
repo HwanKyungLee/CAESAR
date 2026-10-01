@@ -1858,7 +1858,7 @@ def _pass2_write_file(fp, rows, ctx):
         # 옛 경로(느리지만 정확)로 떨어뜨린다 — 조용히 보정을 끄면 안 된다.
         _clk = DataIO.clock_epoch_offset_sec(fp, ncols=_ncols or None)
         f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
-        f.write("# clock_epoch=%s  (hot 2026-05-29 UTC-toggle; 축 규약은 기록 UTC)\n"
+        f.write("# clock_epoch=%s  (hot 2026-05-29 UTC-toggle; axis convention: recorded UTC)\n"
                 % ("pre_fix %+.0fh" % (_clk / 3600.0) if _clk else "none +0h"))
         f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
                 '\t'.join(f"px{ctx['pix_min']+j}" for j in range(ctx['n_pix'])) + "\n")

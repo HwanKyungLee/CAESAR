@@ -227,7 +227,7 @@ class Channel:
     def slice(self, row: Sequence[float]):
         """이 채널의 스펙트럼 절편 반환(양끝 포함). columns 미지정이면 오류."""
         if self.columns is None:
-            raise ProfileError(f"channel '{self.id}' has no columns (autodetect 필요)")
+            raise ProfileError(f"channel '{self.id}' has no columns (autodetect required)")
         s, e = self.columns
         return row[s:e + 1]
 
@@ -430,7 +430,7 @@ class Profile:
         근거: raw_parser VALUE-INSPECTION(신호≈3~5만, 노이즈≈700~900). autodetect·
         spectrum_block_width가 있어야 한다. 반환: 새 Channel 목록(ch0,ch1,...)."""
         if self.autodetect is None or self.spectrum_block_width is None:
-            raise ProfileError("autodetect/spectrum_block_width 미설정 — 자동탐지 불가")
+            raise ProfileError("autodetect/spectrum_block_width not set — cannot autodetect")
         ad = self.autodetect
         width = self.spectrum_block_width
         start = ad.first_spectrum_col
@@ -477,7 +477,7 @@ class Profile:
                 source_path=source_path,
             )
         except (KeyError, TypeError, ValueError) as e:
-            raise ProfileError(f"프로파일 파싱 실패 ({source_path or d.get('profile_id')}): {e}") from e
+            raise ProfileError(f"Profile parse failed ({source_path or d.get('profile_id')}): {e}") from e
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -504,16 +504,16 @@ def validate_profile_dict(d: dict, schema: Optional[dict] = None) -> None:
         try:
             jsonschema.validate(d, schema)
         except jsonschema.ValidationError as e:  # type: ignore[attr-defined]
-            raise ProfileError(f"스키마 검증 실패: {e.message} (at {list(e.path)})") from e
+            raise ProfileError(f"Schema validation failed: {e.message} (at {list(e.path)})") from e
         return
     # 폴백: 최소 필수 키 구조 검사
     required = ["profile_id", "profile_version", "match", "header", "flags",
                 "channels", "hk", "cadence"]
     missing = [k for k in required if k not in d]
     if missing:
-        raise ProfileError(f"필수 키 누락: {missing}")
+        raise ProfileError(f"Missing required keys: {missing}")
     if not d.get("channels"):
-        raise ProfileError("channels 가 비어 있음")
+        raise ProfileError("channels is empty")
 
 
 def load_profile(path: str, validate: bool = True,
@@ -541,7 +541,7 @@ def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,
     for p in profiles:
         if p.profile_id in seen:
             raise ProfileError(
-                f"중복 profile_id '{p.profile_id}': {seen[p.profile_id]} vs {p.source_path}")
+                f"Duplicate profile_id '{p.profile_id}': {seen[p.profile_id]} vs {p.source_path}")
         seen[p.profile_id] = p.source_path
     return profiles
 

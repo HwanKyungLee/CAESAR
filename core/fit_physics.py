@@ -206,18 +206,18 @@ def judge_reference(eng, fitter, scans, ref_props_without, ref_props_with,
     exclude = collinear or unstable or trade_off or impossible
     reasons = []
     if impossible:
-        reasons.append(f"★절대량 {abs_ratio:.0f}배(이론 상한의 {abs_max_ratio:g}배 초과) "
-                       f"— 물리적으로 불가능한 양 흡수=과적합")
+        reasons.append(f"★absolute amount {abs_ratio:.0f}x (exceeds {abs_max_ratio:g}x the theoretical maximum) "
+                       f"— absorbs a physically impossible amount = overfitting")
     if collinear:
-        reasons.append(f"NO2↔{candidate} 공선성 {pair:.2f}>{collin_hi}(분해 임의적)")
+        reasons.append(f"NO2↔{candidate} collinearity {pair:.2f}>{collin_hi} (separation arbitrary)")
     if unstable:
-        reasons.append(f"{candidate} 계수 CV {cand_cv*100:.0f}%>타깃 {health['target_cv']*100:.0f}%(상수여야 하는데 출렁=과적합)")
+        reasons.append(f"{candidate} coefficient CV {cand_cv*100:.0f}%>target {health['target_cv']*100:.0f}% (should be constant but fluctuates = overfitting)")
     if trade_off:
-        reasons.append(f"NO2↔{candidate} 계수 반상관 {corr:.2f}(서로 훔침)")
+        reasons.append(f"NO2↔{candidate} coefficient anticorrelation {corr:.2f} (stealing from each other)")
     return dict(candidate=candidate, exclude=exclude,
                 pair_collinearity=pair, multiple_R=multR,
                 candidate_cv=cand_cv, corr_with_target=corr, abs_ratio=abs_ratio,
                 impossible=impossible,
                 target_cv=health["target_cv"], n=health["n"],
-                verdict=("제외 권고(물리)" if exclude else "포함 타당(물리)"),
+                verdict=("exclude recommended (physics)" if exclude else "include justified (physics)"),
                 reasons=reasons)

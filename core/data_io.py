@@ -846,9 +846,9 @@ class DataIO:
                     # (실측: 핫에서 channel=3 이 channel=2 와 같은 배열). 구조적으로
                     # 존재하는 슬롯이면 그대로 주되, 침묵하지는 않는다.
                     DataIO._warn_once(
-                        f"channel={channel} 요청: 이 구성({len(raw_probe)}열)의 등록 채널은 "
-                        f"{nch}개다. 슬롯 {min(channel, n_slots)} 를 대신 읽는다 — "
-                        f"채널 번호를 확인할 것")
+                        f"channel={channel} requested, but this configuration ({len(raw_probe)} columns) registers "
+                        f"{nch} channel(s). Reading slot {min(channel, n_slots)} instead — "
+                        f"check the channel number")
                 ch = max(1, min(channel, n_slots))   # 구조적으로 있는 슬롯까지만
                 col_start = DataIO._META_COLS + (ch - 1) * DataIO._CH_PIXELS
                 col_end   = col_start + DataIO._CH_PIXELS
@@ -931,9 +931,9 @@ class DataIO:
                         if not (DataIO._P_LO <= env_p <= DataIO._P_HI):
                             # **버리지 않는다** — 고지대·항공이면 정상값이다(무결성 헌장).
                             DataIO._warn_once(
-                                f"압력 {env_p:.1f} mbar 가 지상 기대범위"
-                                f"({DataIO._P_LO:.0f}~{DataIO._P_HI:.0f})를 벗어난다 — "
-                                f"고지대/항공이면 정상, 아니면 HK 열을 확인할 것")
+                                f"Pressure {env_p:.1f} mbar is outside the expected ground-level range "
+                                f"({DataIO._P_LO:.0f}~{DataIO._P_HI:.0f}) — "
+                                f"normal at altitude/airborne, otherwise check the HK columns")
                     if np.isfinite(tv):
                         env_t = float(tv)
                 else:
@@ -1089,15 +1089,15 @@ class DataIO:
                 sec = (DataIO._bytepack_year_seconds(raw[0], raw[1])
                        + DataIO.clock_epoch_offset_sec(filepath))
                 return datetime(year, 1, 1) + timedelta(seconds=sec)
-            reason = ("파일명에 YYYY-MM-DD 없음" if not year
-                      else f"행 컬럼 수 부족({len(raw)})")
+            reason = ("no YYYY-MM-DD in file name" if not year
+                      else f"too few columns in row ({len(raw)})")
         except Exception as e:
             reason = f"{type(e).__name__}: {e}"
         if filepath not in DataIO._TS_WARNED:
             DataIO._TS_WARNED.add(filepath)
-            print(f"[data_io] ⚠ 스캔 시각을 읽지 못했다 — {os.path.basename(filepath)}: "
-                  f"{reason}. mtime 폴백은 2026-09-15에 제거됐다(복사하면 조용히 "
-                  f"틀리므로). Time 칸은 'row NNNN'으로 남는다.", file=sys.stderr)
+            print(f"[data_io] ⚠ Could not read scan time — {os.path.basename(filepath)}: "
+                  f"{reason}. The mtime fallback was removed on 2026-09-15 (copying files makes it "
+                  f"silently wrong). The Time cell stays 'row NNNN'.", file=sys.stderr)
         return None
 
     @staticmethod
@@ -1327,11 +1327,11 @@ def read_scans_via_dataio(fp, channel, min_peak=1000.0):
     n_fail = int(np.count_nonzero(np.asarray(flags, dtype=np.int64) == RAW_LOAD_FAIL))
     if n_fail and n_fail == len(flags):
         raise RuntimeError(
-            f"{os.path.basename(fp)}: {n_fail}행 전부 로드 실패 — 파일을 읽지 "
-            f"못했다('ZA/He 블록 없음'과 다르다)")
+            f"{os.path.basename(fp)}: all {n_fail} rows failed to load — the file could not "
+            f"be read (not the same as 'no ZA/He blocks')")
     if n_fail:
-        print(f"[data_io] {os.path.basename(fp)}: {n_fail}/{len(flags)}행 로드 실패"
-              f"(flag={RAW_LOAD_FAIL}) — 남은 행으로 계속한다", file=sys.stderr)
+        print(f"[data_io] {os.path.basename(fp)}: {n_fail}/{len(flags)} rows failed to load "
+              f"(flag={RAW_LOAD_FAIL}) — continuing with the remaining rows", file=sys.stderr)
     return za, he
 
 
@@ -1349,7 +1349,7 @@ def scans_worker_for_parallel(task):
     try:
         za, he = read_scans_via_dataio(fp, channel, min_peak)
     except Exception as e:
-        print(f"[data_io] raw 파싱 실패 {os.path.basename(fp)}: "
+        print(f"[data_io] raw parse failed {os.path.basename(fp)}: "
               f"{type(e).__name__}: {e}", file=sys.stderr)
         return fp, None, None
     return fp, za, he

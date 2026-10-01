@@ -191,7 +191,7 @@ class SaveExportMixin:
                     f"# Data Period: {span_str}",
                     (f"# Fit Range: Pixel {f_min_px}-{f_max_px} ({wl_str})"
                      if _range_ok else
-                     "# Fit Range: UNREADABLE — UI 핏범위 입력을 읽지 못했다 (0-0은 실제 값이 아님)"),
+                     "# Fit Range: UNREADABLE — could not read the fit-range input in the UI (0-0 is not a real value)"),
                     f"# Polynomial Degree: {poly_deg}",
                     f"# Tikhonov Lambda: {lam_val:g}",
                     f"# Robust Fitting (IRLS): {robust_status}",

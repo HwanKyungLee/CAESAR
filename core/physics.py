@@ -216,7 +216,7 @@ def _demo():
     """자기검증: ppb 환산과 Rayleigh가 **같은 상수**를 쓰는지 + 위임이 끊기지 않았는지."""
     # 유도값이 CODATA 2018 Loschmidt(2.686 780 111e19 cm^-3)와 맞나 — 매직넘버 방지
     assert abs(N_LOSCHMIDT - 2.686780111e19) / 2.686780111e19 < 1e-9, N_LOSCHMIDT
-    assert abs(air_number_density(0.0, 1013.25) - N_LOSCHMIDT) < 1e6, "STP에서 N0가 아님"
+    assert abs(air_number_density(0.0, 1013.25) - N_LOSCHMIDT) < 1e6, "not N0 at STP"
     n1 = air_number_density(25.0, 1013.25)
     assert abs(n1 - N_LOSCHMIDT * (273.15 / 298.15)) / n1 < 1e-12
     # 온도·압력 의존이 물리대로인지(밀도 ∝ P, ∝ 1/T)
@@ -234,7 +234,7 @@ def _demo():
     from core import physics as _cp
     from core import fit_optimizer, fit_physics, param_optimizer, window_designer
     for m in (fit_optimizer, fit_physics, param_optimizer, window_designer):
-        assert m.air_number_density is _cp.air_number_density, m.__name__ + " 가 사본을 쓴다"
+        assert m.air_number_density is _cp.air_number_density, m.__name__ + " uses a copy"
 
     print("physics self-check OK: N(25C,1013.25) = %.6e molec/cm3" % n1)
 

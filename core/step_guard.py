@@ -62,10 +62,10 @@ def resolve_time_axis(idx_values, sec_values, warn=None):
     if bad.size:
         if warn is not None:
             i = int(bad[0])
-            warn(f"[time] ⚠ 시각축이 단조증가가 아니다 — knot {i}→{i+1}: "
+            warn(f"[time] ⚠ time axis is not monotonically increasing — knot {i}→{i+1}: "
                  f"{sec[i]:.2f} → {sec[i + 1]:.2f} s "
-                 f"({'중복' if sec[i + 1] == sec[i] else f'{sec[i] - sec[i+1]:.1f}s 역행'}), "
-                 f"위반 {bad.size}건 → 스캔 인덱스축으로 폴백")
+                 f"({'duplicate' if sec[i + 1] == sec[i] else f'{sec[i] - sec[i+1]:.1f}s backwards'}), "
+                 f"{bad.size} violation(s) → falling back to scan-index axis")
         return idx, False
     return sec, True
 

@@ -63,7 +63,7 @@ def test_floor_warns_when_it_binds():
             except Exception:
                 pass          # 스텁이라 뒤에서 죽어도 된다 — 경고가 났는지만 본다
             msgs = [str(x.message) for x in w if issubclass(x.category, RuntimeWarning)]
-        assert any("n_eff 바닥 발동" in m for m in msgs), \
+        assert any("n_eff floor triggered" in m for m in msgs), \
             f"바닥이 걸렸는데 경고가 없다: {msgs}"
     finally:
         WD.residual_rho = real

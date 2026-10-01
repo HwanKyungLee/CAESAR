@@ -94,19 +94,19 @@ def resolve_calibration_dir(meta, alpha_wave, px_start, roots=None):
     """
     name = ((meta.get("calibration") or {}).get("wavecal") or "").strip()
     if not name:
-        return None, "meta에 wavecal이 기록돼 있지 않음"
+        return None, "no wavecal recorded in meta"
     roots = roots or [WV_CAL_DIR, REFERENCE_DIR]
     cands = []
     for root in roots:
         cands += glob.glob(os.path.join(root, "**", name), recursive=True)
     cands = sorted(set(cands))
     if not cands:
-        return None, "wavecal '%s'을(를) reference_data에서 못 찾음" % name
+        return None, "wavecal '%s' not found in reference_data" % name
     if len(cands) == 1:
         return os.path.dirname(cands[0]), ""
 
     if alpha_wave is None or not len(alpha_wave):
-        return None, "wavecal '%s'이 %d곳에 있는데 알파 파장축이 없어 확정 불가" % (name, len(cands))
+        return None, "wavecal '%s' exists in %d places and the alpha has no wavelength axis — cannot resolve" % (name, len(cands))
     matched = []
     for c in cands:
         arr = load_wavecal_array(c)
@@ -118,9 +118,9 @@ def resolve_calibration_dir(meta, alpha_wave, px_start, roots=None):
     if len(matched) == 1:
         return os.path.dirname(matched[0]), ""
     if not matched:
-        return None, ("wavecal '%s' 후보 %d개 중 알파의 파장축과 맞는 게 없음 "
-                      "(채널이 다른 파일일 수 있음)" % (name, len(cands)))
-    return None, ("wavecal '%s' 후보 %d개가 알파 축과 모두 일치 — 어느 채널 폴더인지 확정 불가"
+        return None, ("wavecal '%s': none of %d candidates match the alpha wavelength axis "
+                      "(may be a file from another channel)" % (name, len(cands)))
+    return None, ("wavecal '%s': all %d candidates match the alpha axis — cannot tell which channel folder"
                   % (name, len(matched)))
 
 
@@ -168,44 +168,44 @@ def refit_row(fit_path, alpha_path, row_idx, *, saved_conc=None, saved_shift=Non
     """
     meta = read_meta(fit_path)
     if not meta:
-        return {"ok": False, "reason": "잔차 불가: .meta.json 없음 "
-                                       "(레거시 결과 — tools/backfill_meta.py로 생성 가능)"}
+        return {"ok": False, "reason": "Residual unavailable: no .meta.json "
+                                       "(legacy result — can be generated with tools/backfill_meta.py)"}
     if str(meta.get("runid") or "").startswith("L") or \
             ((meta.get("provenance") or {}).get("meta_source") != "live"):
-        return {"ok": False, "reason": "잔차 불가: legacy meta(설정 일부 미상) — "
-                                       "부분 설정으로 그린 잔차는 이 농도와 대응하지 않음"}
+        return {"ok": False, "reason": "Residual unavailable: legacy meta (settings partly unknown) — "
+                                       "a residual from partial settings would not correspond to this concentration"}
 
     wave, alpha, px_start, t_row, p_row = read_alpha_row(alpha_path, row_idx)
     if alpha is None:
-        return {"ok": False, "reason": "잔차 불가: 알파에 row %s 없음" % row_idx}
+        return {"ok": False, "reason": "Residual unavailable: row %s not in alpha" % row_idx}
 
     ref_dir, why = resolve_calibration_dir(meta, wave, px_start)
     if ref_dir is None:
-        return {"ok": False, "reason": "잔차 불가: " + why}
+        return {"ok": False, "reason": "Residual unavailable: " + why}
     cfg, missing = meta_to_cfg(meta, ref_dir)
     if missing:
-        return {"ok": False, "reason": "잔차 불가: 파일 못 찾음 — " + ", ".join(missing[:3])}
+        return {"ok": False, "reason": "Residual unavailable: file not found — " + ", ".join(missing[:3])}
 
     eng, _ = FB.build_engine(cfg["wl_path"], cfg["refs"], load_wavecal_array)
     want = [r["name"] for r in cfg["refs"]]
     if list(eng.gas_list) != want:
-        return {"ok": False, "reason": "잔차 불가: 레퍼런스 로딩 실패 — 기대 %s, 실제 %s"
+        return {"ok": False, "reason": "Residual unavailable: reference loading failed — expected %s, got %s"
                                        % (want, list(eng.gas_list))}
 
     i0, i1 = _fit_indices(cfg, wave, px_start)
     if i1 - i0 < 10:
-        return {"ok": False, "reason": "잔차 불가: 핏창이 알파 범위 밖(idx %d..%d)" % (i0, i1)}
+        return {"ok": False, "reason": "Residual unavailable: fit window outside alpha range (idx %d..%d)" % (i0, i1)}
 
     # 농도 환산 온도: gas_temp(>0)가 있으면 그걸, 없으면 행 실측값.
     # (gui/worker.py `gas_temp_override`와 같은 규약 — 다르면 ppb가 통째로 어긋난다.)
     gt = float(cfg.get("gas_temp") or 0)
     t_used = gt if gt > 0 else t_row
     if not np.isfinite(t_used) or not np.isfinite(p_row):
-        return {"ok": False, "reason": "잔차 불가: 그 행의 T/P를 알파에서 못 읽음"}
+        return {"ok": False, "reason": "Residual unavailable: could not read T/P for that row from alpha"}
 
     target = _driver(cfg)
     if not target:
-        return {"ok": False, "reason": "잔차 불가: meta에 레퍼런스가 없음"}
+        return {"ok": False, "reason": "Residual unavailable: no references in meta"}
 
     start = None
     if saved_shift is not None and saved_squeeze is not None \
@@ -219,7 +219,7 @@ def refit_row(fit_path, alpha_path, row_idx, *, saved_conc=None, saved_shift=Non
                           allow_negative_gas=bool(cfg["allow_negative_gas"]),
                           controlled_start=start, return_model=True)
     except Exception as e:                      # noqa: BLE001
-        return {"ok": False, "reason": "잔차 불가: 재핏 실패 — %s" % e}
+        return {"ok": False, "reason": "Residual unavailable: refit failed — %s" % e}
 
     off = []
     for gas, saved in (saved_conc or {}).items():
@@ -231,8 +231,8 @@ def refit_row(fit_path, alpha_path, row_idx, *, saved_conc=None, saved_shift=Non
             off.append("%s %.4g->%.4g" % (gas, saved, got))
     if off:
         return {"ok": False,
-                "reason": ("잔차 불가: 재현 실패(웜스타트 이력을 복원 못 함) — "
-                           + ", ".join(off[:3]) + " / 허용 %.1f%%" % (tol_rel * 100))}
+                "reason": ("Residual unavailable: reproduction failed (could not restore warm-start history) — "
+                           + ", ".join(off[:3]) + " / tolerance %.1f%%" % (tol_rel * 100))}
 
     return {"ok": True, "runid": meta.get("runid"),
             "wave": out["wavelength_nm"], "alpha": np.asarray(alpha, float)[i0:i1 + 1],
@@ -305,7 +305,7 @@ def _demo():
             ok2 = refit_row(fit_fp, alpha_fp, 7, saved_conc={"G1": got})
             assert ok2["ok"], ok2.get("reason")
             bad = refit_row(fit_fp, alpha_fp, 7, saved_conc={"G1": got * 1.5})
-            assert not bad["ok"] and "재현 실패" in bad["reason"], bad
+            assert not bad["ok"] and "reproduction failed" in bad["reason"], bad
 
             # 없는 행
             assert not refit_row(fit_fp, alpha_fp, 999)["ok"]
