@@ -3,14 +3,15 @@
 Question: does a residual-based correction for correlated residuals (Stutz & Platt 1996 type; here the sandwich
 covariance pinv(M) Σ pinv(M)^T with Σ = Toeplitz(s² ACF_r)) account for the structural budget of Sect. 4?
 
-## 1. Benchmark group B (bench_residual_corr.py -> bench_summary.csv), 60 cases per condition, Augur operational fit path
-scatter / RMS(sigma):
-| condition | white sigma | joint sigma | corrected (ACF truncated at first non-positive lag) | corrected (Bartlett 20) |
+## 1. Benchmark group B (bench_residual_corr.py -> bench_cases.csv; scored with the benchmark's score.py definition,
+robust scatter / median sigma -> bench_summary_scorepy.csv), 60 cases per condition, Augur operational fit path
+| condition | white sigma (= manuscript Sect. 3.4) | joint sigma | corrected (ACF truncated at first non-positive lag) | corrected (Bartlett 20) |
 |---|---|---|---|---|
-| white x1 | 1.20 | 1.20 | 1.19 | 1.38 |
-| white x2 | 0.92 | 0.92 | 0.91 | 1.08 |
-| AR(1) 0.5 | 1.85 | 1.85 | 1.15 | 1.27 |
-Fixed-shift fits give the same (1.19 / 0.95 / 1.87 white). The correction recovers most of the correlated-noise deficit.
+| white x1 | 1.32 (fixed shift 1.19) | 1.32 | 1.31 (fixed 1.18) | 1.55 |
+| white x2 | 1.09 (fixed 1.12) | 1.09 | 1.08 (fixed 1.11) | 1.30 |
+| AR(1) 0.5 | 1.65 (fixed 1.75) | 1.65 | **1.04** (fixed 1.08) | 1.15 |
+The SD-based ratio (SD(err)/RMS sigma) in bench_summary.csv gives 1.20 / 0.92 / 1.85 -> 1.19 / 0.91 / 1.15; same conclusion.
+The correction recovers the correlated-noise deficit and leaves white-noise cases unchanged; joint = linear within 0.1 %.
 
 ## 2. Field budget window (field_residual_corr.py -> field_ANs.csv, field_PNs.csv, field_summary.json)
 9034 records per heated channel, 8847 non-bound; reconstruction of the operational fit exact (NO2 rel. diff 4e-16, sigma 5e-14).
