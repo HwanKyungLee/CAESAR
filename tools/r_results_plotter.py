@@ -14,14 +14,24 @@ from matplotlib.gridspec import GridSpec
 
 # ── 경로 설정 ─────────────────────────────────────────────────────────────────
 BASE_DIR = r"C:\Users\kh548\OneDrive\바탕 화면\여수 필드 준비"
+# 채널 이름은 **블록 번호** 기준. 폴더는 새 이름(R_Hot_blk2053)을 먼저 찾고, 없으면 2026-10-01 전
+# 이름을 읽는다 — 옛 R_Hot_PNs 에 들어 있는 건 **블록 2053**(여수 판정: ANs)이다(셀 라벨이 반대였다).
+def _first_dir(*names):
+    for n in names:
+        d = os.path.join(BASE_DIR, n)
+        if os.path.isdir(d):
+            return d
+    return os.path.join(BASE_DIR, names[0])
+
+
 CHANNELS = {
-    "Cold":     os.path.join(BASE_DIR, "R_Cold"),
-    "Hot PNs":  os.path.join(BASE_DIR, "R_Hot_PNs"),
-    "Hot ANs":  os.path.join(BASE_DIR, "R_Hot_ANs"),
+    "Cold":          _first_dir("R_Cold"),
+    "Hot blk2053":   _first_dir("R_Hot_blk2053", "R_Hot_PNs"),
+    "Hot blk4101":   _first_dir("R_Hot_blk4101", "R_Hot_ANs"),
 }
 OUT_DIR = BASE_DIR
 
-COLORS = {"Cold": "#1f77b4", "Hot PNs": "#d62728", "Hot ANs": "#ff7f0e"}
+COLORS = {"Cold": "#1f77b4", "Hot blk2053": "#d62728", "Hot blk4101": "#ff7f0e"}
 
 # ── 데이터 로더 ───────────────────────────────────────────────────────────────
 
@@ -226,9 +236,10 @@ def make_spectra_figure(all_records):
 # ── 3. 채널 비교 그래프 (같은 날짜 파일: PNs vs ANs) ─────────────────────────
 
 def make_comparison_figure(all_records):
-    """Hot PNs / Hot ANs 중앙값 스펙트럼 비교 (날짜별)"""
-    pns_recs = all_records.get("Hot PNs", [])
-    ans_recs = all_records.get("Hot ANs", [])
+    """Hot 블록 2053 / 4101 중앙값 스펙트럼 비교 (날짜별). 변수 이름(pns/ans)은 레거시 —
+    pns_* = 블록 2053, ans_* = 블록 4101."""
+    pns_recs = all_records.get("Hot blk2053", [])
+    ans_recs = all_records.get("Hot blk4101", [])
     if not pns_recs or not ans_recs:
         return
 
@@ -251,15 +262,15 @@ def make_comparison_figure(all_records):
     cols = min(n, 2)
     rows = (n + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(13, 4.5 * rows), squeeze=False)
-    fig.suptitle("Hot PNs vs Hot ANs — Median R Spectra by Date",
+    fig.suptitle("Hot block 2053 vs block 4101 — Median R Spectra by Date",
                  fontsize=13, fontweight="bold")
 
     for idx, date in enumerate(dates):
         ax = axes[idx // cols][idx % cols]
 
         yvals_all = []
-        for ch_name, grp, color in [("Hot PNs", pns_g[date], COLORS["Hot PNs"]),
-                                     ("Hot ANs", ans_g[date], COLORS["Hot ANs"])]:
+        for ch_name, grp, color in [("Hot blk2053", pns_g[date], COLORS["Hot blk2053"]),
+                                     ("Hot blk4101", ans_g[date], COLORS["Hot blk4101"])]:
             r_list = [r for _, _, r in grp]
             if not r_list:
                 continue

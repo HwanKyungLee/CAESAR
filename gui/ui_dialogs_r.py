@@ -354,8 +354,8 @@ class RCalibratorDialog(QDialog):
         cb_raw_ch.setFixedWidth(62)
         cb_raw_ch.setToolTip(
             "Which ROI to read in the raw file (dio_channel)\n"
-            "ch1: spec 0–2048 (Cold / Hot PNs)\n"
-            "ch2: spec 2048–4096 (Hot ANs)\n"
+            "ch1: spec 0–2048 (Cold / Hot primary block 2053 — Yeosu: ANs)\n"
+            "ch2: spec 2048–4096 (Hot secondary block 4101 — Yeosu: PNs)\n"
             "Hot 2-channel: same raw_dir, set ch1·ch2 separately")
         row.addWidget(cb_raw_ch)
 
@@ -930,8 +930,8 @@ class RCalibratorDialog(QDialog):
             channels = []
             for res, color, name in [
                 (arg0, _CH_COLORS[0], 'Cold'),
-                (arg1, _CH_COLORS[1], 'Hot PNs'),
-                (arg2, _CH_COLORS[2], 'Hot ANs'),
+                (arg1, _CH_COLORS[1], 'Hot blk2053'),   # 레거시 arg1 = 블록 2053(여수 판정: ANs)
+                (arg2, _CH_COLORS[2], 'Hot blk4101'),   # 레거시 arg2 = 블록 4101(여수 판정: PNs)
             ]:
                 if res:
                     channels.append({"label": name, "results": res, "color": color})
@@ -962,12 +962,11 @@ class RCalibratorDialog(QDialog):
                     f"{r['r_mean'] * 100:.4f}"))
                 file_date  = "-".join(r["filename"].split("-")[:3])
                 base_fname = os.path.splitext(r["filename"])[0]
-                # 새 형식: R_{name}; 레거시 호환 매핑
-                _legacy = {"cold": "R_Cold", "hot_pns": "R_Hot_PNs",
-                           "hot_ans": "R_Hot_ANs"}
-                ch_subdir = _legacy.get(name.lower().replace(" ", "_"), f"R_{name}")
-                dat_path  = os.path.join(
-                    out_dir, ch_subdir, file_date, f"{base_fname}_R.dat")
+                # 하위 폴더 후보: 새 이름(블록 기준) → 2026-10-01 전 이름 — r_trend_monitor 가 정한다.
+                from gui.r_workers import r_subdir_candidates
+                _cands = [os.path.join(out_dir, sd, file_date, f"{base_fname}_R.dat")
+                          for sd in r_subdir_candidates(name)]
+                dat_path = next((c for c in _cands if os.path.exists(c)), _cands[0])
                 if not os.path.exists(dat_path):
                     dat_path = os.path.join(out_dir, file_date, f"{base_fname}_R.dat")
                 self._all_results.append({

@@ -12,6 +12,30 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-01 (3) — 단일 출처 정리 + 레거시 R 경로의 하드코딩 셀 이름 제거
+
+### 1. 숫자 무변경 정리 (커밋 `b67f15c`)
+* `core/physics.coeff_to_ppb()` — 계수→ppb 식 사본 8곳을 하나로(연산 순서 같게 → 비트 동일, 무작위 20만 대조).
+* R 도구 HK 열 번호(`r_batch_calculator`, GUI R 폴백)는 `raw_parser` HotHKMap/ColdHKMap 에서.
+* **확인한 사실**: R 스캔(`r_trend_monitor.scan_directory`)은 `col_press`/`col_temp` 인자를 **안 쓴다** —
+  T/P 는 `data_io.read_scans_via_dataio` 가 채널 **이름**으로 고른 센서(9-27 판정 짝)에서 읽는다. 그래서
+  R 도구에 옛 짝 이름이 남아 있어도 R 숫자는 이미 판정대로였다.
+
+### 2. 레거시 R 경로: 블록 기준 이름 + 레이아웃 라벨
+레거시 경로(명령줄 `r_trend_monitor`, `rt_precompute` 프리셋, 구형 3채널 차트, `r_results_plotter`)가
+블록 2053 을 'Hot PNs', 4101 을 'Hot ANs' 로 **코드에 박아** 여수 판정과 반대였다(값·핏 창은 블록에 맞았음).
+셀 이름은 캠페인·배치마다 바뀌므로(9/27 실험실은 2053 = 콜드) 이름을 판정대로 바꾸는 대신 원칙을 바꿨다:
+* **파일·폴더 이름 = 블록 번호** (`Hot_blk2053_*.dat`, `R_Hot_blk2053/`, `R_trend_Hot_blk2053.png`) —
+  주 경로의 `R_CH1/R_CH2` 와 같은 원칙. 캠페인이 바뀌어도 틀리지 않는다.
+* **화면 라벨 = `core.raw_parser.block_label(path, block)`** — 등록 레이아웃·날짜 범위가 아는 셀이면
+  'Hot ANs (block 2053)', 범위 밖·미등록이면 'Hot block 2053'(이름을 주장하지 않음).
+* 옛 이름 호환: R 곡선 폴더는 `r_trend_monitor.r_subdir_candidates()` 가 새 이름 → 옛 이름(R_Hot_PNs =
+  **블록 2053**) 순서로 돌려주고 GUI 2곳·plotter 가 그대로 찾는다. 옛 키 `hot_pns`/`hot_ans` 는 창·프리셋에
+  블록 별칭으로 남김. R 숫자·파일 내용은 그대로, **이름만** 바뀐다.
+* 회귀 `tools/test_block_labels.py`(19항목) — 라벨·기간 밖·옛 폴더 찾기·별칭·명령줄 main 끝까지.
+* 여전히 레거시: GUI R 대화상자의 cfg 키 `wl_hot_ans`(= 블록 4101 wavecal), `_update_daily_rt_chart` 인자 이름.
+  주석으로 블록을 명시했다.
+
 ## 2026-10-01 (2) — worker 핏 경로 통합: `_fit_spectrum` 하나 (출력 바이트동일)
 
 순차 `_run` 과 Fast 청크 `_fit_alpha_range` 가 핏 본체(재시도 루프·가중·VarPro·모델 재구성·

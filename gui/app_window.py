@@ -1212,6 +1212,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 f"R(λ)  median={r_med*100:.4f}%  Leff≈{leff:.0f} cm")
 
     def _update_daily_rt_chart(self, cold_results, hot_pns_results=None, hot_ans_results=None):
+        # 인자 이름은 레거시: hot_pns_results = **블록 2053**, hot_ans_results = **블록 4101** 결과
+        # (여수 판정으로는 2053 = ANs). 라벨은 셀 이름 대신 블록 번호를 쓴다(gui/r_workers 경로엔 파일 정보가 없다).
         """Populate the R time-series chart in Daily Run from R Calibrator results.
 
         Accepts both new format (cold_results = [{label,results,color},...])
@@ -1232,8 +1234,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             channels = []
             for res, color, lbl in [
                 (cold_results,    channel_color(1), 'Cold'),
-                (hot_pns_results, channel_color(2), 'Hot PNs'),
-                (hot_ans_results, channel_color(3), 'Hot ANs'),
+                (hot_pns_results, channel_color(2), 'Hot blk2053'),
+                (hot_ans_results, channel_color(3), 'Hot blk4101'),
             ]:
                 if res:
                     channels.append({"label": lbl, "results": res, "color": color})
@@ -1284,8 +1286,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             channels = []
             for res, color, lbl in [
                 (cold_results,    channel_color(1), 'Cold'),
-                (hot_pns_results, channel_color(2), 'Hot PNs'),
-                (hot_ans_results, channel_color(3), 'Hot ANs'),
+                (hot_pns_results, channel_color(2), 'Hot blk2053'),
+                (hot_ans_results, channel_color(3), 'Hot blk4101'),
             ]:
                 if res:
                     channels.append({"label": lbl, "results": res, "color": color})
@@ -1401,10 +1403,11 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         file_date = "-".join(fname.split("-")[:3])
         base = os.path.splitext(fname)[0]
         _key = rec["ch_key"]
-        # 레거시 고정 이름 매핑 먼저 시도; 없으면 새 포맷 R_{label} 사용
-        ch_subdir = {"cold": "R_Cold", "hot_pns": "R_Hot_PNs",
-                     "hot_ans": "R_Hot_ANs"}.get(_key, f"R_{_key}")
-        dat_path = os.path.join(out_dir, ch_subdir, file_date, f"{base}_R.dat")
+        # 하위 폴더 후보: 새 이름(블록 기준) → 2026-10-01 전 이름(R_Hot_PNs = 블록 2053).
+        # 목록은 tools/r_trend_monitor.r_subdir_candidates 한 곳이 정한다.
+        from gui.r_workers import r_subdir_candidates
+        _cands = [os.path.join(out_dir, sd, file_date, f"{base}_R.dat") for sd in r_subdir_candidates(_key)]
+        dat_path = next((c for c in _cands if os.path.exists(c)), _cands[0])
         if not os.path.exists(dat_path):
             dat_path = os.path.join(out_dir, file_date, f"{base}_R.dat")
         roi = r.get("fit_window_nm", (400, 500))

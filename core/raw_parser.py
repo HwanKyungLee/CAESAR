@@ -900,8 +900,37 @@ class RawParser:
             return float("nan")
 
 
+def block_channel_name(path: str, block_start: int):
+    """이 raw 파일에서 `block_start` 열로 시작하는 스펙트럼 블록의 **캠페인 채널 이름**(예 'ANs').
+
+    이름은 코드가 아니라 등록된 캠페인 레이아웃(`register_campaign_layout`, 날짜 범위 포함)이
+    정한다 — 어느 블록이 어느 셀인지는 캠페인·배치마다 바뀌기 때문이다(2026-09-27 실험실 raw 는
+    같은 6181열인데 block 2053 = 콜드). 레이아웃이 모르는 구성이거나 날짜 범위 밖이면 None.
+    파일을 못 읽어도 None(라벨용이라 실패가 결과를 바꾸지 않는다)."""
+    try:
+        fl = RawParser._detect_layout(path)
+    except OSError:
+        return None
+    lay = CAMPAIGN_LAYOUTS.get(fl.ncols)
+    if lay is None:
+        return None
+    for name, (start, _end) in fl.spec_blocks.items():
+        if start == int(block_start) and name in lay.channels:
+            return name
+    return None
+
+
+def block_label(path: str, block_start: int, prefix: str = "") -> str:
+    """표시용 라벨 — 레이아웃이 아는 셀이면 'ANs (block 2053)', 모르면 'block 2053'.
+    파일·폴더 **이름**에는 쓰지 말 것: 이름은 블록 번호 기준(캠페인이 바뀌어도 틀리지 않게)."""
+    name = block_channel_name(path, block_start) if path else None
+    head = f"{prefix} " if prefix else ""
+    return f"{head}{name} (block {int(block_start)})" if name else f"{head}block {int(block_start)}"
+
+
 __all__ = [
     "RawParser",
+    "block_channel_name", "block_label",
     "ParsedRow",
     "FileLayout",
     "HotHKMap",

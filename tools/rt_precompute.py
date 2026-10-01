@@ -68,15 +68,23 @@ def _campaign_presets():
     )
     cold_tz = int(getattr(_RT.COLD_TS_TZ, 'utcoffset')(None).total_seconds() // 3600)
     hot_tz  = int(getattr(_RT.HOT_TS_TZ,  'utcoffset')(None).total_seconds() // 3600)
-    return {
-        "cold":    RTConfig((435.0, 480.0), COL_PRESS_COLD,    COL_TEMP_COLD, SPEC_START_DEFAULT, SPEC_END_DEFAULT, cold_tz, "cold",    dio_channel=1),
-        "hot_pns": RTConfig((430.0, 465.0), COL_PRESS_HOT_PNS, COL_TEMP_HOT,  SPEC_START_DEFAULT, SPEC_END_DEFAULT, hot_tz,  "hot_pns", dio_channel=1),
-        "hot_ans": RTConfig((435.0, 470.0), COL_PRESS_HOT_ANS, COL_TEMP_HOT,  SPEC_START_ANS,     SPEC_END_ANS,     hot_tz,  "hot_ans", dio_channel=2),
+    # 키·라벨은 **블록 번호** 기준 — 어느 블록이 어느 셀인지는 캠페인 레이아웃이 정한다
+    # (core.raw_parser.block_label). 창 값은 블록의 LED 대역에 맞춘 여수 값이다.
+    p = {
+        "cold":        RTConfig((435.0, 480.0), COL_PRESS_COLD,    COL_TEMP_COLD, SPEC_START_DEFAULT, SPEC_END_DEFAULT, cold_tz, "cold",        dio_channel=1),
+        "hot_blk2053": RTConfig((430.0, 465.0), COL_PRESS_HOT_PNS, COL_TEMP_HOT,  SPEC_START_DEFAULT, SPEC_END_DEFAULT, hot_tz,  "hot_blk2053", dio_channel=1),
+        "hot_blk4101": RTConfig((435.0, 470.0), COL_PRESS_HOT_ANS, COL_TEMP_HOT,  SPEC_START_ANS,     SPEC_END_ANS,     hot_tz,  "hot_blk4101", dio_channel=2),
     }
+    # 레거시 키(2026-10-01 전): hot_pns = 블록 2053, hot_ans = 블록 4101 — 여수 판정과 셀 이름이
+    # 반대였다(값은 블록에 맞았다). 외부 호출 호환용 별칭.
+    p["hot_pns"] = p["hot_blk2053"]
+    p["hot_ans"] = p["hot_blk4101"]
+    return p
 
 
 def preset(name):
-    """현 캠페인 프리셋 RTConfig 반환 (cold/hot_pns/hot_ans). 새 캠페인은 RTConfig 직접 생성."""
+    """현 캠페인 프리셋 RTConfig 반환 (cold/hot_blk2053/hot_blk4101; 레거시 별칭 hot_pns/hot_ans).
+    새 캠페인은 RTConfig 직접 생성."""
     p = _campaign_presets()
     if name not in p:
         raise ValueError(f"unknown preset '{name}' — build an RTConfig directly. (available: {list(p)})")
