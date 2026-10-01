@@ -32,7 +32,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from vigil.alert_engine import OK, P1, SKIP, aggregate, worse
+from vigil.alert_engine import OK, P0, P1, P2, SKIP, aggregate, worse
 from vigil.ingest_cursor import IngestCursor
 from vigil.monitors.hk_monitor import evaluate_hk
 from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
@@ -41,10 +41,16 @@ from vigil.monitors.r_monitor import RMonitor
 from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from vigil.state_log import StateLog
 from vigil.watcher import DEFAULT_BACKLOG_AGE_SEC, DEFAULT_MAX_BYTES_PER_TICK, Watcher
+from vigil.datapaths import rebase, rebase_fitset_channel
+from vigil.record import STATUS_CODE, MinuteRecorder
 
 log = logging.getLogger("vigil")
 
-TREND_MAXLEN = 300   # ponytail: 그래프 표시용 최근 N개 — 부족하면 늘릴 것
+TREND_MAXLEN = 720   # 그래프 표시용 최근 N점 — HK·농도 10 s 간격이면 2 h, R 은 교정 720회
+# HK 는 매 행(1 s) 오는데 그래프는 열화 추세를 보는 용도라 10 s 에 한 점이면 충분하다. 예전엔 매 행을
+# 넣어 300점 = 5분만 보였다(몇 시간에 걸친 온도 드리프트가 안 보였다). 판정은 매 행 그대로.
+HK_TREND_EVERY_SEC = 10.0
+ALARM_HISTORY_MAX = 500
 # 이만큼 새 행이 없는 파일은 파일별 상태(표·HK 판정)에서 뺀다. 1 h 파일 rollover 뒤 지난 파일의
 # P1 이 종합 상태를 영원히 붙잡고, 표가 캠페인 내내 늘어나던 것(2026-10-01). 측정 정지 자체는
 # liveness(전체 최신 행 기준)가 따로 잡으므로 여기서 빼도 숨겨지지 않는다.
@@ -92,6 +98,10 @@ class VigilApp:
         self.dashboard = dashboard
         self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
         self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
+        # 다른 PC 의 Augur 출력 폴더 — 프로파일·FitSet 의 절대경로가 없을 때 그 아래에서 찾는다(vigil/datapaths.py)
+        self.data_root = None
+        # 1분 요약 기록(vigil/record.py) — 감시기가 이미 낸 최신값만 복사, 새 계산 없음
+        self.recorder = MinuteRecorder(state_dir)
         self.watch_dir = None
         self.watcher = None
         self._reset_state()
@@ -115,7 +125,11 @@ class VigilApp:
         self._tick_errors = 0
         self._backlog_logged = False
         self._was_catching_up = False
-        self._last_arrival = None          # 전체 최신 관측 벽시계 시각
+        self._last_arrival = None
+        self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
+        self._hk_trend_t: dict = {}        # {(profile_id, field_key): 마지막으로 그래프에 넣은 시각}
+        self.alarms: list = []             # 경보 이력 [{start, end, source, level, msg}] — 최근 것이 끝
+        self._open_alarms: dict = {}       # {source: 위 dict} — 진행 중          # 전체 최신 관측 벽시계 시각
         self._files_seen: dict = {}        # {path: arrival_time}
         self._routed_ids: set = set()
         self._hk_status: dict = {}         # {path: (status, msg, metrics)} — 최신 HK 판정
@@ -138,19 +152,37 @@ class VigilApp:
         self._hk_trend: dict = {}     # {(profile_id,field_key): deque[(datetime,float)]}
         self._trend_meta: dict = {}   # 채널/필드 메타(label, unit, min/max, warn/alarm) — 1회만 채움
 
+    def set_data_root(self, path) -> None:
+        """Augur 데이터 폴더(대시보드 버튼). 바꾸면 농도·R 감시기를 새 경로로 다시 만든다."""
+        self.data_root = path or None
+        self._wavecal_cache.clear()
+        self._fitset_cache.clear()
+        for d in (self._r_monitors, self._r_by_channel, self._r_status, self._r_last_status,
+                  self._conc_monitors, self._conc_by_channel, self._conc_status, self._conc_last_status):
+            d.clear()
+        msg = f"Augur data folder: {path or '(not set)'} — concentration/R monitors re-initialise"
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="data_root", data_root=path)
+        if self.dashboard is not None:
+            self.dashboard.log_line(msg)
+
     def _get_wavecal(self, path):
+        path = rebase(path, self.data_root)
         if path not in self._wavecal_cache:
             from tools.optimize_params import load_wavecal   # 기존 로더 재사용(3번째 사본 안 만듦)
             self._wavecal_cache[path] = load_wavecal(path)
         return self._wavecal_cache[path]
 
     def _get_fitset_channel(self, cfg):
-        scen = self._fitset_cache.get(cfg.fitset_path)
+        fp = rebase(cfg.fitset_path, self.data_root)
+        scen = self._fitset_cache.get(fp)
         if scen is None:
-            scen = json.load(open(cfg.fitset_path, encoding="utf-8"))
-            self._fitset_cache[cfg.fitset_path] = scen
+            if not os.path.exists(fp):
+                raise FileNotFoundError(f"FitSet not found: {cfg.fitset_path} — set the Augur data folder")
+            scen = json.load(open(fp, encoding="utf-8"))
+            self._fitset_cache[fp] = scen
         from vigil.monitors.conc_monitor import pick_fitset_channel
-        return pick_fitset_channel(scen, cfg.wl_dir)
+        return rebase_fitset_channel(pick_fitset_channel(scen, cfg.wl_dir), self.data_root)
 
     def _observe_reflectance(self, prof, ev, now) -> None:
         """이 행의 프로파일에 reflectance 설정이 있는 signal 채널마다 RMonitor.observe.
@@ -351,6 +383,77 @@ class VigilApp:
                 d.pop(p, None)
             log.info("retired file (no new rows for %.0f min): %s", self.retire_after_sec / 60, p)
 
+    # ── 경보 이력·현재 값·1분 기록 — 감시기가 이미 낸 판정·값을 모을 뿐, 새 계산 없음 ──────────
+    def _update_alarms(self, results, now) -> None:
+        """판정 항목(source)별로 P2/P1/P0 이 시작·해소된 시각을 이력으로 남긴다(같은 경보는 한 줄)."""
+        alarming = {}
+        for name, status, msg, _mt in results:
+            if status in (P0, P1, P2):
+                alarming[name] = (status, msg)
+        for name, (status, msg) in alarming.items():
+            a = self._open_alarms.get(name)
+            if a is None:
+                a = {"start": now, "end": None, "source": name, "level": status, "msg": msg}
+                self._open_alarms[name] = a
+                self.alarms.append(a)
+                del self.alarms[:-ALARM_HISTORY_MAX]
+            else:
+                if worse(a["level"], status) == status:
+                    a["level"] = status            # 진행 중 가장 심했던 등급
+                a["msg"] = msg
+        for name in [n for n in self._open_alarms if n not in alarming]:
+            self._open_alarms.pop(name)["end"] = now
+
+    def _cards(self) -> list:
+        """현재 값 카드 — 채널별 농도(대표 기체)·R·램프, 밴드 있는 HK 필드."""
+        cards = []
+        for key, (s, m, mt) in sorted(self._conc_by_channel.items()):
+            meta = self._trend_meta.get(key, {})
+            v = mt.get("conc_ppb")
+            cards.append({"key": ("conc", key), "title": f"{meta.get('label', key[1])} {meta.get('target', '')}",
+                          "value": f"{v:.2f} ppb" if isinstance(v, (int, float)) and v == v else "—",
+                          "sub": "concentration" if mt else "not running", "status": s, "tip": m})
+        for key, (s, m, mt) in sorted(self._r_by_channel.items()):
+            meta = self._trend_meta.get(key, {})
+            r = mt.get("R")
+            drop = mt.get("drop")
+            cards.append({"key": ("r", key), "title": f"R {meta.get('label', key[1])}",
+                          "value": f"{r:.6f}" if isinstance(r, float) else "—",
+                          "sub": f"drop {drop:.1e}" if isinstance(drop, float) else "building baseline",
+                          "status": s, "tip": m})
+        for key, (s, m, mt) in sorted(self._lamp_by_channel.items()):
+            lvl, rel = mt.get("I"), mt.get("rel")
+            cards.append({"key": ("lamp", key), "title": f"Lamp {key[1]}",
+                          "value": f"{lvl:.0f}" if isinstance(lvl, float) else "—",
+                          "sub": f"{rel:+.1%} vs baseline" if isinstance(rel, float) and rel == rel else "building baseline",
+                          "status": s, "tip": m})
+        sev_status = {None: OK, "warn": P2, "alarm": P1}
+        for mkey, (val, sev, _t) in sorted(self._hk_latest.items()):
+            meta = self._trend_meta.get(mkey, {})
+            unit = meta.get("unit") or ""
+            ok = isinstance(val, float) and val == val
+            cards.append({"key": ("hk", mkey), "title": meta.get("label", mkey[1]),
+                          "value": f"{val:.1f} {unit}".strip() if ok else "missing",
+                          "sub": _band_text(meta.get("alarm") or meta.get("warn")),
+                          "status": sev_status.get(sev, P2) if ok else P2})
+        return cards
+
+    def _record_values(self, overall_status, now) -> dict:
+        """1분 기록 한 줄 — 열 이름은 안정적인 순서(정렬)로."""
+        v = {"overall": STATUS_CODE.get(overall_status),
+             "last_row_age_s": (now - self._last_arrival).total_seconds() if self._last_arrival else None}
+        for key, dq in sorted(self._conc_trend.items()):
+            if dq:
+                for gas, ppb in sorted(dq[-1][1].items()):
+                    v[f"conc:{self._trend_meta.get(key, {}).get('label', key[1])}:{gas}_ppb"] = ppb
+        for key, (_s, _m, mt) in sorted(self._r_by_channel.items()):
+            v[f"R:{self._trend_meta.get(key, {}).get('label', key[1])}"] = mt.get("R")
+        for key, (_s, _m, mt) in sorted(self._lamp_by_channel.items()):
+            v[f"lamp:{key[1]}_I"] = mt.get("I")
+        for mkey, (val, _sev, _t) in sorted(self._hk_latest.items()):
+            v[f"hk:{mkey[1]}"] = val
+        return v
+
     def _tick(self) -> None:
         events = self.watcher.poll()
         now = datetime.now()
@@ -378,7 +481,11 @@ class VigilApp:
                 if mkey not in self._trend_meta:
                     self._trend_meta[mkey] = {"label": field.label or fkey, "unit": field.unit,
                                               "warn": field.warn, "alarm": field.alarm}
-                self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
+                self._hk_latest[mkey] = (val, sev, now)
+                _last = self._hk_trend_t.get(mkey)
+                if _last is None or (now - _last).total_seconds() >= HK_TREND_EVERY_SEC:
+                    self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
+                    self._hk_trend_t[mkey] = now
             self._observe_reflectance(prof, ev, now)
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
@@ -405,8 +512,14 @@ class VigilApp:
                 self.dashboard.log_line(f"overall: {overall_status} — {overall_msg}")
         self._last_status = overall_status
 
+        self._update_alarms(results, now)
+        self.recorder.maybe_write(now.timestamp(), self._record_values(overall_status, now))
+
         if self.dashboard is not None:
             self.dashboard.set_status(overall_status, overall_msg)
+            self.dashboard.set_freshness(self._last_arrival, now, grace_sec)
+            self.dashboard.update_cards(self._cards())
+            self.dashboard.update_alarms(self.alarms)
             rows = {}
             for p, t in self._files_seen.items():
                 hk = self._hk_status.get(p)
@@ -424,6 +537,15 @@ class VigilApp:
             self.dashboard.update_conc_trend(self._conc_trend, self._trend_meta)
             self.dashboard.update_r_trend(self._r_trend, self._trend_meta)
             self.dashboard.update_hk_trend(self._hk_trend, self._trend_meta)
+
+
+def _band_text(band) -> str:
+    if not band:
+        return ""
+    lo, hi = band
+    if lo is not None and hi is not None:
+        return f"band {lo:g}–{hi:g}"
+    return f"≥ {lo:g}" if lo is not None else f"≤ {hi:g}"
 
 
 def _default_state_dir() -> str:
@@ -446,6 +568,22 @@ def pick_watch_dir(parent=None, qs=None):
     if not chosen:
         return None
     qs.setValue("watch_dir", chosen)
+    return chosen
+
+
+def pick_data_root(parent=None, qs=None):
+    """'Augur data…' 버튼 — 이 PC 에서 Augur 산출물(FitSet·파장보정·레퍼런스)이 있는 폴더.
+    프로파일의 절대경로가 다른 PC 것일 때만 필요하다(vigil/datapaths.py). 취소하면 None."""
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QFileDialog
+    qs = qs if qs is not None else QSettings("CAESAR", "vigil")
+    last = qs.value("data_root", "", type=str)
+    start = last if last and os.path.isdir(last) else os.path.expanduser("~")
+    chosen = QFileDialog.getExistingDirectory(
+        parent, "Vigil — choose the Augur data folder (the one holding 'fit setting', wavelength calibrations …)", start)
+    if not chosen:
+        return None
+    qs.setValue("data_root", chosen)
     return chosen
 
 
@@ -553,11 +691,18 @@ def main(argv=None) -> int:
     _ver = code_version()
     splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
 
+    from PyQt6.QtCore import QSettings
     from vigil.dashboard.dashboard_window import DashboardWindow
-    win = DashboardWindow(title="Vigil")
+    qs = QSettings("CAESAR", "vigil")
+    win = DashboardWindow(title="Vigil", tz=qs.value("tz", "KST", type=str))
+    win.tz_changed.connect(lambda tz: qs.setValue("tz", tz))
     core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win,
                     max_bytes_per_tick=int(args.max_mb_per_tick * 2**20),
                     backlog_age_sec=(args.backlog_age_min * 60 if args.backlog_age_min >= 0 else None))
+    _data_root = qs.value("data_root", "", type=str)
+    if _data_root and os.path.isdir(_data_root):
+        core.data_root = _data_root          # 시작 시엔 감시기가 아직 없으니 경로만
+        win.set_data_root(_data_root)
     splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
     win.log_line(f"poll {args.poll_sec:.1f}s, {len(core.profiles)} profile(s) loaded")
     win.set_watch_dir(args.dir)
@@ -585,6 +730,11 @@ def main(argv=None) -> int:
         win.set_watch_dir(path)
         win.log_line(f"watching {path}")
     win.folder_requested.connect(lambda: (lambda p: p and _on_folder_chosen(p))(pick_watch_dir(win)))
+
+    def _on_data_root(path):
+        core.set_data_root(path)
+        win.set_data_root(path)
+    win.data_root_requested.connect(lambda: (lambda p: p and _on_data_root(p))(pick_data_root(win, qs)))
 
     if not args.autostart or not args.dir:
         # 기본은 정지 상태로 켠다 — 폴더를 고르고(또는 확인하고) 사람이 Start 를 누를 때 읽기 시작.

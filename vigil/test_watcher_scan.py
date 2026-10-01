@@ -5,6 +5,9 @@
   2) 전체 나열이 비싸 드물게만 하는 동안에도, 최근 폴더의 새 줄은 매 poll 잡는다
   3) 파일이 잘리면(커서 > 크기) 처음부터 다시 읽는다
   4) 큰 트리는 한 번 경고하고 전체 나열 간격을 늘린다
+  5) 전체 나열 사이(rescan_sec)에는 끝난 파일을 stat·열기·나열하지 않고 활성 파일만 본다,
+     활성 파일의 새 줄은 매 poll, 같은 폴더의 새 파일(rollover)은 전체 나열을 안 기다리고 잡는다
+     (폴더 mtime 이 안 바뀌는 파일시스템이어도), 전체 나열 경계를 넘어도 빠지는 행이 없다
 """
 import os
 import shutil
@@ -41,6 +44,114 @@ def _write(path, rows):
     with open(path, "a", encoding="utf-8") as fh:
         for k in rows:
             fh.write(f"{k}\t1.0\t2.0\n")
+
+
+def _old_files(folder, n, prefix):
+    t = time.time() - 7200
+    for i in range(n):
+        p = os.path.join(folder, f"{prefix}{i:03d}.dat"); _write(p, [i])
+        os.utime(p, (t, t))
+
+
+class _Spy:
+    """os.stat · os.scandir · open(watcher 모듈 안) 호출 경로를 센다."""
+    def __init__(self):
+        self.paths = []
+
+    def __enter__(self):
+        self.real = (os.stat, os.scandir)
+        real_stat, real_scandir = self.real
+        def stat(p, *a, **k):
+            self.paths.append(("stat", os.fspath(p)))
+            return real_stat(p, *a, **k)
+        def scandir(p="."):
+            self.paths.append(("scandir", os.fspath(p)))
+            return real_scandir(p)
+        def opener(p, *a, **k):
+            self.paths.append(("open", os.fspath(p)))
+            return open(p, *a, **k)
+        os.stat, os.scandir = stat, scandir
+        W.open = opener                                   # watcher 모듈 안의 open 만 가로챈다
+        return self
+
+    def __exit__(self, *exc):
+        os.stat, os.scandir = self.real
+        del W.open
+
+    def touched(self, folder):
+        return [(k, p) for k, p in self.paths if os.path.dirname(p) == folder or p == folder]
+
+
+def test_active_files():
+    d = tempfile.mkdtemp()
+    try:
+        live = os.path.join(d, "2026-07"); cold = os.path.join(d, "2026-06")
+        os.makedirs(live); os.makedirs(cold)
+        _old_files(cold, 200, "c")                        # 지난달 폴더 — 끝난 파일만
+        _old_files(live, 200, "b")                        # 이번달 폴더 — 끝난 파일 + 자라는 파일 하나
+        f = os.path.join(live, "2026-07-01-001.dat"); _write(f, [0])
+        w = W.Watcher(d, ProfileSet([]), IngestCursor(os.path.join(d, "s", "c.json")), rescan_sec=3600)
+        w.poll()                                          # 첫 poll 은 항상 전체 나열
+        w.poll()                                          # (상위 폴더 항목의 mtime 이 늦게 갱신되면 한 번 다시 나열)
+
+        got = []
+        with _Spy() as spy:
+            for k in range(1, 6):
+                _write(f, [k])
+                got.append([int(e.row[0]) for e in w.poll()])
+        check("(b) 활성 파일에 붙은 줄은 매 poll 관측", got == [[1], [2], [3], [4], [5]], got)
+        finished = [x for x in spy.paths if os.path.basename(x[1]).startswith(("b", "c"))]
+        check("(a) 전체 나열 사이엔 끝난 파일을 stat·열기 안 함", not finished, finished[:5])
+        check("(a) 끝난 파일만 있는 폴더는 나열·stat 안 함", not spy.touched(cold), spy.touched(cold)[:5])
+        check("(a) 활성 폴더도 자라는 동안엔 다시 나열 안 함",
+              not [x for x in spy.paths if x == ("scandir", live)], spy.paths[:8])
+
+        g = os.path.join(live, "2026-07-01-002.dat")      # 자라는 중에 같은 폴더에 새 파일(폴더 mtime 바뀜)
+        _write(f, [6]); _write(g, [100, 101])
+        ev = w.poll()
+        check("(c) 같은 폴더 새 파일을 전체 나열 없이 잡음(폴더 mtime)",
+              sorted((os.path.basename(e.file), int(e.row[0])) for e in ev)
+              == [("2026-07-01-001.dat", 6), ("2026-07-01-002.dat", 100), ("2026-07-01-002.dat", 101)],
+              [(os.path.basename(e.file), int(e.row[0])) for e in ev])
+
+        # rollover — 폴더 mtime 이 안 바뀌는 파일시스템(FAT/exFAT·일부 공유)을 흉내: 기록값을 지금 값으로 덮는다
+        _write(f, [7]); _write(g, [102]); w.poll()        # 둘 다 자람 → 폴더가 '살아 있음'
+        h = os.path.join(live, "2026-07-01-003.dat"); _write(h, [200])
+        w._dir_mtime[live] = os.stat(live).st_mtime
+        ev = w.poll()                                     # f·g 가 안 자랐다 → rollover 의심 → 그 폴더만 나열
+        check("(c) 폴더 mtime 없이도 rollover 새 파일을 다음 poll 에 잡음",
+              [(os.path.basename(e.file), int(e.row[0])) for e in ev] == [("2026-07-01-003.dat", 200)],
+              [(os.path.basename(e.file), int(e.row[0])) for e in ev])
+        check("전체 나열은 첫 poll 뿐", w._next_full - time.monotonic() > 3000)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_rescan_boundary():
+    d = tempfile.mkdtemp()
+    try:
+        live = os.path.join(d, "Hot"); other = os.path.join(d, "Cold")
+        os.makedirs(live); os.makedirs(other)
+        _old_files(live, 50, "b")
+        w = W.Watcher(d, ProfileSet([]), IngestCursor(os.path.join(d, "s", "c.json")), rescan_sec=3600)
+        want, got, k = [], [], 0
+        for step in range(40):
+            if step % 7 == 0:                             # rollover — 새 파일
+                cur = os.path.join(live, f"2026-07-01-{step:03d}.dat")
+            if step == 20:                                # 활성 폴더가 아닌 곳에 새 파일 → 전체 나열이 잡는다
+                _write(os.path.join(other, "late.dat"), [9000]); want.append(9000)
+            _write(cur, [k, k + 1]); want += [k, k + 1]; k += 2
+            if step % 5 == 4:
+                w._next_full = 0.0                        # 전체 나열 경계
+            got += [int(e.row[0]) for e in w.poll()]
+        w._next_full = 0.0
+        got += [int(e.row[0]) for e in w.poll()]
+        check("(d) 전체 나열 경계·rollover 를 넘어도 행이 빠지거나 중복되지 않음",
+              sorted(got) == sorted(want) and len(got) == len(want), (len(got), len(want)))
+        rows = [x for x in got if x != 9000]
+        check("(d) 순서 유지", rows == sorted(rows))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def main():
@@ -99,6 +210,8 @@ def main():
               (big.huge_tree, round(big._next_full - time.monotonic(), 1)))
     finally:
         shutil.rmtree(d, ignore_errors=True)
+    test_active_files()
+    test_rescan_boundary()
 
     print(f"\nwatcher scan tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
