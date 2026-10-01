@@ -26,7 +26,8 @@ from datetime import datetime
 import numpy as np
 import pyqtgraph as pg
 from gui.result_viewer_io import (load_result_time_gas, detect,
-                                  detect_sep, load_fit_table)
+                                  detect_sep, load_fit_table,
+                                  flag_of, qc_hidden_mask)
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
@@ -773,28 +774,27 @@ class ResultViewerWidget(QWidget):
         """숨길/제외할 행 마스크(True) — 두 기준의 OR:
           (1) Hide QC 체크 시 Status가 QC-* 인 행
           (2) Post-hoc QC: K>0이면 RMS 분포에서 robust 임계 초과 행 (채널별)."""
-        n = len(t["row_idx"])
-        mask = np.zeros(n, bool)
-        # (1) Status 기반
+        hide_st = bool(getattr(self, '_chk_hide_qc', None) and self._chk_hide_qc.isChecked())
+        K = self._spin_qc_k.value() if hasattr(self, '_spin_qc_k') else 0.0
+        # 단일 출처: Plot Maker로 넘긴 규칙도 같은 함수로 마스크를 만든다.
+        return qc_hidden_mask(len(t["row_idx"]), status=t.get("status"), rms=t.get("rms"),
+                              channel=t.get("channel"), hide_status_qc=hide_st, K=K)
+
+    def view_rules(self):
+        """지금 보고 있는 상태(Hide QC·사후 QC K·구간)를 재계산 가능한 규칙으로 번역.
+        fit 파일을 보고 있을 때만 의미가 있다(_fit_cache가 다른 파일 것일 수 있음)."""
+        if getattr(self, '_current_kind', None) != "fit" or not self._fit_cache:
+            return []
+        rules = []
         if getattr(self, '_chk_hide_qc', None) and self._chk_hide_qc.isChecked():
-            st = t.get("status")
-            if st:
-                mask |= np.array([s.startswith("QC") for s in st])
-        # (2) RMS robust 임계 (사후 QC)
+            rules.append({"kind": "status_qc"})
         K = self._spin_qc_k.value() if hasattr(self, '_spin_qc_k') else 0.0
         if K > 0:
-            rms = t.get("rms")
-            if rms is not None:
-                from core.result_io import robust_rms_thresholds
-                ch = t.get("channel")   # 채널 배열(없으면 전체 한 그룹)
-                chans = [ch[i] if (ch is not None and i < len(ch)) else 0
-                         for i in range(n)]
-                thr = robust_rms_thresholds(rms, chans, K=K, min_n=5)
-                for i in range(n):
-                    ti = thr.get(chans[i], np.inf)
-                    if np.isfinite(rms[i]) and rms[i] > ti:
-                        mask[i] = True
-        return mask
+            rules.append({"kind": "rms_k", "K": float(K)})
+        t0, t1 = self._region_times()        # 원본 시각 기준, 전체 범위면 (None, None)
+        if t0 is not None:
+            rules.append({"kind": "time_range", "t0": t0.timestamp(), "t1": t1.timestamp()})
+        return rules
 
     # ── B2: flag 색 · 세로 스택 레인 ─────────────────────────────────
     # 값은 **절대 지우지 않는다**(헌장 ①) — 색으로만 구분한다. 'Hide QC' 체크박스는
@@ -807,21 +807,7 @@ class ResultViewerWidget(QWidget):
         "cal":      AUGUR.special,     # 보라 — ZA/He 등 교정 스캔
     }
 
-    @staticmethod
-    def _flag_of(status):
-        """Status 문자열 → flag 키. 자유형식이라 부분일치로 본다."""
-        s = (status or "").strip().lower()
-        if not s:
-            return "ok"
-        if s.startswith("qc"):
-            return "qc"
-        if "unstable" in s:
-            return "unstable"
-        if "settl" in s:
-            return "settling"
-        if "zero-air" in s or "helium" in s or s.startswith("skip"):
-            return "cal"
-        return "ok"
+    _flag_of = staticmethod(flag_of)     # 단일 출처: gui.result_viewer_io.flag_of
 
     def _lane(self, key, i, n_total):
         """스택 레인 하나를 얻는다(없으면 만들고, 있으면 비워서 재사용).
@@ -1219,12 +1205,19 @@ class ResultViewerWidget(QWidget):
         return paths
 
     def _to_plot_maker(self):
-        """선택(없으면 현재) 결과파일을 Plot Maker 선반으로 보낸다."""
+        """선택(없으면 현재) 결과파일을 Plot Maker 선반으로 보낸다.
+
+        경로만 보내면 보던 상태(Hide QC·K·구간·시프트)가 증발한다. 그렇다고 메모리
+        배열을 넘기면 Plot Maker 설정을 다시 열 때 재현이 안 된다(원칙 ④). → 경로 +
+        재계산 가능한 규칙을 보낸다. 숨김은 삭제가 아니므로 Plot Maker에서 끌 수 있다."""
         paths = self._selected_paths()
         if not paths:
             QMessageBox.information(self, "Plot Maker", "Open a result file to send first.")
             return
-        self.send_to_plotmaker.emit(paths)
+        rules = self.view_rules()
+        self.send_to_plotmaker.emit([{"path": p, "rules": [dict(r) for r in rules],
+                                      "shift_h": float(self._time_shift_hours)}
+                                     for p in paths])
 
     def _bake_qc_into_rows(self, colhdr, rows):
         """현재 K>0이면 rows(텍스트 행)의 RMS 분포로 robust 임계를 잡아 초과 행의

@@ -13,9 +13,9 @@ send_to_plotmaker, tools/validate_plotmaker.py)가 하나도 안 바뀌도록, �
   modes.py      TimeSeries·Scatter·Allan·Heatmap·Histogram·Diurnal 6개 모드
   widget.py     PlotMakerWidget(호스트) — 탭 UI·Export·설정 저장/불러오기
 """
-from .data import Dataset, load_dataset
+from .data import Dataset, load_dataset, load_spec
 from .core import ResolvedSeries, PlotMode, register_mode
 from .widget import PlotMakerWidget
 
-__all__ = ["Dataset", "load_dataset", "ResolvedSeries", "PlotMode",
+__all__ = ["Dataset", "load_dataset", "load_spec", "ResolvedSeries", "PlotMode",
            "register_mode", "PlotMakerWidget"]

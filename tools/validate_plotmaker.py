@@ -71,6 +71,9 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     한글+수식 혼합 라벨 감지(mathtext 엔진엔 한글이 없어 □가 된다) (2026-09-21)
 33. 표시 토글 : 시리즈·주석 체크 해제가 화면·Publish 양쪽에서 숨기되 **삭제하지
     않나** · 곡선에 시리즈 라벨이 태깅돼 클릭→편집이 가능한가 (2026-09-21)
+34. Result Lab → Plot Maker 다리 : Hide QC·사후 QC K·구간·시프트가 **경로 + 규칙**으로
+    넘어가 Result Lab 선택과 행 단위로 같은 숨김을 만드나 · 끄면 복원 · 원본 불변 ·
+    설정 저장/열기 왕복 · 옛 형식 호환 (D0, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1187,6 +1190,125 @@ def c_visibility_and_click():
     if "fixture:NO2" not in tagged:
         return "FAIL", f"곡선에 시리즈 라벨 태그 없음 — 클릭해도 뭘 편집할지 모른다: {tagged}"
     return "PASS", "시리즈·주석 숨김이 화면·Publish 양쪽에 · _series 보존 · 곡선 태깅 확인"
+
+
+# ── 34. Result Lab → Plot Maker 다리: 보던 상태가 레시피로 넘어가나 (D0) ─────────
+# 전엔 경로만 넘겨서 Hide QC·K·구간·시프트가 증발했다. 이제 경로 + 재계산 가능한
+# 규칙을 넘긴다. 숨김은 삭제가 아니다 — 끄면 돌아오고, 설정을 다시 열어도 같다.
+def _write_report_fixture(path, n=120, seed=1):
+    """GUI 리포트 포맷(File\\tChannel\\tTime…) 합성 파일 — 두 채널, 일부 QC·튀는 RMS."""
+    from datetime import datetime, timedelta
+    rng = np.random.default_rng(seed)
+    t0 = datetime(2026, 5, 20, 0, 0, 0)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# synthetic report for validate_plotmaker #34\n")
+        f.write("File\tChannel\tTime\tRMS\tChi2\tStatus\tNO2\tNO2_Error\tShift\tSqueeze\n")
+        for i in range(n):
+            ch = "1" if i % 2 == 0 else "2"
+            rms = 1e-3 * (1 + 0.05 * rng.normal())
+            if i in (7, 30, 31, 90):
+                rms *= 8                       # 사후 QC(K)가 잡을 튀는 점
+            st = "QC-RMS" if i in (12, 13, 60) else ("Unstable" if i == 44 else "")
+            f.write(f"s{i}.txt\t{ch}\t{(t0 + timedelta(minutes=2 * i)):%Y-%m-%d %H:%M:%S}\t"
+                    f"{rms:.6g}\t1.0\t{st}\t{5 + rng.normal():.4f}\t0.2\t{0.1 * rng.normal():.4f}\t1.0001\n")
+
+
+@check("Result Lab → Plot Maker: QC·구간·시프트가 규칙으로 넘어가고, 끄면 복원·설정 왕복")
+def c_resultlab_bridge():
+    import json, tempfile
+    from PyQt6.QtCore import QDateTime
+    from gui.ui_result_viewer import ResultViewerWidget
+    from gui.ui_plot_maker import load_dataset
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+
+    rv = ResultViewerWidget()
+    rv._path = p
+    rv._reload()
+    if rv._current_kind != "fit":
+        return "FAIL", f"리포트 fixture가 fit으로 판별 안 됨: {rv._current_kind}"
+    rv._chk_hide_qc.setChecked(True)
+    rv._spin_qc_k.setValue(3.0)
+    rv._spin_shift.setValue(9.0)          # → _reload, 입력칸은 시프트된 전체 범위로 재초기화
+    t = rv._fit_cache
+    a, b = float(t["time"][20]), float(t["time"][100])   # 원본 시각
+    off = 9 * 3600
+    rv._dt_from.setDateTime(QDateTime.fromSecsSinceEpoch(int(a + off)))
+    rv._dt_to.setDateTime(QDateTime.fromSecsSinceEpoch(int(b + off)))
+
+    got = []
+    rv.send_to_plotmaker.connect(got.append)
+    rv._to_plot_maker()
+    if not got or not isinstance(got[0][0], dict):
+        return "FAIL", f"다리가 레시피(dict)를 안 보냄: {got[:1]}"
+    spec = got[0][0]
+    kinds = [r["kind"] for r in spec["rules"]]
+    if kinds != ["status_qc", "rms_k", "time_range"] or spec["shift_h"] != 9.0:
+        return "FAIL", f"규칙 번역 불일치: {kinds}, shift={spec['shift_h']}"
+
+    # Result Lab이 Stats에 쓰는 선택 마스크와 Plot Maker 숨김 마스크가 행 단위로 같아야 한다
+    _, sel = rv._stats_arrays()
+    w = PlotMakerWidget()
+    w.add_specs(got[0])
+    ds = next(iter(w.shelf.values()))
+    hid = ds.hidden_mask()
+    if hid is None or not np.array_equal(hid, ~sel):
+        return "FAIL", (f"숨김 마스크 ≠ Result Lab 선택 (PM {0 if hid is None else int(hid.sum())}"
+                        f" vs RL {int((~sel).sum())})")
+    if not {"Status", "Flag", "Channel"} <= set(ds.cats) or "Shift" not in ds.cols:
+        return "FAIL", f"범주형/진단 열 누락: cats={list(ds.cats)} cols={list(ds.cols)}"
+    if ds.cats["Flag"][44] != "unstable" or ds.cats["Flag"][12] != "qc":
+        return "FAIL", "Flag 열이 flag_of와 다름"
+
+    label = f"{ds.name}:NO2"
+    _, _, y, tt = w.resolve(label)
+    raw = load_dataset(p).cols["NO2"]
+    if not (np.all(np.isnan(y[hid])) and np.array_equal(y[~hid], raw[~hid])):
+        return "FAIL", "resolve()가 숨김 행만 NaN으로 내지 않음"
+    if not np.allclose(tt, ds.time + off):
+        return "FAIL", "데이터셋 시프트가 resolve() 시각에 안 걸림"
+    if not np.array_equal(ds.cols["NO2"], raw):
+        return "FAIL", "원본 ds.cols가 변조됨 — 숨김은 삭제가 아니다(헌장 ①)"
+
+    w.set_dataset_view(ds.name, rules_on=False)        # 끄면 전부 돌아온다
+    _, _, y_off, _ = w.resolve(label)
+    if not np.array_equal(y_off, raw, equal_nan=True):
+        return "FAIL", "필터를 껐는데 값이 안 돌아옴"
+    w.set_dataset_view(ds.name, rules_on=True)
+
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([label, "L", None, None])
+    fig = w._build_publish_fig()
+    if not any("dataset shift" in tx.get_text() for tx in fig.texts):
+        return "FAIL", "Publish에 데이터셋 시프트 표기가 없음(조용한 시각 조작 금지)"
+
+    # 설정 저장 → 새 위젯에서 열기: 같은 마스크·시프트 (파일 다시 읽고 규칙 재적용)
+    from unittest import mock
+    cfgp = os.path.join(tmpd, "x.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"][ds.name]
+    if not isinstance(saved, dict) or saved.get("rules") != spec["rules"]:
+        return "FAIL", f"설정에 레시피가 안 저장됨: {saved}"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    ds2 = w2.shelf.get(ds.name)
+    if ds2 is None or not np.array_equal(ds2.hidden_mask(), hid) or ds2.shift_h != 9.0:
+        return "FAIL", "설정 왕복 후 숨김 마스크/시프트가 다름"
+
+    # 옛 형식(이름 → 경로 문자열)도 열린다
+    with open(cfgp, "w", encoding="utf-8") as f:
+        json.dump({"_version": w._CFG_VERSION, "datasets": {"old": p}}, f)
+    w3 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w3._load_cfg()
+    if "old" not in w3.shelf or w3.shelf["old"].hidden_mask() is not None:
+        return "FAIL", "옛 형식 설정(경로 문자열)이 안 열리거나 규칙이 생김"
+    return "PASS", (f"규칙 3종+9h 전달 · 숨김 {int(hid.sum())}행 = RL 선택과 행 단위 동일 · "
+                    "끄면 복원 · 원본 불변 · Publish 표기 · 설정 왕복·옛 형식 호환")
 
 
 def main():

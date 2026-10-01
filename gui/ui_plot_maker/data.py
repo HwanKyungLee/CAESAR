@@ -11,7 +11,8 @@ import os
 
 import numpy as np
 
-from gui.result_viewer_io import detect, detect_sep, read_numeric, load_fit_table
+from gui.result_viewer_io import (detect, detect_sep, read_numeric, load_fit_table,
+                                  flag_of, rules_hidden_mask)
 
 
 class Dataset:
@@ -21,19 +22,76 @@ class Dataset:
     cols  : {컬럼명: float ndarray}  (가스 ppb, RMS, 일반 수치 등)
     units : {컬럼명: 단위문자열}  (예: NO2→'ppb', RMS→'cm⁻¹'). 모르면 없음.
     errs  : {컬럼명: 1σ 오차 ndarray|None}  (fit 결과의 {gas}_Error). 에러밴드용.
-    """
-    __slots__ = ("name", "path", "time", "cols", "units", "errs")
+    cats  : {컬럼명: str ndarray}  범주형 열(fit이면 Status·Channel·Flag). 숫자 열과
+            분리해 둔다 — 모드들은 cols만 보므로 그리기 경로에 섞이지 않는다.
 
-    def __init__(self, name, path, time, cols, units=None, errs=None):
+    보기 상태 — **값이 아니라 레시피**(경로를 다시 읽고 재적용 가능, 원칙 ④):
+    rules    : 숨김 규칙 list[dict] (`result_viewer_io.rules_hidden_mask`)
+    rules_on : False면 규칙을 잠시 끈다(숨김≠삭제, 헌장 ①)
+    shift_h  : 이 데이터셋만의 표시 시각 보정(전역 시프트에 더해짐). 원본 time은 불변.
+    """
+    __slots__ = ("name", "path", "time", "cols", "units", "errs", "cats",
+                 "rules", "rules_on", "shift_h", "_hidden")
+
+    def __init__(self, name, path, time, cols, units=None, errs=None, cats=None,
+                 rules=None, rules_on=True, shift_h=0.0):
         self.name = name
         self.path = path
         self.time = time
         self.cols = cols
         self.units = units or {}
         self.errs = errs or {}
+        self.cats = cats or {}
+        self.rules = list(rules or [])
+        self.rules_on = bool(rules_on)
+        self.shift_h = float(shift_h or 0.0)
+        self._hidden = None
 
     def __len__(self):
         return max((len(v) for v in self.cols.values()), default=0)
+
+    def set_rules(self, rules=None, rules_on=None):
+        """규칙 교체/켜고 끄기 — 캐시된 마스크를 버린다."""
+        if rules is not None:
+            self.rules = list(rules)
+        if rules_on is not None:
+            self.rules_on = bool(rules_on)
+        self._hidden = None
+
+    def hidden_mask(self):
+        """숨길 행(True). 규칙이 없거나 꺼져 있으면 None(= 아무것도 안 숨김)."""
+        if not (self.rules and self.rules_on):
+            return None
+        if self._hidden is None:
+            st = self.cats.get("Status")
+            ch = self.cats.get("Channel")
+            self._hidden = rules_hidden_mask(
+                self.rules, len(self), time=self.time,
+                status=list(st) if st is not None else None,
+                rms=self.cols.get("RMS"),
+                channel=list(ch) if ch is not None else None)
+        return self._hidden
+
+    def n_hidden(self):
+        m = self.hidden_mask()
+        return int(m.sum()) if m is not None else 0
+
+    def to_spec(self):
+        """설정 파일용 레시피 — 열 때 `load_spec`으로 그대로 되살린다."""
+        return {"path": self.path, "rules": [dict(r) for r in self.rules],
+                "rules_on": self.rules_on, "shift_h": self.shift_h}
+
+
+def load_spec(spec) -> Dataset:
+    """레시피(경로 문자열 또는 {"path","rules","rules_on","shift_h"}) → Dataset.
+    파일은 항상 다시 읽고 규칙을 다시 건다 — 값은 캐시일 뿐이다."""
+    if isinstance(spec, str):
+        spec = {"path": spec}
+    ds = load_dataset(spec["path"])
+    ds.set_rules(spec.get("rules") or [], spec.get("rules_on", True))
+    ds.shift_h = float(spec.get("shift_h") or 0.0)
+    ds.hidden_mask()          # 규칙이 이 파일에 맞지 않으면(모르는 kind 등) 지금 터뜨린다
+    return ds
 
 
 def load_dataset(path) -> Dataset:
@@ -49,8 +107,25 @@ def load_dataset(path) -> Dataset:
         if t.get("rms") is not None:
             cols["RMS"] = t["rms"]
             units["RMS"] = "cm⁻¹"
+        # 진단용 숫자 열 — 예전엔 버렸다. 전부 NaN인 열(리포트 포맷의 T/P)은 싣지 않는다.
+        for key, col, unit in (("T", "T", "°C"), ("P", "P", "mbar"),
+                               ("shift", "Shift", "px"), ("squeeze", "Squeeze", None)):
+            v = t.get(key)
+            if v is not None and col not in cols and np.isfinite(np.asarray(v, float)).any():
+                cols[col] = np.asarray(v, float)
+                if unit:
+                    units[col] = unit
+        # 범주형 열 — Result Lab의 flag가 그림까지 이어지게(헌장 ①).
+        cats = {}
+        if t.get("status") is not None:
+            st = np.asarray(t["status"], dtype=object)
+            cats["Status"] = st
+            cats["Flag"] = np.asarray([flag_of(s) for s in st], dtype=object)
+        if t.get("channel") is not None:
+            cats["Channel"] = np.asarray(t["channel"], dtype=object)
         return Dataset(name, path, t.get("time"), cols, units,
-                       errs={g: e for g, e in (t.get("errs") or {}).items() if e is not None})
+                       errs={g: e for g, e in (t.get("errs") or {}).items() if e is not None},
+                       cats=cats)
 
     # ② 일반 표(csv/tsv/농도) → pandas로 시간컬럼 + 수치컬럼
     try:
