@@ -14,6 +14,11 @@ GUI 테스트가 0인 상태에서 app_window.py를 쪼개는 건 저장소에�
 추가는 통과시키고 유실만 잡는다(subset). 의도적으로 메서드를 지웠다면 아래 목록에서도
 지워라 — 그게 "이건 정말 없애는 게 맞나"를 한 번 더 보게 만드는 유일한 지점이다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import ast
 import builtins
 import glob

@@ -20,6 +20,7 @@ from core.data_io import DataIO
 from core.parallel import set_max_workers
 from core.paths import DEFAULT_CAMPAIGN
 from core.__version__ import __version__
+from gui.theme import AUGUR, channel_color   # 채널 색은 모든 Augur 그래프 공통
 from .ui_dialogs import *
 # 재수출 — 정의는 app_window_policy.py. tools/test_test_fit_dialog.py가 여기서 가져간다.
 from .app_window_policy import _scenario_gas_policy, _channel_worker_gas_policy  # noqa: F401
@@ -229,7 +230,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         btn_add.clicked.connect(self.add_ref_row)
         btn_mask = QPushButton("Mask")
         btn_mask.clicked.connect(self.open_mask_dialog)
-        btn_mask.setStyleSheet("color: #cc0000; font-weight: bold;") 
+        btn_mask.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;") 
         
         layout_load.addWidget(btn_batch)
         layout_load.addWidget(btn_add)
@@ -311,13 +312,13 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # 긴 파일명이 패널 폭을 밀어내지 않게: 고정폭(min=max) + 중간 생략(전체 경로는 툴팁).
         # ※ SizePolicy.Ignored는 폭을 0으로 접어 라벨이 사라지므로 쓰지 않는다.
         self.lbl_wavecal = QLabel("wavecal: none")
-        self.lbl_wavecal.setStyleSheet("color: #B71C1C; font-weight: bold; padding: 2px;")
+        self.lbl_wavecal.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold; padding: 2px;")
         self.lbl_wavecal.setToolTip("Wavelength calibration loaded for this channel tab. Red = not loaded.")
         self.lbl_wavecal.setFixedWidth(int(180 * self._s))
         layout_px.addWidget(self.lbl_wavecal)
 
         self.lbl_fwhm_display = QLabel("FWHM: —")
-        self.lbl_fwhm_display.setStyleSheet("color: #757575; font-weight: bold; padding: 3px;")
+        self.lbl_fwhm_display.setStyleSheet(f"color: {AUGUR.muted}; font-weight: bold; padding: 3px;")
         self.lbl_fwhm_display.setFixedWidth(int(85 * self._s))
         layout_px.addWidget(self.lbl_fwhm_display)
         layout_px.addStretch(1)
@@ -396,7 +397,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self._btn_toggle_params = QPushButton("▼  Parameters")
         self._btn_toggle_params.setStyleSheet(
             "text-align: left; font-weight: bold; "
-            "border: 1px solid #B0BEC5; padding: 4px 8px;")
+            f"border: 1px solid {AUGUR.rule}; padding: 4px 8px;")
         left_layout.addWidget(self._btn_toggle_params)
 
         self._params_container = QWidget()
@@ -559,7 +560,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # r2: 가스별 Shift/Squeeze 요약 한 줄 (테이블이 접혀 있을 때의 요약)
         from PyQt6.QtWidgets import QSizePolicy as _SPsq
         self.lbl_shsq = QLabel("Sh/Sq: (lock refs to show)")
-        self.lbl_shsq.setStyleSheet("color:#555;")
+        self.lbl_shsq.setStyleSheet(f"color:{AUGUR.muted};")
         self.lbl_shsq.setToolTip("Per-gas Shift/Squeeze modes — expand the table below to edit")
         self.lbl_shsq.setSizePolicy(_SPsq.Policy.Ignored, _SPsq.Policy.Preferred)
         _pg.addWidget(self.lbl_shsq, 2, 0, 1, 8)
@@ -572,7 +573,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # 팝업은 그대로 남는다 — 넓은 창 + Cancel 되돌리기가 필요한 경우가 있다.
         self._btn_shsq_tbl = QPushButton("▼ Reference policy (Shift / Squeeze / T / bands)")
         self._btn_shsq_tbl.setFlat(True)
-        self._btn_shsq_tbl.setStyleSheet("text-align:left; color:#1565C0; font-weight:bold;")
+        self._btn_shsq_tbl.setStyleSheet(f"text-align:left; color:{AUGUR.info}; font-weight:bold;")
         self._btn_shsq_tbl.setToolTip(
             "Per-gas fitting policy, always visible and editable here.\n"
             "Edits apply immediately (no OK button) — use  Properties if you want\n"
@@ -597,7 +598,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self._adv_params_visible = False
         self._btn_adv_params = QPushButton("▶ Advanced (Tikhonov · Robust · Kalman · RMS%)")
         self._btn_adv_params.setStyleSheet(
-            "text-align:left; color:#78909C; border:1px solid #ECEFF1; padding:2px 6px; font-size:11px;")
+            f"text-align:left; color:{AUGUR.muted}; border:1px solid {AUGUR.rule}; padding:2px 6px; font-size:11px;")
         lay_calib_main.addWidget(self._btn_adv_params)
         self._adv_params_container = QWidget()
         self._adv_params_container.setVisible(False)
@@ -906,7 +907,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # (Fit Scenario 저장/로드 그룹 제거 — 왼쪽 패널 채널탭바 📋/💾 버튼으로 일원화, S2)
 
         grp_status = QGroupBox("Setup Status")
-        grp_status.setStyleSheet("QGroupBox { font-weight: bold; color: #1565C0; }")
+        grp_status.setStyleSheet(f"QGroupBox {{ font-weight: bold; color: {AUGUR.info}; }}")
         lay_status = QVBoxLayout()
 
         self.lbl_st_wl    = QLabel("Wavelength calibration: not loaded")
@@ -958,7 +959,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             wl = np.asarray(self.wavelengths).flatten()
             self.lbl_st_wl.setText(
                 f"Wavelength: {wl.min():.2f}–{wl.max():.2f} nm  ({len(wl)} px)")
-            self.lbl_st_wl.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_wl.setStyleSheet(f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;")
             # Auto-correct txt_max if it still holds the default 2047 and wl is shorter
             try:
                 n = len(wl)
@@ -968,12 +969,12 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 pass
         else:
             self.lbl_st_wl.setText("Wavelength calibration: not loaded")
-            self.lbl_st_wl.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_wl.setStyleSheet(f"color: {AUGUR.fail}; padding: 2px 6px; font-size: 11px;")
 
         # 입력 종류 판별 — 알파면 I0/R가 이미 반영돼 있어 '해당 없음(✅)'으로 표시.
-        _green = "color: #2E7D32; padding: 2px 6px; font-size: 11px;"
-        _amber = "color: #e65100; padding: 2px 6px; font-size: 11px;"
-        _gray = "color: #757575; padding: 2px 6px; font-size: 11px;"
+        _green = f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;"
+        _amber = f"color: {AUGUR.warn}; padding: 2px 6px; font-size: 11px;"
+        _gray = f"color: {AUGUR.muted}; padding: 2px 6px; font-size: 11px;"
         _is_alpha = False
         try:
             _f0 = self._entry_filepath(self.file_list[0]) if getattr(self, 'file_list', None) else None
@@ -1013,17 +1014,17 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             self.lbl_st_r.setStyleSheet(_gray)
         else:
             self.lbl_st_r.setText("R-Curve: auto from He scans during run")
-            self.lbl_st_r.setStyleSheet("color: #e65100; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_r.setStyleSheet(f"color: {AUGUR.warn}; padding: 2px 6px; font-size: 11px;")
 
         # References locked
         refs_ok = hasattr(self, 'engine') and len(self.engine.gas_list) > 0
         if refs_ok:
             self.lbl_st_refs.setText(
                 f"References locked: {', '.join(self.engine.gas_list)}")
-            self.lbl_st_refs.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_refs.setStyleSheet(f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;")
         else:
             self.lbl_st_refs.setText("References: not locked  (lock before RUN)")
-            self.lbl_st_refs.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_refs.setStyleSheet(f"color: {AUGUR.fail}; padding: 2px 6px; font-size: 11px;")
 
         # Fit range
         try:
@@ -1039,19 +1040,19 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             else:
                 self.lbl_st_range.setText(
                     f"Fit range: px {fmin}–{fmax}  ({rng} px)")
-            self.lbl_st_range.setStyleSheet("color: #2E7D32; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_range.setStyleSheet(f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;")
         except ValueError:
             self.lbl_st_range.setText("Fit range: invalid pixel values")
-            self.lbl_st_range.setStyleSheet("color: #c62828; padding: 2px 6px; font-size: 11px;")
+            self.lbl_st_range.setStyleSheet(f"color: {AUGUR.fail}; padding: 2px 6px; font-size: 11px;")
 
         self._render_day_audit()   # 캐시된 감사 결과는 Refresh로 지워지지 않는다
 
     # ── 측정일 감사 (D1) ───────────────────────────────────────────────
     _AUDIT_STYLE = {
-        "PASS": "color: #2E7D32; padding: 2px 6px; font-size: 11px;",
-        "WARN": "color: #e65100; padding: 2px 6px; font-size: 11px;",
-        "FAIL": "color: #c62828; padding: 2px 6px; font-weight: bold; font-size: 11px;",
-        "SKIP": "color: #757575; padding: 2px 6px; font-size: 11px;",
+        "PASS": f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;",
+        "WARN": f"color: {AUGUR.warn}; padding: 2px 6px; font-size: 11px;",
+        "FAIL": f"color: {AUGUR.fail}; padding: 2px 6px; font-weight: bold; font-size: 11px;",
+        "SKIP": f"color: {AUGUR.muted}; padding: 2px 6px; font-size: 11px;",
     }
 
     def _raw_days(self):
@@ -1122,7 +1123,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                      for s, m in rep.messages if s in ("WARN", "FAIL")]
             self.status.setText(f"Day audit {worst} — " + " | ".join(lines[:3]))
             self.status.setStyleSheet(
-                "color: %s; font-weight: bold;" % ("#c62828" if worst == "FAIL" else "#e65100"))
+                "color: %s; font-weight: bold;" % (AUGUR.fail if worst == "FAIL" else AUGUR.warn))
 
     def _day_audit_worst(self):
         rank = {"SKIP": 0, "PASS": 1, "WARN": 2, "FAIL": 3}
@@ -1211,6 +1212,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 f"R(λ)  median={r_med*100:.4f}%  Leff≈{leff:.0f} cm")
 
     def _update_daily_rt_chart(self, cold_results, hot_pns_results=None, hot_ans_results=None):
+        # 인자 이름은 레거시: hot_pns_results = **블록 2053**, hot_ans_results = **블록 4101** 결과
+        # (여수 판정으로는 2053 = ANs). 라벨은 셀 이름 대신 블록 번호를 쓴다(gui/r_workers 경로엔 파일 정보가 없다).
         """Populate the R time-series chart in Daily Run from R Calibrator results.
 
         Accepts both new format (cold_results = [{label,results,color},...])
@@ -1230,9 +1233,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         else:
             channels = []
             for res, color, lbl in [
-                (cold_results,    '#2196F3', 'Cold'),
-                (hot_pns_results, '#FF6F00', 'Hot PNs'),
-                (hot_ans_results, '#D32F2F', 'Hot ANs'),
+                (cold_results,    channel_color(1), 'Cold'),
+                (hot_pns_results, channel_color(2), 'Hot blk2053'),
+                (hot_ans_results, channel_color(3), 'Hot blk4101'),
             ]:
                 if res:
                     channels.append({"label": lbl, "results": res, "color": color})
@@ -1282,9 +1285,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         else:
             channels = []
             for res, color, lbl in [
-                (cold_results,    '#2196F3', 'Cold'),
-                (hot_pns_results, '#FF6F00', 'Hot PNs'),
-                (hot_ans_results, '#D32F2F', 'Hot ANs'),
+                (cold_results,    channel_color(1), 'Cold'),
+                (hot_pns_results, channel_color(2), 'Hot blk2053'),
+                (hot_ans_results, channel_color(3), 'Hot blk4101'),
             ]:
                 if res:
                     channels.append({"label": lbl, "results": res, "color": color})
@@ -1400,10 +1403,11 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         file_date = "-".join(fname.split("-")[:3])
         base = os.path.splitext(fname)[0]
         _key = rec["ch_key"]
-        # 레거시 고정 이름 매핑 먼저 시도; 없으면 새 포맷 R_{label} 사용
-        ch_subdir = {"cold": "R_Cold", "hot_pns": "R_Hot_PNs",
-                     "hot_ans": "R_Hot_ANs"}.get(_key, f"R_{_key}")
-        dat_path = os.path.join(out_dir, ch_subdir, file_date, f"{base}_R.dat")
+        # 하위 폴더 후보: 새 이름(블록 기준) → 2026-10-01 전 이름(R_Hot_PNs = 블록 2053).
+        # 목록은 tools/r_trend_monitor.r_subdir_candidates 한 곳이 정한다.
+        from gui.r_workers import r_subdir_candidates
+        _cands = [os.path.join(out_dir, sd, file_date, f"{base}_R.dat") for sd in r_subdir_candidates(_key)]
+        dat_path = next((c for c in _cands if os.path.exists(c)), _cands[0])
         if not os.path.exists(dat_path):
             dat_path = os.path.join(out_dir, file_date, f"{base}_R.dat")
         roi = r.get("fit_window_nm", (400, 500))

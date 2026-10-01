@@ -145,10 +145,14 @@ R_WARN_DELTA = 0.0005
 #   Hot  ch1 (PNs cell)  : 430..465 nm   (Rs2_Hot.m line 124)
 #   Hot  ch2 (ANs cell)  : 435..470 nm   (Rs2_Hot.m line 129)
 CH_FIT_WINDOW_NM = {
-    "cold":    (435.0, 480.0),
-    "hot_pns": (430.0, 465.0),
-    "hot_ans": (435.0, 470.0),
+    "cold":        (435.0, 480.0),
+    "hot_blk2053": (430.0, 465.0),   # primary 블록 — 여수 판정: ANs(청색 LED 428–456 nm)
+    "hot_blk4101": (435.0, 470.0),   # secondary 블록 — 여수 판정: PNs(469 nm LED)
 }
+# 레거시 키(2026-10-01 전 이름). **hot_pns = 블록 2053, hot_ans = 블록 4101** 이었다 — 여수 판정과
+# 셀 이름이 반대지만 값(창)은 블록에 맞았다. 외부 스크립트 호환용으로만 남긴다.
+CH_FIT_WINDOW_NM["hot_pns"] = CH_FIT_WINDOW_NM["hot_blk2053"]
+CH_FIT_WINDOW_NM["hot_ans"] = CH_FIT_WINDOW_NM["hot_blk4101"]
 
 # 타임존 상수 (설정에서 참조하므로 여기서 먼저 정의)
 _UTC      = timezone.utc
@@ -963,16 +967,34 @@ def plot_intensity_index(series: dict, boundaries: list, channel_name: str,
     plt.close(fig)
 
 
-def plot_combined(results_cold, results_hot_pns, results_hot_ans, out_path):
-    # 3채널(Cold / Hot PNs / Hot ANs) × (R + 선택적 Leff)
+# 출력 하위 폴더: 새 이름(블록 기준) → 2026-10-01 전 이름. 옛 이름은 셀 라벨이 여수 판정과 반대였다
+# (R_Hot_PNs 에 블록 2053 = 실제 ANs 가 들어 있다). 읽는 쪽은 이 목록 순서대로 찾는다.
+R_SUBDIR_CANDIDATES = {
+    "cold":        ["R_Cold"],
+    "hot_blk2053": [f"R_Hot_blk{SPEC_START_DEFAULT}", "R_Hot_PNs"],
+    "hot_blk4101": [f"R_Hot_blk{SPEC_START_ANS}", "R_Hot_ANs"],
+}
+R_SUBDIR_CANDIDATES["hot_pns"] = R_SUBDIR_CANDIDATES["hot_blk2053"]   # 레거시 키 = 같은 블록
+R_SUBDIR_CANDIDATES["hot_ans"] = R_SUBDIR_CANDIDATES["hot_blk4101"]
+
+
+def r_subdir_candidates(key: str) -> list:
+    """채널 키 → R(λ) 곡선 하위 폴더 후보(새 이름 우선). 모르는 키는 ['R_{key}']."""
+    return list(R_SUBDIR_CANDIDATES.get(str(key).lower().replace(" ", "_"), [f"R_{key}"]))
+
+
+def plot_combined(results_cold, results_hot_a, results_hot_b, out_path,
+                  label_a=f"Hot block {SPEC_START_DEFAULT}", label_b=f"Hot block {SPEC_START_ANS}"):
+    # 3채널(Cold / Hot primary 블록 / Hot secondary 블록) × (R + 선택적 Leff).
+    # 셀 이름은 호출부가 캠페인 레이아웃에서 구해 label_* 로 넘긴다(raw_parser.block_label).
     per_ch = 2 if SHOW_LEFF else 1
     n_rows = 3 * per_ch
     fig, axes = plt.subplots(n_rows, 1, figsize=(14, 3.5 * n_rows), sharex=False, squeeze=False)
-    fig.suptitle("CAESAR Pro — Cold / Hot PNs(roi1) / Hot ANs(roi2) Mirror Reflectivity Trend", fontsize=12)
+    fig.suptitle(f"CAESAR Pro — Cold / {label_a} / {label_b} Mirror Reflectivity Trend", fontsize=12)
     channels = [
-        (results_cold,    "Cold",            R_EXPECTED_COLD, "steelblue"),
-        (results_hot_pns, "Hot PNs(roi1)",   R_EXPECTED_HOT,  "darkorange"),
-        (results_hot_ans, "Hot ANs(roi2)",   R_EXPECTED_HOT,  "crimson"),
+        (results_cold,  "Cold",  R_EXPECTED_COLD, "steelblue"),
+        (results_hot_a, label_a, R_EXPECTED_HOT,  "darkorange"),
+        (results_hot_b, label_b, R_EXPECTED_HOT,  "crimson"),
     ]
     for i, (res, name, r_exp, color) in enumerate(channels):
         ax_r = axes[i * per_ch, 0]
@@ -994,9 +1016,12 @@ def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # ── 파장 보정 파일 로드 (Cold / Hot PNs / Hot ANs) ──
-    # Hot은 한 raw 파일 안에 ROI 2개(PNs=CH2 / ANs=CH3)가 있어 파장보정이 각각 다르다.
-    wave_nm_cold = wave_nm_hot_pns = wave_nm_hot_ans = None
+    # ── 파장 보정 파일 로드 (Cold / Hot primary 블록 / Hot secondary 블록) ──
+    # Hot은 한 raw 파일 안에 블록이 2개(2053·4101) 있어 파장보정이 각각 다르다.
+    # 어느 블록이 어느 셀인지는 캠페인 레이아웃이 정한다 — 파일·폴더 **이름**은 블록 번호로
+    # 짓고(캠페인이 바뀌어도 틀리지 않게), 화면 라벨만 레이아웃에서 셀 이름을 붙인다.
+    # (2026-10-01 전엔 블록 2053 을 'Hot PNs', 4101 을 'Hot ANs' 로 하드코딩해 여수 판정과 반대였다.)
+    wave_nm_cold = wave_nm_hot_a = wave_nm_hot_b = None
 
     def _load_wave(path, label):
         if not os.path.isfile(path):
@@ -1010,10 +1035,16 @@ def main():
             return None
 
     wave_nm_cold    = _load_wave(WAVE_CAL_COLD,    "Cold")
-    wave_nm_hot_pns = _load_wave(WAVE_CAL_HOT,     "Hot PNs(roi1)")
-    wave_nm_hot_ans = _load_wave(WAVE_CAL_HOT_ANS, "Hot ANs(roi2)")
+    wave_nm_hot_a   = _load_wave(WAVE_CAL_HOT,     f"Hot block {SPEC_START_DEFAULT}")
+    wave_nm_hot_b   = _load_wave(WAVE_CAL_HOT_ANS, f"Hot block {SPEC_START_ANS}")
 
     has_hot = (HOT_FILES is not None or os.path.isdir(HOT_DIR))
+    from core.raw_parser import block_label
+    _hot_files = _resolve_files(HOT_DIR, HOT_FILES) if has_hot else []
+    _first_hot = _hot_files[0] if _hot_files else None
+    label_a = block_label(_first_hot, SPEC_START_DEFAULT, "Hot")   # 여수: 'Hot ANs (block 2053)'
+    label_b = block_label(_first_hot, SPEC_START_ANS, "Hot")       # 여수: 'Hot PNs (block 4101)'
+    tag_a, tag_b = f"Hot_blk{SPEC_START_DEFAULT}", f"Hot_blk{SPEC_START_ANS}"   # 파일·폴더 이름
 
     # ── Cold 채널 (CH2) ───────────────────────────────────────────
     bar = "=" * 64
@@ -1025,54 +1056,55 @@ def main():
                                   fit_window_nm=CH_FIT_WINDOW_NM["cold"]) \
                    if (COLD_FILES is not None or os.path.isdir(COLD_DIR)) else []
 
-    # ── Hot PNs(roi1) 채널 (CH2, 컬럼 2053-4100) ──────────────────
-    print(f"\n{bar}\n  Hot PNs (roi1) channel  fit window: {CH_FIT_WINDOW_NM['hot_pns']} nm\n{bar}")
-    results_hot_pns = scan_directory(HOT_DIR, wave_nm_hot_pns, HOT_FILES,
-                                     col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
-                                     ts_tz=HOT_TS_TZ,
-                                     spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
-                                     fit_window_nm=CH_FIT_WINDOW_NM["hot_pns"]) \
-                      if has_hot else []
+    # ── Hot primary 블록 (컬럼 2053-4100) ──────────────────────────
+    print(f"\n{bar}\n  {label_a} channel  fit window: {CH_FIT_WINDOW_NM['hot_blk2053']} nm\n{bar}")
+    results_hot_a = scan_directory(HOT_DIR, wave_nm_hot_a, HOT_FILES,
+                                   col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
+                                   ts_tz=HOT_TS_TZ,
+                                   spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
+                                   fit_window_nm=CH_FIT_WINDOW_NM["hot_blk2053"]) \
+                    if has_hot else []
 
-    # ── Hot ANs(roi2) 채널 (CH3, 컬럼 4101-6148) ──────────────────
-    print(f"\n{bar}\n  Hot ANs (roi2) channel  fit window: {CH_FIT_WINDOW_NM['hot_ans']} nm\n{bar}")
-    results_hot_ans = scan_directory(HOT_DIR, wave_nm_hot_ans, HOT_FILES,
-                                     col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
-                                     ts_tz=HOT_ANS_TS_TZ,
-                                     spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS,
-                                     fit_window_nm=CH_FIT_WINDOW_NM["hot_ans"]) \
-                      if has_hot else []
+    # ── Hot secondary 블록 (컬럼 4101-6148) ────────────────────────
+    print(f"\n{bar}\n  {label_b} channel  fit window: {CH_FIT_WINDOW_NM['hot_blk4101']} nm\n{bar}")
+    results_hot_b = scan_directory(HOT_DIR, wave_nm_hot_b, HOT_FILES,
+                                   col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
+                                   ts_tz=HOT_ANS_TS_TZ,
+                                   spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS,
+                                   fit_window_nm=CH_FIT_WINDOW_NM["hot_blk4101"]) \
+                    if has_hot else []
 
     # ── 출력 폴더 이름 결정 및 저장 ──────────────────────────────────
     range_cold    = make_range_name(results_cold)
-    range_hot_pns = make_range_name(results_hot_pns)
-    range_hot_ans = make_range_name(results_hot_ans)
-    all_results = results_cold + results_hot_pns + results_hot_ans
+    range_hot_a   = make_range_name(results_hot_a)
+    range_hot_b   = make_range_name(results_hot_b)
+    all_results = results_cold + results_hot_a + results_hot_b
     folder_name = make_range_name(sorted(all_results, key=lambda x: x["timestamp"])) if all_results else "nodata"
     out_folder = os.path.join(OUTPUT_DIR, folder_name)
     os.makedirs(out_folder, exist_ok=True)
 
     print(f"\n{bar}\n  Save results  ->  {out_folder}\n{bar}")
     if results_cold:    save_dat(results_cold,    os.path.join(out_folder, f"Cold_{range_cold}.dat"))
-    if results_hot_pns: save_dat(results_hot_pns, os.path.join(out_folder, f"Hot_PNs_{range_hot_pns}.dat"))
-    if results_hot_ans: save_dat(results_hot_ans, os.path.join(out_folder, f"Hot_ANs_{range_hot_ans}.dat"))
+    if results_hot_a:   save_dat(results_hot_a,   os.path.join(out_folder, f"{tag_a}_{range_hot_a}.dat"))
+    if results_hot_b:   save_dat(results_hot_b,   os.path.join(out_folder, f"{tag_b}_{range_hot_b}.dat"))
 
     # Per-file R(λ) curves (raw points + 5-th order poly fit) for the GUI's
     # per-scan plot. Path layout matches ui_dialogs_r.py expectations.
     if results_cold:    save_r_curves_per_file(results_cold,    "R_Cold",    out_folder)
-    if results_hot_pns: save_r_curves_per_file(results_hot_pns, "R_Hot_PNs", out_folder)
-    if results_hot_ans: save_r_curves_per_file(results_hot_ans, "R_Hot_ANs", out_folder)
+    if results_hot_a:   save_r_curves_per_file(results_hot_a,   f"R_{tag_a}", out_folder)
+    if results_hot_b:   save_r_curves_per_file(results_hot_b,   f"R_{tag_b}", out_folder)
 
     if HAS_MPL:
         if results_cold:    plot_single_channel(results_cold,    "Cold",        R_EXPECTED_COLD, os.path.join(out_folder, "R_trend_Cold.png"),    "steelblue")
-        if results_hot_pns: plot_single_channel(results_hot_pns, "Hot PNs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_PNs.png"), "darkorange")
-        if results_hot_ans: plot_single_channel(results_hot_ans, "Hot ANs",     R_EXPECTED_HOT,  os.path.join(out_folder, "R_trend_Hot_ANs.png"), "crimson")
-        if all_results: plot_combined(results_cold, results_hot_pns, results_hot_ans, os.path.join(out_folder, "R_trend_combined.png"))
+        if results_hot_a:   plot_single_channel(results_hot_a,   label_a,       R_EXPECTED_HOT,  os.path.join(out_folder, f"R_trend_{tag_a}.png"), "darkorange")
+        if results_hot_b:   plot_single_channel(results_hot_b,   label_b,       R_EXPECTED_HOT,  os.path.join(out_folder, f"R_trend_{tag_b}.png"), "crimson")
+        if all_results: plot_combined(results_cold, results_hot_a, results_hot_b, os.path.join(out_folder, "R_trend_combined.png"),
+                                      label_a=label_a, label_b=label_b)
 
         # R(λ) per-scan overlay + mean spectrum (박사님 Rs2.m line 144 style)
         if results_cold:    plot_r_curves_per_channel(results_cold,    "Cold",        "steelblue",  os.path.join(out_folder, "R_curve_Cold.png"))
-        if results_hot_pns: plot_r_curves_per_channel(results_hot_pns, "Hot PNs(roi1)", "darkorange", os.path.join(out_folder, "R_curve_Hot_PNs.png"))
-        if results_hot_ans: plot_r_curves_per_channel(results_hot_ans, "Hot ANs(roi2)", "crimson",    os.path.join(out_folder, "R_curve_Hot_ANs.png"))
+        if results_hot_a:   plot_r_curves_per_channel(results_hot_a,   label_a, "darkorange", os.path.join(out_folder, f"R_curve_{tag_a}.png"))
+        if results_hot_b:   plot_r_curves_per_channel(results_hot_b,   label_b, "crimson",    os.path.join(out_folder, f"R_curve_{tag_b}.png"))
 
         # ── He/ZA 인덱싱 검증용 intensity 시계열 (남 우희 박사님 요청) ──────
         # R 그림과 같은 파일을 다시 읽어 ambient/ZA/He peak intensity를 시간순으로
@@ -1083,10 +1115,10 @@ def main():
             ch_specs = [
                 ("Cold",          COLD_DIR, COLD_FILES, SPEC_START_DEFAULT, SPEC_END_DEFAULT, COLD_TS_TZ,
                  "steelblue", "Cold"),
-                ("Hot PNs(roi1)", HOT_DIR,  HOT_FILES,  SPEC_START_DEFAULT, SPEC_END_DEFAULT, HOT_TS_TZ,
-                 "darkorange", "Hot_PNs"),
-                ("Hot ANs(roi2)", HOT_DIR,  HOT_FILES,  SPEC_START_ANS,     SPEC_END_ANS,     HOT_ANS_TS_TZ,
-                 "crimson", "Hot_ANs"),
+                (label_a,         HOT_DIR,  HOT_FILES,  SPEC_START_DEFAULT, SPEC_END_DEFAULT, HOT_TS_TZ,
+                 "darkorange", tag_a),
+                (label_b,         HOT_DIR,  HOT_FILES,  SPEC_START_ANS,     SPEC_END_ANS,     HOT_ANS_TS_TZ,
+                 "crimson", tag_b),
             ]
             for name, ddir, dfiles, sp_s, sp_e, tz, col, tag in ch_specs:
                 files = _resolve_files(ddir, dfiles)
@@ -1101,9 +1133,9 @@ def main():
     print("\n╔══════════════════════════════════════════════════════════════╗")
     print("║  Done — reflectance summary                                  ║")
     print("╠══════════════════════════════════════════════════════════════╣")
-    for ch, res, r_exp in [("Cold    ", results_cold, R_EXPECTED_COLD),
-                           ("Hot PNs ", results_hot_pns, R_EXPECTED_HOT),
-                           ("Hot ANs ", results_hot_ans, R_EXPECTED_HOT)]:
+    for ch, res, r_exp in [("Cold", results_cold, R_EXPECTED_COLD),
+                           (label_a, results_hot_a, R_EXPECTED_HOT),
+                           (label_b, results_hot_b, R_EXPECTED_HOT)]:
         if not res:
             print(f"║  {ch}: no data")
             continue
@@ -1111,7 +1143,8 @@ def main():
         print(f"║  {ch}: cycles {len(res)}  R_mean={np.mean(r_vals):.6f}  warnings={int(np.sum(r_vals < r_exp - R_WARN_DELTA))}")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
-    return results_cold, results_hot_pns, results_hot_ans, out_folder
+    # 반환 순서: (cold, 블록 2053, 블록 4101, 폴더) — GUI(_RTWorker.data_ready)가 이 순서로 받는다.
+    return results_cold, results_hot_a, results_hot_b, out_folder
 
 if __name__ == "__main__":
     main()

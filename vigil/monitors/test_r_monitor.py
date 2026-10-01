@@ -14,6 +14,11 @@ tools.reflectance_calc.ReflectanceCalculator의 실제 품질게이트(contrast 
 
 사용: python vigil/monitors/test_r_monitor.py → 전부 PASS면 exit 0
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 
@@ -133,7 +138,7 @@ def test_quality_gate_blocks_bad_contrast():
         rm.observe("he_inject", bad, 25.0, 1013.25)
     r = rm.observe("sampling", bad, 25.0, 1013.25)
     check("품질게이트 실패 → P1(실패 1회)", r[0] == P1, f"got {r[0]}: {r[1]}")
-    check("메시지에 실패 언급", "실패" in r[1], r[1])
+    check("메시지에 실패 언급", "failed" in r[1], r[1])
 
 
 def main():

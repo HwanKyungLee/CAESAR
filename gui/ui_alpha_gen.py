@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.dlg_dir import dlg_dir
+from gui.theme import AUGUR
 from core.parallel import set_max_workers
 
 
@@ -42,7 +43,7 @@ class AlphaGeneratorDialog(QDialog):
 
         info = QLabel("Generate α spectra (*_alpha_trace.dat) from raw measurement files.\n"
                       "wavecal / fit range / cavity / flags use the main window settings.")
-        info.setStyleSheet("color:#546E7A;")
+        info.setStyleSheet(f"color:{AUGUR.muted};")
         root.addWidget(info)
 
         # raw 파일 로드 버튼
@@ -137,7 +138,7 @@ class AlphaGeneratorDialog(QDialog):
         self._wc_layout = QVBoxLayout(self._wc_group)
         self._wc_hint = QLabel("One row per channel appears after raw is loaded.\n"
                                "e.g. to build cold raw with the cold wavecal/range you keep on 'CH3 tab', select CH3.")
-        self._wc_hint.setStyleSheet("color:gray;")
+        self._wc_hint.setStyleSheet(f"color:{AUGUR.muted};")
         self._wc_layout.addWidget(self._wc_hint)
         root.addWidget(self._wc_group)
 
@@ -146,7 +147,7 @@ class AlphaGeneratorDialog(QDialog):
         btn_out = QPushButton("Output Folder")
         btn_out.clicked.connect(self._pick_out)
         self._lbl_out = QLabel("(no output folder)")
-        self._lbl_out.setStyleSheet("color:gray;")
+        self._lbl_out.setStyleSheet(f"color:{AUGUR.muted};")
         sav.addWidget(btn_out)
         sav.addWidget(self._lbl_out, 1)
         root.addLayout(sav)
@@ -167,7 +168,7 @@ class AlphaGeneratorDialog(QDialog):
         btn_mat = QPushButton("_avg_60s.mat (std_t grid)")
         btn_mat.clicked.connect(self._pick_mat)
         self._lbl_mat = QLabel("(no std_t .mat)")
-        self._lbl_mat.setStyleSheet("color:gray;")
+        self._lbl_mat.setStyleSheet(f"color:{AUGUR.muted};")
         mr.addWidget(btn_mat); mr.addWidget(self._lbl_mat, 1)
         self._mat_row.setVisible(False)
         self._drnam_mat = ""
@@ -176,7 +177,7 @@ class AlphaGeneratorDialog(QDialog):
 
         # 상태 + 진행바 + 실행
         self._lbl_status = QLabel("")
-        self._lbl_status.setStyleSheet("color:#1565C0;")
+        self._lbl_status.setStyleSheet(f"color:{AUGUR.info};")
         root.addWidget(self._lbl_status)
 
         self._pbar = QProgressBar()
@@ -268,11 +269,11 @@ class AlphaGeneratorDialog(QDialog):
                 self._raw_files.append(f)
                 self._list.addItem(os.path.basename(f))
         if skipped:
-            _shown = skipped if len(skipped) <= 8 else skipped[:8] + [f"… +{len(skipped)-8}개"]
+            _shown = skipped if len(skipped) <= 8 else skipped[:8] + [f"… +{len(skipped)-8} more"]
             QMessageBox.warning(
-                self, "측정 파일 아님 — 제외됨",
-                "다음 파일은 측정 파일 형식(YYYY-MM-DD-NNN)이 아니라 알파 입력에서 제외했습니다"
-                "(FWHM/Calib 등 분석 파일을 넣으면 알파가 오염됩니다):\n\n  " + "\n  ".join(_shown))
+                self, "Not measurement files — excluded",
+                "These files are not in measurement-file format (YYYY-MM-DD-NNN) and were excluded from alpha input "
+                "(analysis files such as FWHM/Calib would contaminate alpha):\n\n  " + "\n  ".join(_shown))
         self._lbl_status.setText(f"{len(self._raw_files)} raw file(s) selected")
         # 채널 수 감지 → 핏세팅 탭 매핑 행 갱신
         if self._raw_files:
@@ -332,14 +333,14 @@ class AlphaGeneratorDialog(QDialog):
             btn_rt.setFixedWidth(30)
             btn_rt.setToolTip(f"Pick R(t) npz for raw CH{ch} (none = self R)")
             rt_lbl = QLabel("self R")
-            rt_lbl.setStyleSheet("color:gray;")
+            rt_lbl.setStyleSheet(f"color:{AUGUR.muted};")
             btn_rtx = QPushButton("X")
             btn_rtx.setFixedWidth(24)
             btn_rtx.setToolTip("Clear R(t)")
             btn_rt.clicked.connect(lambda _x, c=ch, lb=rt_lbl: self._pick_ch_rt(c, lb))
             btn_rtx.clicked.connect(
                 lambda _x, c=ch, lb=rt_lbl: (self._ch_rt.pop(c, None),
-                                             lb.setText("self R"), lb.setStyleSheet("color:gray;")))
+                                             lb.setText("self R"), lb.setStyleSheet(f"color:{AUGUR.muted};")))
             row.addWidget(btn_rt)
             row.addWidget(rt_lbl, 1)
             row.addWidget(btn_rtx)
@@ -358,7 +359,7 @@ class AlphaGeneratorDialog(QDialog):
             dlg_dir("rt_path", f)
             self._ch_rt[ch] = f
             lbl.setText(os.path.basename(f))
-            lbl.setStyleSheet("color:#1565C0;")
+            lbl.setStyleSheet(f"color:{AUGUR.info};")
             lbl.setToolTip(f)
 
     def _clear(self):

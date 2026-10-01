@@ -11,6 +11,7 @@ import os
 
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 from core.paths import resolve_ref_path
+from gui.theme import AUGUR
 from .app_window_policy import _scenario_gas_policy
 
 
@@ -268,7 +269,7 @@ class ChannelConfigMixin:
             self.load_wavelength_cal(auto_path=wl_path)
         elif hasattr(self, 'lbl_wavecal'):
             self.lbl_wavecal.setText("wavecal: none")
-            self.lbl_wavecal.setStyleSheet("color: #B71C1C; font-weight: bold; padding: 2px;")
+            self.lbl_wavecal.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold; padding: 2px;")
             self.lbl_wavecal.setToolTip("No wavelength calibration loaded for this channel tab.")
         # L7: 가스별 Sh/Sq 모드 요약 갱신
         self._refresh_shsq_summary()

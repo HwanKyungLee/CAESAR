@@ -5,6 +5,11 @@
   2. **아무도 코어 수를 따로 계산하지 않는다** — 옛 `cpu_count()//2` 가 한 군데라도
      되살아나면 GUI 스핀이 그 경로만 조용히 못 건드리게 된다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import re
 import sys

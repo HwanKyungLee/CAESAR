@@ -398,7 +398,7 @@ def meta_to_cfg(meta: dict, ref_dir: str | None = None) -> tuple:
     calib = meta.get("calibration") or {}
     wl = _path(calib.get("wavecal"))
     if not wl or not os.path.exists(wl):
-        unresolved.append(calib.get("wavecal") or "(wavecal 미기록)")
+        unresolved.append(calib.get("wavecal") or "(wavecal not recorded)")
 
     win = meta.get("window") or {}
     px = win.get("px") or [None, None]
@@ -539,7 +539,7 @@ def _demo():
 
     vs = find_versions(fp)
     assert len(vs) == 3, [v["meta"]["runid"] for v in vs]
-    assert [v["meta"]["poly_deg"] for v in vs] == [3, 4, 5], "created 순 정렬이 아님"
+    assert [v["meta"]["poly_deg"] for v in vs] == [3, 4, 5], "not sorted by created"
     assert all(v["meta"]["channel"] == 1 for v in vs)
     assert os.path.exists(vs[0]["path"]), vs[0]["path"]
 
@@ -553,7 +553,7 @@ def _demo():
         fp3 = os.path.join(dd, f"260905_cold_{mx['runid']}.dat")
         open(fp3, "w").close()
         write_meta(fp3, mx)
-    assert len(find_versions(fp3)) == 2, "legacy: QC 버킷 가로지르기 실패"
+    assert len(find_versions(fp3)) == 2, "legacy: lookup across QC buckets failed"
     assert os.path.basename(version_search_root(fp3)) == "260905"
     assert os.path.basename(version_search_root(fp)) == "2026-09-04"
 
@@ -566,7 +566,7 @@ def _demo():
     assert back["ref_props"]["NO2"]["sh_mode"] == "Center"
     assert back["ref_props"]["NO2"]["sh_val"] == "-0.21, 1.9"
     assert back["f_min"] == "512" and back["f_max"] == "1240"
-    assert missing, "없는 파일은 unresolved로 보고돼야 한다(조용히 넘어가면 안 됨)"
+    assert missing, "missing files must be reported as unresolved (not silently skipped)"
     # λ·robust는 meta의 qc 블록에 있다 — 기본값으로 때우면 다른 핏이 된다.
     q = build_meta(cfg, channel=1, qc={"enabled": True, "auto_k": 6.0, "tikhonov": 0.02,
                                        "robust": True},

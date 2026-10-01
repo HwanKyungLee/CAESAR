@@ -19,9 +19,10 @@ from core.raw_parser import (
     RawParser, FLAG_ZA, FLAG_HE, FLAG_AMBIENT, SPEC_PRIMARY, SPEC_SECONDARY,
 )
 from gui.dlg_dir import dlg_dir
+from gui.theme import AUGUR, SERIES
 
 _LABEL = {FLAG_ZA: "ZA (500)", FLAG_HE: "He (510)", FLAG_AMBIENT: "Sampling (1)"}
-_COLOR = {FLAG_ZA: "#2196F3", FLAG_HE: "#FF6F00", FLAG_AMBIENT: "#388E3C"}
+_COLOR = {FLAG_ZA: SERIES[0], FLAG_HE: SERIES[1], FLAG_AMBIENT: SERIES[3]}
 
 
 def _find_files(raw_dir, prefix):
@@ -195,7 +196,7 @@ class PeakTrendDialog(QDialog):
         self._btn_run.setStyleSheet("font-weight:bold; padding:6px;")
         self._btn_run.clicked.connect(self._run)
         run.addWidget(self._btn_run, 1)
-        self._lbl = QLabel(""); self._lbl.setStyleSheet("color:#1565C0;")
+        self._lbl = QLabel(""); self._lbl.setStyleSheet(f"color:{AUGUR.info};")
         run.addWidget(self._lbl, 2)
         root.addLayout(run)
 

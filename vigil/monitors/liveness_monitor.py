@@ -26,14 +26,14 @@ def check_liveness(last_arrival: Optional[datetime], now: Optional[datetime] = N
 
     status: SKIP(아직 아무 행도 못 봄) | OK | P0(측정 정지 의심, grace_sec 초과)."""
     if last_arrival is None:
-        return SKIP, "아직 관측된 행 없음 (초기화 중이거나 감시폴더에 raw 없음)", {}
+        return SKIP, "no rows seen yet (initializing, or no raw in watch folder)", {}
     now = now or datetime.now()
     gap = (now - last_arrival).total_seconds()
     metrics = {"gap_sec": gap, "grace_sec": grace_sec,
               "last_arrival": last_arrival.isoformat()}
     if gap > grace_sec:
-        return P0, f"측정 정지 의심 — 마지막 행 {gap:.0f}s 전 (허용 {grace_sec:.0f}s)", metrics
-    return OK, f"정상 — 마지막 행 {gap:.1f}s 전", metrics
+        return P0, f"measurement stopped? — last row {gap:.0f}s ago (limit {grace_sec:.0f}s)", metrics
+    return OK, f"normal — last row {gap:.1f}s ago", metrics
 
 
 def latest_arrival(events: Sequence, prior: Optional[datetime]) -> Optional[datetime]:

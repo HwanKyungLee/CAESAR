@@ -5,6 +5,11 @@
   3) 없는 파일·깨진 json·빈 경로 → [] (스플래시는 σ 로 대체, 절대 실패하지 않는다)
   4) 표시용 아래첨자: NO2 → NO₂, CHOCHO 는 그대로
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import json
 import os
 import sys

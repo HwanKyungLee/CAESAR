@@ -33,7 +33,7 @@ def _clean(x, y):
     x = np.asarray(x, dtype=float).ravel()
     y = np.asarray(y, dtype=float).ravel()
     if x.shape != y.shape:
-        raise ValueError(f"길이가 다르다: {x.shape} vs {y.shape}")
+        raise ValueError(f"length mismatch: {x.shape} vs {y.shape}")
     m = np.isfinite(x) & np.isfinite(y)
     return x[m], y[m]
 
@@ -209,13 +209,13 @@ def compare(x, y, *, name="", lam=1.0, relative=False, boot=True) -> dict:
 def format_compare(r: dict, unit="ppb") -> str:
     ba = r.get("ba") or {}
     L = []
-    L.append(f"[{r.get('name') or 'pair'}]  n={r['n']:,}  (유효 n≈{r['n_eff']:,.0f}"
-             f" — 자기상관 반영)")
-    L.append(f"  r²                 {r['r2']:.4f}      ← 연관성. **일치가 아니다**")
+    L.append(f"[{r.get('name') or 'pair'}]  n={r['n']:,}  (effective n≈{r['n_eff']:,.0f}"
+             f" — autocorrelation-adjusted)")
+    L.append(f"  r²                 {r['r2']:.4f}      ← association, **not agreement**")
     L.append(f"  OLS     slope      {r['ols_slope']:.4f}   intercept {r['ols_intercept']:+.4g} {unit}"
-             f"   (x 오차로 0쪽 감쇠)")
+             f"   (attenuated toward 0 by x error)")
     ci = r.get("deming_ci")
-    ci_s = (f"  [{ci[0]:.4f}, {ci[1]:.4f}] 95% 블록부트스트랩"
+    ci_s = (f"  [{ci[0]:.4f}, {ci[1]:.4f}] 95% block bootstrap"
             if ci and np.isfinite(ci[0]) else "")
     L.append(f"  Deming  slope      {r['deming_slope']:.4f}   intercept "
              f"{r['deming_intercept']:+.4g} {unit}   (λ={r['lambda']:g}){ci_s}")
@@ -223,18 +223,18 @@ def format_compare(r: dict, unit="ppb") -> str:
         u = "" if ba.get("relative") else f" {unit}"
         sc = 100.0 if ba.get("relative") else 1.0
         tag = "%" if ba.get("relative") else u
-        L.append(f"  Bland–Altman 편향  {ba['bias'] * sc:+.4g}{tag}"
-                 f"   일치한계 [{ba['loa_lo'] * sc:+.4g}, {ba['loa_hi'] * sc:+.4g}]{tag}")
+        L.append(f"  Bland–Altman bias  {ba['bias'] * sc:+.4g}{tag}"
+                 f"   LoA [{ba['loa_lo'] * sc:+.4g}, {ba['loa_hi'] * sc:+.4g}]{tag}")
         if ba.get("ratio_equiv") is not None and np.isfinite(ba["ratio_equiv"]):
-            L.append(f"     (= 비율 {ba['ratio_equiv']:.4f} 배. 상대 BA는 두 값의 평균으로"
-                     f" 나누므로 편향%를 그대로 '몇 % 차이'로 읽지 말 것)")
-        L.append(f"  비례 편향 기울기    {ba['prop_bias_slope']:+.4g}"
-                 f"   ← 0에서 멀면 편향이 농도에 따라 변함(단일 값 요약 금지)")
+            L.append(f"     (= ratio {ba['ratio_equiv']:.4f}x. Relative BA divides by the mean of the two,"
+                     f" so do not read bias% directly as 'X % difference')")
+        L.append(f"  Prop. bias slope   {ba['prop_bias_slope']:+.4g}"
+                 f"   ← far from 0 = bias varies with concentration (no single-value summary)")
     sc = r.get("scaled") or {}
     if sc.get("bias_rel") is not None:
-        L.append(f"  편향/중앙값        {sc['bias_rel'] * 100:+.2f}%"
-                 f"   일치한계 [{sc['loa_lo_rel'] * 100:+.1f}, {sc['loa_hi_rel'] * 100:+.1f}]%"
-                 f"   (분모 = |기준값| 중앙값 {sc['scale']:.4g} — 0 나눗셈 회피)")
+        L.append(f"  Bias/median        {sc['bias_rel'] * 100:+.2f}%"
+                 f"   LoA [{sc['loa_lo_rel'] * 100:+.1f}, {sc['loa_hi_rel'] * 100:+.1f}]%"
+                 f"   (denominator = median |reference| {sc['scale']:.4g} — avoids division by 0)")
     return "\n".join(L)
 
 
@@ -250,13 +250,13 @@ def _demo():
     x, y = true + ex, true + ey                # 참 기울기 = 1.0
     a_ols, _ = ols(x, y)
     a_dem, _ = deming(x, y, 1.0)
-    assert a_ols < 0.95, f"OLS 감쇠가 안 보인다: {a_ols}"
-    assert abs(a_dem - 1.0) < 0.05, f"Deming이 참값을 못 찾음: {a_dem}"
+    assert a_ols < 0.95, f"OLS attenuation not seen: {a_ols}"
+    assert abs(a_dem - 1.0) < 0.05, f"Deming failed to recover the true value: {a_dem}"
     assert a_dem > a_ols
 
     # ② r²는 높은데 일치는 나쁜 경우 — 이 모듈의 핵심 주장
     y2 = 1.30 * true                            # 30% 비례 차이, 노이즈 없음
-    assert pearson_r2(true, y2) > 0.999, "상관은 완벽한데"
+    assert pearson_r2(true, y2) > 0.999, "correlation should be perfect"
     ba = bland_altman(true, y2, relative=True)
     # 상대 BA는 (두 값의 평균)으로 나누므로 비율 1.30 → 2(k−1)/(k+1) = 0.2609다.
     # 이 숫자를 "26% 차이"로 읽으면 틀리므로 ratio_equiv로 되돌릴 수 있어야 한다.
@@ -278,7 +278,7 @@ def _demo():
     # 증상은 평균이 아니라 **산포**다: 일치한계가 ±2700%까지 벌어지고 부호까지 뒤집힌다
     # (실측 z~N(0,1), 참 편향 +0.10 → 상대BA bias=-0.30, sd=13.6).
     assert ba_bad["sd"] > 5.0, ba_bad
-    assert ba_bad["bias"] * 0.10 < 0, ("상대BA 부호가 참값과 반대여야 한다(전제)", ba_bad)
+    assert ba_bad["bias"] * 0.10 < 0, ("relative-BA sign must be opposite to the truth (premise)", ba_bad)
     # 안정 스케일은 정확히 맞는다
     assert abs(sc_ok["bias_rel"] - 0.10 / float(np.median(np.abs(z)))) < 1e-12, sc_ok
     assert sc_ok["sd_rel"] < 1e-9, sc_ok      # 덧셈 편향만 있으므로 산포는 0
@@ -295,10 +295,10 @@ def _demo():
     lo, hi = block_bootstrap_slope_ci(x, y, n_boot=200)
     assert lo < 1.0 < hi, (lo, hi)
 
-    r = compare(x, y, name="demo(참 slope=1.0)", relative=False)
+    r = compare(x, y, name="demo(true slope=1.0)", relative=False)
     print(format_compare(r))
     print()
-    print("agreement self-check OK — OLS %.4f(감쇠) vs Deming %.4f(회복)"
+    print("agreement self-check OK — OLS %.4f (attenuated) vs Deming %.4f (recovered)"
           % (a_ols, a_dem))
 
 

@@ -11,6 +11,7 @@ import re
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTableWidgetItem,
                              QVBoxLayout)
 from core.data_io import DataIO
+from gui.theme import AUGUR
 from .ui_dialogs import RangeSelectorDialog
 
 
@@ -79,7 +80,7 @@ class DataLoadMixin:
                         else:
                             _n_skip += 1
             if _n_skip:
-                self.status.setText(f"Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref 등)")
+                self.status.setText(f"Skipped {_n_skip} non-measurement file(s) (FWHM/Calib/Ref etc.)")
             # 파일명(날짜+스캔) 기준 정렬 — 하위폴더가 흩어져도 시간순 유지
             files = sorted(set(files), key=lambda f: (os.path.basename(f), f))
             if not files:
@@ -312,16 +313,16 @@ class DataLoadMixin:
             self._detected_channels = n
             ch_names = {1: "CH1", 2: "CH1+CH2", 3: "CH1+CH2+CH3"}
             ch_labels = {
-                1: "1채널  (Cold / single-cavity)",
-                2: "2채널  (Hot:  CH1 PNs 180°C  +  CH2 ANs 300°C)",
-                3: "3채널  (CH1 + CH2 + CH3)",
+                1: "1 channel  (Cold / single-cavity)",
+                2: "2 channels  (Hot:  CH1 PNs 180°C  +  CH2 ANs 300°C)",
+                3: "3 channels  (CH1 + CH2 + CH3)",
             }
             label = ch_labels.get(n, f"{n}CH")
             self.lbl_channel_info.setText(label)
             # (채널별 설정은 좌측 채널 탭으로 — 여기선 감지 정보만 표시)
-            colours = {1: "#1565C0", 2: "#6A1B9A", 3: "#2E7D32"}
+            colours = {1: AUGUR.info, 2: AUGUR.special, 3: AUGUR.ok}
             self.lbl_channel_info.setStyleSheet(
-                f"color: {colours.get(n, '#333')}; font-weight: bold;")
+                f"color: {colours.get(n, AUGUR.ink)}; font-weight: bold;")
             self.status.setText(
                 f"{len(self.file_list)} file(s) loaded  —  {ch_names.get(n, str(n)+'CH')} detected")
         except Exception as e:

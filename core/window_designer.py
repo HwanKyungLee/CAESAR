@@ -37,7 +37,7 @@ from scipy.ndimage import uniform_filter1d
 
 
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
-from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처(이 모듈이 직접 호출)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -84,12 +84,12 @@ def residual_rho(eng, alphas, species, px_min, px_max, poly_deg, etalon_freq=0.3
         # 옆의 model_adequacy()는 같은 상황에서 inf(=모델 불충분)를 돌려준다.
         # 보수적으로 실패하는 게 이 모듈의 규칙이므로 여기서는 멈춘다.
         raise RuntimeError(
-            f"residual_rho: {n_fail}개 스캔 전부 lstsq 실패 — 자기상관을 잴 수 없다. "
-            f"설계행렬/알파가 성립하는지 확인할 것(0.0으로 계속하면 유효자유도 "
-            f"보정이 조용히 꺼진다)")
+            f"residual_rho: lstsq failed on all {n_fail} scans — cannot measure autocorrelation. "
+            f"Check that the design matrix/alpha are valid (continuing with 0.0 would silently "
+            f"disable the effective-dof correction)")
     if n_fail:
-        print(f"[window_designer] residual_rho: {n_fail}/{n_fail + len(rs)} 스캔 "
-              f"lstsq 실패 — 남은 {len(rs)}개로 ρ 추정", file=sys.stderr)
+        print(f"[window_designer] residual_rho: {n_fail}/{n_fail + len(rs)} scans: "
+              f"lstsq failed — estimating ρ from the remaining {len(rs)}", file=sys.stderr)
     return float(np.clip(np.median(rs), 0.0, 0.98))
 
 
@@ -212,11 +212,11 @@ def estimate_shift(eng, alphas, species, px_min, px_max, poly_deg,
     # 0 은 중립값이라 반환은 유지하되, "정렬 실패"를 "정렬이 0"과 구분되게 알린다.
     import warnings
     if not np.isfinite(best_r):
-        warnings.warn("estimate_shift: 유효 스캔이 없어 정렬 실패 — shift 0 은 추정값이 아니다.",
+        warnings.warn("estimate_shift: alignment failed, no valid scans — shift 0 is not an estimate.",
                       RuntimeWarning, stacklevel=2)
     elif best_sh <= lo + 1e-9 or best_sh >= hi - 1e-9:
-        warnings.warn(f"estimate_shift: 최적 shift {best_sh:+.2f}px 가 탐색 경계 [{lo},{hi}] 에 붙었다 "
-                      f"— 실제 정렬이 범위 밖일 수 있다.", RuntimeWarning, stacklevel=2)
+        warnings.warn(f"estimate_shift: best shift {best_sh:+.2f}px sits on the search boundary [{lo},{hi}] "
+                      f"— the true alignment may be out of range.", RuntimeWarning, stacklevel=2)
     return best_sh
 
 
@@ -327,7 +327,7 @@ def scan_windows(eng, alphas, species, wave, T_C, P_mbar,
                 chi = model_adequacy(A, [np.asarray(a, float)[pmn:pmx + 1]
                                          for a in np.asarray(alphas, float)], noise_sl)
                 # 계수공간 σ → 수밀도 → ppb (핏의 환산과 동일 규약)
-                mdl = d["sigma"] * mu / sc / n_air * 1e9
+                mdl = coeff_to_ppb(d["sigma"], mu, sc, n_air)
                 # 강건성: 레퍼런스를 ±1px 흔들었을 때 σ가 얼마나 나빠지나(웨이브칼 오차 내성)
                 A2, n2 = design_matrix(eng, species, pmn, pmx, p, etalon_freq,
                                        shift=shift0 + robust_shift_px)
@@ -342,7 +342,7 @@ def scan_windows(eng, alphas, species, wave, T_C, P_mbar,
                     robust_ratio=float(rr), width_nm=float(wave[pmx] - wave[pmn]),
                     gated=bool(gated),
                     gate_reason=("degenerate" if d["multiple_R"] > degeneracy_max else
-                                 "unmodeled(편향위험)" if chi > chi_max else
+                                 "unmodeled(bias risk)" if chi > chi_max else
                                  "bad" if not np.isfinite(mdl) else ""),
                 ))
     rows.sort(key=lambda r: (r["gated"], r["mdl_ppb"] * max(r["robust_ratio"], 1.0)
@@ -365,10 +365,10 @@ def compare_species(eng, alphas, base_species, candidate, wave, T_C, P_mbar,
                     ("with", list(base_species) + ([candidate] if candidate not in base_species else []))):
         A, names = design_matrix(eng, sp, px_min, px_max, poly_deg, etalon_freq)
         d = predicted_sigma(A, names, noise_sl, rho, target)
-        out[tag] = dict(mdl_ppb=d["sigma"] * mu / sc / n_air * 1e9,
+        out[tag] = dict(mdl_ppb=coeff_to_ppb(d["sigma"], mu, sc, n_air),
                         multiple_R=d["multiple_R"], cond=d["cond"])
     w, wo = out["with"]["mdl_ppb"], out["without"]["mdl_ppb"]
     out["ratio"] = float(w / wo) if wo > 0 else float("inf")
-    out["verdict"] = ("포함 이득" if out["ratio"] < 0.95 else
-                      "무의미/해로움" if out["ratio"] > 1.05 else "중립")
+    out["verdict"] = ("include: gain" if out["ratio"] < 0.95 else
+                      "no gain/harmful" if out["ratio"] > 1.05 else "neutral")
     return out

@@ -21,6 +21,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QDialogButtonBox
 from .dlg_dir import dlg_dir
 from .worker import AnalysisWorker
+from gui.theme import AUGUR
 
 
 class AnalysisRunMixin:
@@ -548,7 +549,7 @@ class AnalysisRunMixin:
             for w in running:
                 w.stop()
             self.status.setText("Stopping… (finishing current scan)")
-            self.status.setStyleSheet("color: red; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
             self.b_stop.setEnabled(False)
 
     def _active_workers(self):

@@ -44,7 +44,7 @@ def pick_fitset_channel(scen: dict, wl_dir: str) -> dict:
     for ch in scen["channels"].values():
         if wl_dir in str(ch.get("wl_path", "")).replace("\\", "/").split("/"):
             return ch
-    raise ValueError(f"FitSet에 wl_path가 '{wl_dir}'인 채널이 없음")
+    raise ValueError(f"FitSet has no channel with wl_path '{wl_dir}'")
 
 
 class ConcMonitor:
@@ -120,7 +120,7 @@ class ConcMonitor:
         window = alpha[self.px_min:self.px_max + 1]
         if not np.all(np.isfinite(window)):
             self._fail_streak += 1
-            return self._fail_status("alpha 계산 실패(창 안에 0/음수 광량)")
+            return self._fail_status("alpha computation failed (zero/negative intensity in window)")
 
         try:
             result = PO.fit_scan(self.eng, self.fitter, self._seeded_ref_props(), self.wave,
@@ -139,40 +139,40 @@ class ConcMonitor:
         metrics = {"conc_ppb": conc, "rms_sig": rms_sig, "rms": result["rms"],
                    "perr_rel": result["perr_rel"], "conc_all_ppb": result["conc_all"]}
         if not np.isfinite(conc):
-            return P1, f"{self.cfg.target} 핏 실패(농도 NaN)", metrics
+            return P1, f"{self.cfg.target} fit failed (concentration NaN)", metrics
 
         issues: list = []
         worst = OK
         c = self.cfg
         if c.conc_min_ppb is not None and conc < c.conc_min_ppb:
-            issues.append(f"물리불가(너무 낮음) {conc:.1f}<{c.conc_min_ppb}ppb")
+            issues.append(f"unphysical (too low) {conc:.1f}<{c.conc_min_ppb}ppb")
             worst = worse(worst, P1)
         if c.conc_max_ppb is not None and conc > c.conc_max_ppb:
-            issues.append(f"물리불가(너무 높음) {conc:.1f}>{c.conc_max_ppb}ppb")
+            issues.append(f"unphysical (too high) {conc:.1f}>{c.conc_max_ppb}ppb")
             worst = worse(worst, P1)
         if c.rms_sig_alarm is not None and rms_sig > c.rms_sig_alarm:
-            issues.append(f"핏 신뢰 낮음 rms/sig={rms_sig*100:.1f}%")
+            issues.append(f"low fit confidence rms/sig={rms_sig*100:.1f}%")
             worst = worse(worst, P1)
         if c.rms_alarm is not None and result["rms"] > c.rms_alarm:
-            issues.append(f"핏 잔차 큼 rms={result['rms']:.2e}")
+            issues.append(f"large fit residual rms={result['rms']:.2e}")
             worst = worse(worst, P1)
         if (c.spike_ppb is not None and self._history
                 and np.isfinite(self._history[-1])
                 and abs(conc - self._history[-1]) > c.spike_ppb):
-            issues.append(f"급변 Δ{abs(conc - self._history[-1]):.1f}ppb")
+            issues.append(f"sudden change Δ{abs(conc - self._history[-1]):.1f}ppb")
             worst = worse(worst, P2)
 
         self._history.append(conc)
         if c.flatline_n and len(self._history) >= c.flatline_n:
             recent = list(self._history)[-c.flatline_n:]
             if len({round(v, 6) for v in recent}) == 1:
-                issues.append(f"평탄선(센서 고착 의심) 최근 {c.flatline_n}회 동일")
+                issues.append(f"flatline (stuck sensor?) last {c.flatline_n} identical")
                 worst = worse(worst, P2)
 
-        msg = f"{c.target}={conc:.1f}ppb" + (" · " + "; ".join(issues) if issues else " (정상)")
+        msg = f"{c.target}={conc:.1f}ppb" + (" · " + "; ".join(issues) if issues else " (normal)")
         return worst, msg, metrics
 
     def _fail_status(self, reason: str):
         status = P0 if self._fail_streak >= FAIL_STREAK_FOR_P0 else P1
-        return status, f"{self.cfg.target} 핏 실패({self._fail_streak}회 연속): {reason}", \
+        return status, f"{self.cfg.target} fit failed ({self._fail_streak} in a row): {reason}", \
             {"fail_streak": self._fail_streak}

@@ -11,6 +11,11 @@
     python tools/test_result_lanes.py
 """
 from __future__ import annotations
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 import os
 import sys
@@ -148,7 +153,7 @@ def test_residual_refuses_without_meta(w):
 
     assert not w._pw_resid.plotItem.listDataItems(), "복원 못 했는데 잔차를 그렸다"
     title = w._pw_resid.plotItem.titleLabel.text
-    assert "불가" in title and "meta" in title, title
+    assert "unavailable" in title and "meta" in title, title
     # α는 그대로 보여야 한다 — 잔차가 없다고 상세가 통째로 사라지면 안 된다
     assert len(w._pw_detail.plotItem.listDataItems()) == 1, "alpha까지 사라졌다"
 

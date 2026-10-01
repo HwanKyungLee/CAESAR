@@ -9,6 +9,11 @@
 raw 데이터가 없어도 돌도록 열수는 가짜 행으로 흉내낸다. E: 가 붙어 있으면
 실제 경계 파일(2026-05-29-010/011)로 보정 후 전진하는지까지 확인한다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 
@@ -60,11 +65,11 @@ def test_time_axis_rejects_backwards_and_duplicates():
     msgs = []
     x, ok = resolve_time_axis(idx, [10.0, 11.0, 2.0, 3.0, 4.0], warn=msgs.append)
     assert not ok and np.array_equal(x, idx)
-    assert msgs and "역행" in msgs[0]
+    assert msgs and "backwards" in msgs[0]
     # 중복(2026-05-28-009 모양): diff==0 도 strictly increasing 위반이다
     msgs = []
     x, ok = resolve_time_axis(idx, [10.0, 11.0, 11.0, 12.0, 13.0], warn=msgs.append)
-    assert not ok and "중복" in msgs[0]
+    assert not ok and "duplicate" in msgs[0]
     # 콜백 없이도 죽지 않는다
     assert resolve_time_axis(idx, [10.0, 9.0, 8.0, 7.0, 6.0])[1] is False
     # NaN 은 종전대로 폴백

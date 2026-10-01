@@ -135,9 +135,9 @@ def select_references(eng, alphas, candidates, wave, T_C, P_mbar,
     n_eff = max(_n_eff_raw, 10.0)
     if _n_eff_raw < 10.0:
         warnings.warn(
-            f"n_eff 바닥 발동: rho={rho:.3f}, n_pix={n_pix} → n_eff_raw={_n_eff_raw:.2f} < 10. "
-            f"F검정 자유도가 관대한 쪽으로 부풀어 레퍼런스가 과채택될 수 있다 — "
-            f"실측(2026-09-16)에서는 rho 최대 0.65라 도달한 적 없는 경로다. 잔차를 확인할 것.",
+            f"n_eff floor triggered: rho={rho:.3f}, n_pix={n_pix} → n_eff_raw={_n_eff_raw:.2f} < 10. "
+            f"F-test degrees of freedom are inflated toward leniency, so references may be over-accepted — "
+            f"a path never reached in measured data (2026-09-16, max rho 0.65). Check the residuals.",
             RuntimeWarning, stacklevel=2)
 
     def _rss(species):
@@ -170,8 +170,8 @@ def select_references(eng, alphas, candidates, wave, T_C, P_mbar,
         if ok:
             keep.append(n)
         log.append(dict(name=n, ratio=cmp["ratio"], chi_gain=float(gain), F=float(F),
-                        decision=("include(신호)" if has_signal else
-                                  "include(무해)" if ok else "exclude(신호없음·간섭)"),
+                        decision=("include(signal)" if has_signal else
+                                  "include(harmless)" if ok else "exclude(no signal / interferes)"),
                         multR_with=cmp["with"]["multiple_R"],
                         multR_without=cmp["without"]["multiple_R"]))
     return keep, log
@@ -191,15 +191,15 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
 
     # 0) 레퍼런스 발견 + mult 자동
     cands = discover_references(ref_dir)
-    _say(f"레퍼런스 발견: {[(c['name'], c['mult']) for c in cands]}")
+    _say(f"References found: {[(c['name'], c['mult']) for c in cands]}")
     eng, wave = build_engine(wl_path, cands, load_wavecal)
     if wave is None:
-        raise ValueError("wavecal 로드 실패")
+        raise ValueError("Failed to load wavecal")
 
     # ── 사전검증(health_checks) — 후보 refs셋 평가 *전* 게이트(fit_optimizer_handoff.md §7·§10-C).
     # 웨이브칼 손상(비단조·범위이상)이나 레퍼런스 결함(빈값·평평·격자불일치)을 여기서 못 잡으면
     # 이후 창설계·ref취사·파라미터 추정 전부가 조용히 오염된 입력 위에서 돈다.
-    _say("사전검증(웨이브칼·레퍼런스)…")
+    _say("Preflight (wavecal / references)…")
     wc_status, wc_msg, wc_metrics = HC.check_wavecal(wave)
     refs_for_check = {}
     for c in cands:
@@ -213,9 +213,9 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
     preflight = [("wavecal", wc_status, wc_msg, wc_metrics),
                 ("references", rf_status, rf_msg, rf_metrics)]
     pf_status, pf_msg = HC.overall(preflight)
-    _say(f"사전검증 결과: {pf_status} — {pf_msg}")
+    _say(f"Preflight result: {pf_status} — {pf_msg}")
     if pf_status == HC.FAIL:
-        raise ValueError(f"사전검증 실패 — FitSet 생성 중단 (wavecal: {wc_msg} / references: {rf_msg})")
+        raise ValueError(f"Preflight failed — FitSet build aborted (wavecal: {wc_msg} / references: {rf_msg})")
 
     alphas_all = np.array([s[1] for s in scans if len(s[1]) == len(wave)])
     alphas = alphas_all[:: max(1, len(alphas_all) // n_design_alphas)][:n_design_alphas]
@@ -230,14 +230,14 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
         ends_nm = np.arange(round(hi0), round(hi0) + 28.1, 2.0)
 
     # 1) 1패스 창(전체 후보로) — ref 취사를 위한 임시 창
-    _say("1패스: 임시 창 설계…")
+    _say("Pass 1: provisional window design…")
     rows, meta = WD.scan_windows(eng, alphas, [c["name"] for c in cands], wave,
                                  T_C, P_mbar, starts_nm, ends_nm, target=target)
     ok = [r for r in rows if not r["gated"]] or rows
     tmp = ok[0]
 
     # 2) 레퍼런스 취사(핏 없이) + 절대량 물리심판
-    _say("레퍼런스 취사…")
+    _say("Selecting references…")
     keep, sel_log = select_references(eng, alphas, cands, wave, T_C, P_mbar,
                                       tmp["px_min"], tmp["px_max"], tmp["poly"], target)
     # 절대량을 아는 종은 물리로 재확인(포함으로 기울었어도 물리가 아니면 제외)
@@ -254,12 +254,12 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
                 keep.remove(c["name"])
                 for L in sel_log:
                     if L["name"] == c["name"]:
-                        L["decision"] = "exclude(물리)"
+                        L["decision"] = "exclude(physics)"
                         L["physics"] = v["reasons"]
-    _say(f"채택 refs: {keep}")
+    _say(f"Accepted refs: {keep}")
 
     # 3) 최종 창·poly 재설계(확정 ref 세트로)
-    _say("2패스: 최종 창 설계…")
+    _say("Pass 2: final window design…")
     eng2, _ = build_engine(wl_path, [c for c in cands if c["name"] in keep], load_wavecal)
     fitter2 = DoasFitter(eng2)
     rows2, meta2 = WD.scan_windows(eng2, alphas, keep, wave, T_C, P_mbar,
@@ -269,7 +269,7 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
     px_min, px_max, poly = best["px_min"], best["px_max"], best["poly"]
 
     # 4) 파라미터: shift/squeeze(넓게 풀어 실측 분포로), step_limit, Link
-    _say("파라미터 추정…")
+    _say("Estimating parameters…")
     rp = _default_ref_props(keep, target, wide=12.0)
     sh = PO.recommend_shift(scans, eng2, fitter2, rp, px_min, px_max, poly,
                             target, wide=12.0, allow_negative_gas=allow_negative_gas)
@@ -277,7 +277,7 @@ def build_fitset(wl_path, ref_dir, scans, load_wavecal, consecutive_scans=None,
                               target,
                               step_limit=max(abs(sh.get("lb", 1.0)), abs(sh.get("ub", 1.0)), 1.0),
                               allow_negative_gas=allow_negative_gas)
-    step = dict(value=None, reason="연속 스캔 없음")
+    step = dict(value=None, reason="no consecutive scans")
     if consecutive_scans:
         step = PO.recommend_step_limit(consecutive_scans, eng2, fitter2, rp,
                                        px_min, px_max, poly, target,
@@ -387,46 +387,46 @@ def validate_fitset(cfg, target="NO2"):
             try:
                 c_, h_ = map(float, str(pr["sh_val"]).split(","))
                 if abs(h_) <= 0:
-                    problems.append(f"{g}: Center 반폭이 0 이하")
+                    problems.append(f"{g}: Center half-width is <= 0")
             except Exception:
-                problems.append(f"{g}: sh_val(Center) 파싱 불가 '{pr.get('sh_val')}'")
+                problems.append(f"{g}: cannot parse sh_val(Center) '{pr.get('sh_val')}'")
         elif pr.get("sh_mode") == "Limit":
             try:
                 lo, hi = map(float, str(pr["sh_val"]).split(","))
             except Exception:
-                problems.append(f"{g}: sh_val 파싱 불가 '{pr.get('sh_val')}'")
+                problems.append(f"{g}: cannot parse sh_val '{pr.get('sh_val')}'")
                 continue
             if hi <= lo:
-                problems.append(f"{g}: sh_val 상하한 역전 ({lo}, {hi})")
+                problems.append(f"{g}: sh_val bounds inverted ({lo}, {hi})")
             # 첫 스캔(center=0)에서 교집합이 비면 핏이 죽는다
             if not (lo <= step and hi >= -step):
-                problems.append(f"{g}: sh_val [{lo},{hi}]이 시작점 0±{step}과 교집합 없음 → 핏 불가")
+                problems.append(f"{g}: sh_val [{lo},{hi}] does not overlap start point 0±{step} → fit impossible")
         elif pr.get("sh_mode") == "Fix":
             # 2026-09-15 추가: Fix는 검사에서 빠져 있었다. doas_fit이 예전에는
             # 파싱 실패를 0.0으로 조용히 갈아탔으므로(지금은 예외) 여기서도 잡는다.
             try:
                 float(str(pr["sh_val"]))
             except Exception:
-                problems.append(f"{g}: sh_val(Fix) 파싱 불가 '{pr.get('sh_val')}'")
+                problems.append(f"{g}: cannot parse sh_val(Fix) '{pr.get('sh_val')}'")
         if pr.get("sq_mode") == "Limit":
             try:
                 lo, hi = map(float, str(pr["sq_val"]).split(","))
                 if hi <= lo:
-                    problems.append(f"{g}: sq_val 상하한 역전")
+                    problems.append(f"{g}: sq_val bounds inverted")
             except Exception:
-                problems.append(f"{g}: sq_val 파싱 불가")
+                problems.append(f"{g}: cannot parse sq_val")
         elif pr.get("sq_mode") == "Fix":
             try:
                 float(str(pr["sq_val"]))
             except Exception:
-                problems.append(f"{g}: sq_val(Fix) 파싱 불가 '{pr.get('sq_val')}'")
+                problems.append(f"{g}: cannot parse sq_val(Fix) '{pr.get('sq_val')}'")
     try:
         if int(cfg["f_max"]) - int(cfg["f_min"]) < 50:
-            problems.append("핏창이 너무 좁음(<50px)")
+            problems.append("Fit window too narrow (<50px)")
     except Exception:
-        problems.append("f_min/f_max 파싱 불가")
+        problems.append("Cannot parse f_min/f_max")
     if target not in cfg.get("ref_props", {}):
-        problems.append(f"타깃 {target}가 ref_props에 없음")
+        problems.append(f"Target {target} is not in ref_props")
     return problems
 
 

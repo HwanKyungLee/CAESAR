@@ -55,15 +55,8 @@ from gui.r_workers import (_LiveStream, _RTrendWorker, _RTExportWorker,
 
 
 # ── 채널 색상 팔레트 ─────────────────────────────────────────────────────────
-_CH_COLORS = [
-    '#2196F3',  # blue
-    '#FF6F00',  # orange
-    '#D32F2F',  # red
-    '#388E3C',  # green
-    '#7B1FA2',  # purple
-    '#0097A7',  # teal
-    '#795548',  # brown
-]
+from gui.theme import AUGUR, CHANNELS as _THEME_CHANNELS
+_CH_COLORS = list(_THEME_CHANNELS)   # 모든 Augur 그래프 공통 채널 색(gui/theme.py)
 
 
 class RCalibratorDialog(QDialog):
@@ -138,7 +131,7 @@ class RCalibratorDialog(QDialog):
         hdr = QHBoxLayout()
         btn_load_panel = QPushButton("Load channels from left panel")
         btn_load_panel.setStyleSheet(
-            "background-color:#1565C0;color:white;font-weight:bold;")
+            f"background-color:{AUGUR.info};color:white;font-weight:bold;")
         btn_load_panel.setToolTip(
             "Reads the left panel's channel settings (wavecal·R-window·TZ) to fill the rows.\n"
             "Click to sync if you changed or added channels.")
@@ -212,7 +205,7 @@ class RCalibratorDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_run = QPushButton("▶  Start")
         btn_run.setStyleSheet(
-            "background-color:#4CAF50;color:white;font-weight:bold;height:36px;")
+            f"background-color:{AUGUR.ok};color:white;font-weight:bold;height:36px;")
         btn_run.clicked.connect(self._run)
         self._btn_run = btn_run
         btn_row.addWidget(btn_run)
@@ -223,9 +216,9 @@ class RCalibratorDialog(QDialog):
         self._chk_auto_npz = QCheckBox("Auto-update α R(t) npz")
         self._chk_auto_npz.setChecked(True)
         self._chk_auto_npz.setToolTip(
-            "Start 계산 결과를 R_<channel>.npz에 자동 증분 머지합니다(재스캔 없음).\n"
-            "기존 npz가 있으면 새 knot만 시간순 머지+중복제거(덮어쓰지 않음),\n"
-            "없으면 새로 만듭니다. 끄면 Start가 npz를 건드리지 않습니다.")
+            "Incrementally merge Start results into R_<channel>.npz (no rescan).\n"
+            "If the npz exists, only new knots are merged in time order and de-duplicated (no overwrite);\n"
+            "otherwise it is created. When off, Start does not touch the npz.")
         btn_row.addWidget(self._chk_auto_npz)
 
         # 이미 npz에 계산돼 있는 파일은 다시 스캔하지 않음(속도). 트렌드 플롯은
@@ -233,16 +226,16 @@ class RCalibratorDialog(QDialog):
         self._chk_skip_done = QCheckBox("Skip already-computed")
         self._chk_skip_done.setChecked(True)
         self._chk_skip_done.setToolTip(
-            "npz의 processed_files에 이미 있는 파일은 다시 계산하지 않습니다(재실행·연장이 빨라짐).\n"
-            "전체 트렌드는 기존 {channel}_R_trend.dat을 불러와 새 결과와 합쳐 표시합니다.\n"
-            "끄면 선택 범위 전체를 매번 다시 계산합니다.")
+            "Files already in the npz processed_files are not recomputed (faster reruns/extensions).\n"
+            "The full trend loads the existing {channel}_R_trend.dat and merges it with new results.\n"
+            "When off, the whole selected range is recomputed every time.")
         btn_row.addWidget(self._chk_skip_done)
 
         # 평소엔 Start(auto-update 체크) 하나로 npz가 증분 관리된다. Rebuild는
         # 설정 변경/손상 시 npz를 처음부터 다시 만드는 비상용 탈출구(덮어쓰기).
         btn_rt = QPushButton("Rebuild npz (full)")
         btn_rt.setStyleSheet(
-            "background-color:#1976D2;color:white;font-weight:bold;height:36px;")
+            f"background-color:{AUGUR.info};color:white;font-weight:bold;height:36px;")
         btn_rt.setToolTip(
             "Recompute every file from scratch and OVERWRITE R_<channel>.npz.\n"
             "Use only when settings changed (cavity/RL/R-window) or the npz is damaged.\n"
@@ -266,7 +259,7 @@ class RCalibratorDialog(QDialog):
         # npz에 기록하면 α 생성 시 그 시각에서 R(t) PCHIP 보간이 강제 분절된다.
         btn_breaks = QPushButton("R(t) Breaks…")
         btn_breaks.setStyleSheet(
-            "background-color:#5D4037;color:white;font-weight:bold;height:36px;")
+            f"background-color:{AUGUR.special};color:white;font-weight:bold;height:36px;")
         btn_breaks.setToolTip(
             "Manual step-change breaks for R(t) interpolation (step guard).\n"
             "Enter known events (mirror cleaning / realignment) as datetimes;\n"
@@ -283,7 +276,7 @@ class RCalibratorDialog(QDialog):
         self._progress.setRange(0, 0); self._progress.setFixedHeight(16)
         self._progress.setVisible(False)
         self._lbl_elapsed = QLabel("")
-        self._lbl_elapsed.setStyleSheet("color:#555;font-size:11px;min-width:80px;")
+        self._lbl_elapsed.setStyleSheet(f"color:{AUGUR.sub};font-size:11px;min-width:80px;")
         prog_row.addWidget(self._progress, stretch=1); prog_row.addWidget(self._lbl_elapsed)
         main.addLayout(prog_row)
 
@@ -330,13 +323,13 @@ class RCalibratorDialog(QDialog):
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame.setStyleSheet(
-            "QFrame{background:#FAFAFA;border:1px solid #CCC;border-radius:3px;}")
+            f"QFrame{{background:{AUGUR.surface};color:{AUGUR.ink};border:1px solid {AUGUR.rule};border-radius:3px;}}")
         row = QHBoxLayout(frame)
         row.setContentsMargins(6, 2, 6, 2)
         row.setSpacing(5)
 
         lbl_num = QLabel(f"CH{ch_num}")
-        lbl_num.setStyleSheet("font-weight:bold;color:#1565C0;")
+        lbl_num.setStyleSheet(f"font-weight:bold;color:{AUGUR.info};")
         lbl_num.setFixedWidth(34)
         row.addWidget(lbl_num)
 
@@ -361,14 +354,14 @@ class RCalibratorDialog(QDialog):
         cb_raw_ch.setFixedWidth(62)
         cb_raw_ch.setToolTip(
             "Which ROI to read in the raw file (dio_channel)\n"
-            "ch1: spec 0–2048 (Cold / Hot PNs)\n"
-            "ch2: spec 2048–4096 (Hot ANs)\n"
+            "ch1: spec 0–2048 (Cold / Hot primary block 2053 — Yeosu: ANs)\n"
+            "ch2: spec 2048–4096 (Hot secondary block 4101 — Yeosu: PNs)\n"
             "Hot 2-channel: same raw_dir, set ch1·ch2 separately")
         row.addWidget(cb_raw_ch)
 
         lbl_wv = QLabel("wavecal" if wv_ok else "no wavecal")
         lbl_wv.setStyleSheet(
-            "color:#2E7D32;font-weight:bold;" if wv_ok else "color:#C62828;")
+            f"color:{AUGUR.ok};font-weight:bold;" if wv_ok else f"color:{AUGUR.fail};")
         lbl_wv.setFixedWidth(104)
         lbl_wv.setToolTip("Wavecal status loaded from the left panel")
         row.addWidget(lbl_wv)
@@ -388,14 +381,14 @@ class RCalibratorDialog(QDialog):
         row.addWidget(sp_r_end)
 
         lbl_tz = QLabel(tz_str)
-        lbl_tz.setStyleSheet("color:#555;font-size:11px;")
+        lbl_tz.setStyleSheet(f"color:{AUGUR.sub};font-size:11px;")
         lbl_tz.setFixedWidth(36)
         lbl_tz.setToolTip("TZ — set in left panel")
         row.addWidget(lbl_tz)
 
         btn_del = QPushButton("X")
         btn_del.setFixedWidth(22)
-        btn_del.setStyleSheet("color:#AAA;")
+        btn_del.setStyleSheet(f"color:{AUGUR.faint};")
         btn_del.setToolTip("Delete this channel row")
         btn_del.clicked.connect(lambda _f=frame: self._del_ch_row(_f))
         row.addWidget(btn_del)
@@ -516,10 +509,12 @@ class RCalibratorDialog(QDialog):
                 SPEC_START_DEFAULT, SPEC_END_DEFAULT, SPEC_START_ANS, SPEC_END_ANS,
                 COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT_ANS, COL_TEMP_HOT)
         except ImportError:
-            SPEC_START_DEFAULT = 2053; SPEC_END_DEFAULT = 4101
-            SPEC_START_ANS = 4101;     SPEC_END_ANS = 6149
-            COL_PRESS_COLD = 6160;     COL_TEMP_COLD = 6173
-            COL_PRESS_HOT_ANS = 6164;  COL_TEMP_HOT = 6155
+            # 도구 폴더를 못 찾을 때도 숫자 사본을 두지 않는다 — raw 레이아웃 단일 출처에서.
+            from core.raw_parser import ColdHKMap, HotHKMap, SPEC_PRIMARY, SPEC_SECONDARY
+            SPEC_START_DEFAULT, SPEC_END_DEFAULT = SPEC_PRIMARY
+            SPEC_START_ANS, SPEC_END_ANS = SPEC_SECONDARY
+            COL_PRESS_COLD, COL_TEMP_COLD = ColdHKMap["cavity_P"][0], ColdHKMap["cavity_T"][0]
+            COL_PRESS_HOT_ANS, COL_TEMP_HOT = HotHKMap["P_ANs"][0], HotHKMap["cavity_gas_T"][0]
 
         out_dir = self._out_root()
         # R(t) npz는 하루짜리가 아니라 기간 전체의 교정 산출물이라 날짜 폴더가 아니라
@@ -561,7 +556,9 @@ class RCalibratorDialog(QDialog):
             fit_win = (frame.sp_r_start.value(), frame.sp_r_end.value())
             tz_h    = frame._panel_data.get('ts_tz_hours', 0)
 
-            if dio_ch >= 2:  # ch2, ch3 → ANs 영역
+            # 여기서 고르는 건 **스펙트럼 블록**뿐이다. col_p/col_t 는 RTConfig 서명 호환용으로
+            # 넘기지만 R 스캔은 T/P 를 data_io 가 채널 이름으로 고른 센서에서 읽는다(9-27 판정 짝).
+            if dio_ch >= 2:  # ch2, ch3 → secondary 블록(4101) — 2026 여수 핫에선 PNs
                 spec_s, spec_e = SPEC_START_ANS,     SPEC_END_ANS
                 col_p,  col_t  = COL_PRESS_HOT_ANS,  COL_TEMP_HOT
             else:            # ch1 default
@@ -792,11 +789,11 @@ class RCalibratorDialog(QDialog):
             names = "\n".join(f"  • {_os.path.basename(p)}" for p in existing)
             ans = QMessageBox.warning(
                 self, "Rebuild npz — overwrite?",
-                "다음 npz를 처음부터 다시 계산해 **덮어씁니다**(증분 아님):\n"
+                "The following npz will be recomputed from scratch and **overwritten** (not incremental):\n"
                 f"{names}\n\n"
-                "평소 추가는 Start의 'Auto-update α R(t) npz'로 충분합니다.\n"
-                "설정(cavity/RL/R-window)을 바꿨거나 npz가 손상된 경우에만 사용하세요.\n\n"
-                "계속할까요?",
+                "For routine additions, Start's 'Auto-update α R(t) npz' is enough.\n"
+                "Use this only if settings (cavity/RL/R-window) changed or the npz is corrupted.\n\n"
+                "Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel)
             if ans != QMessageBox.StandardButton.Yes:
@@ -907,9 +904,9 @@ class RCalibratorDialog(QDialog):
         msg.setWindowTitle("Verify npz")
         msg.setIcon(QMessageBox.Icon.Warning if any_issue else QMessageBox.Icon.Information)
         msg.setText(
-            ("아래 항목을 확인하세요. 빈 날·미계산 파일은 그 구간 R이 보간으로만 "
-             "채워짐을 뜻합니다.\n해당 날짜/파일을 Start로 계산하면 자동 삽입됩니다.\n\n"
-             if any_issue else "모든 채널 npz가 깨끗합니다 (빈 날·미계산 파일 없음).\n\n")
+            ("Review the items below. Missing days / uncomputed files mean R in those spans is "
+             "interpolated only.\nComputing those dates/files with Start inserts them automatically.\n\n"
+             if any_issue else "All channel npz files are clean (no missing days or uncomputed files).\n\n")
             + "\n".join(summary_lines))
         if detail_lines:
             msg.setDetailedText("\n".join(detail_lines))
@@ -932,9 +929,9 @@ class RCalibratorDialog(QDialog):
             # Legacy format: map fixed 3 channels
             channels = []
             for res, color, name in [
-                (arg0, '#2196F3', 'Cold'),
-                (arg1, '#FF6F00', 'Hot PNs'),
-                (arg2, '#D32F2F', 'Hot ANs'),
+                (arg0, _CH_COLORS[0], 'Cold'),
+                (arg1, _CH_COLORS[1], 'Hot blk2053'),   # 레거시 arg1 = 블록 2053(여수 판정: ANs)
+                (arg2, _CH_COLORS[2], 'Hot blk4101'),   # 레거시 arg2 = 블록 4101(여수 판정: PNs)
             ]:
                 if res:
                     channels.append({"label": name, "results": res, "color": color})
@@ -965,12 +962,11 @@ class RCalibratorDialog(QDialog):
                     f"{r['r_mean'] * 100:.4f}"))
                 file_date  = "-".join(r["filename"].split("-")[:3])
                 base_fname = os.path.splitext(r["filename"])[0]
-                # 새 형식: R_{name}; 레거시 호환 매핑
-                _legacy = {"cold": "R_Cold", "hot_pns": "R_Hot_PNs",
-                           "hot_ans": "R_Hot_ANs"}
-                ch_subdir = _legacy.get(name.lower().replace(" ", "_"), f"R_{name}")
-                dat_path  = os.path.join(
-                    out_dir, ch_subdir, file_date, f"{base_fname}_R.dat")
+                # 하위 폴더 후보: 새 이름(블록 기준) → 2026-10-01 전 이름 — r_trend_monitor 가 정한다.
+                from gui.r_workers import r_subdir_candidates
+                _cands = [os.path.join(out_dir, sd, file_date, f"{base_fname}_R.dat")
+                          for sd in r_subdir_candidates(name)]
+                dat_path = next((c for c in _cands if os.path.exists(c)), _cands[0])
                 if not os.path.exists(dat_path):
                     dat_path = os.path.join(out_dir, file_date, f"{base_fname}_R.dat")
                 self._all_results.append({
@@ -995,9 +991,9 @@ class RCalibratorDialog(QDialog):
         if gap_lines:
             QMessageBox.warning(
                 self, "Missing days in R(t)",
-                "아래 날짜는 npz에 데이터(knot)가 없어 알파에서 R이 보간으로만 "
-                "채워집니다.\n해당 날짜 데이터를 나중에 계산해 Start하면 자동으로 "
-                "중간에 삽입됩니다.\n\n" + "\n\n".join(gap_lines))
+                "The dates below have no data (knots) in the npz, so R in alpha is "
+                "interpolated only.\nComputing those dates later with Start inserts them "
+                "automatically.\n\n" + "\n\n".join(gap_lines))
 
         all_r = [r["r_mean"] * 100 for ch in channels for r in ch["results"]]
         if all_r:

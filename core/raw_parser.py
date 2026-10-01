@@ -170,8 +170,10 @@ CH_PIXELS = 2048            # 2048 pixels per spectral channel
 
 # Absolute spectrum slices (start, end_exclusive)
 SPEC_BLOCK_A = (5,         5 + CH_PIXELS)            # 5..2053  — empty / legacy 3-ch
-SPEC_PRIMARY = (META_COLS, META_COLS + CH_PIXELS)    # 2053..4101 — Cold NO2 / Hot PNs
-SPEC_SECONDARY = (META_COLS + CH_PIXELS,             # 4101..6149 — Hot ANs only
+# 블록이 어느 셀인지는 캠페인 레이아웃이 정한다(아래 register_campaign_layout). 2026 여수 핫은
+# primary = ANs(300 °C), secondary = PNs(180 °C) — docs/채널정체_판정_2026-09-27.md.
+SPEC_PRIMARY = (META_COLS, META_COLS + CH_PIXELS)    # 2053..4101 — Cold NO2 / 여수 Hot ANs
+SPEC_SECONDARY = (META_COLS + CH_PIXELS,             # 4101..6149 — 여수 Hot PNs (hot only)
                   META_COLS + 2 * CH_PIXELS)
 # Legacy aliases for code expecting the MATLAB nomenclature
 SPEC_CH1_NO2 = SPEC_PRIMARY        # MATLAB "ch1"
@@ -432,8 +434,8 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
     if ncols in CAMPAIGN_LAYOUTS and not replace:
         have = CAMPAIGN_LAYOUTS[ncols]
         raise ValueError(
-            f"ncols={ncols} 레이아웃이 이미 있다({have.kind}, source={have.source}). "
-            f"덮어쓰려면 replace=True — 다른 구성이면 ncols가 같은지부터 확인할 것")
+            f"ncols={ncols} layout already exists ({have.kind}, source={have.source}). "
+            f"Pass replace=True to overwrite — if it is a different configuration, first check whether ncols really match")
     # hk_map은 **사본을 만들지 않는다** — 기존 코드가 `layout.hk_map is ColdHKMap`로
     # 동일성을 본다(tools/test_raw_parser.py). 사본을 쥐어주면 조용히 깨진다.
     lay = CampaignLayout(ncols=int(ncols), kind=str(kind), channels=dict(channels),
@@ -441,8 +443,8 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
                          date_range=(tuple(date_range) if date_range else None))
     for name, role in lay.channels.items():
         if isinstance(role, str) and role not in ROLE_BLOCKS:
-            raise ValueError(f"채널 '{name}'의 역할 '{role}'을 모른다. "
-                             f"{list(ROLE_BLOCKS)} 중 하나이거나 (start, end)여야 한다")
+            raise ValueError(f"Channel '{name}' has unknown role '{role}'. "
+                             f"Must be one of {list(ROLE_BLOCKS)} or (start, end)")
     CAMPAIGN_LAYOUTS[lay.ncols] = lay
     return lay
 
@@ -465,8 +467,8 @@ def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayo
     prof = load_profile(path)
     ncols = prof.match.n_columns if prof.match else None
     if not ncols:
-        raise ValueError(f"{os.path.basename(path)}: match.n_columns가 없어 "
-                         f"어느 raw 구성인지 알 수 없다")
+        raise ValueError(f"{os.path.basename(path)}: no match.n_columns, so "
+                         f"the raw configuration cannot be determined")
 
     warn = []
     hdr = prof.header
@@ -474,7 +476,7 @@ def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayo
     # **열 번호**가 같아야 한다 — 다르면 시각이 통째로 틀어진다.
     tb = getattr(hdr, "time_bytepack", None)
     if tb is not None and {tb.hi_col, tb.lo_col} != {COL_TIME_LO, COL_TIME_HI}:
-        warn.append(f"time_bytepack 열 {tb.hi_col}/{tb.lo_col} != core "
+        warn.append(f"time_bytepack columns {tb.hi_col}/{tb.lo_col} != core "
                     f"{COL_TIME_LO}/{COL_TIME_HI}")
     if getattr(hdr, "exposure_col", COL_EXPOSURE) != COL_EXPOSURE:
         warn.append(f"exposure_col {hdr.exposure_col} != core {COL_EXPOSURE}")
@@ -484,7 +486,7 @@ def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayo
     channels = {}
     for ch in prof.signal_channels():
         if ch.columns is None:
-            warn.append(f"채널 '{ch.id}'에 columns가 없다(자동탐지 전용) — 건너뜀")
+            warn.append(f"channel '{ch.id}' has no columns (autodetect only) — skipped")
             continue
         block = (int(ch.columns[0]), int(ch.columns[1]) + 1)   # 프로파일은 포함 끝
         role = next((r for r, b in ROLE_BLOCKS.items() if b == block), block)
@@ -497,15 +499,15 @@ def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayo
         if f.offset:
             # raw_parser의 HK 튜플은 (열, scale, unit, kind) — offset 자리가 없다.
             # 조용히 버리면 물리값이 틀리므로 아예 안 싣는다.
-            warn.append(f"{f.key}: offset={f.offset} 는 raw_parser HK 표가 표현 못 함 — 제외")
+            warn.append(f"{f.key}: offset={f.offset} cannot be expressed in the raw_parser HK table — excluded")
             continue
         if f.scale is not None and scale and abs(float(f.scale) - scale) / scale > 1e-3:
-            warn.append(f"{f.key}: 프로파일 scale {f.scale} vs core {scale:.8g} "
-                        f"({unit}) — core 값을 쓴다")
+            warn.append(f"{f.key}: profile scale {f.scale} vs core {scale:.8g} "
+                        f"({unit}) — using the core value")
         hk_map[str(f.key)] = (int(prof.hk.start_col) + int(f.rel), scale, unit, knd)
 
     for w in warn:
-        print(f"[raw_parser] 캠페인 프로파일 주의 ({os.path.basename(path)}): {w}")
+        print(f"[raw_parser] Campaign profile note ({os.path.basename(path)}): {w}")
 
     return register_campaign_layout(
         ncols, kind or str(prof.profile_id or "campaign"), channels, hk_map,
@@ -540,21 +542,25 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
         if os.path.basename(path).startswith("_"):
             continue                             # _schema.json 등 메타 파일
         try:
-            from core.profile import load_profile
-            prof = load_profile(path)
-            ncols = prof.match.n_columns if prof.match else None
+            # 열 수만 먼저 본다 — 이미 아는 구성이면 스키마 검증 없이 넘어간다. 검증용 jsonschema
+            # 임포트가 1.9 s 라(rfc3987_syntax 문법 빌드 1.5 s) 등록할 게 0개인 평소 부팅에서도
+            # Augur 시작이 그만큼 늦었다(2026-10-01 실측). 처음 보는 열 수만 아래에서 전체 검증·등록.
+            import json as _json
+            with open(path, encoding="utf-8") as _fh:
+                _peek = _json.load(_fh)
+            ncols = (_peek.get("match") or {}).get("n_columns") if isinstance(_peek, dict) else None
             if not ncols or ncols in CAMPAIGN_LAYOUTS:
                 continue                         # 이미 아는 구성 — 덮지 않는다
             out.append(load_campaign_layout(path))
             if verbose:
-                print(f"[raw_parser] 캠페인 레이아웃 등록: {os.path.basename(path)} "
-                      f"(ncols={ncols}, 채널={list(out[-1].channels)})")
+                print(f"[raw_parser] Registered campaign layout: {os.path.basename(path)} "
+                      f"(ncols={ncols}, channels={list(out[-1].channels)})")
         except Exception as e:                   # noqa: BLE001
             # verbose와 무관하게 알린다. 캠페인 프로파일이 조용히 등록 안 되면
             # 그 ncols는 구조적 폴백으로 떨어지고, HK 열 지도가 없는 채로 파싱된다
             # (= T/P가 기본값으로 대체될 수 있다). 레이아웃은 이 파일이 단일
             # 출처이므로, 등록 실패는 stderr로라도 반드시 보여야 한다.
-            print(f"[raw_parser] ⚠ 캠페인 프로파일 등록 실패 — 건너뜀 "
+            print(f"[raw_parser] ⚠ Campaign profile registration failed — skipped "
                   f"({os.path.basename(path)}): {type(e).__name__}: {e}",
                   file=sys.stderr)
     return out
@@ -706,8 +712,8 @@ class RawParser:
             # 같은 열 수지만 캠페인 기간 밖 — 채널 이름은 주장하지 않는다(블록·HK는 유지).
             blocks = spec_blocks_for_ncols(ncols)
             blocks = {k: v for k, v in blocks.items() if v in lay.spec_blocks().values()}
-            print(f"[raw_parser] {os.path.basename(path)}: {lay.campaign} 기간"
-                  f"{lay.date_range} 밖 → 채널 이름 대신 구조 이름 {list(blocks)} 사용",
+            print(f"[raw_parser] {os.path.basename(path)}: {lay.campaign}: outside date range "
+                  f"{lay.date_range} → using structural names {list(blocks)} instead of channel names",
                   file=sys.stderr)
             return FileLayout(
                 path=path, ncols=ncols, kind=f"{lay.kind}(outside {lay.campaign})",
@@ -809,8 +815,8 @@ class RawParser:
         missing = [ch for ch in channels if ch not in self.layout.spec_blocks]
         if missing:
             # 조용히 빼면 '채널 하나가 비었다'를 아무도 모른다(캠페인 기간 밖 파일 등).
-            print(f"[raw_parser] {os.path.basename(self.path)}: 요청 채널 {missing} 없음 "
-                  f"(가능: {list(self.layout.spec_blocks)})", file=sys.stderr)
+            print(f"[raw_parser] {os.path.basename(self.path)}: requested channels {missing} not present "
+                  f"(available: {list(self.layout.spec_blocks)})", file=sys.stderr)
         for i, line in enumerate(self._iter_data_lines()):
             toks = line.split("\t") if "\t" in line else line.split()
             if len(toks) < self.layout.ncols:
@@ -898,8 +904,37 @@ class RawParser:
             return float("nan")
 
 
+def block_channel_name(path: str, block_start: int):
+    """이 raw 파일에서 `block_start` 열로 시작하는 스펙트럼 블록의 **캠페인 채널 이름**(예 'ANs').
+
+    이름은 코드가 아니라 등록된 캠페인 레이아웃(`register_campaign_layout`, 날짜 범위 포함)이
+    정한다 — 어느 블록이 어느 셀인지는 캠페인·배치마다 바뀌기 때문이다(2026-09-27 실험실 raw 는
+    같은 6181열인데 block 2053 = 콜드). 레이아웃이 모르는 구성이거나 날짜 범위 밖이면 None.
+    파일을 못 읽어도 None(라벨용이라 실패가 결과를 바꾸지 않는다)."""
+    try:
+        fl = RawParser._detect_layout(path)
+    except OSError:
+        return None
+    lay = CAMPAIGN_LAYOUTS.get(fl.ncols)
+    if lay is None:
+        return None
+    for name, (start, _end) in fl.spec_blocks.items():
+        if start == int(block_start) and name in lay.channels:
+            return name
+    return None
+
+
+def block_label(path: str, block_start: int, prefix: str = "") -> str:
+    """표시용 라벨 — 레이아웃이 아는 셀이면 'ANs (block 2053)', 모르면 'block 2053'.
+    파일·폴더 **이름**에는 쓰지 말 것: 이름은 블록 번호 기준(캠페인이 바뀌어도 틀리지 않게)."""
+    name = block_channel_name(path, block_start) if path else None
+    head = f"{prefix} " if prefix else ""
+    return f"{head}{name} (block {int(block_start)})" if name else f"{head}block {int(block_start)}"
+
+
 __all__ = [
     "RawParser",
+    "block_channel_name", "block_label",
     "ParsedRow",
     "FileLayout",
     "HotHKMap",

@@ -8,7 +8,7 @@
 import sys, os, json
 import numpy as np
 
-from core.physics import air_number_density   # ppb 환산 단일 출처
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -85,7 +85,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar):
     ppb = {}
     for gi, nm in enumerate(eng.gas_list):
         sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
-        ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
+        ppb[nm] = coeff_to_ppb(gas_coeffs[gi], mu, sc, n_air)
     return wl, a, baseline, etal, total_abs, resid, rms, ppb, opt_shifts[0], opt_squeezes[0]
 
 
@@ -175,7 +175,7 @@ def main():
     ppb = {}
     for gi, nm in enumerate(eng.gas_list):
         sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
-        ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
+        ppb[nm] = coeff_to_ppb(gas_coeffs[gi], mu, sc, n_air)
     gtxt = "  ".join(f"{g}={ppb[g]:.2f}ppb" for g in ppb)
     print(f"FIT: {gtxt}  shift={opt_shifts[0]:+.3f}px  sq={opt_squeezes[0]:.4f}  RMS={rms:.3e}")
 

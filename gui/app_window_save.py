@@ -15,6 +15,7 @@ from core import run_meta
 from core.data_io import DataIO
 from core.result_io import MISFIT_CHI2 as _MISFIT_CHI2
 from core.engine import UniversalEngine
+from gui.theme import AUGUR
 from core.paths import (DEFAULT_CAMPAIGN, DEFAULT_OUTPUT_DIR, campaign_dir as _campaign_dir, out_path as _out_path,
                         resolve_ref_path)
 
@@ -191,7 +192,7 @@ class SaveExportMixin:
                     f"# Data Period: {span_str}",
                     (f"# Fit Range: Pixel {f_min_px}-{f_max_px} ({wl_str})"
                      if _range_ok else
-                     "# Fit Range: UNREADABLE — UI 핏범위 입력을 읽지 못했다 (0-0은 실제 값이 아님)"),
+                     "# Fit Range: UNREADABLE — could not read the fit-range input in the UI (0-0 is not a real value)"),
                     f"# Polynomial Degree: {poly_deg}",
                     f"# Tikhonov Lambda: {lam_val:g}",
                     f"# Robust Fitting (IRLS): {robust_status}",
@@ -343,7 +344,7 @@ class SaveExportMixin:
         """
         def _fail(msg):
             self.status.setText(f"Double-click: {msg}")
-            self.status.setStyleSheet("color: red; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
 
         # Bring the Analysis Monitor into view regardless of which main tab the
         # user is currently looking at — otherwise the replay can render correctly
@@ -462,7 +463,7 @@ class SaveExportMixin:
                       "— plot was skipped by the channel filter.")
             else:
                 self.status.setText(f"Replay: {fname} (CH{ch})")
-                self.status.setStyleSheet("color: green;")
+                self.status.setStyleSheet(f"color: {AUGUR.ok};")
         except Exception as e:
             print(f"Double-click viewer failed to load: {e}")
             _fail(f"failed to load '{fname}': {e}")
@@ -536,34 +537,34 @@ class SaveExportMixin:
         if wlp and os.path.exists(wlp):
             wave = self._load_wavecal_array(wlp)
             if wave is None:
-                _diffs.append(f"wavecal 읽기 실패({os.path.basename(wlp)})")
+                _diffs.append(f"wavecal read failed ({os.path.basename(wlp)})")
         elif wlp:
-            _diffs.append(f"wavecal 파일 없음({os.path.basename(wlp)})")
+            _diffs.append(f"wavecal file missing ({os.path.basename(wlp)})")
         if wave is None:   # 폴백: 현재 로드된 마스터 wavecal
             wl = getattr(self, 'wavelengths', None)
             wave = np.asarray(wl, dtype=float).flatten() if wl is not None else None
             if wave is not None and wlp:
-                _diffs.append("마스터 wavecal로 대체(파장축이 원본과 다를 수 있음)")
+                _diffs.append("fell back to master wavecal (wavelength axis may differ from original)")
         if wave is not None:
             eng.set_wavelength_axis(wave)
         for ref in cfg.get('refs', []):
             ref_path = resolve_ref_path(ref.get('path', ''))
             if not os.path.exists(ref_path):
-                _diffs.append(f"{ref.get('name')}: 레퍼런스 파일 없음")
+                _diffs.append(f"{ref.get('name')}: reference file missing")
                 continue
             try:
                 eng.add_reference(name=ref['name'], filepath=ref_path,
                                   wave_nm=wave, multiplier=10.0 ** ref.get('mult', 0))
             except Exception as e:
                 print(f"[ch engine] ref failed {ref.get('name')}: {e}")
-                _diffs.append(f"{ref.get('name')}: 로드 실패({type(e).__name__})")
+                _diffs.append(f"{ref.get('name')}: load failed ({type(e).__name__})")
         try:
             eng.apply_ils_convolution(0.0)
         except Exception as e:
-            _diffs.append(f"ILS 적용 실패({type(e).__name__}) — 단면이 원본과 다름")
+            _diffs.append(f"ILS apply failed ({type(e).__name__}) — cross-sections differ from original")
         if _diffs:
-            _msg = ("⚠ 리플레이 엔진이 원본과 다르다 — " + " · ".join(_diffs)
-                    + ". 여기 보이는 핏은 저장된 결과와 같지 않을 수 있다.")
+            _msg = ("⚠ replay engine differs from the original — " + " · ".join(_diffs)
+                    + ". The fit shown here may not match the saved results.")
             print(f"[ch engine] {_msg}")
             _status = getattr(self, 'status', None)
             if _status is not None:

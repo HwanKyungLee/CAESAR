@@ -97,36 +97,36 @@ def build(conc_ppb, *, fit_err_ppb=None, total_err_ppb=None, T_C=None, P_mbar=No
     terms = []
 
     if fit_err_ppb is not None:
-        terms.append(Term("핏 공분산 (perr)", RANDOM, abs(fit_err_ppb) / c,
-                          "결과 파일 <gas>_Error",
-                          "VarPro 선형해의 공분산 대각 — 이미 행마다 있음"))
+        terms.append(Term("Fit covariance (perr)", RANDOM, abs(fit_err_ppb) / c,
+                          "result file <gas>_Error",
+                          "Diagonal of the VarPro linear-solution covariance — already per row"))
 
     # T/P 전파는 TotalError에 이미 합성돼 있으므로 **빼서** 분리한다(이중계산 금지)
     if fit_err_ppb is not None and total_err_ppb is not None:
         d2 = float(total_err_ppb) ** 2 - float(fit_err_ppb) ** 2
         tp = (d2 ** 0.5 if d2 > 0 else 0.0)
-        terms.append(Term("T·P 측정 전파", RANDOM, tp / c,
+        terms.append(Term("T·P propagation", RANDOM, tp / c,
                           "<gas>_TotalError ⊖ <gas>_Error",
-                          "±1 °C·±1 mbar 가정(worker.py) — 실제 센서 사양으로 교체할 것"))
+                          "assumes ±1 °C·±1 mbar (worker.py) — replace with actual sensor specs"))
 
     if T_C is not None and P_mbar is not None:
-        terms.append(Term("이상기체 가정 (Z 미보정)", SYSTEMATIC,
+        terms.append(Term("Ideal gas (Z uncorrected)", SYSTEMATIC,
                           ideal_gas_bias(T_C, P_mbar),
                           "core.error_budget.ideal_gas_bias",
-                          "농도가 **항상 그만큼 크게** 나옴. 보정은 ppb 경로에만(σ는 관례상 이상기체)"))
+                          "Concentration is **always high by this much**. Correct only on the ppb path (σ is ideal-gas by convention)"))
 
-    terms.append(Term("단면 문헌 불확도", SYSTEMATIC, xs_rel,
-                      "원 논문(Vandaele 2002 / Volkamer 2005 / Thalman 2013)",
-                      "보통 3~5%로 가장 큰 항일 가능성이 높다 — **채워 넣을 것**"))
-    terms.append(Term("σ(R) → 경로길이", SYSTEMATIC, r_rel,
-                      "R_<ch>.npz knot 산포",
-                      "α ∝ (1−R)/d 이므로 R 불확도가 그대로 농도 스케일로 간다"))
-    terms.append(Term("캐비티 길이 d · R_L", SYSTEMATIC, cavity_rel,
-                      "실측(ASIA-AQ) — 불확도는 미기록",
-                      "d=51.8 cm, R_L 채널별 0.9330/0.9950/0.9968"))
-    terms.append(Term("잔차 구조 (고정패턴)", SYSTEMATIC, residual_rel,
+    terms.append(Term("Cross-section (lit.)", SYSTEMATIC, xs_rel,
+                      "original papers (Vandaele 2002 / Volkamer 2005 / Thalman 2013)",
+                      "typically 3–5%, likely the largest term — **fill this in**"))
+    terms.append(Term("σ(R) → path length", SYSTEMATIC, r_rel,
+                      "R_<ch>.npz knot scatter",
+                      "α ∝ (1−R)/d, so R uncertainty maps directly onto concentration scale"))
+    terms.append(Term("Cavity length d · R_L", SYSTEMATIC, cavity_rel,
+                      "measured (ASIA-AQ) — uncertainty not recorded",
+                      "d=51.8 cm, R_L per channel 0.9330/0.9950/0.9968"))
+    terms.append(Term("Residual fixed pattern", SYSTEMATIC, residual_rel,
                       "docs/Augur_소개_2026-07.md §10-1",
-                      "콜드는 노이즈가 아니라 이게 불확도를 지배한다고 기록돼 있음"))
+                      "documented as dominating the cold-channel uncertainty, not noise"))
 
     terms.extend(extra)
     return terms
@@ -150,28 +150,28 @@ def format_budget(terms, conc_ppb, gas="", header=True) -> str:
     c = abs(float(conc_ppb))
     out = []
     if header:
-        out.append(f"오차 예산 — {gas or 'gas'} = {conc_ppb:.4g} ppb")
-        out.append(f"{'항목':<26}{'종류':<6}{'상대':>10}{'절대(ppb)':>13}  근거")
+        out.append(f"Error budget — {gas or 'gas'} = {conc_ppb:.4g} ppb")
+        out.append(f"{'Term':<26}{'Kind':<6}{'Rel.':>10}{'Abs.(ppb)':>13}  Source")
         out.append("-" * 92)
     q = sorted([t for t in terms if t.quantified], key=lambda t: -abs(t.rel))
     for t in q:
-        out.append(f"{t.name:<26}{'무작위' if t.kind == RANDOM else '계통':<6}"
+        out.append(f"{t.name:<26}{'random' if t.kind == RANDOM else 'syst.':<6}"
                    f"{t.rel * 100:>9.4f}%{t.rel * c:>13.5g}  {t.source}")
     for t in terms:
         if not t.quantified:
-            out.append(f"{t.name:<26}{'계통' if t.kind == SYSTEMATIC else '무작위':<6}"
-                       f"{'미정량':>10}{'—':>13}  {t.source}")
+            out.append(f"{t.name:<26}{'syst.' if t.kind == SYSTEMATIC else 'random':<6}"
+                       f"{'unquant.':>10}{'—':>13}  {t.source}")
     tt = totals(terms)
     out.append("-" * 92)
     if tt["random_rel"] is not None:
-        out.append(f"{'무작위 합(√Σσ²)':<26}{'':<6}{tt['random_rel'] * 100:>9.4f}%"
+        out.append(f"{'Random sum (√Σσ²)':<26}{'':<6}{tt['random_rel'] * 100:>9.4f}%"
                    f"{tt['random_rel'] * c:>13.5g}")
     if tt["systematic_rel"] is not None:
-        out.append(f"{'계통 합(선형)':<26}{'':<6}{tt['systematic_rel'] * 100:>9.4f}%"
-                   f"{tt['systematic_rel'] * c:>13.5g}  ← 평균해도 안 줄어듦")
+        out.append(f"{'Systematic sum (linear)':<26}{'':<6}{tt['systematic_rel'] * 100:>9.4f}%"
+                   f"{tt['systematic_rel'] * c:>13.5g}  ← does not average down")
     if tt["unquantified"]:
-        out.append(f"⚠ 미정량 {len(tt['unquantified'])}항: {', '.join(tt['unquantified'])}")
-        out.append("  → 이 표는 **하한**이다. 위 항이 채워지기 전에는 총 불확도를 말할 수 없다.")
+        out.append(f"⚠ {len(tt['unquantified'])} unquantified term(s): {', '.join(tt['unquantified'])}")
+        out.append("  → This table is a **lower bound**. No total uncertainty can be stated until the terms above are filled in.")
     return "\n".join(out)
 
 
@@ -193,10 +193,10 @@ def from_result_file(path, gas=None, *, row=None, **known):
     idx = {c: i for i, c in enumerate(cols)}
     gases = [c for c in cols if (c + "_Error") in idx]
     if not gases:
-        raise ValueError("가스 컬럼(<gas>_Error)이 없다 — 핏 결과 파일이 맞나?")
+        raise ValueError("No gas column (<gas>_Error) — is this a fit result file?")
     gas = gas or gases[0]
     if gas not in gases:
-        raise ValueError(f"'{gas}' 없음. 있는 가스: {gases}")
+        raise ValueError(f"'{gas}' not found. Available gases: {gases}")
 
     def _f(r, name):
         i = idx.get(name)
@@ -211,7 +211,7 @@ def from_result_file(path, gas=None, *, row=None, **known):
     parsed = [(t, ln.split("\t")) for t, ln in rows]
     vals = [(t, r) for t, r in parsed if _f(r, gas) is not None]
     if not vals:
-        raise ValueError(f"{gas}에 유효한 값이 없다(전부 QC/NaN?)")
+        raise ValueError(f"No valid values for {gas} (all QC/NaN?)")
     if row is None:                          # 대표행 = 농도 중앙값에 가장 가까운 행
         import statistics
         med = statistics.median(_f(r, gas) for _, r in vals)
@@ -242,7 +242,7 @@ def _demo():
 
     # T/P 항은 TotalError에서 **빼서** 얻는다 — 핏 오차를 두 번 세면 안 된다
     tp = next(t for t in terms if "T·P" in t.name)
-    assert tp.rel * 0.64 < 0.08, "T/P 항이 핏 오차만큼 커졌다 = 이중계산"
+    assert tp.rel * 0.64 < 0.08, "T/P term as large as the fit error = double counting"
     # 무작위 합은 제곱합이라 최대항보다 크되 선형합보다 작다
     rnd = [t.rel for t in terms if t.kind == RANDOM]
     assert max(rnd) <= tt["random_rel"] <= sum(rnd) + 1e-12
@@ -251,7 +251,7 @@ def _demo():
     # ★ 미정량 항이 반드시 남아야 한다 — 숨으면 "다 안다"는 거짓말이 된다
     assert len(tt["unquantified"]) == 4, tt["unquantified"]
     txt = format_budget(terms, 0.64, "NO2")
-    assert "미정량" in txt and "하한" in txt
+    assert "unquantified" in txt and "lower bound" in txt
 
     # 실제 결과 파일 경로도 돈다(컬럼 이름 계약이 깨지면 여기서 걸린다)
     import os, tempfile
@@ -265,7 +265,7 @@ def _demo():
                      % (i, c))
     g, c, tf = from_result_file(fp, "NO2")
     assert g == "NO2" and abs(c - 0.64) < 1e-9, (g, c)      # 중앙값 행을 골랐나
-    assert any("이상기체" in t.name for t in tf)
+    assert any("Ideal gas" in t.name for t in tf)
     assert len(totals(tf)["unquantified"]) == 4
     import shutil; shutil.rmtree(d, ignore_errors=True)
 
@@ -277,7 +277,7 @@ def _demo():
 
     print(txt)
     print()
-    print("error_budget self-check OK (Z@0C=%.6f, 미정량 %d항)"
+    print("error_budget self-check OK (Z@0C=%.6f, %d unquantified terms)"
           % (z0, len(tt["unquantified"])))
 
 

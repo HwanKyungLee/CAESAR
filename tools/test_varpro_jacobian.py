@@ -18,6 +18,11 @@
    그 조건에선 투영이 미분 불가능이라 해석해가 성립하지 않는다.
 5. 창 밖 기체(`gas_active=False`)의 계수는 정확히 0 (`keep_mask` 경로).
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

@@ -35,6 +35,11 @@
 2026-06-14 PNs 알파(444.1~470.6nm, 551px, poly3) 20스캔 잔차 RMS 중앙값
 6.16e-9 cm⁻¹ (min 2.73e-9 / max 6.63e-9). 이 값을 NOISE_MEASURED로 쓴다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

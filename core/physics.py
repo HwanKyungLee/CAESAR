@@ -68,6 +68,20 @@ def air_number_density(T_C: float, P_mbar: float) -> float:
     return N_LOSCHMIDT * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
 
 
+def coeff_to_ppb(coeff, multiplier, scale_div, n_air):
+    """핏 계수(정규화된 레퍼런스 열의 계수) → ppb. **계수→ppb 환산의 단일 출처**(2026-10-01).
+
+        ppb = (coeff × multiplier / scale_div) / N_air × 1e9
+
+    multiplier·scale_div 는 엔진의 `multipliers[gas]`·`scaling_factors[gas]` — 정규화로 열에서
+    빠진 물리 단위를 되돌린다. 같은 식이 param_optimizer·fit_optimizer·window_designer·
+    Test Fit·도구 2개에 8번 복사돼 있었다. **연산 순서를 그 사본들과 똑같이 두어 결과가
+    비트 단위로 같다**(곱 → 나눔 → 나눔 → 곱, 왼쪽부터) — 순서를 바꾸면 끝자리가 달라질 수 있다.
+    배열도 받는다(numpy 브로드캐스트). gui/worker 는 계수를 미리 실농도로 바꿔 두므로
+    `(real / n_air) * 1e9` 를 쓴다(다른 단계라 이 함수 대상이 아니다)."""
+    return (coeff * multiplier / scale_div) / n_air * 1e9
+
+
 class RayleighPhysics:
     """
     Rayleigh scattering extinction α(λ) [cm⁻¹] — Sellmeier 굴절률 기반.
@@ -216,7 +230,7 @@ def _demo():
     """자기검증: ppb 환산과 Rayleigh가 **같은 상수**를 쓰는지 + 위임이 끊기지 않았는지."""
     # 유도값이 CODATA 2018 Loschmidt(2.686 780 111e19 cm^-3)와 맞나 — 매직넘버 방지
     assert abs(N_LOSCHMIDT - 2.686780111e19) / 2.686780111e19 < 1e-9, N_LOSCHMIDT
-    assert abs(air_number_density(0.0, 1013.25) - N_LOSCHMIDT) < 1e6, "STP에서 N0가 아님"
+    assert abs(air_number_density(0.0, 1013.25) - N_LOSCHMIDT) < 1e6, "not N0 at STP"
     n1 = air_number_density(25.0, 1013.25)
     assert abs(n1 - N_LOSCHMIDT * (273.15 / 298.15)) / n1 < 1e-12
     # 온도·압력 의존이 물리대로인지(밀도 ∝ P, ∝ 1/T)
@@ -234,7 +248,7 @@ def _demo():
     from core import physics as _cp
     from core import fit_optimizer, fit_physics, param_optimizer, window_designer
     for m in (fit_optimizer, fit_physics, param_optimizer, window_designer):
-        assert m.air_number_density is _cp.air_number_density, m.__name__ + " 가 사본을 쓴다"
+        assert m.air_number_density is _cp.air_number_density, m.__name__ + " uses a copy"
 
     print("physics self-check OK: N(25C,1013.25) = %.6e molec/cm3" % n1)
 

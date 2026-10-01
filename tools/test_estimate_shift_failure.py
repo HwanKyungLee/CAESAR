@@ -3,6 +3,11 @@
 설계행렬은 가짜로 바꿔 끼운다: 가우시안 흡수대 하나를 shift 만큼 옮긴 열 + 상수.
 데이터 없이 돈다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 import warnings
@@ -41,7 +46,7 @@ def main():
         print("PASS 정상 정렬: 경고 없음")
 
         sh, ws = _run(np.full((3, N), np.nan))
-        assert sh == 0.0 and any("정렬 실패" in m for m in ws), ws
+        assert sh == 0.0 and any("alignment failed" in m for m in ws), ws
         print("PASS 전 스캔 NaN: shift 0 + 실패 경고")
 
         mixed = np.vstack([good, np.full((1, N), np.nan)])
@@ -50,7 +55,7 @@ def main():
         print("PASS NaN 스캔 하나 섞임: 나머지로 정렬")
 
         sh, ws = _run(good, lo=-2.0, hi=2.0)
-        assert sh == 2.0 and any("경계" in m for m in ws), (sh, ws)
+        assert sh == 2.0 and any("boundary" in m for m in ws), (sh, ws)
         print("PASS 경계에 붙음: 경고")
     finally:
         WD.design_matrix = orig

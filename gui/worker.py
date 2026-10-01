@@ -1,5 +1,6 @@
 import os
 import time
+from types import SimpleNamespace
 import numpy as np
 
 # DataIO gatekeeper call
@@ -538,8 +539,8 @@ class AnalysisWorker(QThread):
                 # print만 하면 사용자는 "결과 0건으로 정상 종료"로 본다.
                 # 재실행 여부를 사람이 정해야 하므로 반드시 화면에 남긴다.
                 self.status_msg.emit(
-                    f"ERROR: 병렬 핏 실패 — {type(e).__name__}: {e} "
-                    f"(결과 없음. 자세한 내용은 logs/session_*.log)")
+                    f"ERROR: parallel fit failed — {type(e).__name__}: {e} "
+                    f"(no results; see logs/session_*.log for details)")
                 self.finished.emit()
             return
         try: current_params = [ float(np.atleast_1d(p)[ 0 ]) for p in self.params ]
@@ -676,8 +677,8 @@ class AnalysisWorker(QThread):
                     if _n_sat:
                         # R 은 이후 모든 ambient 스캔에 곱해진다 — 조용히 넘기면 안 된다.
                         self.status_msg.emit(
-                            f"⚠ 포화 {_n_sat}px: ZA(flag {state_flag}) "
-                            f"{os.path.basename(file_path)}[{row_idx}] — R/I0 가 틀어질 수 있다")
+                            f"⚠ saturated {_n_sat}px: ZA(flag {state_flag}) "
+                            f"{os.path.basename(file_path)}[{row_idx}] — R/I0 may be biased")
                     self.result_ready.emit(result, i)
                     continue
 
@@ -697,8 +698,8 @@ class AnalysisWorker(QThread):
                     if _n_sat:
                         # 실측 유병률이 가장 높은 자리다(핫 flag510 21.4 %).
                         self.status_msg.emit(
-                            f"⚠ 포화 {_n_sat}px: He(flag {state_flag}) "
-                            f"{os.path.basename(file_path)}[{row_idx}] — R 이 틀어질 수 있다")
+                            f"⚠ saturated {_n_sat}px: He(flag {state_flag}) "
+                            f"{os.path.basename(file_path)}[{row_idx}] — R may be biased")
                     self.result_ready.emit(result, i)
                     continue
 
@@ -847,208 +848,33 @@ class AnalysisWorker(QThread):
                             optical_depth = np.log(I_meas) 
                             fit_sign = -1.0
 
-                poly_start_idx = 2 + len(self.engine.gas_list)
-                poly_order = len(current_params) - poly_start_idx - 1
-                absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw)/2.0
-
-                # 2. Etalon detection
-                if getattr(self, 'use_etalon', True) and getattr(self, 'etalon_freq', None) is None:
-                    self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
-
-                # 3. Fitting loop
-                max_retries = 2
-                for attempt in range(max_retries):
-                    current_lam = self.tikhonov_lambda
-                    current_robust = self.use_robust_fitting
-
-                    if self.needs_pre_calibration:
-                        best_sh, best_sq = self.auto_pre_calibrate(pixel_idx, optical_depth, poly_order)
-                        current_params[ 0 ] = best_sh; current_params[ 1 ] = best_sq
-                        self.needs_pre_calibration = False
-
-                    if len(current_params) > poly_start_idx:
-                        current_params[poly_start_idx] = np.mean(optical_depth) 
-                        current_params[poly_start_idx+1 : poly_start_idx+1+poly_order] = [0.0] * poly_order
-                    
-                    # 4. Parameter setup
-                    active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = self._setup_fit_parameters(initial_shift_center, current_params)
-                    fixed_e_f = self.etalon_freq if getattr(self, 'use_etalon', True) else None
-                    # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
-                    #  두 선형열로 처리. 위상 append 제거.)
-                    
-                    try:
-                        weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(I_meas))
-                        # X1 마스킹: I ≤ 0 이었던 픽셀은 가중 0 → 설계행렬·잔차에서 완전히 빠진다.
-                        _mask = masked_px
-                        _n_masked = 0
-                        if _mask is not None and np.any(_mask):
-                            weights = weights * (~_mask)
-                            _n_masked = int(np.count_nonzero(_mask))
-                        result['MaskedPixels'] = _n_masked
-                        _w_mean = float(np.mean(weights))
-                        if _w_mean <= 0:
-                            raise ValueError(f"fit window fully masked ({_n_masked}px I<=0)")
-                        W = weights / _w_mean            # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
-                        if _n_masked > 0.05 * len(weights):
-                            # 핏창의 5%를 넘으면 그 스캔의 농도는 남은 픽셀만으로 나온 것이다.
-                            self.status_msg.emit(
-                                f"⚠ I≤0 마스킹 {_n_masked}/{len(weights)}px "
-                                f"({100.0 * _n_masked / len(weights):.1f}%) — "
-                                f"{os.path.basename(file_path)}[{row_idx}]")
-
-                        # 5. Core engine call
-                        opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = self._execute_varpro_fit(
-                            pixel_idx, optical_depth, W, active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub,
-                            poly_order, fixed_e_f, absolute_center, fit_sign,
-                            override_lam=current_lam, override_robust=current_robust
-                        )
-
-                        # 6. Combine and store results (keep 5 unpacked values)
-                        _, abs_val_scaled, poly_val_scaled, _, _ = self.engine.get_model_components(
-                            pixel_idx, opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled
-                        )
-                        
-                        abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
-                        etalon_part_orig = ((etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
-                                            if fixed_e_f is not None else 0.0)   # etalon OFF: 사인 열 없음
-
-                        y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
-                        # residual must be in the same units as the fitted signal (optical_depth)
-                        if is_linear_mode:
-                            residual = intensity_raw - y_fit_model_orig
-                        else:
-                            residual = optical_depth - y_fit_model_orig
-                        rms = np.sqrt(np.mean(residual**2))
-                        
-                        result['RMS'] = rms
-                        result['Shift'] = opt_shifts[ 0 ] if len(opt_shifts) > 0 else 0
-                        result['Squeeze'] = opt_squeezes[ 0 ] if len(opt_squeezes) > 0 else 1
-                        
-                        final_params_dict = {
-                            'shifts': opt_shifts, 'squeezes': opt_squeezes,
-                            'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
-                            'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
-                            'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': (float(fixed_e_f) if fixed_e_f is not None else 0.0),
-                            'channel': self.channel
-                        }
-                        result['Params'] = final_params_dict 
-                        
-                        raw_concentrations, real_errors = [], []
-                        for gi, nm in enumerate(self.engine.gas_list):
-                            scale_div = self.engine.scaling_factors[nm]
-                            # The normalised reference column = ref_raw / max(ref_raw),
-                            # so the multiplier cancels in the column but must be
-                            # reapplied here to recover physical units [cm-3]:
-                            #   N = (coeff / scale_factor) * mult / scale_div
-                            mult_i = self.engine.multipliers.get(nm, 1.0)
-                            if is_linear_mode:
-                                real_conc = (gas_coeffs_scaled[gi] / scale_factor) / scale_div * mult_i
-                                real_err  = (gas_errs[gi]           / scale_factor) / scale_div * mult_i
-                            else:
-                                real_conc = gas_coeffs_scaled[gi] / scale_div * mult_i
-                                real_err  = gas_errs[gi]           / scale_div * mult_i
-                            raw_concentrations.append(real_conc); real_errors.append(real_err)
-
-                        # Export the exact state used for the ppb conversion.
-                        result['T_used_C'] = float(self.temperature)
-                        result['P_used_mbar'] = float(self.pressure)
-                        self._fit_status_cols(result)
-                        for gi, nm in enumerate(self.engine.gas_list):
-                            result[f"{nm}_RealConc"] = float(raw_concentrations[gi])
-
-                        smooth_concentrations = kalman_filter.process(raw_concentrations)
-                        
-                        # ── Real-time PPB conversion ─────────────────────────────────────
-                        # Cross-section fitting gives concentrations in [cm²/molecule × molecules/cm³]
-                        # i.e., the raw coefficient has units cm⁻³.
-                        # Dividing by air number density N_air converts to a dimensionless mixing ratio.
-                        # Multiplying by 1e9 converts to parts-per-billion (ppb).
-                        # N_air from the ideal gas law at measured T and P:
-                        n_air = air_number_density(self.temperature, self.pressure)
-                        
-                        # n_air uncertainty propagation (assuming T: ±1°C, P: ±1 mbar, Washenfelder 2008)
-                        dn_air_dT = -n_air / (self.temperature + 273.15)
-                        dn_air_dP = n_air / self.pressure
-                        rel_err_n = np.sqrt((dn_air_dT * 1.0)**2 + (dn_air_dP * 1.0)**2) / n_air
-
-                        for gi, nm in enumerate(self.engine.gas_list):
-                            ppb_raw    = (raw_concentrations[gi]    / n_air) * 1e9
-                            ppb_smooth = (smooth_concentrations[gi] / n_air) * 1e9
-                            ppb_err    = (real_errors[gi]           / n_air) * 1e9
-                            ppb_total_err = abs(ppb_raw) * np.sqrt((ppb_err / max(abs(ppb_raw), 1e-30))**2 + rel_err_n**2)
-
-                            # Primary column = raw fit result (not Kalman-filtered).
-                            # _Smooth column = Kalman-filtered value for trend monitoring only.
-                            result[nm]                  = ppb_raw
-                            result[f"{nm}_Smooth"]      = ppb_smooth
-                            result[f"{nm}_Error"]       = ppb_err
-                            result[f"{nm}_TotalError"]  = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
-                            result[f"{nm}_MDL"]         = 3.0 * ppb_err
-                            # A8-2: shift/squeeze 불확도까지 결합한 오차. 기존 열은
-                            # 그대로 두고 **나란히** 낸다 — 두 값의 비가 논문 재료다.
-                            result[f"{nm}_ErrorJoint"]  = self._joint_error_ppb(
-                                gi, nm, scale_factor, is_linear_mode, n_air)
-                            result[f"{nm}_Shift"]       = opt_shifts[gi]
-                            result[f"{nm}_Squeeze"]     = opt_squeezes[gi]
-
-
-
-                        # ── Spectral quality metrics ─────────────────────────────────────
-                        # DOF = n_pixels − n_free_params (Shift, Squeeze, gases, poly, etalon)
-                        # Chi2 (reduced): uses Neumann estimator for independent pixel noise:
-                        #   sigma_pix ≈ std(diff(spectrum)) / sqrt(2)
-                        #   This captures instrument noise without being biased by spectral features.
-                        #   chi2 > 1 means systematic structure remains in residual.
-                        # SNR: signal / noise, both in the same (scaled) units.
-                        n_pts = len(pixel_idx)
-                        n_gases = len(self.engine.gas_list)
-                        n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
-                        dof = max(n_pts - n_params, 1)
-                        # Neumann estimator σ on the fitted signal (optical_depth units for both modes)
-                        signal_for_stats = intensity_raw if is_linear_mode else optical_depth
-                        sigma_pix = np.std(np.diff(signal_for_stats)) / np.sqrt(2)
-                        if sigma_pix < 1e-30:
-                            sigma_pix = rms if rms > 1e-30 else 1.0
-                        chi2 = float(np.sum(residual**2 / sigma_pix**2) / dof)
-                        snr = float(np.mean(np.abs(optical_depth)) / (rms + 1e-30))
-                        result['Chi2'] = chi2
-                        result['DOF'] = dof
-                        result['SNR'] = snr
-
-                        _sig_mean = float(np.mean(abs(signal_for_stats)))
-                        result['_signal_mean'] = _sig_mean
-                        status = quality_label(chi2, attempt)
-                        result['Status'] = status + _sat_note + self._solver_status_note()
-                        if state_flag == FLAG_HEADER:
-                            # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
-                            # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
-                            # 쓰면 안 되므로 행마다 표시한다.
-                            result['Status'] += " · header row (T/P borrowed from next scan)"
-
-                        # Always update last_valid_shift so the step-limit window can
-                        # drift even during Unstable periods.  Without this the optimizer
-                        # stays locked at the same center and perpetually hits the wall.
-                        # The per-scan step_limit in _setup_fit_parameters already
-                        # guarantees the shift cannot jump more than step_limit px/scan.
-                        # 단, 헤더행은 제외한다. 이 행의 RMS는 같은 파일 중앙값의
-                        # 2.8~7.6배라(핫 22·콜드 44파일 실측) 여기서 정착한 shift를
-                        # 물려주면 그 파일 첫 실측 스캔들이 오염된 초기값에서 출발한다
-                        # (2026-08-10 NO2 인젝션에서 ±5px 경계까지 끌려간 그 현상).
-                        if len(opt_shifts) > 0 and state_flag != FLAG_HEADER:
-                            last_valid_shift = opt_shifts[ 0 ]
-
-                        # 탈출 조건은 **라벨이 아니라 저신호 재시도 기준**이다
-                        # (라벨은 chi2 축으로 옮겼고, 재시도 동작은 보존 — `_low_signal_retry`).
-                        if (not self._low_signal_retry(rms, _sig_mean)) or attempt == max_retries - 1:
-                            break
-                        else:
-                            # If status is bad, trigger defensive mode in the next loop
-                            self.needs_pre_calibration = True
-                            
-                    except Exception as e:
-                        if attempt == max_retries - 1: raise e
-                        self.needs_pre_calibration = True
+                # 핏 본체는 청크(Fast) 경로와 공유한다(`_fit_spectrum`).
+                shift_box = [last_valid_shift]
+                try:
+                    fit = self._fit_spectrum(
+                        result, pixel_idx=pixel_idx, optical_depth=optical_depth,
+                        intensity_raw=intensity_raw, intensity_processed=intensity_processed,
+                        scale_factor=scale_factor, fit_sign=fit_sign, is_linear_mode=is_linear_mode,
+                        current_params=current_params, initial_shift_center=initial_shift_center,
+                        shift_box=shift_box,
+                        I_meas=(None if is_linear_mode else I_meas), masked_px=masked_px,
+                        sat_note=_sat_note, kalman=kalman_filter, record_masked=True,
+                        # 헤더행은 shift 를 물려주지 않는다 — 이 행의 RMS 는 같은 파일 중앙값의
+                        # 2.8~7.6배라(핫 22·콜드 44파일 실측) 다음 실측 스캔이 오염된 초기값에서
+                        # 출발한다(2026-08-10 NO2 인젝션에서 ±5px 경계까지 끌려간 현상).
+                        track_shift=(state_flag != FLAG_HEADER),
+                        warn_label=f"{os.path.basename(file_path)}[{row_idx}]")
+                finally:
+                    last_valid_shift = shift_box[0]
+                if state_flag == FLAG_HEADER:
+                    # 이 행의 T/P는 계기가 이 시각에 잰 값이 아니라 **다음
+                    # 실측행에서 끌어온 값**이다. 결과를 읽는 사람이 모르고
+                    # 쓰면 안 되므로 행마다 표시한다.
+                    result['Status'] += " · header row (T/P borrowed from next scan)"
+                residual, rms = fit.residual, fit.rms
+                opt_shifts, opt_squeezes = fit.opt_shifts, fit.opt_squeezes
+                poly_val_orig, abs_val_orig = fit.poly_val_orig, fit.abs_val_orig
+                etalon_part_orig, final_params_dict = fit.etalon_part_orig, fit.params
 
                 # Keep this outside the retry loop: one final fitted residual per scan.
                 self._write_residual_dump(wave_nm, result, residual)
@@ -1105,6 +931,219 @@ class AnalysisWorker(QThread):
             self._run()
         finally:
             self._close_residual_dump()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 스펙트럼 1개 핏(재시도 포함) — 순차 `_run` 과 청크 `_fit_alpha_range` 의 공통 본체.
+    # 2026-10-01 까지 두 경로가 이 ~150줄을 복사해 들고 있었다. 그 사이 etalon OFF 버그가
+    # 두 곳에 똑같이 들어갔고(187e26a), 한쪽만 고치면 Fast 모드와 순차 모드가 조용히 갈라질
+    # 구조였다. 계산·결과 키 순서는 두 경로의 종전 코드와 바이트 동일하다(실데이터 296스캔 ×
+    # etalon ON/OFF, 두 경로 결과 dict 전체 비교). 경로별로 다른 것은 인자로만 받는다:
+    #   kalman        — 순차만(스캔 순서에 의존하는 평활이라 청크는 못 한다) → '{gas}_Smooth' 열
+    #   record_masked — 순차만 'MaskedPixels' 열을 낸다(청크 출력 열을 바꾸지 않으려고)
+    #   sat_note      — 순차만 포화 표시(청크 입력은 알파라 포화 정보가 없다)
+    #   track_shift   — 헤더행은 shift 를 다음 스캔에 물려주지 않는다(순차, 2026-08-10 사건)
+    #   shift_box     — [last_valid_shift] 를 제자리에서 갱신. 마지막 재시도가 예외로 끝나도
+    #                   앞 시도에서 정착한 shift 는 남는다(종전 지역변수 동작 그대로).
+    # ──────────────────────────────────────────────────────────────────────────
+    def _fit_spectrum(self, result, *, pixel_idx, optical_depth, intensity_raw,
+                      intensity_processed, scale_factor, fit_sign, is_linear_mode,
+                      current_params, initial_shift_center, shift_box,
+                      I_meas=None, masked_px=None, sat_note="", kalman=None,
+                      record_masked=False, track_shift=True, warn_label=""):
+        """한 스캔을 핏하고 `result` 에 농도·오차·품질 열을 채운다(제자리). 마지막 재시도의
+        예외는 그대로 던진다(호출부가 'Skip: …' 로 기록). 반환: 그림·잔차 덤프용 값 묶음."""
+        poly_start_idx = 2 + len(self.engine.gas_list)
+        poly_order = len(current_params) - poly_start_idx - 1
+        absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw) / 2.0
+
+        # Etalon detection (첫 스캔에서 1회)
+        if getattr(self, 'use_etalon', True) and getattr(self, 'etalon_freq', None) is None:
+            self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
+
+        fit = None
+        max_retries = 2
+        for attempt in range(max_retries):
+            current_lam = self.tikhonov_lambda
+            current_robust = self.use_robust_fitting
+
+            if self.needs_pre_calibration:
+                best_sh, best_sq = self.auto_pre_calibrate(pixel_idx, optical_depth, poly_order)
+                current_params[0] = best_sh; current_params[1] = best_sq
+                self.needs_pre_calibration = False
+
+            if len(current_params) > poly_start_idx:
+                current_params[poly_start_idx] = np.mean(optical_depth)
+                current_params[poly_start_idx + 1: poly_start_idx + 1 + poly_order] = [0.0] * poly_order
+
+            # Parameter setup
+            active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = \
+                self._setup_fit_parameters(initial_shift_center, current_params)
+            fixed_e_f = self.etalon_freq if getattr(self, 'use_etalon', True) else None
+            # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
+            #  두 선형열로 처리. 위상 append 제거.)
+
+            try:
+                weights = np.ones_like(intensity_processed) if is_linear_mode else np.sqrt(np.abs(I_meas))
+                # X1 마스킹: I ≤ 0 이었던 픽셀은 가중 0 → 설계행렬·잔차에서 완전히 빠진다.
+                _mask = masked_px
+                _n_masked = 0
+                if _mask is not None and np.any(_mask):
+                    weights = weights * (~_mask)
+                    _n_masked = int(np.count_nonzero(_mask))
+                if record_masked:
+                    result['MaskedPixels'] = _n_masked
+                _w_mean = float(np.mean(weights))
+                if _w_mean <= 0:
+                    raise ValueError(f"fit window fully masked ({_n_masked}px I<=0)")
+                W = weights / _w_mean            # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
+                if _n_masked > 0.05 * len(weights):
+                    # 핏창의 5%를 넘으면 그 스캔의 농도는 남은 픽셀만으로 나온 것이다.
+                    self.status_msg.emit(
+                        f"⚠ I≤0 masked {_n_masked}/{len(weights)}px "
+                        f"({100.0 * _n_masked / len(weights):.1f}%) — {warn_label}")
+
+                # Core engine call
+                opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = \
+                    self._execute_varpro_fit(
+                        pixel_idx, optical_depth, W, active_vars, fixed_vars, linked_vars,
+                        theta0, theta_lb, theta_ub, poly_order, fixed_e_f, absolute_center, fit_sign,
+                        override_lam=current_lam, override_robust=current_robust)
+
+                # Combine and store results (keep 5 unpacked values)
+                _, abs_val_scaled, poly_val_scaled, _, _ = self.engine.get_model_components(
+                    pixel_idx, opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled)
+                abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
+                etalon_part_orig = ((etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                                    if fixed_e_f is not None else 0.0)   # etalon OFF: 사인 열 없음
+
+                y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
+                # residual must be in the same units as the fitted signal (optical_depth)
+                if is_linear_mode:
+                    residual = intensity_raw - y_fit_model_orig
+                else:
+                    residual = optical_depth - y_fit_model_orig
+                rms = np.sqrt(np.mean(residual ** 2))
+
+                result['RMS'] = rms
+                result['Shift'] = opt_shifts[0] if len(opt_shifts) > 0 else 0
+                result['Squeeze'] = opt_squeezes[0] if len(opt_squeezes) > 0 else 1
+
+                final_params_dict = {
+                    'shifts': opt_shifts, 'squeezes': opt_squeezes,
+                    'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
+                    'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
+                    'etalon_amp': etalon_amp_scaled / scale_factor,
+                    'etalon_phase': float(best_ep), 'etalon_freq': (float(fixed_e_f) if fixed_e_f is not None else 0.0),
+                    'channel': self.channel
+                }
+                result['Params'] = final_params_dict
+
+                raw_concentrations, real_errors = [], []
+                for gi, nm in enumerate(self.engine.gas_list):
+                    scale_div = self.engine.scaling_factors[nm]
+                    # The normalised reference column = ref_raw / max(ref_raw),
+                    # so the multiplier cancels in the column but must be
+                    # reapplied here to recover physical units [cm-3]:
+                    #   N = (coeff / scale_factor) * mult / scale_div
+                    mult_i = self.engine.multipliers.get(nm, 1.0)
+                    if is_linear_mode:
+                        real_conc = (gas_coeffs_scaled[gi] / scale_factor) / scale_div * mult_i
+                        real_err = (gas_errs[gi] / scale_factor) / scale_div * mult_i
+                    else:
+                        real_conc = gas_coeffs_scaled[gi] / scale_div * mult_i
+                        real_err = gas_errs[gi] / scale_div * mult_i
+                    raw_concentrations.append(real_conc); real_errors.append(real_err)
+
+                # Export the exact state used for the ppb conversion.
+                result['T_used_C'] = float(self.temperature)
+                result['P_used_mbar'] = float(self.pressure)
+                self._fit_status_cols(result)
+                for gi, nm in enumerate(self.engine.gas_list):
+                    result[f"{nm}_RealConc"] = float(raw_concentrations[gi])
+
+                # Kalman 평활은 순차 경로만(스캔 순서 의존). 재시도마다 한 번씩 — 종전 동작 그대로.
+                smooth_concentrations = kalman.process(raw_concentrations) if kalman is not None else None
+
+                # ── Real-time PPB conversion ─────────────────────────────────────
+                # Cross-section fitting gives concentrations in [cm²/molecule × molecules/cm³]
+                # i.e., the raw coefficient has units cm⁻³. Dividing by air number density
+                # N_air (ideal gas law at measured T and P) → mixing ratio; ×1e9 → ppb.
+                n_air = air_number_density(self.temperature, self.pressure)
+
+                # n_air uncertainty propagation (assuming T: ±1°C, P: ±1 mbar, Washenfelder 2008)
+                dn_air_dT = -n_air / (self.temperature + 273.15)
+                dn_air_dP = n_air / self.pressure
+                rel_err_n = np.sqrt((dn_air_dT * 1.0) ** 2 + (dn_air_dP * 1.0) ** 2) / n_air
+
+                for gi, nm in enumerate(self.engine.gas_list):
+                    ppb_raw = (raw_concentrations[gi] / n_air) * 1e9
+                    ppb_err = (real_errors[gi] / n_air) * 1e9
+                    ppb_total_err = abs(ppb_raw) * np.sqrt((ppb_err / max(abs(ppb_raw), 1e-30)) ** 2 + rel_err_n ** 2)
+
+                    # Primary column = raw fit result (not Kalman-filtered).
+                    # _Smooth column = Kalman-filtered value for trend monitoring only.
+                    result[nm] = ppb_raw
+                    if smooth_concentrations is not None:
+                        result[f"{nm}_Smooth"] = (smooth_concentrations[gi] / n_air) * 1e9
+                    result[f"{nm}_Error"] = ppb_err
+                    result[f"{nm}_TotalError"] = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
+                    result[f"{nm}_MDL"] = 3.0 * ppb_err
+                    # A8-2: shift/squeeze 불확도까지 결합한 오차. 기존 열은
+                    # 그대로 두고 **나란히** 낸다 — 두 값의 비가 논문 재료다.
+                    result[f"{nm}_ErrorJoint"] = self._joint_error_ppb(
+                        gi, nm, scale_factor, is_linear_mode, n_air)
+                    result[f"{nm}_Shift"] = opt_shifts[gi]
+                    result[f"{nm}_Squeeze"] = opt_squeezes[gi]
+
+                # ── Spectral quality metrics ─────────────────────────────────────
+                # DOF = n_pixels − n_free_params (Shift, Squeeze, gases, poly, etalon)
+                # Chi2 (reduced): Neumann estimator for independent pixel noise:
+                #   sigma_pix ≈ std(diff(spectrum)) / sqrt(2)
+                #   chi2 > 1 means systematic structure remains in residual.
+                # SNR: signal / noise, both in the same (scaled) units.
+                n_pts = len(pixel_idx)
+                n_gases = len(self.engine.gas_list)
+                n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
+                dof = max(n_pts - n_params, 1)
+                # Neumann estimator σ on the fitted signal (optical_depth units for both modes)
+                signal_for_stats = intensity_raw if is_linear_mode else optical_depth
+                sigma_pix = np.std(np.diff(signal_for_stats)) / np.sqrt(2)
+                if sigma_pix < 1e-30:
+                    sigma_pix = rms if rms > 1e-30 else 1.0
+                chi2 = float(np.sum(residual ** 2 / sigma_pix ** 2) / dof)
+                snr = float(np.mean(np.abs(optical_depth)) / (rms + 1e-30))
+                result['Chi2'] = chi2
+                result['DOF'] = dof
+                result['SNR'] = snr
+
+                _sig_mean = float(np.mean(abs(signal_for_stats)))
+                result['_signal_mean'] = _sig_mean
+                status = quality_label(chi2, attempt)
+                result['Status'] = status + sat_note + self._solver_status_note()
+
+                # Always update last_valid_shift so the step-limit window can
+                # drift even during Unstable periods. The per-scan step_limit in
+                # _setup_fit_parameters already bounds the jump per scan.
+                if len(opt_shifts) > 0 and track_shift:
+                    shift_box[0] = opt_shifts[0]
+
+                fit = SimpleNamespace(
+                    residual=residual, rms=rms, opt_shifts=opt_shifts, opt_squeezes=opt_squeezes,
+                    poly_val_orig=poly_val_orig, abs_val_orig=abs_val_orig,
+                    etalon_part_orig=etalon_part_orig, params=final_params_dict)
+
+                # 탈출 조건은 **라벨이 아니라 저신호 재시도 기준**이다
+                # (라벨은 chi2 축으로 옮겼고, 재시도 동작은 보존 — `_low_signal_retry`).
+                if (not self._low_signal_retry(rms, _sig_mean)) or attempt == max_retries - 1:
+                    break
+                else:
+                    # If status is bad, trigger defensive mode in the next loop
+                    self.needs_pre_calibration = True
+
+            except Exception as e:
+                if attempt == max_retries - 1: raise e
+                self.needs_pre_calibration = True
+        return fit
 
     # ──────────────────────────────────────────────────────────────────────────
     # 청크+워밍업 병렬화용 알파 핏 (터보 모드). run()의 ambient/linear 경로를
@@ -1166,114 +1205,18 @@ class AnalysisWorker(QThread):
                 optical_depth = intensity_processed
                 fit_sign = 1.0
 
-                poly_start_idx = 2 + len(self.engine.gas_list)
-                poly_order = len(current_params) - poly_start_idx - 1
-                absolute_center = (self.pixel_min + self.pixel_max) / 2.0 if self.pixel_max else len(intensity_raw) / 2.0
-
-                if getattr(self, 'use_etalon', True) and self.etalon_freq is None:
-                    self.etalon_freq = self._detect_etalon_frequency(pixel_idx, optical_depth, poly_order)
-
-                max_retries = 2
-                for attempt in range(max_retries):
-                    current_lam = self.tikhonov_lambda
-                    current_robust = self.use_robust_fitting
-                    if self.needs_pre_calibration:
-                        best_sh, best_sq = self.auto_pre_calibrate(pixel_idx, optical_depth, poly_order)
-                        current_params[0] = best_sh; current_params[1] = best_sq
-                        self.needs_pre_calibration = False
-                    if len(current_params) > poly_start_idx:
-                        current_params[poly_start_idx] = np.mean(optical_depth)
-                        current_params[poly_start_idx + 1: poly_start_idx + 1 + poly_order] = [0.0] * poly_order
-
-                    active_vars, fixed_vars, linked_vars, theta0, theta_lb, theta_ub = \
-                        self._setup_fit_parameters(initial_shift_center, current_params)
-                    fixed_e_f = self.etalon_freq if getattr(self, 'use_etalon', True) else None
-                    # (etalon 위상은 더 이상 비선형 파라미터 아님 — doas_fit가 sin·cos
-                    #  두 선형열로 처리. 위상 append 제거.)
-                    try:
-                        weights = np.ones_like(intensity_processed)
-                        W = weights / np.mean(weights)   # 대각 가중 벡터 (doas_fit이 행스케일로 적용)
-                        opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled, etalon_amp_scaled, best_ep, gas_errs = \
-                            self._execute_varpro_fit(
-                                pixel_idx, optical_depth, W, active_vars, fixed_vars, linked_vars,
-                                theta0, theta_lb, theta_ub, poly_order, fixed_e_f, absolute_center, fit_sign,
-                                override_lam=current_lam, override_robust=current_robust)
-                        _, abs_val_scaled, poly_val_scaled, _, _ = self.engine.get_model_components(
-                            pixel_idx, opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled)
-                        abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
-                        etalon_part_orig = ((etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
-                                            if fixed_e_f is not None else 0.0)   # etalon OFF: 사인 열 없음
-                        y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
-                        residual = intensity_raw - y_fit_model_orig
-                        rms = np.sqrt(np.mean(residual ** 2))
-
-                        result['RMS'] = rms
-                        result['Shift'] = opt_shifts[0] if len(opt_shifts) > 0 else 0
-                        result['Squeeze'] = opt_squeezes[0] if len(opt_squeezes) > 0 else 1
-                        result['Params'] = {
-                            'shifts': opt_shifts, 'squeezes': opt_squeezes,
-                            'gas_coeffs': (gas_coeffs_scaled / scale_factor).tolist(),
-                            'poly_coeffs': (poly_coeffs_scaled / scale_factor).tolist(),
-                            'etalon_amp': etalon_amp_scaled / scale_factor,
-                            'etalon_phase': float(best_ep), 'etalon_freq': (float(fixed_e_f) if fixed_e_f is not None else 0.0),
-                            'channel': self.channel}
-
-                        raw_concentrations, real_errors = [], []
-                        for gj, nm in enumerate(self.engine.gas_list):
-                            scale_div = self.engine.scaling_factors[nm]
-                            mult_i = self.engine.multipliers.get(nm, 1.0)
-                            real_conc = (gas_coeffs_scaled[gj] / scale_factor) / scale_div * mult_i
-                            real_err = (gas_errs[gj] / scale_factor) / scale_div * mult_i
-                            raw_concentrations.append(real_conc); real_errors.append(real_err)
-
-                        result['T_used_C'] = float(self.temperature)
-                        result['P_used_mbar'] = float(self.pressure)
-                        self._fit_status_cols(result)
-                        for gj, nm in enumerate(self.engine.gas_list):
-                            result[f"{nm}_RealConc"] = float(raw_concentrations[gj])
-
-                        n_air = air_number_density(self.temperature, self.pressure)
-                        dn_air_dT = -n_air / (self.temperature + 273.15)
-                        dn_air_dP = n_air / self.pressure
-                        rel_err_n = np.sqrt((dn_air_dT * 1.0) ** 2 + (dn_air_dP * 1.0) ** 2) / n_air
-                        for gj, nm in enumerate(self.engine.gas_list):
-                            ppb_raw = (raw_concentrations[gj] / n_air) * 1e9
-                            ppb_err = (real_errors[gj] / n_air) * 1e9
-                            ppb_total_err = abs(ppb_raw) * np.sqrt(
-                                (ppb_err / max(abs(ppb_raw), 1e-30)) ** 2 + rel_err_n ** 2)
-                            result[nm] = ppb_raw
-                            result[f"{nm}_Error"] = ppb_err
-                            result[f"{nm}_TotalError"] = float(np.mean(ppb_total_err)) if hasattr(ppb_total_err, '__len__') else float(ppb_total_err)
-                            result[f"{nm}_MDL"] = 3.0 * ppb_err
-                            result[f"{nm}_ErrorJoint"] = self._joint_error_ppb(
-                                gj, nm, scale_factor, True, n_air)
-                            result[f"{nm}_Shift"] = opt_shifts[gj]
-                            result[f"{nm}_Squeeze"] = opt_squeezes[gj]
-
-                        n_pts = len(pixel_idx); n_gases = len(self.engine.gas_list)
-                        n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
-                        dof = max(n_pts - n_params, 1)
-                        sigma_pix = np.std(np.diff(intensity_raw)) / np.sqrt(2)
-                        if sigma_pix < 1e-30:
-                            sigma_pix = rms if rms > 1e-30 else 1.0
-                        chi2 = float(np.sum(residual ** 2 / sigma_pix ** 2) / dof)
-                        result['Chi2'] = chi2
-                        result['DOF'] = dof
-                        result['SNR'] = float(np.mean(np.abs(optical_depth)) / (rms + 1e-30))
-
-                        _sig_mean = float(np.mean(abs(intensity_raw)))
-                        result['_signal_mean'] = _sig_mean
-                        status = quality_label(chi2, attempt)
-                        result['Status'] = status + self._solver_status_note()
-                        if len(opt_shifts) > 0:
-                            last_valid_shift = opt_shifts[0]
-                        if (not self._low_signal_retry(rms, _sig_mean)) or attempt == max_retries - 1:
-                            break
-                        else:
-                            self.needs_pre_calibration = True
-                    except Exception as e:
-                        if attempt == max_retries - 1: raise e
-                        self.needs_pre_calibration = True
+                # 핏 본체는 순차 경로와 공유한다(`_fit_spectrum`). 알파 = linear mode.
+                shift_box = [last_valid_shift]
+                try:
+                    fit = self._fit_spectrum(
+                        result, pixel_idx=pixel_idx, optical_depth=optical_depth,
+                        intensity_raw=intensity_raw, intensity_processed=intensity_processed,
+                        scale_factor=scale_factor, fit_sign=fit_sign, is_linear_mode=True,
+                        current_params=current_params, initial_shift_center=initial_shift_center,
+                        shift_box=shift_box)
+                finally:
+                    last_valid_shift = shift_box[0]
+                rms, residual = fit.rms, fit.residual
 
                 self._apply_qc(result)          # run() 과 같은 단일 출처
 
@@ -1422,8 +1365,8 @@ class AnalysisWorker(QThread):
                         except Exception as e:
                             print(f"[ParallelFit] chunk error: {e}")
                             self.status_msg.emit(
-                                f"⚠ 청크 핏 실패 — {type(e).__name__}: {e} "
-                                f"(해당 스캔들은 결과에서 빠진다)")
+                                f"⚠ chunk fit failed — {type(e).__name__}: {e} "
+                                f"(those scans are dropped from the results)")
                             # 빠진 인덱스를 Skip으로 메워 emit이 막히지 않게(데이터 유실
                             # 대신 명시적 Skip 표시). 결과 dict 모양은 기존 Skip과 동일.
                             for (gi, _fp, _ridx) in fut_body.get(fut, ()):
@@ -1724,7 +1667,7 @@ def _reread_amb_plain(entries, spool_path, row_bytes, n_pix):
         # 에러가 없는 상태를 만들면 안 된다. 예외는 그 함수가 이미 붙잡아
         # (fp, None, 0, "ExcType: ...")로 보고한다.
         raise RuntimeError(
-            f"ambient 스풀 재읽기 실패 (seq {s0}..{s1}, {cnt}행): "
+            f"ambient spool re-read failed (seq {s0}..{s1}, {cnt} rows): "
             f"{type(e).__name__}: {e}") from e
     fp = entries[0][6] if len(entries[0]) > 6 else None   # 미사용(호환용) — 실제 fp는 호출부가 앎
     out = []
@@ -1858,7 +1801,7 @@ def _pass2_write_file(fp, rows, ctx):
         # 옛 경로(느리지만 정확)로 떨어뜨린다 — 조용히 보정을 끄면 안 된다.
         _clk = DataIO.clock_epoch_offset_sec(fp, ncols=_ncols or None)
         f.write("# time = bytepack(col0,col1)/100 (matches reference doy, no timezone conversion)\n")
-        f.write("# clock_epoch=%s  (hot 2026-05-29 UTC-toggle; 축 규약은 기록 UTC)\n"
+        f.write("# clock_epoch=%s  (hot 2026-05-29 UTC-toggle; axis convention: recorded UTC)\n"
                 % ("pre_fix %+.0fh" % (_clk / 3600.0) if _clk else "none +0h"))
         f.write("row_idx\tdoy\tdatetime\tT_C\tP_mbar\t" +
                 '\t'.join(f"px{ctx['pix_min']+j}" for j in range(ctx['n_pix'])) + "\n")
@@ -2465,9 +2408,9 @@ class AlphaExportWorker(QThread):
 
         if n_purge_skipped:
             self.status_msg.emit(
-                f"[purge settle] 교정 직후 {self.purge_settle_sec:.0f}초 ambient "
-                f"{n_purge_skipped}/{global_idx} 스캔 제외 — 캐비티에 ZA/He 가 남아 있어"
-                f" 농도가 1/4로 찍히던 구간이다 (raw 는 그대로, 헤더에 기록됨).")
+                f"[purge settle] excluded ambient scans within {self.purge_settle_sec:.0f} s after calibration: "
+                f"{n_purge_skipped}/{global_idx} — residual ZA/He in the cavity"
+                f" made concentrations read ~1/4 here (raw untouched, recorded in header).")
 
         if n_default_tp:
             self.status_msg.emit(
@@ -2478,13 +2421,13 @@ class AlphaExportWorker(QThread):
         # 포화 보고 — ZA/He 를 먼저, 더 세게. R/I0 를 거쳐 전 구간으로 번지기 때문이다.
         if n_sat_cal:
             self.status_msg.emit(
-                f"[WARN] CCD 포화: ZA/He 교정 스캔 {n_sat_cal}개 — 이 스캔들은 블록평균을"
-                f" 거쳐 R/I0 가 되므로 **이후 ambient α 전체**가 영향받을 수 있다"
-                f" (문턱 {SATURATION_ADC_MAX:.0f} ADC). 해당 구간 R 트렌드를 확인할 것.")
+                f"[WARN] CCD saturation: {n_sat_cal} ZA/He calibration scan(s) — these are block-averaged"
+                f" into R/I0, so **all subsequent ambient α** may be affected"
+                f" (threshold {SATURATION_ADC_MAX:.0f} ADC). Check the R trend for this period.")
         if n_sat_amb:
             self.status_msg.emit(
-                f"[WARN] CCD 포화: ambient 스캔 {n_sat_amb}/{global_idx}개 — 포화 픽셀은"
-                f" 흡수를 과소평가한다 (문턱 {SATURATION_ADC_MAX:.0f} ADC).")
+                f"[WARN] CCD saturation: {n_sat_amb}/{global_idx} ambient scan(s) — saturated pixels"
+                f" underestimate absorption (threshold {SATURATION_ADC_MAX:.0f} ADC).")
 
         # ── Block-average each ZA / He injection into one clean spectrum ──────
         # 핵심 수정: 개별 단일 스캔(noise ~1%)을 그대로 I0로 쓰면 alpha가 망가진다.
@@ -2523,9 +2466,9 @@ class AlphaExportWorker(QThread):
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
         if n_za_drop or n_he_drop:
             self.status_msg.emit(
-                f"[I0 settle] 블록 선두 과도구간 제외: ZA {n_za_drop}/{n_za_raw} · "
-                f"He {n_he_drop}/{n_he_raw} 스캔 — 가스 전환 직후 캐비티가 아직 "
-                f"채워지는 구간이다 (raw 는 그대로, 헤더에 기록됨)."
+                f"[I0 settle] excluded block-leading transients: ZA {n_za_drop}/{n_za_raw} · "
+                f"He {n_he_drop}/{n_he_raw} scans — the cavity is still filling "
+                f"right after a gas switch (raw untouched, recorded in header)."
             )
 
         # §6.3 저광량 I0 knot 게이트. 기본 frac=0 → 한 블록도 안 빠진다(무변경).
@@ -2535,8 +2478,8 @@ class AlphaExportWorker(QThread):
         if _ll:
             if len(za_gidx) - len(_ll) < 2:
                 self.status_msg.emit(
-                    f"[I0 저광량] 게이트가 knot 을 {len(_ll)}/{len(za_gidx)}개 버리려 한다 "
-                    f"— 2개 미만이 남아 **적용하지 않는다**. frac 을 낮춰라.")
+                    f"[I0 low-light] gate would drop {len(_ll)}/{len(za_gidx)} knots "
+                    f"— fewer than 2 would remain, so it is **not applied**. Lower frac.")
             else:
                 n_ll_drop = len(_ll)
                 _keep = [i for i in range(len(za_gidx)) if i not in _ll]
@@ -2546,9 +2489,9 @@ class AlphaExportWorker(QThread):
                 za_t_list = [za_t_list[i] for i in _keep]
                 za_p_list = [za_p_list[i] for i in _keep]
                 self.status_msg.emit(
-                    f"[I0 저광량] ZA knot {n_ll_drop}/{n_ll_drop + len(_keep)}개 제외 "
-                    f"(핏창 중앙 카운트 < 블록중앙값의 {self.i0_low_light_frac:g}배) — "
-                    f"raw 는 그대로, 헤더에 기록됨.")
+                    f"[I0 low-light] excluded {n_ll_drop}/{n_ll_drop + len(_keep)} ZA knots "
+                    f"(fit-window center counts < {self.i0_low_light_frac:g}× block median) — "
+                    f"raw untouched, recorded in header.")
 
         # 강도 보정(dark·offset·stray) — 블록평균 후 한 번만. RUN 경로와 동일 물리.
         # 기본값(scale=1·offset=None·ε=0)에선 기존 'I−dark'와 byte-동일(무회귀).
@@ -2637,8 +2580,8 @@ class AlphaExportWorker(QThread):
                 # 만들어진다. 물리적으로 다른 처리인데 결과만 보면 구분이 안 된다.
                 _RC = None
                 self.status_msg.emit(
-                    f"[R(t)] ⚠ reflectance_calc 임포트 실패 ({type(_e_rc).__name__}: "
-                    f"{_e_rc}) — ZA 블록별 R(t) 생략, 단일 R(best_omr_d)로 진행")
+                    f"[R(t)] ⚠ reflectance_calc import failed ({type(_e_rc).__name__}: "
+                    f"{_e_rc}) — skipping per-ZA-block R(t), using single R(best_omr_d)")
             if _RC is not None:
                 _za_key, _za_sec_ok = resolve_time_axis(
                     za_gidx, za_sec, warn=self.status_msg.emit)
@@ -2674,8 +2617,8 @@ class AlphaExportWorker(QThread):
                     _knots.append((float(_za_key[_i]), _od))
                 if _pair_skipped:
                     self.status_msg.emit(
-                        f"[R(t)] ZA/He 페어 {_pair_skipped}/{len(za_gidx)}개가 품질 "
-                        f"미달로 제외됨 — knot {len(_knots)}개로 R(t) 구성")
+                        f"[R(t)] {_pair_skipped}/{len(za_gidx)} ZA/He pair(s) excluded for "
+                        f"failing quality checks — R(t) built from {len(_knots)} knot(s)")
                 if len(_knots) >= 2:
                     _knots.sort(key=lambda k: k[0])
                     _kg = np.array([k[0] for k in _knots], dtype=float)
@@ -2752,7 +2695,7 @@ class AlphaExportWorker(QThread):
                 # 병렬 쪽 _reread_amb_plain과 같은 이유로 예외. 여기선 run()이
                 # 받아서 finished.emit("ERROR: ...")로 GUI에 띄운다.
                 raise RuntimeError(
-                    f"ambient 스풀 재읽기 실패 ({os.path.basename(fp)}, "
+                    f"ambient spool re-read failed ({os.path.basename(fp)}, "
                     f"seq {s0}..{s1}): {type(e).__name__}: {e}") from e
             out = []
             for e in ents:

@@ -42,7 +42,7 @@ def _require_bool(value):
 
 
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
-from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처(이 모듈이 직접 호출)
 from core.doas_fit import alpha_fit_scale   # 알파 정규화 단일 출처
 
 
@@ -200,7 +200,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
         gi = eng.gas_list.index(target)
         sc = eng.scaling_factors.get(target, 1.0)
         mu = eng.multipliers.get(target, 1.0)
-        conc = float((gco[gi] * mu / sc) / n_air * 1e9)
+        conc = float(coeff_to_ppb(gco[gi], mu, sc, n_air))
         conc *= 1.0   # perr_rel은 단위 무관(계수/계수)
         perr_rel = float(perr[gi] / abs(gco[gi])) if abs(gco[gi]) > 0 else float("inf")
 
@@ -210,7 +210,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     for gi, g in enumerate(eng.gas_list):
         sc = eng.scaling_factors.get(g, 1.0)
         mu = eng.multipliers.get(g, 1.0)
-        conc_all[g] = float((gco[gi] * mu / sc) / n_air * 1e9)
+        conc_all[g] = float(coeff_to_ppb(gco[gi], mu, sc, n_air))
 
     shifts = {g: float(s) for g, s in zip(eng.gas_list, opt_sh)}
     squeezes = {g: float(s) for g, s in zip(eng.gas_list, opt_sq)}
@@ -390,28 +390,28 @@ def recommend_shift(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
     # 넘어가지 못하게 한다(recommend_shift는 예전부터 이 체크가 아예 없었음).
     ac1 = row.get("autocorr1", float("nan"))
     degenerate = bool(np.isfinite(ac1) and abs(ac1) > AC1_DEGENERATE_THRESHOLD)
-    warn = (f"⚠퇴화 분기 의심(|ac1|={abs(ac1):.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B — "
-            "잔차가 안 흼, 통계적으로만 좋아 보이는 가짜 해일 수 있음) — " if degenerate else "")
+    warn = (f"⚠Suspected degenerate branch (|ac1|={abs(ac1):.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B — "
+            "residual not white; may be a spurious solution that only looks good statistically) — " if degenerate else "")
     if not np.isfinite(med):
-        return dict(policy="Link", reason="측정불가", median=med, sigma=sig, ac1=ac1, degenerate=degenerate)
+        return dict(policy="Link", reason="not measurable", median=med, sigma=sig, ac1=ac1, degenerate=degenerate)
     # ★미결정 감지: bounds를 활짝 열었는데도 핏이 x0(0.0)에서 한 발도 안 움직임 →
     # 데이터가 shift를 제약하지 못한다는 뜻(타깃 신호가 약하면 발생). 이때 좁은 Limit을
     # 추천하면 "측정된 값"인 척하는 거짓말이 된다 → 자유도를 빼고 Fix + 사유를 보고.
     if abs(med) < 1e-9 and (not np.isfinite(sig) or sig < 1e-9):
         return dict(policy="Fix", value=0.0, median=med, sigma=sig, undetermined=True,
                     ac1=ac1, degenerate=degenerate,
-                    reason=(warn + "데이터가 shift를 결정 못 함(bounds ±%g로 열었는데 핏이 0에서 불변) "
-                            "→ 자유도 주지 말고 **Fix**. 타깃 신호가 약할 때 나타남." % wide))
+                    reason=(warn + "Data cannot determine shift (bounds opened to ±%g but fit stayed at 0) "
+                            "→ do not free it, use **Fix**. Occurs when the target signal is weak." % wide))
     if jittery:
         return dict(policy="Fix", value=round(med, 2), median=med, sigma=sig,
                     ac1=ac1, degenerate=degenerate,
-                    reason=warn + f"shift 흔들림 σ={sig:.2f}px→고정 권고")
+                    reason=warn + f"shift jitter σ={sig:.2f}px → Fix recommended")
     lb = _round_bound(med - margin_sigma * sig, up=False)
     ub = _round_bound(med + margin_sigma * sig, up=True)
     return dict(policy="Limit", lb=lb, ub=ub, median=med, sigma=sig,
                 at_wide_edge=bool(at_edge), ac1=ac1, degenerate=degenerate,
-                reason=(warn + f"핏 shift {med:.2f}±{sig:.2f}px → Limit [{lb}, {ub}]"
-                        + ("  ⚠넓힌 경계에도 닿음(더 넓혀야 할 수도)" if at_edge else "")))
+                reason=(warn + f"fitted shift {med:.2f}±{sig:.2f}px → Limit [{lb}, {ub}]"
+                        + ("  ⚠hits even the widened bound (may need wider)" if at_edge else "")))
 
 
 def recommend_squeeze(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
@@ -428,16 +428,16 @@ def recommend_squeeze(scans, eng, fitter, ref_props, px_min, px_max, poly_deg,
                    target, allow_negative_gas=allow_negative_gas)
     med, sig = row["sq_dist"].get(target, (float("nan"), float("nan")))
     if not np.isfinite(med):
-        return dict(policy="Fix", value=1.0, reason="측정불가 → Fix 1.0")
+        return dict(policy="Fix", value=1.0, reason="not measurable → Fix 1.0")
     dev = med - 1.0
     # 편차도 산포도 무시할 만하면 자유도를 줄 이유가 없다
     if abs(dev) < 1e-4 and (not np.isfinite(sig) or sig < 1e-4):
         return dict(policy="Fix", value=1.0, median=med, sigma=sig,
-                    reason=f"핏 squeeze {med:.5f}±{sig:.5f} → 1.0에서 사실상 안 움직임 → Fix 1.0(절약)")
+                    reason=f"fitted squeeze {med:.5f}±{sig:.5f} → effectively does not move from 1.0 → Fix 1.0 (parsimony)")
     lo = dev - margin_sigma * sig
     hi = dev + margin_sigma * sig
     return dict(policy="Limit", lo=round(lo, 4), hi=round(hi, 4), median=med, sigma=sig,
-                reason=f"핏 squeeze {med:.5f}±{sig:.5f} → Limit [{lo:+.4f}, {hi:+.4f}] (1.0 기준 편차)")
+                reason=f"fitted squeeze {med:.5f}±{sig:.5f} → Limit [{lo:+.4f}, {hi:+.4f}] (deviation from 1.0)")
 
 
 def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_max,
@@ -471,13 +471,13 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
     finite_ac1 = [a for a in ac1s if np.isfinite(a)]
     med_ac1 = float(np.median(np.abs(finite_ac1))) if finite_ac1 else float("nan")
     degenerate = bool(np.isfinite(med_ac1) and med_ac1 > AC1_DEGENERATE_THRESHOLD)
-    warn = (f"⚠퇴화 분기 의심(median |ac1|={med_ac1:.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B) — " if degenerate else "")
+    warn = (f"⚠Suspected degenerate branch (median |ac1|={med_ac1:.2f}>{AC1_DEGENERATE_THRESHOLD:g}, §16-B) — " if degenerate else "")
     if len(d) < 3:
-        return dict(value=None, ac1=med_ac1, degenerate=degenerate, reason=warn + "연속 스캔 부족 → 추천 불가")
+        return dict(value=None, ac1=med_ac1, degenerate=degenerate, reason=warn + "too few consecutive scans → no recommendation")
     if float(np.max(d)) < 1e-9:
         # shift 자체가 미결정(핏이 안 움직임)이면 '스캔당 변화량'은 정의되지 않는다.
         return dict(value=None, undetermined=True, ac1=med_ac1, degenerate=degenerate,
-                    reason=warn + "shift가 미결정(Δ가 전부 0) → step_limit은 의미 없음. shift Fix 권고와 함께 판단할 것")
+                    reason=warn + "shift undetermined (all Δ are 0) → step_limit is meaningless. Judge together with the shift Fix recommendation")
     # ⚠️|Δshift|는 스캔마다 독립 시딩된 **추정 잡음**을 크게 포함한다(드리프트가 아님).
     # 실제 드리프트 = 부호 있는 변화의 추세. 이것만 수용하면 되고, 잡음까지 허용하면
     # step_limit이 과대해져 핏이 스캔마다 헤맬 수 있다.
@@ -487,7 +487,7 @@ def recommend_step_limit(consecutive_scans, eng, fitter, ref_props, px_min, px_m
     rec = max(floor, float(np.ceil(drift * 3.0 * 20) / 20))          # 드리프트 3배 여유
     return dict(value=rec, q=q, drift=drift, jitter=jitter, median_step=float(np.median(d)), n=len(d),
                 ac1=med_ac1, degenerate=degenerate,
-                reason=(warn + f"스캔당 드리프트 {drift:.3f}px (추정잡음 σ {jitter:.3f}px는 제외; "
+                reason=(warn + f"drift per scan {drift:.3f}px (estimation noise σ {jitter:.3f}px excluded; "
                         f"|Δ| median {np.median(d):.3f}) → step_limit {rec:.2f}"))
 
 
@@ -518,7 +518,7 @@ def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly
     free = evaluate(scans, eng, fitter, rp_free, px_min, px_max, poly_deg,
                     step_limit=wide, allow_negative_gas=allow_negative_gas, target=target)
     if not base.get("n_ok") or not free.get("n_ok"):
-        return dict(secondary=secondary, decision="Link", reason="평가불가")
+        return dict(secondary=secondary, decision="Link", reason="cannot evaluate")
 
     improve = (base["rms_sig"] - free["rms_sig"]) / (abs(base["rms_sig"]) + 1e-30)
     med, sig = free["shift_dist"].get(secondary, (float("nan"), float("nan")))
@@ -537,15 +537,15 @@ def recommend_secondary_link(scans, eng, fitter, ref_props, px_min, px_max, poly
         ub = _round_bound(med + 4 * sig, up=True)
         return dict(secondary=secondary, decision="Independent",
                     lb=lb, ub=ub, improve=improve, shift=(med, sig), conc_move=conc_move,
-                    reason=(f"독립시 잔차 {improve*100:.0f}%↓ & shift {med:.2f}±{sig:.2f}px 안정"
-                            f" → 독립 [{lb}, {ub}] (Δ농도 {conc_move*100:.1f}%)"))
+                    reason=(f"independent: residual {improve*100:.0f}%↓ & shift {med:.2f}±{sig:.2f}px stable"
+                            f" → Independent [{lb}, {ub}] (Δconc {conc_move*100:.1f}%)"))
     blocked_by_collinearity = collinear and improve >= improve_min and stable
-    reason = (f"독립 이득 {improve*100:.0f}%(<{improve_min*100:.0f}%)"
-              + ("" if stable else f"·shift 불안정 σ={sig:.2f}") + " → Link 유지")
+    reason = (f"independent gain {improve*100:.0f}%(<{improve_min*100:.0f}%)"
+              + ("" if stable else f"·shift unstable σ={sig:.2f}") + " → keep Link")
     if blocked_by_collinearity:
-        reason = (f"⚠공선성 |r|={pair_r:.2f}>{COLLIN_HI_DEFAULT:g}({target}↔{secondary}) — "
-                  f"RMS는 {improve*100:.0f}%↓, shift도 안정이지만 두 종의 분해 자체가 임의적이라 "
-                  "독립 승격 거부, Link 유지")
+        reason = (f"⚠collinearity |r|={pair_r:.2f}>{COLLIN_HI_DEFAULT:g}({target}↔{secondary}) — "
+                  f"RMS {improve*100:.0f}%↓ and shift stable, but separating the two species is arbitrary, so "
+                  "promotion to Independent refused, keep Link")
     return dict(secondary=secondary, decision="Link", improve=improve,
                 shift=(med, sig), conc_move=conc_move, collinear=collinear,
                 blocked_by_collinearity=blocked_by_collinearity, pairwise_r=pair_r,

@@ -87,13 +87,14 @@ def main():
         check("정지·재개가 state_log 에 한 번씩", kinds.count("control") == 2, kinds.count("control"))
 
         win = DashboardWindow(title="t")
+        win.set_watch_dir(d)   # 폴더가 없으면 배지는 '폴더를 고르라'는 안내다(2026-10-01) — 정지 배지는 폴더가 있을 때
         got = []
         win.run_toggled.connect(got.append)
         win._toggle_run()
         check("Stop → run_toggled(False), 버튼 Start", got == [False] and "Start" in win.btn_run.text())
-        check("정지 배지(경보색 아님)", "정지" in win.badge.text() and "#C62828" not in win.badge.styleSheet())
+        check("정지 배지(경보색 아님)", "paused" in win.badge.text() and "#C62828" not in win.badge.styleSheet())
         win.set_status(P0, "늦게 도착한 경보")
-        check("정지 중 set_status 무시", "정지" in win.badge.text())
+        check("정지 중 set_status 무시", "paused" in win.badge.text())
         win._toggle_run()
         check("Start → run_toggled(True), 버튼 Stop", got == [False, True] and "Stop" in win.btn_run.text())
         win.set_status(P0, "재개 뒤 경보")

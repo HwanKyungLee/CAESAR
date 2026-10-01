@@ -11,6 +11,11 @@ F검정 자유도가 **관대한 쪽으로** 부풀어 레퍼런스가 과채택
 
 `python tools/test_n_eff_floor.py` 로 단독 실행 가능.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 
@@ -63,7 +68,7 @@ def test_floor_warns_when_it_binds():
             except Exception:
                 pass          # 스텁이라 뒤에서 죽어도 된다 — 경고가 났는지만 본다
             msgs = [str(x.message) for x in w if issubclass(x.category, RuntimeWarning)]
-        assert any("n_eff 바닥 발동" in m for m in msgs), \
+        assert any("n_eff floor triggered" in m for m in msgs), \
             f"바닥이 걸렸는데 경고가 없다: {msgs}"
     finally:
         WD.residual_rho = real

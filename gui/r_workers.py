@@ -26,6 +26,17 @@ class _LiveStream:
         return False
 
 
+def r_subdir_candidates(key):
+    """R(λ) 곡선 하위 폴더 후보(새 블록 기준 이름 우선, 2026-10-01 전 이름도). 목록의 단일 출처는
+    tools/r_trend_monitor.R_SUBDIR_CANDIDATES — 여기는 GUI 가 tools 를 임포트하는 통로일 뿐."""
+    import sys as _sys, os as _os
+    _td = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "tools")
+    if _td not in _sys.path:
+        _sys.path.insert(0, _td)
+    import r_trend_monitor as _rtm   # type: ignore
+    return _rtm.r_subdir_candidates(key)
+
+
 class _RTrendWorker(QThread):
     """백그라운드에서 r_trend_monitor.main()을 실행."""
     log        = pyqtSignal(str)
@@ -52,8 +63,8 @@ class _RTrendWorker(QThread):
             rtm.COLD_DIR         = cfg.get("cold_dir", "")
             rtm.HOT_DIR          = cfg.get("hot_dir",  "")
             rtm.WAVE_CAL_COLD    = cfg.get("wl_cold",  "")
-            rtm.WAVE_CAL_HOT     = cfg.get("wl_hot",   "")      # PNs(roi1)=CH2
-            rtm.WAVE_CAL_HOT_ANS = cfg.get("wl_hot_ans", "")    # ANs(roi2)=CH3
+            rtm.WAVE_CAL_HOT     = cfg.get("wl_hot",   "")      # primary 블록 2053 wavecal(여수: ANs, roi1)
+            rtm.WAVE_CAL_HOT_ANS = cfg.get("wl_hot_ans", "")    # secondary 블록 4101 wavecal(여수: PNs, roi2) — 키 이름은 레거시
             rtm.OUTPUT_DIR       = cfg.get("out_dir",  ".")
             rtm.COLD_FILES       = cfg.get("cold_files", None)  
             rtm.HOT_FILES        = cfg.get("hot_files",  None)  
@@ -265,11 +276,11 @@ class _ChannelRWorker(QThread):
                             # 읽기 실패 = 덮어쓰기 금지. 바깥 except가 받아 로그에
                             # 남기고 이 채널만 건너뛴다(다른 채널은 계속).
                             raise RuntimeError(
-                                f"기존 R 트렌드를 읽지 못했다 "
+                                f"Could not read the existing R trend "
                                 f"({_os.path.basename(trend_path)}): "
-                                f"{type(_e_prior).__name__}: {_e_prior} — 덮어쓰지 "
-                                f"않고 이 채널을 건너뛴다. 파일을 확인하거나 옮긴 뒤 "
-                                f"다시 실행할 것") from _e_prior
+                                f"{type(_e_prior).__name__}: {_e_prior} — not overwriting; "
+                                f"skipping this channel. Check or move the file, then "
+                                f"run again") from _e_prior
                     fresh = {r["filename"] for r in results}
                     plot_results = [r for r in prior if r["filename"] not in fresh] + results
                     plot_results.sort(key=lambda r: r["timestamp"].replace(tzinfo=None))

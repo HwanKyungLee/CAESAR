@@ -14,6 +14,11 @@
 sigma 값 자체는 안 건다 — 실측 데이터가 있어야 나오는 값이고, 값을 테스트에 박으면
 캠페인이 바뀔 때 의미 없이 깨진다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import json
 import os
 import sys

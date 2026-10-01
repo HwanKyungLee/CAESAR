@@ -105,10 +105,10 @@ def require_reproducible(context: str = "") -> str:
     v = code_version()
     if not is_reproducible(v):
         raise RuntimeError(
-            f"코드 버전을 확정할 수 없다: {v!r}"
+            f"Cannot pin down the code version: {v!r}"
             + (f" ({context})" if context else "")
-            + ". 논문/제출용 산출물은 커밋된 clean 작업트리에서 만들 것 "
-              "— 결과 파일 헤더의 해시로 checkout해 재현할 수 있어야 한다."
+            + ". Build paper/submission outputs from a clean, committed working tree "
+              "— it must be reproducible by checking out the hash in the result file header."
         )
     return v
 

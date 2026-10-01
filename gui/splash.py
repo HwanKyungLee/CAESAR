@@ -25,6 +25,8 @@ from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QPainter, QPainter
                          QPolygonF)
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 
+from gui.theme import AUGUR, VIGIL   # 색 토큰의 단일 출처
+
 # NO2(Vandaele 2002)·CHOCHO·H2O(벤치마크 hot_PNs 단면) + O4(Thalman & Volkamer 2013)의
 # 차등 광학두께 합, 421.8–478.3 nm, 220점, |max|=1. 장식용 사본이라 계산에 쓰지 말 것.
 _TAU = (
@@ -147,8 +149,10 @@ class BootSplash(QSplashScreen):
         self._subtitle = subtitle
         self._n_steps = max(1, n_steps)
         self._steps: list = []            # (status, label, value)
+        # 시계는 restart() 에서 처음 켠다. 여기서 켜면 restart 전 준비(설정·git·레이아웃, 1.3 s 넘게
+        # 걸리기도 한다) 동안 모션이 다 재생돼 완성 그림이 먼저 보이고, restart 에서 처음부터 다시
+        # 재생됐다(2026-10-01 지적). 그 전까지는 첫 프레임(빈 장면 + 부팅 로그)에 멈춰 있다.
         self._clock = QElapsedTimer()
-        self._clock.start()
         self._mono = _family("IBM Plex Mono", "Consolas")
 
     # ── 공개 API ────────────────────────────────────────────────────────
@@ -160,8 +164,11 @@ class BootSplash(QSplashScreen):
     def restart(self) -> None:
         """모션을 처음부터. 메인 스레드를 막는 가벼운 준비(설정·git·레이아웃)를 첫 장면에서 끝낸
         뒤 부른다 — 그 사이 흐른 시간만큼 모션이 건너뛰어지지 않게."""
-        self._clock.restart()
+        self._clock.start()               # restart() 는 무효 타이머에서 정의되지 않음
         self.pump()
+
+    def _elapsed_ms(self) -> int:
+        return self._clock.elapsed() if self._clock.isValid() else 0
 
     def pump(self) -> None:
         self.repaint()
@@ -172,11 +179,14 @@ class BootSplash(QSplashScreen):
         t_end = time.monotonic() + max_s
         while busy() and self.isVisible() and time.monotonic() < t_end:
             self.pump()
-            time.sleep(0.012)
+            # 모션(T_END)이 끝나면 화면은 멈춰 있다 — 그 뒤에도 12 ms 마다 다시 그리면 그리기(파이썬)가
+            # 백그라운드 임포트와 GIL 을 다퉈 부팅이 늦어진다(2026-10-01 실측: 임포트 4.0 s → 7 s).
+            # 정지 화면은 Vigil LIVE 시계(초 단위)만 바뀌므로 0.2 s 마다로 충분하다.
+            time.sleep(0.012 if self._elapsed_ms() < T_END * 1000 else 0.2)
 
     def wait_settled(self) -> None:
         """모션이 끝날 때까지(최대 SETTLE_MS) 돌린다. 이미 지났으면 즉시 반환."""
-        self.wait_while(lambda: self._clock.elapsed() < SETTLE_MS, max_s=SETTLE_MS / 1000)
+        self.wait_while(lambda: self._elapsed_ms() < SETTLE_MS, max_s=SETTLE_MS / 1000)
 
     # ── 공통 그리기 ─────────────────────────────────────────────────────
     def _text(self, p, x, baseline, s, font, color, anchor="left"):
@@ -200,7 +210,7 @@ class BootSplash(QSplashScreen):
 
     def drawContents(self, p: QPainter) -> None:            # noqa: N802 (Qt 규약)
         th = self.THEME
-        t = self._clock.elapsed() / 1000.0
+        t = self._elapsed_ms() / 1000.0
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(QRectF(0, 0, self.W, self.H), QColor(th["bg"]))
         self._draw_scene(p, t)
@@ -238,14 +248,14 @@ class AugurSplash(BootSplash):
     '확정 결과'라는 뜻이라, 스플래시 캡처 한 장이 존재하지 않는 측정값이 되면 안 된다(데이터
     무결성 헌장). 기체 이름은 확정 전엔 흐리고 확정되면 짙어진다."""
     NAME = "AUGUR"
-    COLS = ("#3B63B5", "#5B4FA6", "#7E4A86", "#4C6A7C", "#2F7A8C", "#6A5D9E")
+    COLS = AUGUR.components
 
     def __init__(self, version: str, subtitle: str = "", n_steps: int = 6, species=None):
         serif = _family("Spectral", "Georgia")
         self.THEME = dict(
-            bg="#F4F1EA", ink="#1A1D24", sub="#4A4E57", brand="#B4473A", track="#D8D3C7",
-            fill="#1A1D24", msg="#3B3F48", footer="#9A9A96",
-            log_ok="#1A1D24", log_skip="#9A9A96", log_fail="#B4473A",
+            bg=AUGUR.paper, ink=AUGUR.ink, sub=AUGUR.sub, brand=AUGUR.brand, track=AUGUR.rule,
+            fill=AUGUR.ink, msg=AUGUR.msg, footer=AUGUR.faint,
+            log_ok=AUGUR.ink, log_skip=AUGUR.faint, log_fail=AUGUR.brand,
             word_font=lambda: _font(serif, 30, 700, spacing_px=3.6),
             sub_font=lambda: _font(serif, 11.5, 400, italic=True),
             sub_strong_font=lambda: _font(serif, 11.5, 700))
@@ -337,14 +347,14 @@ class VigilSplash(BootSplash):
     주황·빨강)과 겹치지 않는다."""
     NAME = "VIGIL"
     EMB = ((30, 100), (70, 100), (78, 112), (86, 88), (96, 60), (106, 126), (114, 100), (150, 100))
-    MON = (("ingest", "#7FC3F0"), ("HK", "#8FA8F5"), ("R", "#A99BF0"), ("lamp", "#6FD0DA"), ("conc", "#B7C7DA"))
+    MON = tuple(zip(("ingest", "HK", "R", "lamp", "conc"), VIGIL.monitors))
 
     def __init__(self, version: str, subtitle: str = "", n_steps: int = 6):
         sans = _family("IBM Plex Sans", "Segoe UI")
         self.THEME = dict(
-            bg="#0B0F1A", ink="#DCE1EA", sub="#8A93A3", brand="#7FC3F0", track="#1C2333",
-            fill="#6E7686", msg="#B4BAC6", footer="#4A5264",
-            log_ok="#7FC3F0", log_skip="#6E7686", log_fail="#E5484D",
+            bg=VIGIL.night, ink=VIGIL.text, sub=VIGIL.sub, brand=VIGIL.lamp, track=VIGIL.rule,
+            fill=VIGIL.dim, msg=VIGIL.log, footer=VIGIL.footer,
+            log_ok=VIGIL.lamp, log_skip=VIGIL.dim, log_fail=VIGIL.fail,
             word_font=lambda: _font(sans, 28, 600, spacing_px=6.7),
             sub_font=lambda: _font(sans, 11),
             sub_strong_font=lambda: _font(sans, 11, 600))

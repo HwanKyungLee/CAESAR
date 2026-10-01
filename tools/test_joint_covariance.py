@@ -12,6 +12,11 @@
 3. 못 구하면 0이 아니라 NaN.
 4. 실측 레퍼런스에서 증가율(결합/조건부)을 **보고**한다 — 논문에 쓸 숫자다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

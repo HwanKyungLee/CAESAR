@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFileDialo
                              QVBoxLayout, QWidget)
 
 from core.data_io import DataIO
+from gui.theme import AUGUR
 
 
 class CavityTabMixin:
@@ -77,7 +78,7 @@ class CavityTabMixin:
         # 분석(좌측)은 알파를 넣고 RUN해 피팅. 알파 생성만 여기 Setup에서 창으로.
         btn_alpha_gen = QPushButton("Alpha Generator")
         btn_alpha_gen.clicked.connect(self.open_alpha_generator)
-        btn_alpha_gen.setStyleSheet("font-weight: bold; padding: 8px; border: 1px solid #90CAF9;")
+        btn_alpha_gen.setStyleSheet(f"font-weight: bold; padding: 8px; border: 1px solid {AUGUR.info};")
         btn_alpha_gen.setToolTip(
             "Takes raw measurement files in a popup and generates α spectra (*_alpha_trace.dat).\n"
             "wavecal/fit-range/cavity/flags use this main window's settings.")
@@ -85,7 +86,7 @@ class CavityTabMixin:
         # Test Fit — RUN 전에 세팅을 검증: 탭1(자동 파라미터 최적화 추천+Apply) +
         # 탭2(첫 알파 스캔 1개 즉석 핏 미리보기, 기존 동작 그대로).
         btn_test_fit = QPushButton("Test Fit")
-        btn_test_fit.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
+        btn_test_fit.setStyleSheet(f"font-weight: bold; padding: 6px; border: 1px solid {AUGUR.ok};")
         btn_test_fit.setToolTip(
             "Optimize tab: auto-recommend poly/shift/squeeze/step_limit from a 12-scan\n"
             "sample (worker thread, human must click Apply).\n"
@@ -101,14 +102,14 @@ class CavityTabMixin:
         # S-A: 고급 설정 구분선 — Cavity/Override/Detector는 캠페인 시작 때 한 번 맞추고
         # 평소엔 안 건드리므로 접이식 '고급' 영역으로 묶는다.
         _adv_hdr = QLabel("──  Advanced (set once per campaign)  ──")
-        _adv_hdr.setStyleSheet("color:#90A4AE; font-size:11px; padding-top:4px;")
+        _adv_hdr.setStyleSheet(f"color:{AUGUR.faint}; font-size:11px; padding-top:4px;")
         control_layout.addWidget(_adv_hdr)
 
         # Group 3: Cavity Setup — only d, RL, Leff (everything else from raw file)
         self._cavity_visible = False
         self._btn_toggle_cavity = QPushButton("▶ Cavity Setup (d, RL, L_eff)")
         self._btn_toggle_cavity.setStyleSheet(
-            "text-align: left; color: #546E7A; border: 1px solid #CFD8DC; padding: 3px 8px;")
+            f"text-align: left; color: {AUGUR.muted}; border: 1px solid {AUGUR.rule}; padding: 3px 8px;")
         control_layout.addWidget(self._btn_toggle_cavity)
         self._cavity_container = QWidget()
         self._cavity_container.setVisible(False)
@@ -120,7 +121,7 @@ class CavityTabMixin:
         # Auto-detected channel info (read-only — updated when files are loaded)
         self._detected_channels = 1   # updated by _auto_detect_channels()
         self.lbl_channel_info = QLabel("—  (auto-detected after load)")
-        self.lbl_channel_info.setStyleSheet("color: #546E7A; font-style: italic;")
+        self.lbl_channel_info.setStyleSheet(f"color: {AUGUR.muted}; font-style: italic;")
         lay_physics.addRow("Channel detect:", self.lbl_channel_info)
 
         # Cavity Length
@@ -163,7 +164,7 @@ class CavityTabMixin:
         self.lbl_leff = QLabel("L_eff: — (auto from He scans)")
         from PyQt6.QtWidgets import QSizePolicy as _SP2
         self.lbl_leff.setSizePolicy(_SP2.Policy.Ignored, _SP2.Policy.Preferred)
-        self.lbl_leff.setStyleSheet("color: #0277BD; font-weight: bold;")
+        self.lbl_leff.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
         lay_physics.addRow("Effective Path:", self.lbl_leff)
 
         grp_physics.setLayout(lay_physics)
@@ -183,8 +184,8 @@ class CavityTabMixin:
         self._manual_override_visible = False
         self._btn_toggle_override = QPushButton("▶ Manual Override")
         self._btn_toggle_override.setStyleSheet(
-            "text-align: left; color: #546E7A; "
-            "border: 1px solid #CFD8DC; padding: 3px 8px;")
+            f"text-align: left; color: {AUGUR.muted}; "
+            f"border: 1px solid {AUGUR.rule}; padding: 3px 8px;")
         control_layout.addWidget(self._btn_toggle_override)
 
         self._manual_override_container = QWidget()
@@ -193,12 +194,12 @@ class CavityTabMixin:
         _ov_outer.setContentsMargins(0, 0, 0, 0)
 
         grp_ov = QGroupBox("Manual Override")
-        grp_ov.setStyleSheet("QGroupBox { color: #546E7A; }")
+        grp_ov.setStyleSheet(f"QGroupBox {{ color: {AUGUR.muted}; }}")
         lay_ov = QFormLayout()
 
         # I0 Setup
         self.lbl_i0_path = QLabel("Auto from ZA scans")
-        self.lbl_i0_path.setStyleSheet("color: #546E7A;")
+        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.muted};")
         # 라벨이 좌측 컬럼 최소폭을 키우지 않게 축소 허용(긴 경로는 툴팁/말줄임).
         from PyQt6.QtWidgets import QSizePolicy as _SPi0
         self.lbl_i0_path.setSizePolicy(_SPi0.Policy.Ignored, _SPi0.Policy.Preferred)
@@ -224,7 +225,7 @@ class CavityTabMixin:
 
         # R Curve Setup
         self.lbl_r_path = QLabel("Auto from He scans")
-        self.lbl_r_path.setStyleSheet("color: #546E7A;")
+        self.lbl_r_path.setStyleSheet(f"color: {AUGUR.muted};")
         btn_browse_r = QPushButton("Browse R")
         btn_browse_r.clicked.connect(self.browse_r_file)
         lay_r = QHBoxLayout()
@@ -305,8 +306,8 @@ class CavityTabMixin:
         self._det_corr_visible = False
         self._btn_toggle_det = QPushButton("▶ Detector Corrections")
         self._btn_toggle_det.setStyleSheet(
-            "text-align: left; color: #546E7A; "
-            "border: 1px solid #E0E0E0; padding: 3px 8px;")
+            f"text-align: left; color: {AUGUR.muted}; "
+            f"border: 1px solid {AUGUR.rule}; padding: 3px 8px;")
         control_layout.addWidget(self._btn_toggle_det)
 
         self._det_corr_container = QWidget()
@@ -319,7 +320,7 @@ class CavityTabMixin:
 
         # Dark Current Setup
         self.lbl_dark_path = QLabel("Not loaded")
-        self.lbl_dark_path.setStyleSheet("color: gray;")
+        self.lbl_dark_path.setStyleSheet(f"color: {AUGUR.muted};")
         btn_browse_dark = QPushButton("Browse Dark")
         btn_browse_dark.clicked.connect(self.browse_dark_file)
         self.spin_dark_scale = QDoubleSpinBox()
@@ -339,7 +340,7 @@ class CavityTabMixin:
 
         # Detector Offset Setup
         self.lbl_offset_path = QLabel("Not loaded")
-        self.lbl_offset_path.setStyleSheet("color: gray;")
+        self.lbl_offset_path.setStyleSheet(f"color: {AUGUR.muted};")
         btn_browse_offset = QPushButton("Browse Offset")
         btn_browse_offset.clicked.connect(self.browse_offset_file)
         self.spin_offset_scale = QDoubleSpinBox()
@@ -463,7 +464,7 @@ class CavityTabMixin:
         # 인젝션 불량(낮은 contrast/valid)을 알파 굽기 전에 한눈에 잡는 게이지.
         self._setup_rt_readout = QLabel("R-cal quality: (run R Calibrator)")
         self._setup_rt_readout.setStyleSheet(
-            "color:#37474F; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
+            f"color:{AUGUR.muted}; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
         # 줄바꿈 끄고 높이 상한 — 좁은 폭에서 라벨이 줄바꿈으로 부풀어 패널이 스크롤되던 것 방지.
         self._setup_rt_readout.setWordWrap(False)
         self._setup_rt_readout.setMaximumHeight(int(74 * self._s))
@@ -491,7 +492,7 @@ class CavityTabMixin:
         _btn_aqc_dir = QPushButton("α Folder…")
         _btn_aqc_dir.clicked.connect(self._alpha_qc_pick_folder)
         self.lbl_aqc_dir = QLabel("(none)")
-        self.lbl_aqc_dir.setStyleSheet("color:#555;")
+        self.lbl_aqc_dir.setStyleSheet(f"color:{AUGUR.muted};")
         self.lbl_aqc_dir.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         _btn_aqc_rnpz = QPushButton("R(t) npz…")
         _btn_aqc_rnpz.setToolTip(
@@ -499,7 +500,7 @@ class CavityTabMixin:
             "Skipped if not set.")
         _btn_aqc_rnpz.clicked.connect(self._pipeline_qc_pick_r_npz)
         self.lbl_aqc_rnpz = QLabel("(none)")
-        self.lbl_aqc_rnpz.setStyleSheet("color:#555;")
+        self.lbl_aqc_rnpz.setStyleSheet(f"color:{AUGUR.muted};")
         self._aqc_r_npz = None
         self._btn_aqc_run = QPushButton("Run Pipeline Check")
         self._btn_aqc_run.setStyleSheet("font-weight:bold;")
@@ -532,7 +533,7 @@ class CavityTabMixin:
             "Pipeline health: pick an α folder (optional) and Run Pipeline Check — "
             "checks α files + wavecal + references + Rayleigh + R(t).")
         self.lbl_aqc_readout.setStyleSheet(
-            "color:#37474F; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
+            f"color:{AUGUR.muted}; font-family:Consolas,monospace; font-size:11px; padding:2px 4px;")
         self.lbl_aqc_readout.setWordWrap(False)
         self.lbl_aqc_readout.setMaximumHeight(int(150 * self._s))
         self.lbl_aqc_readout.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Maximum)
@@ -570,7 +571,7 @@ class CavityTabMixin:
         btn_pick_folder = QPushButton("Sweep Folder…")
         btn_pick_folder.clicked.connect(self._fwhm_pick_sweep_folder)
         self.lbl_fwhm_folder = QLabel("Not selected")
-        self.lbl_fwhm_folder.setStyleSheet("color: #d32f2f;")
+        self.lbl_fwhm_folder.setStyleSheet(f"color: {AUGUR.fail};")
         row_f = QHBoxLayout()
         row_f.addWidget(btn_pick_folder)
         row_f.addWidget(self.lbl_fwhm_folder, stretch=1)
@@ -593,7 +594,7 @@ class CavityTabMixin:
         btn_pick_alpha = QPushButton("Pick α file…")
         btn_pick_alpha.clicked.connect(self._fwhm_pick_alpha_file)
         self.lbl_fwhm_alpha = QLabel("(auto)")
-        self.lbl_fwhm_alpha.setStyleSheet("color: #555;")
+        self.lbl_fwhm_alpha.setStyleSheet(f"color: {AUGUR.muted};")
         row_a2 = QHBoxLayout()
         row_a2.addWidget(btn_pick_alpha)
         row_a2.addWidget(self.lbl_fwhm_alpha, stretch=1)
@@ -602,7 +603,7 @@ class CavityTabMixin:
         btn_pick_alpha_dir = QPushButton("Pick α folder…")
         btn_pick_alpha_dir.clicked.connect(self._fwhm_pick_alpha_folder)
         self.lbl_fwhm_alpha_dir = QLabel("(none)")
-        self.lbl_fwhm_alpha_dir.setStyleSheet("color: #555;")
+        self.lbl_fwhm_alpha_dir.setStyleSheet(f"color: {AUGUR.muted};")
         self._fwhm_alpha_folder = None
         row_a3 = QHBoxLayout()
         row_a3.addWidget(btn_pick_alpha_dir)
@@ -621,7 +622,7 @@ class CavityTabMixin:
         ctl_lay.addRow(row_btn)
 
         self.lbl_fwhm_best = QLabel("")
-        self.lbl_fwhm_best.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_fwhm_best.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
         self.lbl_fwhm_best.setWordWrap(True)
         ctl_lay.addRow(self.lbl_fwhm_best)
 
@@ -655,7 +656,7 @@ class CavityTabMixin:
         import glob
         n = len(glob.glob(os.path.join(d, "Ref_*_FWHM*nm.dat")))
         self.lbl_fwhm_folder.setText(f"{d}  ({n} sweep refs)")
-        self.lbl_fwhm_folder.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_fwhm_folder.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
     def _fwhm_pick_alpha_file(self):
         f, _ = QFileDialog.getOpenFileName(
@@ -668,7 +669,7 @@ class CavityTabMixin:
         self._fwhm_alpha_file_path = f
         self.rb_fwhm_alpha_file.setChecked(True)
         self.lbl_fwhm_alpha.setText(f"{os.path.basename(f)}")
-        self.lbl_fwhm_alpha.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_fwhm_alpha.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
     def _fwhm_pick_alpha_folder(self):
         d = QFileDialog.getExistingDirectory(
@@ -680,7 +681,7 @@ class CavityTabMixin:
         self._fwhm_alpha_folder = d
         self.rb_fwhm_alpha_folder.setChecked(True)
         self.lbl_fwhm_alpha_dir.setText(f"{d}")
-        self.lbl_fwhm_alpha_dir.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_fwhm_alpha_dir.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
     def _fwhm_mean_alpha_from_file(self, path):
         """alpha_trace.dat 한 파일의 모든 ambient 행 α를 평균 → (wave_nm, alpha_mean).
@@ -719,7 +720,7 @@ class CavityTabMixin:
         files = sorted(glob.glob(os.path.join(folder, '**', '*_alpha_trace.dat'),
                                  recursive=True))
         if not files:
-            raise ValueError("폴더에 *_alpha_trace.dat 가 없습니다(하위폴더 포함 검색).")
+            raise ValueError("No *_alpha_trace.dat in folder (subfolders searched).")
         ref_wl, means = None, []
         for fp in files:
             try:
@@ -733,7 +734,7 @@ class CavityTabMixin:
             else:
                 means.append(np.interp(ref_wl, wl, a, left=np.nan, right=np.nan))
         if not means:
-            raise ValueError("읽을 수 있는 α 파일이 없습니다.")
+            raise ValueError("No readable α files.")
         alpha_mean = np.nanmean(np.array(means), axis=0)
         return ref_wl, alpha_mean, len(means)
 
@@ -746,7 +747,7 @@ class CavityTabMixin:
             return
         self._aqc_folder = d
         self.lbl_aqc_dir.setText(f"{d}")
-        self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
+        self.lbl_aqc_dir.setStyleSheet(f"color:{AUGUR.ok}; font-weight:bold;")
 
     def _pipeline_qc_pick_r_npz(self):
         """R(t) npz(R_<channel>.npz) 선택 — core.health_checks.check_r용. 선택 안 하면 SKIP."""
@@ -758,7 +759,7 @@ class CavityTabMixin:
         self._dlg_dir('rt_path', fp)
         self._aqc_r_npz = fp
         self.lbl_aqc_rnpz.setText(f"{os.path.basename(fp)}")
-        self.lbl_aqc_rnpz.setStyleSheet("color:#2E7D32; font-weight:bold;")
+        self.lbl_aqc_rnpz.setStyleSheet(f"color:{AUGUR.ok}; font-weight:bold;")
 
     def _pipeline_health_checks(self):
         """core/health_checks.py 배터리를 현재 로드된 엔진 상태로 실행.
@@ -770,7 +771,7 @@ class CavityTabMixin:
         if wave is not None and wave.size > 1:
             results.append(("wavecal", *HC.check_wavecal(wave)))
         else:
-            results.append(("wavecal", HC.SKIP, "웨이브칼 미로드 (Setup에서 로드)", {}))
+            results.append(("wavecal", HC.SKIP, "Wavecal not loaded (load it in Setup)", {}))
         gas_list = list(getattr(self.engine, 'gas_list', []) or [])
         if gas_list and wave is not None:
             refs = {}
@@ -783,7 +784,7 @@ class CavityTabMixin:
                         pass
             results.append(("references", *HC.check_references(refs, wl=wave)))
         else:
-            results.append(("references", HC.SKIP, "레퍼런스 미로드 (Setup에서 Lock)", {}))
+            results.append(("references", HC.SKIP, "References not loaded (Lock them in Setup)", {}))
         results.append(("rayleigh", *HC.check_rayleigh()))
         results.append(("R(t)", *HC.check_r(getattr(self, '_aqc_r_npz', None))))
         return results
@@ -797,7 +798,7 @@ class CavityTabMixin:
         files = sorted(glob.glob(os.path.join(folder, '**', '*_alpha_trace.dat'),
                                  recursive=True))
         if not files:
-            raise ValueError("폴더에 *_alpha_trace.dat 가 없습니다(하위폴더 포함).")
+            raise ValueError("No *_alpha_trace.dat in folder (including subfolders).")
         g_sum = g_cnt = g_min = g_max = wl_ref = None
         n_scans_total = 0
         per_file = []            # (name, n_scans, nan_frac, flat, mag)
@@ -868,7 +869,7 @@ class CavityTabMixin:
             return
         self._aqc_folder = out_dir
         self.lbl_aqc_dir.setText(f"{out_dir}")
-        self.lbl_aqc_dir.setStyleSheet("color:#2E7D32; font-weight:bold;")
+        self.lbl_aqc_dir.setStyleSheet(f"color:{AUGUR.ok}; font-weight:bold;")
         try:
             if hasattr(self, '_diag_tabs') and hasattr(self, '_tab_aqc'):
                 self._diag_tabs.setCurrentWidget(self._tab_aqc)
@@ -961,7 +962,7 @@ class CavityTabMixin:
         def _esc(s):   # HTML 이스케이프 + 공백/들여쓰기 보존
             return (str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                      .replace(' ', '&nbsp;'))
-        _CLR = {HC.PASS: '#2E7D32', HC.WARN: '#E65100', HC.FAIL: '#C62828', HC.SKIP: '#78909C'}
+        _CLR = {HC.PASS: AUGUR.ok, HC.WARN: AUGUR.warn, HC.FAIL: AUGUR.fail, HC.SKIP: AUGUR.muted}
         _ICON = {HC.PASS: '', HC.WARN: '', HC.FAIL: '', HC.SKIP: ''}
         html = [f'<span style="color:{_CLR[overall_status]}; font-weight:bold;">'
                 f'{_ICON[overall_status]} {_esc(overall_msg)}</span>']
@@ -982,7 +983,7 @@ class CavityTabMixin:
         data = getattr(self, '_aqc_plot_data', None)
         if not data:
             QMessageBox.information(self, "Pipeline Health",
-                "α 폴더를 지정하고 먼저  Run Pipeline Check를 실행하세요.")
+                "Choose an α folder and run Run Pipeline Check first.")
             return
         wl, mean, _lo, _hi = data
         lo_nm = float(self.spin_fit_start_nm.value())
@@ -992,8 +993,8 @@ class CavityTabMixin:
         m = np.isfinite(wl) & np.isfinite(mean) & (wl >= lo_nm) & (wl <= hi_nm)
         if not m.any():
             QMessageBox.information(self, "Pipeline Health",
-                f"핏범위 {lo_nm:.0f}~{hi_nm:.0f} nm 안에 데이터가 없습니다.\n"
-                "Setup의 fit start/end nm를 확인하세요.")
+                f"No data within the fit range {lo_nm:.0f}~{hi_nm:.0f} nm.\n"
+                "Check fit start/end nm in Setup.")
             return
         ys = mean[m]
         ylo, yhi = float(np.nanmin(ys)), float(np.nanmax(ys))
@@ -1088,7 +1089,9 @@ class CavityTabMixin:
             except Exception as e:
                 QMessageBox.critical(self, "FWHM Best-Match", f"α folder load failed:\n{e}")
                 return
-            alpha_label = f"{os.path.basename(self._fwhm_alpha_folder.rstrip('/\\'))} (mean of {n_files} files)"
+            # f-string 밖에서 — f-string 안의 역슬래시는 3.12+ 문법이라 3.11 에선 SyntaxError(2026-10-01)
+            _folder_name = os.path.basename(self._fwhm_alpha_folder.rstrip('/\\'))
+            alpha_label = f"{_folder_name} (mean of {n_files} files)"
         else:
             if self.rb_fwhm_alpha_file.isChecked():
                 alpha_path = self._fwhm_alpha_file_path
@@ -1193,9 +1196,9 @@ class CavityTabMixin:
             f"   → {os.path.basename(best_path)}{_warn}"
         )
         if self._fwhm_legacy_mismatch:
-            self.lbl_fwhm_best.setStyleSheet("color: #E65100; font-weight: bold;")
+            self.lbl_fwhm_best.setStyleSheet(f"color: {AUGUR.warn}; font-weight: bold;")
         else:
-            self.lbl_fwhm_best.setStyleSheet("color: #2E7D32; font-weight: bold;")
+            self.lbl_fwhm_best.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
         self.btn_fwhm_set_active.setEnabled(True)
 
     def _fwhm_set_active_ref(self):

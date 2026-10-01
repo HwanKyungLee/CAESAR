@@ -50,6 +50,8 @@ from core.raw_parser import (  # noqa: E402
     SPEC_PRIMARY,
     SPEC_SECONDARY,
     P_SCALE,
+    HotHKMap,
+    ColdHKMap,
 )
 
 try:
@@ -133,26 +135,30 @@ FLAG_HE = [_RP_FLAG_HE]    # = [510]
 # ─────────────────────────────────────────────────────────────────────────────
 # Legacy column-index aliases (kept for backward compatibility)
 # ─────────────────────────────────────────────────────────────────────────────
-# Cold layout: P at col 6160, T_cavity at col 6173.
-# Hot  layout: P_PNs at 6162, P_ANs at 6164, gas T (heater setpoint) at 6155.
+# 값은 core/raw_parser.py 의 HK 지도·블록 상수가 단일 출처다(2026-10-01 — 예전엔 숫자 사본).
+# ⚠ 이 열 번호들은 R 스캔 경로에서 **읽기에 쓰이지 않는다**: r_trend_monitor.scan_directory 는
+#   T/P 를 core.data_io.read_scans_via_dataio 가 **채널 이름으로** 고른 센서에서 읽는다
+#   (2026-09-27 판정 짝: ANs ↔ P_ANs 6164, PNs ↔ P_PNs 6162). RTConfig 서명 호환용으로 남긴다.
+# ⚠ 이름의 'ANS' 는 레거시다 — 블록 4101(SPEC_SECONDARY)은 2026 여수에서 **PNs** 다
+#   (docs/채널정체_판정_2026-09-27.md). 블록 선택 값 자체는 맞다.
 
 PIXEL_MIN = 0
 PIXEL_MAX = None
 
 # Cold
-COL_PRESS_COLD = 6160
-COL_TEMP_COLD  = 6173
+COL_PRESS_COLD = ColdHKMap["cavity_P"][0]     # 6160
+COL_TEMP_COLD  = ColdHKMap["cavity_T"][0]     # 6173
 
 # Hot — two cavities, separate pressures, shared gas temperature
-COL_PRESS_HOT     = 6162   # default (= PNs)
-COL_TEMP_HOT      = 6155   # cavity gas T setpoint, ~75 °C
-COL_PRESS_HOT_PNS = 6162
-COL_PRESS_HOT_ANS = 6164
+COL_PRESS_HOT     = HotHKMap["P_PNs"][0]        # 6162 (레거시 기본값)
+COL_TEMP_HOT      = HotHKMap["cavity_gas_T"][0] # 6155, cavity gas T setpoint ~75 °C
+COL_PRESS_HOT_PNS = HotHKMap["P_PNs"][0]        # 6162
+COL_PRESS_HOT_ANS = HotHKMap["P_ANs"][0]        # 6164
 
 # Spectrum slices (re-export from raw_parser for callers)
-SPEC_START_DEFAULT = SPEC_PRIMARY[0]      # 2053
+SPEC_START_DEFAULT = SPEC_PRIMARY[0]      # 2053 — 콜드 NO2 / 여수 핫 ANs
 SPEC_END_DEFAULT   = SPEC_PRIMARY[1]      # 4101
-SPEC_START_ANS     = SPEC_SECONDARY[0]    # 4101
+SPEC_START_ANS     = SPEC_SECONDARY[0]    # 4101 — 여수 핫 **PNs**(이름은 레거시)
 SPEC_END_ANS       = SPEC_SECONDARY[1]    # 6149
 
 

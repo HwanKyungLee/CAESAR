@@ -66,9 +66,21 @@ _EXTEND_BYTES = 1024 * 1024   # 상한 안에 개행이 하나도 없을 때(행
 # 1초 타이머라 창이 영영 '응답 없음'이었다. 지금은 폴더 나열(os.scandir) 한 번에 크기·수정시각을
 # 같이 받는다(Windows 는 나열 결과에 들어 있어 추가 디스크 조회가 없다). 나열 자체가 비싼
 # 큰 트리는 전체 나열을 드물게 하고, 사이에는 최근에 바뀌는 파일이 있는 폴더만 다시 본다.
-FULL_SCAN_CHEAP_SEC = 0.05       # 전체 나열이 이보다 빠르면 매 poll 전체 나열(raw 전용 폴더)
+FULL_SCAN_CHEAP_SEC = 0.05       # 전체 나열이 이보다 느리면 '비싼 트리' — 간격을 더 늘린다
 FULL_SCAN_MIN_INTERVAL_SEC = 10  # 비싸면 최소 이 간격, 또는 나열 시간의 20배 중 큰 쪽
 HUGE_TREE_FILES = 20000          # 이보다 많으면 'raw 폴더만 가리키라'고 한 번 경고
+# 활성 파일(2026-10-01, 정상 상태 비용): 전체 나열이 싸도(raw 전용 폴더 ~2천 개 ≈ 50 ms) 매초
+# 하면 한 달치 끝난 파일을 매번 다시 본다. LabVIEW 는 채널 폴더마다 1 h 파일 하나만 키우고 새 파일은
+# rollover 로 같은 폴더에 생긴다. 그래서 전체 나열은 rescan_sec 마다만 하고, 사이에는
+#   - '활성' 파일(최근에 바뀌었거나 아직 덜 읽은 것)만 stat 해서 크기를 보고,
+#   - 그 파일들이 있는 폴더는 폴더 mtime(항목이 생기면 바뀜)이 바뀌었거나, 방금까지 자라던 파일이
+#     이번 poll 에 안 자랐으면(= rollover 직후일 수 있다) 그 폴더 하나만 다시 나열한다.
+# 폴더 mtime 을 믿지 않는 파일시스템(FAT/exFAT·일부 네트워크 공유)이어도 rollover 는 두 번째 규칙이
+# 잡고, 그 밖의 놓친 변화는 다음 전체 나열(≤ rescan_sec)이 잡는다 — 늦을 수는 있어도 행이 빠지진 않는다
+# (커서는 실제로 읽은 바이트까지만 전진한다).
+DEFAULT_RESCAN_SEC = 30.0
+ACTIVE_WINDOW_MIN_SEC = 300.0    # 전체 나열 때 mtime 이 이 안(또는 전체 나열 간격 안)에 바뀌었으면 활성
+ROLLOVER_WATCH_SEC = 60.0        # 이 안에 자란 적 있는 폴더는 '안 자란 poll' 마다 다시 나열
 
 
 def _year_from_filename(path: str, default: Optional[int] = None) -> int:
@@ -101,7 +113,8 @@ class Watcher:
                  file_glob: str = "*.dat",
                  max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
                  backlog_age_sec: Optional[float] = DEFAULT_BACKLOG_AGE_SEC,
-                 cursor_save_interval_sec: float = 0.0):
+                 cursor_save_interval_sec: float = 0.0,
+                 rescan_sec: float = DEFAULT_RESCAN_SEC):
         self.watch_dir = watch_dir
         self.profiles = profiles
         self.cursor = cursor
@@ -121,12 +134,21 @@ class Watcher:
         self._files: dict = {}                 # {path: (size, mtime)} — 마지막 나열 결과
         self._paths: list = []                 # sorted(self._files) — 목록이 바뀔 때만 다시 정렬
         self._done: dict = {}                  # {path: size} 끝까지 읽은 크기 — 같으면 커서도 안 본다
-        self._hot_dirs: set = set()            # 전체 나열 사이에 다시 볼 폴더(최근 변경·안 읽은 것)
-        self._next_full = 0.0                  # 다음 전체 나열 시각(monotonic)
+        # 전체 나열 간격. 0 이면 매 poll 전체 나열(예전 동작). 나열이 비싸면 더 늘린다.
+        self.rescan_sec = max(0.0, float(rescan_sec))
+        self._interval = self.rescan_sec
+        self._next_full = 0.0                  # 다음 전체 나열 시각(monotonic) — 첫 poll 은 항상 전체
+        self._active: set = set()              # 전체 나열 사이에 stat 하는 파일(모듈 상단 '활성 파일')
+        self._active_sorted: list = []
+        self._keep: set = set()                # 활성에서 빼지 않는 파일(살아 있던 폴더의 최신 파일)
+        self._dir_mtime: dict = {}             # {폴더: 마지막 나열 직전에 본 폴더 mtime}
+        self._dir_grew: dict = {}              # {폴더: 그 폴더 파일이 마지막으로 자란 시각(monotonic)}
         self.huge_tree = 0                     # 경고한 파일 수(0 = 경고 안 함)
 
     def _scan_dir(self, d: str, recursive: bool, out: dict) -> None:
-        """폴더 나열로 (크기, 수정시각)을 같이 받는다 — 파일마다 stat 하지 않는다."""
+        """폴더 나열로 (크기, 수정시각)을 같이 받는다 — 파일마다 stat 하지 않는다.
+        재귀일 때는 하위 폴더 mtime 도 그 폴더를 나열하기 **전에** 적어 둔다(나열 중 생긴 파일은
+        다음 poll 의 폴더 mtime 비교가 잡는다)."""
         try:
             it = os.scandir(d)
         except OSError:
@@ -136,6 +158,7 @@ class Watcher:
                 try:
                     if e.is_dir(follow_symlinks=False):
                         if recursive:
+                            self._dir_mtime[e.path] = e.stat().st_mtime
                             self._scan_dir(e.path, True, out)
                     elif fnmatch.fnmatch(e.name, self.file_glob):
                         st = e.stat()
@@ -143,35 +166,107 @@ class Watcher:
                 except OSError:
                     continue
 
-    def _refresh_files(self) -> None:
+    def _set_active(self, paths) -> None:
+        self._active = set(paths)
+        self._active_sorted = sorted(self._active)
+
+    def _full_scan(self, now: float) -> None:
+        t0 = time.perf_counter()
+        files: dict = {}
+        self._dir_mtime = {}
+        try:
+            self._dir_mtime[self.watch_dir] = os.stat(self.watch_dir).st_mtime
+        except OSError:
+            pass
+        self._scan_dir(self.watch_dir, True, files)
+        dur = time.perf_counter() - t0
+        for p, (size, _mt) in files.items():          # 지난 나열보다 자란 파일의 폴더 = 살아 있는 폴더
+            old = self._files.get(p)
+            if old is not None and size > old[0]:
+                self._dir_grew[os.path.dirname(p)] = now
+        self._files = files
+        self._paths = sorted(files)
+        interval = self.rescan_sec
+        if dur >= FULL_SCAN_CHEAP_SEC:
+            interval = max(interval, FULL_SCAN_MIN_INTERVAL_SEC, 20 * dur)
+        self._interval = interval
+        self._next_full = now + interval
+        self._warn_duplicate_basenames(list(files))
+        if len(files) > HUGE_TREE_FILES and not self.huge_tree:
+            self.huge_tree = len(files)
+            log.warning("watch folder has %s %d files — analysis outputs (not raw) seem mixed in. "
+                        "Full listing took %.1f s → now only every %.0f s. Point it at the raw folder only: %s",
+                        self.file_glob, len(files), dur, interval, self.watch_dir)
+
+    def _rebuild_active(self) -> None:
+        """전체 나열 poll 의 읽기가 끝난 뒤: 최근에 바뀐 파일 + 아직 끝까지 못 읽은 파일만 활성.
+        (읽기 뒤라 끝까지 읽은 파일은 _done 에 있다 — 커서를 다시 조회하지 않는다.)"""
+        recent = time.time() - max(ACTIVE_WINDOW_MIN_SEC, self._interval)
+        # 이번 세션에 자란 적 있는 폴더(= LabVIEW 가 쓰던 채널 폴더)는 측정이 오래 멈춰도 가장 최근
+        # 파일 하나를 계속 활성으로 둔다 — 재개해 새 파일이 생기면 전체 나열을 안 기다리고 잡는다.
+        newest: dict = {}
+        for p, (_size, mtime) in self._files.items():
+            d = os.path.dirname(p)
+            if d in self._dir_grew and mtime >= newest.get(d, ("", -1e18))[1]:
+                newest[d] = (p, mtime)
+        self._keep = {p for p, _mt in newest.values()}
+        self._set_active([p for p, (size, mtime) in self._files.items()
+                          if mtime >= recent or self._done.get(p) != size] + list(self._keep))
+
+    def _quick_refresh(self, now: float) -> None:
+        """전체 나열 사이: 활성 파일만 stat, 그 폴더들은 필요할 때만 다시 나열."""
+        grew: set = set()
+        gone = []
+        for p in self._active_sorted:
+            try:
+                st = os.stat(p)
+            except OSError:
+                gone.append(p)                        # 지워졌거나 이름이 바뀜 — 다음 전체 나열이 확인
+                continue
+            old = self._files.get(p)
+            if old is None or st.st_size != old[0]:
+                d = os.path.dirname(p)
+                grew.add(d)
+                self._dir_grew[d] = now
+            self._files[p] = (st.st_size, st.st_mtime)
+        changed = bool(gone)
+        for p in gone:
+            self._active.discard(p)
+            self._files.pop(p, None)
+        new_active = []
+        for d in {os.path.dirname(p) for p in self._active}:
+            try:
+                dmt = os.stat(d).st_mtime
+            except OSError:
+                continue
+            rolled = d not in grew and now - self._dir_grew.get(d, -1e18) <= ROLLOVER_WATCH_SEC
+            if dmt == self._dir_mtime.get(d) and not rolled:
+                continue
+            self._dir_mtime[d] = dmt                  # 나열 **전** 값 — 나열 중 생긴 파일은 다음 poll 이 잡는다
+            fresh: dict = {}
+            self._scan_dir(d, False, fresh)
+            for p, (size, mtime) in fresh.items():
+                old = self._files.get(p)
+                if old is None or old[0] != size:     # 새 파일(rollover)·크기 바뀐 파일 → 활성
+                    new_active.append(p)
+                    if old is None:
+                        changed = True
+                self._files[p] = (size, mtime)
+        if new_active:
+            self._active.update(new_active)
+        if changed or new_active:
+            self._active_sorted = sorted(self._active)
+        if changed:
+            self._paths = sorted(self._files)
+
+    def _refresh_files(self) -> bool:
+        """True = 이번이 전체 나열."""
         now = time.monotonic()
         if now >= self._next_full:
-            t0 = time.perf_counter()
-            files: dict = {}
-            self._scan_dir(self.watch_dir, True, files)
-            dur = time.perf_counter() - t0
-            self._files = files
-            self._paths = sorted(files)
-            interval = 0.0 if dur < FULL_SCAN_CHEAP_SEC else max(FULL_SCAN_MIN_INTERVAL_SEC, 20 * dur)
-            self._next_full = now + interval
-            recent = time.time() - (self.backlog_age_sec or DEFAULT_BACKLOG_AGE_SEC)
-            self._hot_dirs = {os.path.dirname(p) for p, (size, mtime) in files.items()
-                              if mtime >= recent or (self._done.get(p) != size
-                                                     and self.cursor.get(p) < size)}
-            self._warn_duplicate_basenames(list(files))
-            if len(files) > HUGE_TREE_FILES and not self.huge_tree:
-                self.huge_tree = len(files)
-                log.warning("감시 폴더에 %s 파일이 %d개 — raw 가 아닌 분석 산출물이 섞인 듯하다. "
-                            "전체 나열 %.1f s → %.0f s 마다만 한다. raw 폴더만 가리킬 것: %s",
-                            self.file_glob, len(files), dur, interval, self.watch_dir)
-        else:
-            for d in self._hot_dirs:
-                fresh: dict = {}
-                self._scan_dir(d, False, fresh)
-                new = fresh.keys() - self._files.keys()
-                self._files.update(fresh)
-                if new:                              # rollover 로 새 파일이 생겼다
-                    self._paths = sorted(self._files)
+            self._full_scan(now)
+            return True
+        self._quick_refresh(now)
+        return False
 
     def _route(self, path: str, n_columns: int) -> Optional[Profile]:
         """성공만 캐시한다. LabVIEW가 파일 첫 행에 쓰는 flag=0 헤더행은 데이터행보다
@@ -276,23 +371,24 @@ class Watcher:
                 self._warned_dupes.add(name)
                 if shown < 20:                        # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
                     shown += 1
-                    log.warning("같은 파일명이 %d곳에 있다 — 같은 스캔을 중복 수집한다: %s | %s",
+                    log.warning("same file name in %d places — the same scan is collected twice: %s | %s",
                                 len(group), name, " | ".join(group))
                 else:
                     hidden += 1
         if hidden:
-            log.warning("같은 파일명 중복 %d건 더(생략) — 감시 폴더를 raw 폴더로 좁힐 것", hidden)
+            log.warning("%d more duplicate file names (omitted) — narrow the watch folder to the raw folder", hidden)
 
 
     def poll(self) -> list:
         """한 tick: 감시폴더의 파일들에서 새 행을 모아 RowEvent 리스트로 반환.
         이번 tick 에 읽는 총량은 max_bytes_per_tick 까지 — 남은 건 다음 tick 에."""
         events: list = []
-        self._refresh_files()
-        paths = self._paths
+        full = self._refresh_files()
         if not self._started:
-            self._skip_stale_backlog(paths)
+            self._skip_stale_backlog(self._paths)
             self._started = True
+        # 전체 나열 poll 은 모든 파일, 사이에는 활성 파일만(둘 다 정렬 순서 — 상한 배분이 같다)
+        paths = self._paths if full else self._active_sorted
         budget = self.max_bytes_per_tick
         pending = False
         for path in paths:
@@ -306,7 +402,6 @@ class Watcher:
             if before == size:
                 self._done[path] = size               # 새로 붙은 게 없다 — 열지 않는다
                 continue                              # (커서 > 크기 = 잘린 파일은 읽기에서 0 으로)
-            self._hot_dirs.add(os.path.dirname(path))  # 읽을 게 있는 폴더는 계속 본다
             lines = self._read_new_lines(path, max_bytes=budget, size=size)
             after = self.cursor.get(path)
             budget -= max(0, after - before)
@@ -334,6 +429,16 @@ class Watcher:
                     arrival_time=datetime.now(), row=row,
                 ))
         self.catching_up = pending
+        if full:
+            self._rebuild_active()
+        elif self._active_sorted:
+            # 끝까지 읽었고 오래된 파일은 활성에서 뺀다(첫 poll 의 큰 백로그가 끝난 뒤 비용이 줄어든다)
+            recent = time.time() - max(ACTIVE_WINDOW_MIN_SEC, self._interval)
+            idle = [p for p in self._active_sorted if p not in self._keep
+                    and self._done.get(p) == self._files[p][0] and self._files[p][1] < recent]
+            if idle:
+                self._active.difference_update(idle)
+                self._active_sorted = sorted(self._active)
         now = time.monotonic()
         if now - self._last_cursor_save >= self.cursor_save_interval_sec:
             if self.cursor.flush():

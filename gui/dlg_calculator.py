@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from gui.result_viewer_io import load_fit_table
+from gui.theme import AUGUR
 
 # 수식에서 허용하는 element-wise 함수
 _ALLOWED_FUNCS = {
@@ -34,7 +35,7 @@ def safe_eval(expr, variables):
     try:
         node = ast.parse(expr, mode="eval").body
     except SyntaxError as e:
-        raise ValueError(f"수식 문법 오류: {e}")
+        raise ValueError(f"Expression syntax error: {e}")
 
     def ev(n):
         if isinstance(n, ast.BinOp):
@@ -46,26 +47,26 @@ def safe_eval(expr, variables):
                 with np.errstate(divide="ignore", invalid="ignore"):
                     return l / r
             if isinstance(n.op, ast.Pow):  return l ** r
-            raise ValueError("허용되지 않은 연산자 (+ - * / ** 만)")
+            raise ValueError("Operator not allowed (only + - * / **)")
         if isinstance(n, ast.UnaryOp):
             v = ev(n.operand)
             if isinstance(n.op, ast.USub): return -v
             if isinstance(n.op, ast.UAdd): return +v
-            raise ValueError("허용되지 않은 단항 연산")
+            raise ValueError("Unary operation not allowed")
         if isinstance(n, ast.Constant):
             if isinstance(n.value, (int, float)):
                 return n.value
-            raise ValueError("숫자 상수만 허용")
+            raise ValueError("Only numeric constants allowed")
         if isinstance(n, ast.Name):
             if n.id in variables:
                 return variables[n.id]
-            raise ValueError(f"알 수 없는 변수 '{n.id}'")
+            raise ValueError(f"Unknown variable '{n.id}'")
         if isinstance(n, ast.Call):
             if (isinstance(n.func, ast.Name) and n.func.id in _ALLOWED_FUNCS
                     and not n.keywords):
                 return _ALLOWED_FUNCS[n.func.id](*[ev(a) for a in n.args])
-            raise ValueError(f"허용되지 않은 함수 (가능: {', '.join(_ALLOWED_FUNCS)})")
-        raise ValueError(f"허용되지 않은 식: {type(n).__name__}")
+            raise ValueError(f"Function not allowed (available: {', '.join(_ALLOWED_FUNCS)})")
+        raise ValueError(f"Expression not allowed: {type(n).__name__}")
 
     return ev(node)
 
@@ -75,7 +76,7 @@ class CalculatorDialog(QDialog):
 
     def __init__(self, parent=None, datasets=None):
         super().__init__(parent)
-        self.setWindowTitle("Data Calculator — 다단계 수식")
+        self.setWindowTitle("Data Calculator — multi-step expressions")
         self.resize(940, 560)
         self._tables = {}          # path -> load_fit_table 결과(캐시)
         self._paths = list(datasets or [])
@@ -92,7 +93,7 @@ class CalculatorDialog(QDialog):
         b_add_ds = QPushButton("Add file…")
         b_add_ds.clicked.connect(self._add_dataset_file)
         btnbar.addWidget(b_add_ds)
-        btnbar.addWidget(QLabel("변수에 (파일, 컬럼)을 매핑하고 아래 수식을 쓰세요"))
+        btnbar.addWidget(QLabel("Map variables to (file, column), then write an expression below"))
         btnbar.addStretch(1)
         left.addLayout(btnbar)
 
@@ -110,15 +111,15 @@ class CalculatorDialog(QDialog):
         exprbar = QHBoxLayout()
         exprbar.addWidget(QLabel("Expression:"))
         self._expr = QLineEdit("A - B")
-        self._expr.setToolTip("예: A-B,  (A-B)/C,  A*2+B,  sqrt(abs(A)),  A/C*100\n"
-                              "허용: + - * / **, 괄호, 숫자, abs/sqrt/log/log10/exp/where")
+        self._expr.setToolTip("e.g. A-B,  (A-B)/C,  A*2+B,  sqrt(abs(A)),  A/C*100\n"
+                              "Allowed: + - * / **, parentheses, numbers, abs/sqrt/log/log10/exp/where")
         exprbar.addWidget(self._expr, 1)
         left.addLayout(exprbar)
 
         refbar = QHBoxLayout()
         refbar.addWidget(QLabel("Align time to:"))
         self._ref = QComboBox()
-        self._ref.setToolTip("교차-데이터셋일 때 모든 변수를 이 변수의 시각격자에 보간 정렬")
+        self._ref.setToolTip("For cross-dataset expressions, interpolate all variables onto this variable's time grid")
         refbar.addWidget(self._ref)
         refbar.addWidget(QLabel("   Result name:"))
         self._name = QLineEdit("result")
@@ -127,7 +128,7 @@ class CalculatorDialog(QDialog):
 
         actbar = QHBoxLayout()
         b_calc = QPushButton("▶ Compute")
-        b_calc.setStyleSheet("font-weight:bold; background:#2196F3; color:white; padding:4px;")
+        b_calc.setStyleSheet(f"font-weight:bold; background:{AUGUR.info}; color:white; padding:4px;")
         b_calc.clicked.connect(self._compute)
         b_save = QPushButton("Save CSV")
         b_save.clicked.connect(self._save_csv)
@@ -138,7 +139,7 @@ class CalculatorDialog(QDialog):
 
         self._msg = QLabel("")
         self._msg.setWordWrap(True)
-        self._msg.setStyleSheet("color:#555;")
+        self._msg.setStyleSheet(f"color:{AUGUR.muted};")
         left.addWidget(self._msg)
         left.addStretch(1)
 
@@ -185,7 +186,7 @@ class CalculatorDialog(QDialog):
         if t.get("rms") is not None:
             cols.append("RMS")
         if not cols:
-            self._last_col_err = f"{os.path.basename(path)}: 가스 컬럼 없음(핏 결과 아님?)"
+            self._last_col_err = f"{os.path.basename(path)}: no gas columns (not a fit result?)"
         return cols
 
     def _add_dataset_file(self):
@@ -259,7 +260,7 @@ class CalculatorDialog(QDialog):
         col_combo.blockSignals(False)
         if path and not cols and getattr(self, "_last_col_err", "") and hasattr(self, "_msg"):
             self._msg.setText(f"{self._last_col_err}")
-            self._msg.setStyleSheet("color:#c62828;")
+            self._msg.setStyleSheet(f"color:{AUGUR.fail};")
 
     def _refresh_ref(self):
         cur = self._ref.currentText()
@@ -283,16 +284,16 @@ class CalculatorDialog(QDialog):
             t = self._table(path)
             tt = t.get("time")
             if tt is None:
-                raise ValueError(f"{letter}: '{os.path.basename(path)}'에 Time 컬럼이 없어 정렬 불가")
+                raise ValueError(f"{letter}: '{os.path.basename(path)}' has no Time column; cannot align")
             vv = t["rms"] if cname == "RMS" else t["gases"].get(cname)
             if vv is None:
-                raise ValueError(f"{letter}: 컬럼 '{cname}' 없음")
+                raise ValueError(f"{letter}: column '{cname}' not found")
             tt = np.asarray(tt, float); vv = np.asarray(vv, float)
             m = np.isfinite(tt)
             o = np.argsort(tt[m])
             vars_raw[letter] = (tt[m][o], vv[m][o])
         if not vars_raw:
-            raise ValueError("변수를 하나 이상 (파일·컬럼) 지정하세요.")
+            raise ValueError("Assign at least one variable (file · column).")
         return vars_raw, (self._ref.currentText() or next(iter(vars_raw)))
 
     def _compute(self):
@@ -310,12 +311,12 @@ class CalculatorDialog(QDialog):
                     aligned[letter] = np.interp(ref_t, tt, vv, left=np.nan, right=np.nan)
             expr = self._expr.text().strip()
             if not expr:
-                raise ValueError("수식을 입력하세요.")
+                raise ValueError("Enter an expression.")
             res = safe_eval(expr, aligned)
             res = np.asarray(res, float) * np.ones_like(ref_t)  # 스칼라 결과 방어
         except Exception as e:
             self._msg.setText(f"{e}")
-            self._msg.setStyleSheet("color:#c62828;")
+            self._msg.setStyleSheet(f"color:{AUGUR.fail};")
             return
 
         self._result = (ref_t, res, self._name.text().strip() or "result")
@@ -330,11 +331,11 @@ class CalculatorDialog(QDialog):
             f"{expr}  →  n={n_ok}/{len(res)} finite, "
             f"min={np.nanmin(res):.4g}  max={np.nanmax(res):.4g}  "
             f"mean={np.nanmean(res):.4g}   (aligned to {ref})")
-        self._msg.setStyleSheet("color:#2E7D32;")
+        self._msg.setStyleSheet(f"color:{AUGUR.ok};")
 
     def _save_csv(self):
         if not self._result:
-            QMessageBox.information(self, "Save", "먼저 ▶ Compute 하세요.")
+            QMessageBox.information(self, "Save", "Run ▶ Compute first.")
             return
         t, v, name = self._result
         try:
@@ -359,6 +360,6 @@ class CalculatorDialog(QDialog):
                 for ti, vi in zip(t, v):
                     ts = _dt.datetime.fromtimestamp(ti).strftime("%Y-%m-%d %H:%M:%S")
                     f.write(f"{ts},{vi:.8g}\n")
-            QMessageBox.information(self, "Saved", f"저장됨:\n{out}")
+            QMessageBox.information(self, "Saved", f"Saved:\n{out}")
         except Exception as e:
             QMessageBox.critical(self, "Save failed", str(e))

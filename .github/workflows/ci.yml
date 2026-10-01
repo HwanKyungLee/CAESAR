@@ -54,8 +54,15 @@ jobs:
       # 뒤의 pytest·plotmaker 가 2주 넘게 아예 안 돌았던 걸 되풀이하지 않으려는 것.
       # 잡 결과는 그대로다 — 어느 단계든 실패하면 빨간불.
 
+      # 버그만 잡는 린트(pyproject [tool.ruff]) — 문법 오류·정의 안 된 이름, Python 3.11 문법 기준.
+      - name: Lint (ruff, bug-only rules)
+        run: |
+          pip install ruff
+          ruff check .
+
       # 전 모듈 임포트 스모크 — core/gui/tools/diagnostics/calibration 의 모든 .py
       - name: Import smoke test
+        if: ${{ !cancelled() }}
         run: python tools/ci_import_smoke.py
 
       # 데이터 비의존 파이프라인 검증 (Rayleigh King factor 골든값 등)

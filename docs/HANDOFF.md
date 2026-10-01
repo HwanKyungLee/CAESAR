@@ -12,6 +12,51 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-01 (3) — 단일 출처 정리 + 레거시 R 경로의 하드코딩 셀 이름 제거
+
+### 1. 숫자 무변경 정리 (커밋 `b67f15c`)
+* `core/physics.coeff_to_ppb()` — 계수→ppb 식 사본 8곳을 하나로(연산 순서 같게 → 비트 동일, 무작위 20만 대조).
+* R 도구 HK 열 번호(`r_batch_calculator`, GUI R 폴백)는 `raw_parser` HotHKMap/ColdHKMap 에서.
+* **확인한 사실**: R 스캔(`r_trend_monitor.scan_directory`)은 `col_press`/`col_temp` 인자를 **안 쓴다** —
+  T/P 는 `data_io.read_scans_via_dataio` 가 채널 **이름**으로 고른 센서(9-27 판정 짝)에서 읽는다. 그래서
+  R 도구에 옛 짝 이름이 남아 있어도 R 숫자는 이미 판정대로였다.
+
+### 2. 레거시 R 경로: 블록 기준 이름 + 레이아웃 라벨
+레거시 경로(명령줄 `r_trend_monitor`, `rt_precompute` 프리셋, 구형 3채널 차트, `r_results_plotter`)가
+블록 2053 을 'Hot PNs', 4101 을 'Hot ANs' 로 **코드에 박아** 여수 판정과 반대였다(값·핏 창은 블록에 맞았음).
+셀 이름은 캠페인·배치마다 바뀌므로(9/27 실험실은 2053 = 콜드) 이름을 판정대로 바꾸는 대신 원칙을 바꿨다:
+* **파일·폴더 이름 = 블록 번호** (`Hot_blk2053_*.dat`, `R_Hot_blk2053/`, `R_trend_Hot_blk2053.png`) —
+  주 경로의 `R_CH1/R_CH2` 와 같은 원칙. 캠페인이 바뀌어도 틀리지 않는다.
+* **화면 라벨 = `core.raw_parser.block_label(path, block)`** — 등록 레이아웃·날짜 범위가 아는 셀이면
+  'Hot ANs (block 2053)', 범위 밖·미등록이면 'Hot block 2053'(이름을 주장하지 않음).
+* 옛 이름 호환: R 곡선 폴더는 `r_trend_monitor.r_subdir_candidates()` 가 새 이름 → 옛 이름(R_Hot_PNs =
+  **블록 2053**) 순서로 돌려주고 GUI 2곳·plotter 가 그대로 찾는다. 옛 키 `hot_pns`/`hot_ans` 는 창·프리셋에
+  블록 별칭으로 남김. R 숫자·파일 내용은 그대로, **이름만** 바뀐다.
+* 회귀 `tools/test_block_labels.py`(19항목) — 라벨·기간 밖·옛 폴더 찾기·별칭·명령줄 main 끝까지.
+* 여전히 레거시: GUI R 대화상자의 cfg 키 `wl_hot_ans`(= 블록 4101 wavecal), `_update_daily_rt_chart` 인자 이름.
+  주석으로 블록을 명시했다.
+
+## 2026-10-01 (2) — worker 핏 경로 통합: `_fit_spectrum` 하나 (출력 바이트동일)
+
+순차 `_run` 과 Fast 청크 `_fit_alpha_range` 가 핏 본체(재시도 루프·가중·VarPro·모델 재구성·
+농도/ppb/오차·χ²·상태, ~150줄)를 **복사해** 들고 있었다. 같은 날 etalon OFF 버그가 두 곳에 똑같이
+있었고(187e26a), 한쪽만 고치면 Fast/순차가 조용히 갈라질 구조였다. 이제 둘 다
+`AnalysisWorker._fit_spectrum` 을 부른다(worker.py −57줄).
+* **감사가 지적한 "가중치가 이미 갈라졌다"(sqrt|I| vs 1)는 갈라진 게 아니었다** — 청크는 알파(선형
+  모드) 전용이고, 순차도 선형 모드에선 가중 1. sqrt|I| 는 raw 카운트(비선형) 모드에서만 쓰인다.
+* 경로별 차이는 인자로만: `kalman`(순차만 — 스캔 순서 의존 평활 → `{gas}_Smooth`), `record_masked`
+  (순차만 `MaskedPixels` 열), `sat_note`(순차만 포화 표시), `track_shift`(헤더행은 shift 를 안 물려줌),
+  `shift_box`(마지막 재시도가 예외여도 앞 시도에서 정착한 shift 유지 — 종전 지역변수 동작).
+* **무회귀(바이트 비교)**: 바꾸기 전 코드로 결과 dict 전체(키 순서·numpy 타입 포함)를 덤프 → 바꾼 뒤 비교.
+  - 알파: 로컬 핫 ch2 60s 5파일 296스캔, 순차·청크 × etalon ON/OFF → 전부 IDENTICAL(shift 궤적 포함,
+    재시도 'Recovered' 경로 포함). 엔진은 `tests/data/wv_cal_roi1` 레퍼런스.
+  - raw(비선형): 저장소 픽스처 `diagnostics/alpha_pass2_parallel/fixtures/cold_sample-*.dat` 300행,
+    I0+R · I0 없음(log-DOAS) · 암전류 과차감으로 I≤0 마스킹 3설정 → 전부 IDENTICAL.
+  - 헤더행(flag 0) 분기는 픽스처에 없어 바이트 비교로는 못 덮었다 — 코드는 상태 문구 덧붙이기와
+    `track_shift=False` 뿐이다.
+* CI 회귀 `tools/test_fit_paths_agree.py`: 합성 알파 40스캔을 두 경로에 넣어 공통 열이 값·키 순서까지
+  비트 동일한지(etalon ON/OFF). 한쪽 호출만 바꾸면 잡히는 것을 돌연변이로 확인했다.
+
 ## 2026-10-01 — Augur 성능 묶음: 핏 단계 알파 I/O 35배 · 스캔당 sleep · 부팅 정지
 
 출력 바이트동일만 골랐다(숫자를 바꿀 수 있는 청크 경계 변경 등은 하지 않음).

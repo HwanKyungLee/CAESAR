@@ -55,8 +55,9 @@ _KIND_KO = {
     "reference": "Reference",
     "concentration": "Concentration",
 }
-_PALETTE = ["#2196F3", "#FF6F00", "#D32F2F", "#388E3C", "#7B1FA2",
-            "#0097A7", "#C2185B", "#5D4037"]
+from PyQt6.QtGui import QColor
+from gui.theme import AUGUR, SERIES as _SERIES, species_color
+_PALETTE = list(_SERIES)   # gui/theme.py 공통 팔레트
 
 
 class ResultViewerWidget(QWidget):
@@ -86,12 +87,12 @@ class ResultViewerWidget(QWidget):
         # ── 툴바 1줄: [열기] | [보기] ────────────────────────────────────
         def _sep():
             s = QLabel("|")
-            s.setStyleSheet("color:#bbb; padding:0 4px;")
+            s.setStyleSheet(f"color:{AUGUR.faint}; padding:0 4px;")
             return s
 
         def _grp(text):
             l = QLabel(text)
-            l.setStyleSheet("color:#888; font-weight:bold;")
+            l.setStyleSheet(f"color:{AUGUR.muted}; font-weight:bold;")
             return l
 
         bar = FlowLayout(spacing=6)
@@ -104,8 +105,8 @@ class ResultViewerWidget(QWidget):
         bar.addWidget(self._btn_folder)
         self._btn_dates = QPushButton("Dates")
         self._btn_dates.setToolTip(
-            "일별 핏 버킷({YYMMDD}/{neg}/{QC}/)에서 기간·시리즈를 골라 자동 머지해 열기.\n"
-            "머지 파일은 _derived/에 저장(캐시 재사용) — 원본 일별 파일은 그대로.")
+            "Pick a date range and series from daily fit buckets ({YYMMDD}/{neg}/{QC}/), auto-merge and open.\n"
+            "Merged files are saved in _derived/ (cached for reuse) — original daily files are untouched.")
         self._btn_dates.clicked.connect(self._open_by_date)
         bar.addWidget(self._btn_dates)
         bar.addWidget(QLabel("Type:"))
@@ -160,15 +161,15 @@ class ResultViewerWidget(QWidget):
         self._spin_shift.setSuffix(" h")
         self._spin_shift.setFixedWidth(70)
         self._spin_shift.setToolTip(
-            "그래프 표시만 +/-시간 이동(장비 시계 오차·타임존 불일치를 눈으로 맞춰볼 때).\n"
-            "Export/Merge/Stats/구간선택은 항상 원본(파일 그대로) 시각 기준 — 이 값에 영향받지 않음.")
+            "Shift the plot display only by +/- hours (to visually align instrument clock error or timezone mismatch).\n"
+            "Export/Merge/Stats/range selection always use the original file times — unaffected by this value.")
         self._spin_shift.valueChanged.connect(self._on_shift_changed)
         bar.addWidget(self._spin_shift)
 
         root.addLayout(bar)
 
         self._lbl = QLabel("Open a result file or folder.")
-        self._lbl.setStyleSheet("color:#666;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.muted};")
         # 긴 상태문구가 툴바 최소폭을 강제(→그래프 잘림)하지 않게 가로 Ignored
         from PyQt6.QtWidgets import QSizePolicy
         self._lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -179,9 +180,9 @@ class ResultViewerWidget(QWidget):
         fbar.addWidget(_grp("Analyze"))
         self._btn_calc = QPushButton("Calculator")
         self._btn_calc.setToolTip(
-            "데이터 계산기: 여러 결과 컬럼을 변수(A,B,C…)에 매핑하고 (A-B)/C 같은 수식으로\n"
-            "가공 → 미리보기 + CSV 저장. 교차 데이터셋은 시각격자에 자동 보간.\n"
-            "(NO2/PNs/ANs 채널차분도 여기서: PNs = PNsCh−Cold = 'B-A' 식으로)")
+            "Data calculator: map result columns to variables (A,B,C…) and combine them with expressions like (A-B)/C\n"
+            "→ preview + save CSV. Cross-dataset variables are auto-interpolated onto a time grid.\n"
+            "(NO2/PNs/ANs channel differences too: PNs = PNsCh−Cold = 'B-A')")
         self._btn_calc.clicked.connect(self._open_calculator)
         fbar.addWidget(self._btn_calc)
         self._btn_stats = QPushButton("Σ Stats")
@@ -189,8 +190,8 @@ class ResultViewerWidget(QWidget):
         self._btn_stats.clicked.connect(self._show_stats)
         fbar.addWidget(self._btn_stats)
         self._btn_to_pm = QPushButton("To Plot Maker")
-        self._btn_to_pm.setToolTip("선택(없으면 현재) 파일을 Plot Maker 선반으로 보내\n"
-                                   "겹쳐비교·Diurnal·산점도 등 자유 합성")
+        self._btn_to_pm.setToolTip("Send the selected (or current) files to the Plot Maker shelf\n"
+                                   "for overlays, diurnal plots, scatter plots, etc.")
         self._btn_to_pm.clicked.connect(self._to_plot_maker)
         fbar.addWidget(self._btn_to_pm)
 
@@ -231,7 +232,7 @@ class ResultViewerWidget(QWidget):
         fbar.addWidget(self._btn_png)
 
         self._stats_lbl = QLabel("")
-        self._stats_lbl.setStyleSheet("color:#444;")
+        self._stats_lbl.setStyleSheet(f"color:{AUGUR.sub};")
         from PyQt6.QtWidgets import QSizePolicy as _QSP
         self._stats_lbl.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Preferred)
         root.addLayout(fbar)
@@ -256,7 +257,7 @@ class ResultViewerWidget(QWidget):
         _vl.setContentsMargins(0, 4, 0, 0)
         _vl.setSpacing(2)
         self._ver_hdr = QLabel("Versions")
-        self._ver_hdr.setStyleSheet("color:#888; font-weight:bold;")
+        self._ver_hdr.setStyleSheet(f"color:{AUGUR.muted}; font-weight:bold;")
         _vl.addWidget(self._ver_hdr)
         self._ver_list = QListWidget()
         self._ver_list.setToolTip(
@@ -370,7 +371,7 @@ class ResultViewerWidget(QWidget):
             it.setData(Qt.ItemDataRole.UserRole, ("file", p))
             self._list.addItem(it)
         self._lbl.setText(f"{len(dlg.loaded_paths)} merged series — click to view")
-        self._lbl.setStyleSheet("color:#1565C0;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.info};")
         self._path = dlg.loaded_paths[0]
         self._reload()
 
@@ -414,7 +415,7 @@ class ResultViewerWidget(QWidget):
             self._list.addItem(it)
         self._lbl.setText(f"{os.path.basename(d) or d}  —  {len(subdirs)} folders · {len(files)} files"
                           + ("  (double-click folder to enter)" if subdirs else ""))
-        self._lbl.setStyleSheet("color:#1565C0;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.info};")
 
     def _on_list_item(self, item):
         """단일클릭: 파일이면 표시. 폴더면 무시(더블클릭으로 진입)."""
@@ -447,7 +448,7 @@ class ResultViewerWidget(QWidget):
         if not versions:
             self._ver_hdr.setText("Versions  —  no .meta.json found")
             it = QListWidgetItem("(run tools/backfill_meta.py to index existing results)")
-            it.setForeground(Qt.GlobalColor.gray)
+            it.setForeground(QColor(AUGUR.muted))
             self._ver_list.addItem(it)
             return
 
@@ -553,10 +554,10 @@ class ResultViewerWidget(QWidget):
             shift_tag = (f"time shift {self._time_shift_hours:+g}h (display only)"
                         if self._time_shift_hours else "")
             self._lbl.setText(f"{os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
-            self._lbl.setStyleSheet("color:#C62828;" if self._time_shift_hours else "color:#1565C0;")
+            self._lbl.setStyleSheet(f"color:{AUGUR.fail};" if self._time_shift_hours else f"color:{AUGUR.info};")
         except Exception as e:
             self._lbl.setText(f"Failed to display: {e}  (try selecting Type manually)")
-            self._lbl.setStyleSheet("color:#C62828;")
+            self._lbl.setStyleSheet(f"color:{AUGUR.fail};")
         # 버전 목록은 핏 결과에만 의미가 있다(R 커브·α엔 meta가 없다).
         # 표시가 실패해도 목록은 갱신한다 — 어느 버전이 열려 있는지가 그때 더 궁금하다.
         try:
@@ -800,10 +801,10 @@ class ResultViewerWidget(QWidget):
     # 사용자가 명시적으로 켰을 때만 숨기고, 그때도 숨긴 개수를 제목에 적는다.
     _FLAG_COLOR = {
         "ok":       None,          # 가스 고유색 그대로
-        "unstable": "#c62828",     # 붉음 — 핏이 흔들린 스캔
-        "settling": "#9e9e9e",     # 회색 — 정착 구간(값은 살아있음)
-        "qc":       "#e0a020",     # 주황 — 자동 QC가 걸러낸 스캔
-        "cal":      "#7e57c2",     # 보라 — ZA/He 등 교정 스캔
+        "unstable": AUGUR.fail,     # 붉음 — 핏이 흔들린 스캔
+        "settling": AUGUR.faint,     # 회색 — 정착 구간(값은 살아있음)
+        "qc":       AUGUR.warn,      # 주황 — 자동 QC가 걸러낸 스캔
+        "cal":      AUGUR.special,     # 보라 — ZA/He 등 교정 스캔
     }
 
     @staticmethod
@@ -898,7 +899,7 @@ class ResultViewerWidget(QWidget):
                     continue
                 y = y.copy()
                 y[hide] = np.nan          # 'Hide QC'를 켠 경우에만 숨긴다
-                col = _PALETTE[names.index(g) % len(_PALETTE)]
+                col = species_color(g)   # 같은 기체는 어느 창에서든 같은 색(gui/theme.py)
                 if (getattr(self, '_chk_err', None) and self._chk_err.isChecked()):
                     err = (t.get("errs") or {}).get(g)
                     if err is not None:
@@ -926,11 +927,11 @@ class ResultViewerWidget(QWidget):
             elif kind == "shsq":
                 sh, sq = t.get("shift"), t.get("squeeze")
                 if sh is not None:
-                    pw.plot(x, sh, pen=pg.mkPen("#1f5fa9", width=1.2), name="Shift (px)")
+                    pw.plot(x, sh, pen=pg.mkPen(_PALETTE[0], width=1.2), name="Shift (px)")
                 if sq is not None:
                     # squeeze는 1.0 근처라 shift(px)와 축이 다르다 → 1을 뺀 편차로 겹친다
                     pw.plot(x, np.asarray(sq, float) - 1.0,
-                            pen=pg.mkPen("#7e57c2", width=1.2), name="Squeeze - 1")
+                            pen=pg.mkPen(_PALETTE[4], width=1.2), name="Squeeze - 1")
                 pw.setLabel("left", "Shift px / Sq-1")
 
             else:  # rms
@@ -1016,7 +1017,7 @@ class ResultViewerWidget(QWidget):
             self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   row {row_idx} not in alpha_trace")
             return
         xs = wave if (wave is not None and len(wave) == len(alpha)) else np.arange(len(alpha))
-        self._pw_detail.plot(xs, alpha, pen=pg.mkPen("#1f5fa9", width=1.4),
+        self._pw_detail.plot(xs, alpha, pen=pg.mkPen(AUGUR.info, width=1.4),
                              name=f"alpha (row {row_idx})")
         self._pw_detail.setLabel("left", "alpha (cm^-1)")
         self._pw_detail.setLabel(
@@ -1048,15 +1049,15 @@ class ResultViewerWidget(QWidget):
             r = refit_row(self._path, alpha_path, row_idx, saved_conc=saved,
                           saved_shift=_v("shift"), saved_squeeze=_v("squeeze"))
         except Exception as e:                      # noqa: BLE001
-            r = {"ok": False, "reason": "잔차 불가: %s" % e}
+            r = {"ok": False, "reason": "Residual unavailable: %s" % e}
         if not r.get("ok"):
             # 사유를 그대로 보여준다 — 빈 패널보다 "왜 없는지"가 중요하다.
-            self._pw_resid.setTitle(r.get("reason") or "잔차 불가")
+            self._pw_resid.setTitle(r.get("reason") or "Residual unavailable")
             return
 
         x = np.asarray(r["wave"], dtype=float)
         self._pw_resid.plot(x, np.asarray(r["residual"], dtype=float),
-                            pen=pg.mkPen("#c0392b", width=1.2), name="residual")
+                            pen=pg.mkPen(AUGUR.muted, width=1.2), name="residual")
         head = "Residual - RMS %.3g" % r["rms"]
         if r.get("rms_sig") is not None and np.isfinite(r["rms_sig"]):
             head += "  ·  rms/sig %.1f%%" % (r["rms_sig"] * 100)
@@ -1065,7 +1066,7 @@ class ResultViewerWidget(QWidget):
         self._pw_resid.setTitle(head)
         # 모델을 α 위에 겹쳐 그린다 — "얼마나 맞았나"가 한 화면에서 보인다.
         self._pw_detail.plot(x, np.asarray(r["model"], dtype=float),
-                             pen=pg.mkPen("#e67e22", width=1.2,
+                             pen=pg.mkPen(AUGUR.fail, width=1.2,
                                           style=Qt.PenStyle.DashLine),
                              name="model (refit)")
 
@@ -1221,7 +1222,7 @@ class ResultViewerWidget(QWidget):
         """선택(없으면 현재) 결과파일을 Plot Maker 선반으로 보낸다."""
         paths = self._selected_paths()
         if not paths:
-            QMessageBox.information(self, "Plot Maker", "보낼 결과 파일을 먼저 여세요.")
+            QMessageBox.information(self, "Plot Maker", "Open a result file to send first.")
             return
         self.send_to_plotmaker.emit(paths)
 

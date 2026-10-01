@@ -3,6 +3,11 @@
 가장 중요한 게이트는 **운영 알파 무변경**이다: 정상 주기의 ZA/He 블록은
 앞에 wait-before 가 27초 돌고 시작해 첫 행부터 평평하므로 한 행도 잘리면 안 된다.
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

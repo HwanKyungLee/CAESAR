@@ -15,6 +15,7 @@ import pandas as pd
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
                              QWidget)
 from core.data_io import DataIO
+from gui.theme import AUGUR
 from .test_fit_dialog import TestFitDialog
 from .ui_dialogs import (MaskDialog, RCalibratorDialog, RefPropertiesDialog, ReferenceGeneratorDialog,
                          WavelengthCalibrationDialog)
@@ -109,7 +110,7 @@ class FitSetupMixin:
             target_label = getattr(self, 'lbl_fwhm_display', getattr(self, 'fwhm_label', None))
             if target_label:
                 target_label.setText(fwhm_text)
-                target_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
+                target_label.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
             self._refresh_setup_status()
 
@@ -124,7 +125,7 @@ class FitSetupMixin:
             
             msg = f"Wavelength Updated: {wl_array.min():.2f} ~ {wl_array.max():.2f} nm"
             self.status.setText(msg)
-            self.status.setStyleSheet("color: blue; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
             
             QMessageBox.information(self, "Applied", "New wavelength calibration applied to the system instantly.")
         except Exception as e:
@@ -178,7 +179,7 @@ class FitSetupMixin:
                     _el = _fm.elidedText(f"{os.path.basename(filepath)}",
                                          _Qt.TextElideMode.ElideMiddle, int(180 * self._s))
                     self.lbl_wavecal.setText(_el)
-                    self.lbl_wavecal.setStyleSheet("color: #1565C0; font-weight: bold; padding: 2px;")
+                    self.lbl_wavecal.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold; padding: 2px;")
                     self.lbl_wavecal.setToolTip(f"Wavecal for this channel:\n{filepath}")
                 # X3: Calib 헤더에 ILS FWHM이 있으면 채운다. 예전엔 웨이브캘
                 # **다이얼로그를 그 세션에 직접 돌린 경우에만** 채워져, 파일을
@@ -330,12 +331,12 @@ class FitSetupMixin:
             except Exception:
                 gas_models.append(None)
         rms = float(np.sqrt(np.mean(resid ** 2)))
-        from core.physics import air_number_density
+        from core.physics import air_number_density, coeff_to_ppb
         n_air = air_number_density(T_C, P_mbar)   # ppb 환산 단일 출처
         ppb = {}
         for gi, nm in enumerate(eng.gas_list):
             sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
-            ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
+            ppb[nm] = coeff_to_ppb(gas_coeffs[gi], mu, sc, n_air)
 
         # etalon–기체 공선성 진단(보고 전용, 핏 불변) — RUN과 동일한 FFT 검출
         # 주파수(워커 기본 밴드 0.02~0.40 rad/px)에서 평가. 실패해도 팝업은 뜬다.
@@ -498,7 +499,7 @@ class FitSetupMixin:
         self._refs_dirty = True
         if hasattr(self, '_btn_lock_ref'):
             self._btn_lock_ref.setStyleSheet(
-                "font-weight: bold; padding: 5px; background-color: #FFCDD2; color: #B71C1C;")
+                f"font-weight: bold; padding: 5px; background-color: {AUGUR.fail_bg}; color: {AUGUR.fail};")
 
     def del_ref(self, widget):
         """Removes a reference row from the UI."""

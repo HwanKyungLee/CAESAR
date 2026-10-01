@@ -15,6 +15,11 @@ G4  shift 인입영역 — A-4가 발견한 `_seed_shift` 누락을 정답을 �
 `tests/data/wv_cal_roi1/Ref_*_Dynamic-ILS-Applied.dat` + 그 Calib 파장축을 쓴다
 (운영 PNs 창 444.1~470.6 nm, poly3 — closure test와 같은 조건).
 """
+# 한글 Windows 콘솔(cp949)에서 직접 실행해도 '—'·'✓' 등에서 죽지 않게(2026-10-01).
+import sys as _sys_utf8
+for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 import os
 import sys
 

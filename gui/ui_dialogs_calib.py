@@ -45,6 +45,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
+from gui.theme import AUGUR
 
 
 class NavigationHelper:
@@ -187,7 +188,7 @@ class WavelengthCalibrationDialog(QDialog):
         
         # Help Label
         self.help_label = QLabel("Tip: Click near a peak on the graph to automatically snap to the exact pixel.")
-        self.help_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.help_label.setStyleSheet(f"color: {AUGUR.muted}; font-size: 11px;")
         left_layout.addWidget(self.help_label)
         layout.addLayout(left_layout, stretch=3)
         
@@ -213,7 +214,7 @@ class WavelengthCalibrationDialog(QDialog):
         # Delete Table Row Button
         btn_del = QPushButton("Delete Selected Peak (or Press 'Del')")
         btn_del.clicked.connect(self.delete_selected_row)
-        btn_del.setStyleSheet("color: #cc0000;")
+        btn_del.setStyleSheet(f"color: {AUGUR.fail};")
         right_layout.addWidget(btn_del)
         
         # 3. Fitting Button
@@ -222,13 +223,13 @@ class WavelengthCalibrationDialog(QDialog):
         right_layout.addWidget(btn_fit)
         
         btn_save_fwhm = QPushButton("Save FWHM & Sigma Records")
-        btn_save_fwhm.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        btn_save_fwhm.setStyleSheet(f"background-color: {AUGUR.info}; color: white; font-weight: bold;")
         btn_save_fwhm.clicked.connect(self.save_fwhm_data)
         right_layout.addWidget(btn_save_fwhm)
 
         # 4. Save & Apply Button
         btn_apply = QPushButton("4. Save & Apply to Main")
-        btn_apply.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; height: 40px;")
+        btn_apply.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold; height: 40px;")
         btn_apply.clicked.connect(self.save_and_apply)
         right_layout.addWidget(btn_apply)
         
@@ -307,7 +308,7 @@ class WavelengthCalibrationDialog(QDialog):
                 msg = f"[Left Click] Peak registered: {snapped_px} px"
                 if hasattr(self, 'help_label'):
                     self.help_label.setText(msg)
-                    self.help_label.setStyleSheet("color: #2E7D32; font-weight: bold; font-size: 13px;")
+                    self.help_label.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold; font-size: 13px;")
 
         # =========================================================
         # 🔵 [Right Click] (event.button == 3): Calculate & Preview FWHM
@@ -329,7 +330,7 @@ class WavelengthCalibrationDialog(QDialog):
             
             if hasattr(self, 'help_label'):
                 self.help_label.setText(msg)
-                self.help_label.setStyleSheet("color: #1565C0; font-weight: bold; font-size: 13px;")
+                self.help_label.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold; font-size: 13px;")
 
     # ---------------------------------------------------------
     # UI and Graph Management Utilities
@@ -723,7 +724,7 @@ class WavelengthCalibrationDialog(QDialog):
         print(msg)
         if hasattr(self, 'help_label'):
             self.help_label.setText(msg)
-            self.help_label.setStyleSheet("color: #1565C0; font-weight: bold; font-size: 13px;")
+            self.help_label.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold; font-size: 13px;")
 
         # 8. Show fitting result popup
         self.show_fit_result_popup(pixel_list, wavelength_list, poly_func, r_squared)
@@ -1037,13 +1038,13 @@ class RangeSelectorDialog(QDialog):
         # --- 3. Bottom Button Area ---
         btns_layout = QHBoxLayout()
         self.b_apply = QPushButton("Apply Range")
-        self.b_apply.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; height: 35px;")
+        self.b_apply.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold; height: 35px;")
         # Apply는 범위만 반영하고 창은 열어둔다(여러 채널·범위를 이어서 조정 가능).
         # 실제 닫기는 Close 버튼으로만.
         self.b_apply.clicked.connect(self.emit_apply)
         # 적용 피드백(창이 안 닫히므로 반영됐는지 알 수 있게)
         self.lbl_applied = QLabel("")
-        self.lbl_applied.setStyleSheet("color:#2E7D32; font-weight:bold; padding:0 8px;")
+        self.lbl_applied.setStyleSheet(f"color:{AUGUR.ok}; font-weight:bold; padding:0 8px;")
 
         self.b_close = QPushButton("Close")
         self.b_close.clicked.connect(self.reject)

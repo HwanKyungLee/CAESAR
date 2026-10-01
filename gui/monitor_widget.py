@@ -7,6 +7,8 @@ import datetime
 import time
 import numpy as np
 import pyqtgraph as pg
+
+from gui.theme import AUGUR, channel_color   # 채널 색은 모든 Augur 그래프 공통
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
@@ -75,7 +77,7 @@ class MonitorWidget(QWidget):
     def _create_reset_toolbar(self, target_glw=None, target_pw=None):
         toolbar = QHBoxLayout()
         btn = QPushButton("Reset View (Auto Range)")
-        btn.setStyleSheet("background-color: #f5f5f5; font-weight: bold; border: 1px solid #ccc; padding: 4px;")
+        btn.setStyleSheet(f"background-color: {AUGUR.button}; color: {AUGUR.ink}; font-weight: bold; border: 1px solid {AUGUR.rule}; padding: 4px;")
         if target_glw:
             btn.clicked.connect(lambda: self._reset_glw_views(target_glw))
         elif target_pw:
@@ -161,7 +163,7 @@ class MonitorWidget(QWidget):
             p.addLegend(offset=(10, 10))
 
         # Channel colour palette  CH1=blue  CH2=orange  CH3=green
-        _CH_COLORS = {1: '#1f77b4', 2: '#ff7f0e', 3: '#2ca02c'}
+        _CH_COLORS = {ch: channel_color(ch) for ch in (1, 2, 3)}
 
         # _trend_curves[ch][metric] → PlotDataItem
         # _trend_data[ch][metric]   → list
@@ -230,7 +232,7 @@ class MonitorWidget(QWidget):
         h_stat = QHBoxLayout(grp_stat)
         self.lbl_max = QLabel("Max: 0"); self.lbl_min = QLabel("Min: 0")
         self.lbl_mean = QLabel("Mean: 0"); self.lbl_sat = QLabel("Status: OK")
-        self.lbl_sat.setStyleSheet("color: green; font-weight: bold")
+        self.lbl_sat.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold")
         h_stat.addWidget(self.lbl_max); h_stat.addWidget(self.lbl_min); h_stat.addWidget(self.lbl_mean); h_stat.addWidget(self.lbl_sat)
         l_view.addWidget(grp_stat)
         
@@ -285,9 +287,9 @@ class MonitorWidget(QWidget):
         self.lbl_mean.setText(f"Mean: {format_val(ymean)}")
         
         if ymax > 60000: 
-            self.lbl_sat.setText("SATURATED"); self.lbl_sat.setStyleSheet("color: red; font-weight: bold")
+            self.lbl_sat.setText("SATURATED"); self.lbl_sat.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold")
         else: 
-            self.lbl_sat.setText("Status: OK"); self.lbl_sat.setStyleSheet("color: green; font-weight: bold")
+            self.lbl_sat.setText("Status: OK"); self.lbl_sat.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold")
             
     def plot_viewer(self, x, y, title, color='b', style='-', xband=None):
         self.latest_raw_data = (x, y, title)
@@ -563,7 +565,7 @@ class MonitorWidget(QWidget):
     # =========================================================
     # [Tab] 농도 시계열 (가스별 ppb) — 레퍼런스 넣은 기체 전부
     # =========================================================
-    _CONC_CH_COLORS = {1: '#1f77b4', 2: '#ff7f0e', 3: '#2ca02c'}
+    _CONC_CH_COLORS = {ch: channel_color(ch) for ch in (1, 2, 3)}   # gui/theme.py 공통 채널 색
 
     def init_tab_conc_pg(self):
         """가스별 농도(ppb) 시계열 탭. 가스 플롯은 RUN 시작 시 setup_conc_plots로 구성.
@@ -573,7 +575,7 @@ class MonitorWidget(QWidget):
 
         bar = QHBoxLayout()
         btn_reset = QPushButton("Reset View")
-        btn_reset.setStyleSheet("background-color:#f5f5f5; font-weight:bold; border:1px solid #ccc; padding:4px;")
+        btn_reset.setStyleSheet(f"background-color:{AUGUR.button}; color:{AUGUR.ink}; font-weight:bold; border:1px solid {AUGUR.rule}; padding:4px;")
         btn_reset.clicked.connect(lambda: self._reset_glw_views(self.glw_conc))
         bar.addWidget(btn_reset)
         bar.addWidget(QLabel("Show gas:"))

@@ -32,7 +32,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from vigil.alert_engine import OK, P1, SKIP, aggregate, worse
+from vigil.alert_engine import OK, P0, P1, P2, SKIP, aggregate, worse
 from vigil.ingest_cursor import IngestCursor
 from vigil.monitors.hk_monitor import evaluate_hk
 from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
@@ -41,10 +41,16 @@ from vigil.monitors.r_monitor import RMonitor
 from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from vigil.state_log import StateLog
 from vigil.watcher import DEFAULT_BACKLOG_AGE_SEC, DEFAULT_MAX_BYTES_PER_TICK, Watcher
+from vigil.datapaths import rebase, rebase_fitset_channel
+from vigil.record import STATUS_CODE, MinuteRecorder
 
 log = logging.getLogger("vigil")
 
-TREND_MAXLEN = 300   # ponytail: 그래프 표시용 최근 N개 — 부족하면 늘릴 것
+TREND_MAXLEN = 720   # 그래프 표시용 최근 N점 — HK·농도 10 s 간격이면 2 h, R 은 교정 720회
+# HK 는 매 행(1 s) 오는데 그래프는 열화 추세를 보는 용도라 10 s 에 한 점이면 충분하다. 예전엔 매 행을
+# 넣어 300점 = 5분만 보였다(몇 시간에 걸친 온도 드리프트가 안 보였다). 판정은 매 행 그대로.
+HK_TREND_EVERY_SEC = 10.0
+ALARM_HISTORY_MAX = 500
 # 이만큼 새 행이 없는 파일은 파일별 상태(표·HK 판정)에서 뺀다. 1 h 파일 rollover 뒤 지난 파일의
 # P1 이 종합 상태를 영원히 붙잡고, 표가 캠페인 내내 늘어나던 것(2026-10-01). 측정 정지 자체는
 # liveness(전체 최신 행 기준)가 따로 잡으므로 여기서 빼도 숨겨지지 않는다.
@@ -76,31 +82,59 @@ def _hk_value(prof, row, key):
 class VigilApp:
     """감시 루프 상태 컨테이너. QTimer가 매 tick `.tick()`을 부른다."""
 
-    def __init__(self, watch_dir: str, profile_dir: str, state_dir: str,
+    def __init__(self, watch_dir, profile_dir: str, state_dir: str,
                  dashboard=None, max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
                  backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC, retire_after_sec: float = RETIRE_AFTER_SEC,
                  cursor_save_interval_sec: float = CURSOR_SAVE_INTERVAL_SEC):
-        self.watch_dir = watch_dir
+        """watch_dir 은 None 이어도 된다 — 대시보드의 폴더 버튼으로 나중에 정한다(set_watch_dir)."""
         self.profiles = ProfileSet.load(profile_dir)
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
-        self.watcher = Watcher(watch_dir, self.profiles, self.cursor,
-                               max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
-                               cursor_save_interval_sec=cursor_save_interval_sec)
+        self._watcher_kw = dict(max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
+                                cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec
         self.paused = False                # 대시보드 Stop — 정지 중엔 tick 이 아무것도 읽지 않는다
         self._tick_errors = 0              # 연속 tick 예외 수(성공하면 0)
+        self.dashboard = dashboard
+        self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
+        self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
+        # 다른 PC 의 Augur 출력 폴더 — 프로파일·FitSet 의 절대경로가 없을 때 그 아래에서 찾는다(vigil/datapaths.py)
+        self.data_root = None
+        # 1분 요약 기록(vigil/record.py) — 감시기가 이미 낸 최신값만 복사, 새 계산 없음
+        self.recorder = MinuteRecorder(state_dir)
+        self.watch_dir = None
+        self.watcher = None
+        self._reset_state()
+        if watch_dir:
+            self.set_watch_dir(watch_dir)
+
+    def set_watch_dir(self, watch_dir: str) -> None:
+        """감시 폴더를 정하거나 바꾼다(대시보드 폴더 버튼). 커서는 파일 절대경로 키라 그대로 이어지고,
+        이전 폴더의 파일별 상태·감시기 기준선·추세는 비운다 — 다른 계기·캠페인의 데이터와 섞이지 않게."""
+        if self.watcher is not None:
+            self.cursor.flush()
+        self.watch_dir = watch_dir
+        self.watcher = Watcher(watch_dir, self.profiles, self.cursor, **self._watcher_kw)
+        self._reset_state()
+        msg = f"Watch folder: {watch_dir}"
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="watch_dir", watch_dir=watch_dir)
+
+    def _reset_state(self) -> None:
+        """폴더별 상태 — 처음 만들 때와 폴더를 바꿀 때."""
+        self._tick_errors = 0
         self._backlog_logged = False
         self._was_catching_up = False
-        self.dashboard = dashboard
-
-        self._last_arrival = None          # 전체 최신 관측 벽시계 시각
+        self._last_arrival = None
+        self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
+        self._hk_trend_t: dict = {}        # {(profile_id, field_key): 마지막으로 그래프에 넣은 시각}
+        self.alarms: list = []             # 경보 이력 [{start, end, source, level, msg}] — 최근 것이 끝
+        self._open_alarms: dict = {}       # {source: 위 dict} — 진행 중          # 전체 최신 관측 벽시계 시각
         self._files_seen: dict = {}        # {path: arrival_time}
         self._routed_ids: set = set()
         self._hk_status: dict = {}         # {path: (status, msg, metrics)} — 최신 HK 판정
         self._hk_last_status: dict = {}    # {path: status} — 로그 중복 방지용
         self._r_monitors: dict = {}        # {(profile_id, channel_id): RMonitor}
-        self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
         self._r_by_channel: dict = {}      # {(profile_id, channel_id): (status, msg, metrics)}
         self._r_status: dict = {}          # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._r_last_status: dict = {}     # {path: status} — 로그 중복 방지용
@@ -109,7 +143,6 @@ class VigilApp:
         self._lamp_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._lamp_last_status: dict = {}
         self._conc_monitors: dict = {}     # {(profile_id, channel_id): ConcMonitor}
-        self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
         self._conc_by_channel: dict = {}   # {(profile_id, channel_id): (status, msg, metrics)}
         self._conc_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._conc_last_status: dict = {}  # {path: status} — 로그 중복 방지용
@@ -119,19 +152,37 @@ class VigilApp:
         self._hk_trend: dict = {}     # {(profile_id,field_key): deque[(datetime,float)]}
         self._trend_meta: dict = {}   # 채널/필드 메타(label, unit, min/max, warn/alarm) — 1회만 채움
 
+    def set_data_root(self, path) -> None:
+        """Augur 데이터 폴더(대시보드 버튼). 바꾸면 농도·R 감시기를 새 경로로 다시 만든다."""
+        self.data_root = path or None
+        self._wavecal_cache.clear()
+        self._fitset_cache.clear()
+        for d in (self._r_monitors, self._r_by_channel, self._r_status, self._r_last_status,
+                  self._conc_monitors, self._conc_by_channel, self._conc_status, self._conc_last_status):
+            d.clear()
+        msg = f"Augur data folder: {path or '(not set)'} — concentration/R monitors re-initialise"
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="data_root", data_root=path)
+        if self.dashboard is not None:
+            self.dashboard.log_line(msg)
+
     def _get_wavecal(self, path):
+        path = rebase(path, self.data_root)
         if path not in self._wavecal_cache:
             from tools.optimize_params import load_wavecal   # 기존 로더 재사용(3번째 사본 안 만듦)
             self._wavecal_cache[path] = load_wavecal(path)
         return self._wavecal_cache[path]
 
     def _get_fitset_channel(self, cfg):
-        scen = self._fitset_cache.get(cfg.fitset_path)
+        fp = rebase(cfg.fitset_path, self.data_root)
+        scen = self._fitset_cache.get(fp)
         if scen is None:
-            scen = json.load(open(cfg.fitset_path, encoding="utf-8"))
-            self._fitset_cache[cfg.fitset_path] = scen
+            if not os.path.exists(fp):
+                raise FileNotFoundError(f"FitSet not found: {cfg.fitset_path} — set the Augur data folder")
+            scen = json.load(open(fp, encoding="utf-8"))
+            self._fitset_cache[fp] = scen
         from vigil.monitors.conc_monitor import pick_fitset_channel
-        return pick_fitset_channel(scen, cfg.wl_dir)
+        return rebase_fitset_channel(pick_fitset_channel(scen, cfg.wl_dir), self.data_root)
 
     def _observe_reflectance(self, prof, ev, now) -> None:
         """이 행의 프로파일에 reflectance 설정이 있는 signal 채널마다 RMonitor.observe.
@@ -214,7 +265,7 @@ class VigilApp:
                     cm = ConcMonitor(fit_ch, ch.concentration)
                 except Exception as e:                # noqa: BLE001
                     self._conc_by_channel[key] = (
-                        P1, f"[{ch.label or ch.id}] 초기화 실패: {e}", {})
+                        P1, f"[{ch.label or ch.id}] init failed: {e}", {})
                     touched = True
                     continue
                 self._conc_monitors[key] = cm
@@ -255,20 +306,20 @@ class VigilApp:
             self._backlog_logged = True
             n, nbytes = w.skipped_backlog
             if n:
-                msg = (f"시작 시 오래된 raw {n}개 파일({nbytes / 1e6:.0f} MB)은 건너뛰고 끝에서 시작 "
-                       f"(커서 없음·{w.backlog_age_sec / 60:.0f}분 넘게 안 바뀜 — 지난 데이터는 Augur 몫)")
+                msg = (f"On start, skipped {n} old raw files ({nbytes / 1e6:.0f} MB) and began at their end "
+                       f"(no cursor, unchanged for over {w.backlog_age_sec / 60:.0f} min — past data is Augur's job)")
                 self.state_log.append(OK, msg, kind="ingest", skipped_files=n, skipped_bytes=nbytes)
                 if self.dashboard is not None:
                     self.dashboard.log_line(msg)
         if w.catching_up != self._was_catching_up:
             self._was_catching_up = w.catching_up
-            msg = (f"밀린 raw 따라잡는 중 (tick 당 {w.max_bytes_per_tick / 2**20:.0f} MB씩)"
-                   if w.catching_up else "따라잡기 끝 — 실시간")
+            msg = (f"Catching up on backlog raw ({w.max_bytes_per_tick / 2**20:.0f} MB per tick)"
+                   if w.catching_up else "Caught up — live")
             self.state_log.append(OK, msg, kind="ingest")
             if self.dashboard is not None:
                 self.dashboard.log_line(msg)
 
-    def pause(self, reason: str = "감시 정지(사용자 Stop)") -> None:
+    def pause(self, reason: str = "Monitoring paused (user Stop)") -> None:
         """대시보드 Stop. raw 는 계속 쌓이고 커서는 그 자리에 멈춘다 — resume 하면 밀린 줄부터
         (읽기 상한대로 나눠) 이어 읽는다. 정지 즉시 커서를 저장한다(정지한 채 창을 닫아도 안전)."""
         if self.paused:
@@ -281,7 +332,7 @@ class VigilApp:
         if not self.paused:
             return
         self.paused = False
-        self._note_control("감시 재개(사용자 Start) — 밀린 줄부터 이어 읽는다")
+        self._note_control("Monitoring resumed (user Start) — reading from the backlog onward")
 
     def _note_control(self, msg: str) -> None:
         log.info(msg)
@@ -292,15 +343,15 @@ class VigilApp:
     def tick(self) -> None:
         """QTimer 슬롯. PyQt6 는 슬롯에서 새어 나간 예외에 프로세스를 abort 하므로, 여기서 다
         받아 로그에 남기고 배지에 띄운 뒤 다음 tick 을 계속 돈다 — 감시기가 조용히 사라지는
-        것이 가장 나쁜 실패다. 정지(pause) 중엔 아무것도 하지 않는다."""
-        if self.paused:
+        것이 가장 나쁜 실패다. 정지(pause) 중이거나 아직 폴더가 없으면 아무것도 하지 않는다."""
+        if self.paused or self.watcher is None:
             return
         try:
             self._tick()
         except Exception as e:                # noqa: BLE001
             self._tick_errors += 1
-            log.exception("tick 실패 (%d회 연속)", self._tick_errors)
-            msg = f"Vigil 내부 오류 {self._tick_errors}회 연속: {type(e).__name__}: {e}"
+            log.exception("tick failed (%d in a row)", self._tick_errors)
+            msg = f"Vigil internal error, {self._tick_errors} in a row: {type(e).__name__}: {e}"
             if self._tick_errors == 1:        # 연속 실패의 첫 번만 상태 로그에(매초 쌓이지 않게)
                 self.state_log.append(P1, msg, kind="internal")
             if self.dashboard is not None:
@@ -309,11 +360,11 @@ class VigilApp:
                     if self._tick_errors == 1:
                         self.dashboard.log_line(msg)
                 except Exception:             # noqa: BLE001
-                    log.exception("오류 표시도 실패")
+                    log.exception("failed to report the error as well")
         else:
             if self._tick_errors:
-                log.info("tick 복구 (%d회 연속 실패 뒤)", self._tick_errors)
-                self.state_log.append(OK, f"Vigil 내부 오류 복구 ({self._tick_errors}회 뒤)",
+                log.info("tick recovered (after %d consecutive failures)", self._tick_errors)
+                self.state_log.append(OK, f"Vigil internal error recovered (after {self._tick_errors})",
                                       kind="internal")
             self._tick_errors = 0
 
@@ -330,7 +381,78 @@ class VigilApp:
                       self._lamp_last_status, self._conc_status, self._conc_last_status,
                       self.watcher._profile_cache):
                 d.pop(p, None)
-            log.info("파일 퇴역(%.0f분 새 행 없음): %s", self.retire_after_sec / 60, p)
+            log.info("retired file (no new rows for %.0f min): %s", self.retire_after_sec / 60, p)
+
+    # ── 경보 이력·현재 값·1분 기록 — 감시기가 이미 낸 판정·값을 모을 뿐, 새 계산 없음 ──────────
+    def _update_alarms(self, results, now) -> None:
+        """판정 항목(source)별로 P2/P1/P0 이 시작·해소된 시각을 이력으로 남긴다(같은 경보는 한 줄)."""
+        alarming = {}
+        for name, status, msg, _mt in results:
+            if status in (P0, P1, P2):
+                alarming[name] = (status, msg)
+        for name, (status, msg) in alarming.items():
+            a = self._open_alarms.get(name)
+            if a is None:
+                a = {"start": now, "end": None, "source": name, "level": status, "msg": msg}
+                self._open_alarms[name] = a
+                self.alarms.append(a)
+                del self.alarms[:-ALARM_HISTORY_MAX]
+            else:
+                if worse(a["level"], status) == status:
+                    a["level"] = status            # 진행 중 가장 심했던 등급
+                a["msg"] = msg
+        for name in [n for n in self._open_alarms if n not in alarming]:
+            self._open_alarms.pop(name)["end"] = now
+
+    def _cards(self) -> list:
+        """현재 값 카드 — 채널별 농도(대표 기체)·R·램프, 밴드 있는 HK 필드."""
+        cards = []
+        for key, (s, m, mt) in sorted(self._conc_by_channel.items()):
+            meta = self._trend_meta.get(key, {})
+            v = mt.get("conc_ppb")
+            cards.append({"key": ("conc", key), "title": f"{meta.get('label', key[1])} {meta.get('target', '')}",
+                          "value": f"{v:.2f} ppb" if isinstance(v, (int, float)) and v == v else "—",
+                          "sub": "concentration" if mt else "not running", "status": s, "tip": m})
+        for key, (s, m, mt) in sorted(self._r_by_channel.items()):
+            meta = self._trend_meta.get(key, {})
+            r = mt.get("R")
+            drop = mt.get("drop")
+            cards.append({"key": ("r", key), "title": f"R {meta.get('label', key[1])}",
+                          "value": f"{r:.6f}" if isinstance(r, float) else "—",
+                          "sub": f"drop {drop:.1e}" if isinstance(drop, float) else "building baseline",
+                          "status": s, "tip": m})
+        for key, (s, m, mt) in sorted(self._lamp_by_channel.items()):
+            lvl, rel = mt.get("I"), mt.get("rel")
+            cards.append({"key": ("lamp", key), "title": f"Lamp {key[1]}",
+                          "value": f"{lvl:.0f}" if isinstance(lvl, float) else "—",
+                          "sub": f"{rel:+.1%} vs baseline" if isinstance(rel, float) and rel == rel else "building baseline",
+                          "status": s, "tip": m})
+        sev_status = {None: OK, "warn": P2, "alarm": P1}
+        for mkey, (val, sev, _t) in sorted(self._hk_latest.items()):
+            meta = self._trend_meta.get(mkey, {})
+            unit = meta.get("unit") or ""
+            ok = isinstance(val, float) and val == val
+            cards.append({"key": ("hk", mkey), "title": meta.get("label", mkey[1]),
+                          "value": f"{val:.1f} {unit}".strip() if ok else "missing",
+                          "sub": _band_text(meta.get("alarm") or meta.get("warn")),
+                          "status": sev_status.get(sev, P2) if ok else P2})
+        return cards
+
+    def _record_values(self, overall_status, now) -> dict:
+        """1분 기록 한 줄 — 열 이름은 안정적인 순서(정렬)로."""
+        v = {"overall": STATUS_CODE.get(overall_status),
+             "last_row_age_s": (now - self._last_arrival).total_seconds() if self._last_arrival else None}
+        for key, dq in sorted(self._conc_trend.items()):
+            if dq:
+                for gas, ppb in sorted(dq[-1][1].items()):
+                    v[f"conc:{self._trend_meta.get(key, {}).get('label', key[1])}:{gas}_ppb"] = ppb
+        for key, (_s, _m, mt) in sorted(self._r_by_channel.items()):
+            v[f"R:{self._trend_meta.get(key, {}).get('label', key[1])}"] = mt.get("R")
+        for key, (_s, _m, mt) in sorted(self._lamp_by_channel.items()):
+            v[f"lamp:{key[1]}_I"] = mt.get("I")
+        for mkey, (val, _sev, _t) in sorted(self._hk_latest.items()):
+            v[f"hk:{mkey[1]}"] = val
+        return v
 
     def _tick(self) -> None:
         events = self.watcher.poll()
@@ -359,7 +481,11 @@ class VigilApp:
                 if mkey not in self._trend_meta:
                     self._trend_meta[mkey] = {"label": field.label or fkey, "unit": field.unit,
                                               "warn": field.warn, "alarm": field.alarm}
-                self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
+                self._hk_latest[mkey] = (val, sev, now)
+                _last = self._hk_trend_t.get(mkey)
+                if _last is None or (now - _last).total_seconds() >= HK_TREND_EVERY_SEC:
+                    self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
+                    self._hk_trend_t[mkey] = now
             self._observe_reflectance(prof, ev, now)
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
@@ -386,8 +512,14 @@ class VigilApp:
                 self.dashboard.log_line(f"overall: {overall_status} — {overall_msg}")
         self._last_status = overall_status
 
+        self._update_alarms(results, now)
+        self.recorder.maybe_write(now.timestamp(), self._record_values(overall_status, now))
+
         if self.dashboard is not None:
             self.dashboard.set_status(overall_status, overall_msg)
+            self.dashboard.set_freshness(self._last_arrival, now, grace_sec)
+            self.dashboard.update_cards(self._cards())
+            self.dashboard.update_alarms(self.alarms)
             rows = {}
             for p, t in self._files_seen.items():
                 hk = self._hk_status.get(p)
@@ -407,6 +539,15 @@ class VigilApp:
             self.dashboard.update_hk_trend(self._hk_trend, self._trend_meta)
 
 
+def _band_text(band) -> str:
+    if not band:
+        return ""
+    lo, hi = band
+    if lo is not None and hi is not None:
+        return f"band {lo:g}–{hi:g}"
+    return f"≥ {lo:g}" if lo is not None else f"≤ {hi:g}"
+
+
 def _default_state_dir() -> str:
     """소스 실행은 `<repo>/vigil_state`(옛 `oculus_state` 만 있으면 그것), exe 는
     `%LOCALAPPDATA%\\Vigil`(재배포해도 커서 유지, 옛 위치에서 복사) — vigil/runtime.py."""
@@ -414,21 +555,55 @@ def _default_state_dir() -> str:
     return default_state_dir(_ROOT)
 
 
+def pick_watch_dir(parent=None, qs=None):
+    """대시보드 폴더 버튼 — 폴더 선택 창. 고정 감시 폴더는 두지 않고 사람이 고른다(2026-10-01).
+    지난번 고른 폴더에서 **열기만** 한다(자동으로 쓰지 않는다). 고르면 기억하고 경로를, 취소하면 None.
+    `qs` 는 테스트용 설정 저장소(기본 QSettings("CAESAR", "vigil")). QApplication 이 있어야 한다."""
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QFileDialog
+    qs = qs if qs is not None else QSettings("CAESAR", "vigil")
+    last = qs.value("watch_dir", "", type=str)
+    start = last if last and os.path.isdir(last) else os.path.expanduser("~")
+    chosen = QFileDialog.getExistingDirectory(parent, "Vigil — choose the raw .dat folder to monitor", start)
+    if not chosen:
+        return None
+    qs.setValue("watch_dir", chosen)
+    return chosen
+
+
+def pick_data_root(parent=None, qs=None):
+    """'Augur data…' 버튼 — 이 PC 에서 Augur 산출물(FitSet·파장보정·레퍼런스)이 있는 폴더.
+    프로파일의 절대경로가 다른 PC 것일 때만 필요하다(vigil/datapaths.py). 취소하면 None."""
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QFileDialog
+    qs = qs if qs is not None else QSettings("CAESAR", "vigil")
+    last = qs.value("data_root", "", type=str)
+    start = last if last and os.path.isdir(last) else os.path.expanduser("~")
+    chosen = QFileDialog.getExistingDirectory(
+        parent, "Vigil — choose the Augur data folder (the one holding 'fit setting', wavelength calibrations …)", start)
+    if not chosen:
+        return None
+    qs.setValue("data_root", chosen)
+    return chosen
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Vigil M0+M1+M2+M3 — raw 유입 + HK + R + 농도 실시간 감시")
-    ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
+    ap = argparse.ArgumentParser(description="Vigil M0+M1+M2+M3 — real-time monitoring of raw inflow + HK + R + concentration")
+    ap.add_argument("--dir", default=None,
+                    help="raw .dat folder to monitor (recursive). If omitted or missing, a folder picker "
+                         "opens (the last chosen folder is remembered)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
-                    help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")
+                    help=f"instrument profile folder (default {DEFAULT_PROFILE_DIR})")
     ap.add_argument("--state-dir", default=None,
-                    help="커서·로그 저장 폴더 (기본: 소스 실행은 <repo>/vigil_state, exe 는 %%LOCALAPPDATA%%\\Vigil)")
-    ap.add_argument("--poll-sec", type=float, default=1.0, help="폴링 주기(초, 기본 1.0)")
+                    help="folder for cursors and logs (default: <repo>/vigil_state when run from source, %%LOCALAPPDATA%%\\Vigil for the exe)")
+    ap.add_argument("--poll-sec", type=float, default=1.0, help="poll interval (s, default 1.0)")
     ap.add_argument("--autostart", action="store_true",
-                    help="켜자마자 감시 시작(무인 운용·재부팅 후 자동 실행용). 기본은 정지 상태로 켜져 Start 를 기다린다")
+                    help="start monitoring immediately (unattended use, auto-run after reboot). By default it opens paused and waits for Start")
     ap.add_argument("--max-mb-per-tick", type=float, default=DEFAULT_MAX_BYTES_PER_TICK / 2**20,
-                    help="tick 당 읽는 raw 상한(MB, 기본 %(default).0f) — 밀린 분량은 나눠 따라잡는다")
+                    help="max raw read per tick (MB, default %(default).0f) — backlog is caught up in chunks")
     ap.add_argument("--backlog-age-min", type=float, default=DEFAULT_BACKLOG_AGE_SEC / 60,
-                    help="시작 시 커서 없는 파일 중 이보다 오래 안 바뀐 건 건너뜀(분, 기본 %(default).0f). "
-                         "음수면 건너뛰지 않고 처음부터 읽음")
+                    help="on start, skip cursorless files unchanged for longer than this (min, default %(default).0f). "
+                         "Negative: skip nothing, read from the beginning")
     return ap
 
 
@@ -445,29 +620,56 @@ def main(argv=None) -> int:
     args = build_arg_parser().parse_args(argv)
     if args.state_dir is None:
         args.state_dir = _default_state_dir()
-    if not os.path.isdir(args.dir):
-        print(f"감시 폴더 없음: {args.dir}", file=sys.stderr)
-        return 1
 
     from vigil import runtime
     log_path = runtime.setup_logging(args.state_dir)
     _crash_fh = runtime.install_crash_handlers(args.state_dir)   # noqa: F841 — 끝까지 열어 둔다
-    log.info("Vigil 시작 — dir=%s state=%s log=%s", args.dir, args.state_dir, log_path)
+    log.info("Vigil started — dir=%s state=%s log=%s", args.dir, args.state_dir, log_path)
     if runtime.lower_priority():
-        log.info("프로세스 우선순위: 보통 미만(LabVIEW 우선)")
+        log.info("process priority: below normal (LabVIEW first)")
     runtime.disable_quickedit()
 
     from PyQt6.QtCore import QLockFile, QTimer
     from PyQt6.QtWidgets import QApplication, QMessageBox
 
     app = QApplication(sys.argv[:1])
+    from gui.theme import apply_vigil
+    apply_vigil(app)   # 밤·등불 팔레트를 어둡게 고정 + pyqtgraph 기본값(gui/theme.py)
+
+    # 무거운 임포트를 **앱 생성 직후** 스레드로 시작한다. 창에 필요한 것(프로파일 스키마 검증
+    # jsonschema 1.9 s · 대시보드 pyqtgraph)이 끝나면 `_ui_ready` 를 켜고, 농도 감시기(scipy·피팅
+    # 엔진)는 창이 뜬 뒤에도 계속 불러온다 — 첫 감시 tick 에서야 쓰이고, 기본은 정지 상태로 켜므로
+    # 사람이 Start 를 누르기 전에 끝난다. 2026-10-01 전엔 농도 감시기까지 다 불러와야 창을 띄웠고
+    # 그것도 프로파일 로드 뒤(5.6 s 시점)에 시작해서 창까지 ~10 s 였다.
+    import importlib, threading
+    _ui_ready = threading.Event()
+
+    def _prewarm():
+        for _m in ("jsonschema", "pyqtgraph", "vigil.dashboard.dashboard_window"):
+            try:
+                importlib.import_module(_m)
+            except Exception:   # noqa: BLE001 — 실제 임포트 자리가 보고한다
+                pass
+        _ui_ready.set()
+        try:
+            importlib.import_module("vigil.monitors.conc_monitor")
+        except Exception:       # noqa: BLE001
+            pass
+    _pre = threading.Thread(target=_prewarm, daemon=True)
+    _pre.start()
+
+    # 감시 폴더: 시작할 때 묻지 않는다 — 대시보드의 'Choose folder…' 버튼으로 고른다(2026-10-01).
+    # --dir 은 무인 실행용으로만(없거나 사라진 폴더면 무시하고 버튼으로 고르게 한다).
+    if args.dir and not os.path.isdir(args.dir):
+        log.warning("watch folder not found: %s — choose one with the folder button", args.dir)
+        args.dir = None
 
     # 한 PC 에 Vigil 두 개 금지 — 같은 cursors.json·status.jsonl 에 두 프로세스가 쓰고 CPU 도 두 배.
     lock = QLockFile(os.path.join(args.state_dir, "vigil.lock"))
     if not lock.tryLock(100):
-        log.error("이미 실행 중인 Vigil 이 있다 (%s) — 종료", args.state_dir)
-        QMessageBox.warning(None, "Vigil", "Vigil 이 이미 실행 중입니다.\n"
-                            f"(상태 폴더: {args.state_dir})")
+        log.error("another Vigil is already running (%s) — exiting", args.state_dir)
+        QMessageBox.warning(None, "Vigil", "Vigil is already running.\n"
+                            f"(state folder: {args.state_dir})")
         return 2
 
     # 스플래시 먼저 — 로그 줄은 실제로 끝난 부팅 단계만(gui/splash.py).
@@ -479,7 +681,7 @@ def main(argv=None) -> int:
     splash.pump()
     splash.step("engine", f"Vigil v{__version__}")
 
-    splash.step("watch", args.dir)
+    splash.step("watch", args.dir or "not set — choose with the folder button", "ok" if args.dir else "skip")
     _cursors = os.path.join(args.state_dir, "cursors.json")
     _resume = os.path.isfile(_cursors)
     splash.step("state", f"{os.path.basename(args.state_dir)} · "
@@ -489,24 +691,27 @@ def main(argv=None) -> int:
     _ver = code_version()
     splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
 
+    from PyQt6.QtCore import QSettings
     from vigil.dashboard.dashboard_window import DashboardWindow
-    win = DashboardWindow(title=f"Vigil — {args.dir}")
+    qs = QSettings("CAESAR", "vigil")
+    win = DashboardWindow(title="Vigil", tz=qs.value("tz", "KST", type=str))
+    win.tz_changed.connect(lambda tz: qs.setValue("tz", tz))
     core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win,
                     max_bytes_per_tick=int(args.max_mb_per_tick * 2**20),
                     backlog_age_sec=(args.backlog_age_min * 60 if args.backlog_age_min >= 0 else None))
+    _data_root = qs.value("data_root", "", type=str)
+    if _data_root and os.path.isdir(_data_root):
+        core.data_root = _data_root          # 시작 시엔 감시기가 아직 없으니 경로만
+        win.set_data_root(_data_root)
     splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
-    win.log_line(f"watching {args.dir} (poll {args.poll_sec:.1f}s, "
-                f"{len(core.profiles)} profile(s) loaded)")
+    win.log_line(f"poll {args.poll_sec:.1f}s, {len(core.profiles)} profile(s) loaded")
+    win.set_watch_dir(args.dir)
 
     # 모션은 여기서부터 — 위의 준비(git·대시보드 생성)는 메인 스레드를 막으므로 첫 장면에서
     # 끝낸다(실측 0.2–0.4 s 정지가 세 번). 농도 감시기(scipy·피팅 엔진 ≈ 1 s)는 Qt 를 안
     # 건드리므로 스레드로 미리 데우며 1.3 s 모션을 끊김 없이 재생한다.
-    import importlib, threading
-    _pre = threading.Thread(target=lambda: importlib.import_module("vigil.monitors.conc_monitor"),
-                            daemon=True)
     splash.restart()
-    _pre.start()
-    splash.wait_while(_pre.is_alive)
+    splash.wait_while(lambda: not _ui_ready.is_set())   # 창에 필요한 임포트까지만(농도 감시기는 계속 뒤에서)
     splash.wait_settled()
     splash.step("dashboard", "ready")
 
@@ -515,16 +720,34 @@ def main(argv=None) -> int:
     timer.start(int(args.poll_sec * 1000))
     app.aboutToQuit.connect(core.shutdown)
     win.run_toggled.connect(lambda running: core.resume() if running else core.pause())
-    if not args.autostart:
-        # 기본은 정지 상태로 켠다 — 폴더·설정을 확인하고 사람이 Start 를 누를 때 읽기 시작.
-        core.pause("시작: 정지 상태 — Start 를 누르면 감시를 시작한다(바로 시작은 --autostart)")
+
+    def _on_folder_chosen(path):
+        # 폴더를 바꾸면 정지 상태로 — 새 폴더를 확인하고 사람이 Start 를 누를 때 읽기 시작.
+        core.pause("Watch folder changed — press Start to begin monitoring")
         win.set_running(False)
+        core.set_watch_dir(path)
+        win.reset_views()
+        win.set_watch_dir(path)
+        win.log_line(f"watching {path}")
+    win.folder_requested.connect(lambda: (lambda p: p and _on_folder_chosen(p))(pick_watch_dir(win)))
+
+    def _on_data_root(path):
+        core.set_data_root(path)
+        win.set_data_root(path)
+    win.data_root_requested.connect(lambda: (lambda p: p and _on_data_root(p))(pick_data_root(win, qs)))
+
+    if not args.autostart or not args.dir:
+        # 기본은 정지 상태로 켠다 — 폴더를 고르고(또는 확인하고) 사람이 Start 를 누를 때 읽기 시작.
+        core.pause("Started paused — choose a folder and press Start (use --dir and --autostart for unattended runs)")
+        win.set_running(False)
+    if args.dir:
+        win.log_line(f"watching {args.dir}")
 
     win.log_line(f"log: {log_path}")
     win.show()
     splash.finish(win)
     rc = app.exec()
-    log.info("Vigil 종료 (rc=%s)", rc)
+    log.info("Vigil exited (rc=%s)", rc)
     lock.unlock()
     return rc
 
