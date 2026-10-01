@@ -602,6 +602,11 @@ class PlotMakerWidget(QWidget):
         self.p1.getAxis("right").linkToView(self.vb_right)
         self.vb_right.setXLink(self.p1)
         self.p1.vb.sigResized.connect(self.update_views)
+        # 큰 산점도 화면 솎아내기(칸마다 점 하나) — 줌·창 크기가 바뀌면 다시 고른다
+        self._thin = None
+        self._rethinning = False
+        self.p1.vb.sigRangeChanged.connect(lambda *_: self._rethin())
+        self.p1.vb.sigResized.connect(lambda *_: self._rethin())
         # 줌/팬/창크기 변경 → 화살촉 각도 재계산(각도는 픽셀 기준이라 범위에 딸림)
         self.p1.vb.sigRangeChanged.connect(lambda *_: self._update_annot_arrows())
         self.p1.vb.sigResized.connect(lambda *_: self._update_annot_arrows())
@@ -656,7 +661,45 @@ class PlotMakerWidget(QWidget):
                  ).activated.connect(self._save_cfg)               # Ctrl+S
 
     # ── 플롯 헬퍼(모드에서 호출) ────────────────────────────────────────
+    def set_thin_scatter(self, item, x, y, brushes=None, size=5):
+        """큰 산점도를 화면에서 칸 솎아내기로 그린다(gui/pg_perf.thin_indices) → 처음 그린 점 수.
+        보이는 범위를 3 px 칸으로 나눠 칸마다 점 하나 — 점이 있는 칸은 반드시 남아 동떨어진 점이
+        사라지지 않는다. 줌하면 다시 고른다. 자동 범위가 줌한 일부가 아니라 **데이터 전체**에
+        맞도록, 그리지 않는 '범위 표지'(양 끝 두 점)를 같이 붙인다. 회귀·Publish는 원본 전부."""
+        x = np.asarray(x, float)
+        y = np.asarray(y, float)
+        self._thin = {"item": item, "x": x, "y": y, "brushes": brushes, "size": size,
+                      "ext": ((float(np.nanmin(x)), float(np.nanmax(x))),
+                              (float(np.nanmin(y)), float(np.nanmax(y))))}
+        (x0, x1), (y0, y1) = self._thin["ext"]
+        self.p1.addItem(pg.PlotDataItem([x0, x1], [y0, y1], pen=None))   # 범위 표지(안 그려진다)
+        return self._rethin(use_extent=True)
+
+    def _rethin(self, use_extent=False):
+        th = self._thin
+        if not th or self._rethinning:
+            return 0
+        item = th["item"]
+        if item.scene() is None:        # 화면이 지워졌다 — 더는 따라가지 않는다
+            self._thin = None
+            return 0
+        from gui.pg_perf import thin_indices
+        vb = self.p1.getViewBox()
+        xr, yr = th["ext"] if use_extent else vb.viewRange()
+        idx = thin_indices(th["x"], th["y"], xr, yr, vb.width() or 800.0, vb.height() or 500.0,
+                           cell_px=3.0)
+        kw = {"x": th["x"][idx], "y": th["y"][idx], "size": th["size"], "pen": None}
+        if th["brushes"] is not None:
+            kw["brush"] = [th["brushes"][i] for i in idx]
+        self._rethinning = True
+        try:
+            item.setData(**kw)
+        finally:
+            self._rethinning = False
+        return int(idx.size)
+
     def clear_plot(self):
+        self._thin = None               # 산점도 솎아내기 대상은 새 그림마다 다시 정한다
         # 이전 legend를 명시적으로 제거(아직 scene에 붙어 있으면) 후 plotItem clear.
         if self.legend is not None:
             sc = self.legend.scene()

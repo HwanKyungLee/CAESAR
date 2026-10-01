@@ -618,15 +618,17 @@ class TimeSeriesMode(PlotMode):
 
     def _add_curve(self, host, vb, xs, ys, name, label, **style):
         """곡선 하나 추가. 큰 시리즈(gui/pg_perf.BIG 초과)는 화면에서만 peak 솎아내기를 켜는데,
-        **데이터 없이 만들고 → 솎아내기 켜고 → 뷰에 붙인 뒤 → 데이터를 넣는다.** 데이터와 함께
-        만들면 뷰에 붙기도 전에 전체 점으로 마커를 한 번 만들어 버린다(26만 점에서 수 초, 실측).
+        **데이터 없이 만들고 → 뷰에 붙이고 → 솎아내기 켜고 → 데이터를 넣는다.** 데이터와 함께
+        만들면 붙기도 전에 전체 점으로 마커를 한 번 만들고(26만 점에서 수 초), 붙이기 전에 켜면
+        PlotItem.addItem이 꺼 버린다(gui/pg_perf.py).
         작은 시리즈는 예전과 똑같이 만든다. Publish(mpl)는 언제나 원본 전부."""
         n = 0 if xs is None else len(xs)
         if n > BIG:
-            curve = make_fast(pg.PlotDataItem(name=name, **style), force=True)
+            curve = pg.PlotDataItem(name=name, **style)
             if label is not None:
                 self._make_clickable(curve, label)
             self._add_pg(host, vb, curve, name)
+            make_fast(curve, force=True)        # 붙인 **다음에** — PlotItem.addItem이 꺼 버린다
             curve.setData(xs, ys)
         else:
             curve = pg.PlotDataItem(xs, ys, name=name, **style)
@@ -1040,18 +1042,36 @@ class ScatterMode(PlotMode):
             return
         xv, yv, tcolor = xy
         m = np.isfinite(xv) & np.isfinite(yv)
+        big = int(m.sum()) > BIG
+        thin_note = ""
         if self._chk_ct.isChecked() and tcolor is not None and np.isfinite(tcolor[m]).any():
             tc = tcolor[m].astype(float)
             lo, hi = np.nanmin(tc), np.nanmax(tc)
             frac = (tc - lo) / (hi - lo) if hi > lo else np.zeros_like(tc)
             cmap = pg.colormap.get("viridis")
-            brushes = [pg.mkBrush(cmap.map(f, mode="qcolor")) for f in frac]
-            sp = pg.ScatterPlotItem(x=xv[m], y=yv[m], size=6, pen=None, brush=brushes)
-            host.p1.addItem(sp)
+            if big:
+                # 점마다 새 브러시는 수십만 점에서 수 초 — 64단계 공유 브러시(눈으로 구분 안 되는 차이)
+                lut = [pg.mkBrush(cmap.map(k / 63.0, mode="qcolor")) for k in range(64)]
+                brushes = [lut[k] for k in np.clip((frac * 63).round().astype(int), 0, 63)]
+                sp = pg.ScatterPlotItem(size=6, pen=None, name=None)
+                host.p1.addItem(sp)
+                n_shown = host.set_thin_scatter(sp, xv[m], yv[m], brushes=brushes, size=6)
+            else:
+                brushes = [pg.mkBrush(cmap.map(f, mode="qcolor")) for f in frac]
+                sp = pg.ScatterPlotItem(x=xv[m], y=yv[m], size=6, pen=None, brush=brushes)
+                host.p1.addItem(sp)
         else:
             _pt = pg.mkColor(self.color("points", "#2196F3")); _pt.setAlpha(120)
-            host.p1.plot(xv[m], yv[m], pen=None, symbol="o", symbolSize=5,
-                         symbolBrush=_pt, symbolPen=None, name="data")
+            if big:
+                sp = pg.ScatterPlotItem(size=5, pen=None, brush=pg.mkBrush(_pt), name="data")
+                host.p1.addItem(sp)
+                n_shown = host.set_thin_scatter(sp, xv[m], yv[m], size=5)
+            else:
+                host.p1.plot(xv[m], yv[m], pen=None, symbol="o", symbolSize=5,
+                             symbolBrush=_pt, symbolPen=None, name="data")
+        if big:
+            thin_note = (f"  ·  screen draws one point per 3-px cell ({n_shown:,} of {int(m.sum()):,}; "
+                         "fit, R² and Publish use all)")
         host.pg_label("xlabel", host.lbl("xlabel", self._cx.currentText()))
         host.pg_label("ylabel", host.lbl("ylabel", self._cy.currentText()))
         r = self._fit(xv, yv)
@@ -1064,7 +1084,8 @@ class ScatterMode(PlotMode):
             ai = getattr(self, "_align_info", None)
             gap = (f"  ·  {ai['n_gap']} X times left unpaired (Y gap > {ai['max_gap'] / 60:.3g} min)"
                    if ai and ai["n_gap"] else "")
-            host.set_status(f"{how}: slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}{gap}")
+            host.set_status(f"{how}: slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}{gap}"
+                            f"{thin_note}")
         else:
             host.pg_label("title", host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")

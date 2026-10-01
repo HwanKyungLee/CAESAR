@@ -124,6 +124,17 @@ def test_lanes_and_click(w):
     t = w._fit_cache
     assert np.isfinite(t["gases"]["NO2"][1]) and np.isfinite(t["gases"]["NO2"][4])
 
+    # 클릭 판정은 산점도가 아니라 원본 전부로 — 그 점 좌표면 그 행, 동떨어진 곳이면 없음
+    from PyQt6.QtCore import QPointF
+    lane = vis[0]
+    xs, ys = t["time"], t["gases"]["NO2"]
+    hidden = w._qc_mask(t)            # Hide QC로 숨긴 행은 화면에 없으니 클릭으로도 안 집힌다
+    for j in range(len(xs)):
+        want = None if hidden[j] else j
+        assert w.lane_point_at(lane, QPointF(float(xs[j]), float(ys[j]))) == want, j
+    (x0, x1), (y0, y1) = lane.getViewBox().viewRange()
+    assert w.lane_point_at(lane, QPointF(x0 - (x1 - x0), y0 - (y1 - y0))) is None
+
     # 클릭 → 아래 패널에 상세, 시계열 레인은 계속 보인다
     w._show_scan_detail(1)
     title = w._pw_detail.plotItem.titleLabel.text
@@ -136,6 +147,44 @@ def test_lanes_and_click(w):
     os.remove(os.path.join(d, "260904_CH1_PNs_r3f8a1_alpha_trace.dat"))
     w._show_scan_detail(2)
     assert "row 2" in w._pw_detail.plotItem.titleLabel.text
+
+
+def test_big_file_thinning_keeps_flag_share(w):
+    """큰 파일(>2만 행)은 화면 칸마다 점 하나로 그린다 — 그래도 **flag 색 비율이 전부 그린 그림과
+    같아야** 한다(2026-10-01: ok만 솎고 flag 점을 전부 덧그렸더니 2 %인 QC가 띠 전체를 덮어
+    '대부분 QC'처럼 보였다). 클릭은 솎아서 안 그려진 점도 집는다."""
+    from PyQt6.QtCore import QPointF
+    from datetime import datetime, timedelta
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "260904_CH1_PNs_big.dat")
+    rng = np.random.default_rng(0)
+    n = 30000
+    st = rng.choice(["OK", "QC-RMS", "Unstable"], size=n, p=[0.96, 0.03, 0.01])
+    t0 = datetime(2026, 9, 4)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(_HDR + _COLS)
+        for i in range(n):
+            fh.write("\t".join(str(v) for v in (
+                f"f{i}", f"{t0 + timedelta(seconds=20 * i):%Y-%m-%d %H:%M:%S}", 1, 0.0012, 1.05,
+                120.0, st[i], 0.0, 1.0, 3.5 + rng.normal(), 0.06, 0.09, 0.02)) + "\n")
+    w.resize(1200, 800); w.show()
+    w._chk_hide_qc.setChecked(False)
+    w._path = p
+    w._reload()
+    QApplication.processEvents()
+    sc = w._scatters[0]
+    shown = len(sc.points())
+    assert 0 < shown < n, f"큰 파일인데 솎지 않음({shown})"
+    qc_col = w._FLAG_COLOR["qc"]
+    share = np.mean([sp.brush().color().name() == qc_col for sp in sc.points()])
+    assert share < 0.10, f"화면의 QC 비율 {share:.0%} — 실제 3 %인데 덮어 보인다"
+    # 솎아서 안 그려진 점도 클릭으로 집힌다
+    t = w._fit_cache
+    j = n // 2 + 7
+    lane = w._lanes[0]
+    got = w.lane_point_at(lane, QPointF(float(t["time"][j]), float(t["gases"]["NO2"][j])))
+    assert got == j, (got, j)
+    w._chk_hide_qc.setChecked(True)
 
 
 def test_residual_refuses_without_meta(w):
@@ -179,6 +228,7 @@ def main() -> int:
     for fn, args in ((test_loader_exposes_shift_squeeze, ()),
                      (test_flag_classification, ()),
                      (test_lanes_and_click, (w,)),
+                     (test_big_file_thinning_keeps_flag_share, (w,)),
                      (test_residual_refuses_without_meta, (w,)),
                      (test_non_fit_restores_old_plots, (w,))):
         fn(*args)

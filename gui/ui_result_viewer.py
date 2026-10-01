@@ -31,7 +31,7 @@ from gui.result_viewer_io import (load_result_time_gas, detect,
 
 # 레인 선(26만 점급)은 화면에서 솎아 그린다(규칙·근거: gui/pg_perf.py). 클릭용 점(ScatterPlotItem)은
 # 그대로 전부, Export/Stats는 원본 그대로.
-from gui.pg_perf import make_fast as _fast, BIG as _BIG
+from gui.pg_perf import make_fast as _fast, BIG as _BIG, add_fast_curve
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
@@ -882,7 +882,9 @@ class ResultViewerWidget(QWidget):
         n_lanes = len(lanes_spec)
 
         stats = []
-        self._scatters = []
+        self._scatters = []       # 레인마다 flag 색 점 산점도
+        self._lane_hits = {}      # id(레인) → (x, y, x 정렬 순서) — 클릭 판정은 원본 전부로
+        self._lane_thin = {}      # id(레인) → 큰 파일 화면 솎아내기 상태(줌하면 다시 고른다)
         # 화면 솎아내기 배율은 '지금 보이는 x 범위'로 정해진다(gui/pg_perf.py) — 큰 파일이면
         # 그리기 전에 데이터 범위로 잡아둬야 첫 계산부터 맞는다. 다 그린 뒤 자동 범위로 되돌린다.
         fin_x = x[np.isfinite(x)]
@@ -890,7 +892,9 @@ class ResultViewerWidget(QWidget):
         for i, (kind, g) in enumerate(lanes_spec):
             pw = self._lane(kind, i, n_lanes)
             if pre_range:
-                pw.getViewBox().setXRange(float(fin_x.min()), float(fin_x.max()), padding=0)
+                # padding=None = 자동 범위와 같은 여백. x 자동 범위를 다시 켜지 않는다 — 켜면 연결된
+                # 레인들이 연쇄로 범위를 바꿔 마커를 수십 번 다시 만든다(실측 setData 23회). 'A'로 복귀.
+                pw.getViewBox().setXRange(float(fin_x.min()), float(fin_x.max()), padding=None)
             self._set_time_axis(pw, has_time)
             if i == n_lanes - 1:
                 pw.setLabel("bottom", xlabel)
@@ -912,17 +916,28 @@ class ResultViewerWidget(QWidget):
                             pw.addItem(pg.ErrorBarItem(
                                 x=xs[::step], y=ys[::step], height=2 * es[::step],
                                 pen=pg.mkPen(col, width=1)))
-                _fast(pw.plot(x, y, pen=pg.mkPen(col, width=1.2)))
+                add_fast_curve(pw, x, y, pen=pg.mkPen(col, width=1.2))   # 큰 파일이면 peak 솎아내기
                 # 점 색 = flag. 값을 지우는 게 아니라 **표시만** 다르게 한다.
-                # 브러시는 flag마다 **한 개를 공유**한다 — 점마다 새 QBrush를 만들면 pyqtgraph가
-                # 점마다 심볼을 다시 그려 26만 점×가스 4에서 90 s가 걸렸다(실측, 공유 시 레인당 ~1 s).
+                # 브러시는 flag마다 **한 개를 공유**한다 — 점마다 새 QBrush면 pyqtgraph가 점마다 심볼을
+                # 다시 그려 26만 점×가스 4에서 90 s(2026-10-01 실측).
                 shared = {k: pg.mkBrush(c or col) for k, c in self._FLAG_COLOR.items()}
                 brushes = [shared[f] for f in flags]
-                sc = pg.ScatterPlotItem(x=x, y=y, size=5, brush=brushes,
-                                        pen=None, hoverable=True)
-                sc.sigClicked.connect(self._on_lane_points_clicked)
-                pw.addItem(sc)
+                if len(x) > _BIG:
+                    # 큰 파일: 화면 3 px 칸마다 점 하나 — 칸마다 **마지막** 점(전부 그렸을 때 위에 남는
+                    # 점)이라 flag 색 비율이 전부 그린 그림과 같다. ok 점만 솎고 flag 점을 전부 덧그렸더니
+                    # 2 %인 QC가 띠 전체를 덮어 '대부분 QC'처럼 보였다(실측 — 그림이 거짓말). 줌하면 다시.
+                    sc = pg.ScatterPlotItem(size=5, pen=None)
+                    pw.addItem(sc)
+                    self._lane_thin[id(pw)] = {"item": sc, "x": x, "y": y, "brushes": brushes}
+                    self._hook_lane_thin(pw)
+                    self._rethin_lane(pw, use_extent=True)
+                else:
+                    sc = pg.ScatterPlotItem(x=x, y=y, size=5, brush=brushes, pen=None)
+                    pw.addItem(sc)
                 self._scatters.append(sc)
+                # 클릭 판정은 산점도가 아니라 원본 전부로(솎아서 안 그려진 점도 집힌다)
+                self._lane_hits[id(pw)] = (x, y, np.argsort(x, kind="stable"))
+                self._hook_lane_click(pw)
                 pw.setLabel("left", f"{g} (ppb)")
                 fin = y[np.isfinite(y)]
                 if fin.size:
@@ -942,8 +957,6 @@ class ResultViewerWidget(QWidget):
             else:  # rms
                 _fast(pw.plot(x, t["rms"], pen=pg.mkPen(_PALETTE[2], width=1.2), name="RMS"))
                 pw.setLabel("left", "RMS (cm^-1)")
-            if pre_range:
-                pw.getViewBox().enableAutoRange(x=True)   # 미리 잡은 범위 → 예전처럼 자동 범위
         self._hide_extra_lanes(n_lanes)
 
         # 스택을 쓰는 동안 예전 2단 플롯은 숨긴다(다른 종류 파일은 그쪽을 계속 쓴다)
@@ -964,6 +977,75 @@ class ResultViewerWidget(QWidget):
             self._attach_region()
 
         self._stats_lbl.setText("   |   ".join(stats))
+
+    def _hook_lane_thin(self, pw):
+        """레인 범위·크기가 바뀌면 점을 다시 고르는 연결(레인당 한 번)."""
+        if getattr(pw, "_lane_thin_hooked", False):
+            return
+        pw._lane_thin_hooked = True
+        vb = pw.getViewBox()
+        vb.sigRangeChanged.connect(lambda *_, pw=pw: self._rethin_lane(pw))
+        vb.sigResized.connect(lambda *_, pw=pw: self._rethin_lane(pw))
+
+    def _rethin_lane(self, pw, use_extent=False):
+        from gui.pg_perf import thin_indices
+        th = getattr(self, "_lane_thin", {}).get(id(pw))
+        if not th or th.get("busy") or th["item"].scene() is None:
+            return
+        x, y = th["x"], th["y"]
+        vb = pw.getViewBox()
+        if use_extent:
+            fx, fy = x[np.isfinite(x)], y[np.isfinite(y)]
+            if not (fx.size and fy.size):
+                return
+            xr, yr = (float(fx.min()), float(fx.max())), (float(fy.min()), float(fy.max()))
+        else:
+            xr, yr = vb.viewRange()
+        idx = thin_indices(x, y, xr, yr, vb.width() or 1200.0, vb.height() or 120.0,
+                           cell_px=3.0, keep="last")
+        th["busy"] = True
+        try:
+            th["item"].setData(x=x[idx], y=y[idx], brush=[th["brushes"][i] for i in idx],
+                               size=5, pen=None)
+        finally:
+            th["busy"] = False
+
+    def _hook_lane_click(self, pw):
+        """레인 클릭 판정 연결(레인당 한 번 — 레인은 재사용되므로 연결이 쌓이지 않게)."""
+        if getattr(pw, "_lane_click_hooked", False):
+            return
+        pw._lane_click_hooked = True
+        pw.scene().sigMouseClicked.connect(lambda ev, pw=pw: self._on_lane_click(pw, ev))
+
+    def _on_lane_click(self, pw, ev):
+        """레인 클릭 → 화면상 8 px 안의 **실제 데이터 점** 중 가장 가까운 행을 아래 패널에.
+        표시 좌표(x는 시간 시프트가 이미 들어간 값) 그대로 비교하므로 시프트 보정이 필요 없다."""
+        from PyQt6.QtCore import Qt as _Qt
+        if ev.button() != _Qt.MouseButton.LeftButton or ev.double() or ev.isAccepted():
+            return
+        hit = getattr(self, "_lane_hits", {}).get(id(pw))
+        if hit is None or not self._fit_cache or self._path is None:
+            return
+        vb = pw.getViewBox()
+        pos = ev.scenePos()
+        if not vb.sceneBoundingRect().contains(pos):
+            return
+        j = self.lane_point_at(pw, vb.mapSceneToView(pos))
+        if j is not None:
+            self._show_scan_detail(j)
+
+    def lane_point_at(self, pw, p):
+        """레인 pw에서 데이터 좌표 p(QPointF) 근처(8 px)의 행 번호 — 없으면 None."""
+        from gui.pg_perf import nearest_index
+        hit = getattr(self, "_lane_hits", {}).get(id(pw))
+        if hit is None:
+            return None
+        x, y, order = hit
+        vb = pw.getViewBox()
+        (x0, x1), (y0, y1) = vb.viewRange()
+        sx = (x1 - x0) / max(vb.width(), 1.0)
+        sy = (y1 - y0) / max(vb.height(), 1.0)
+        return nearest_index(x, y, order, p.x(), p.y(), sx, sy)
 
     def _on_lane_points_clicked(self, *args):
         """레인의 점 클릭 → 아래 패널에 그 스캔의 상세. **시계열은 그대로 보인다.**
