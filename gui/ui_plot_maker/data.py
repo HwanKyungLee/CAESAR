@@ -29,12 +29,18 @@ class Dataset:
     rules    : 숨김 규칙 list[dict] (`result_viewer_io.rules_hidden_mask`)
     rules_on : False면 규칙을 잠시 끈다(숨김≠삭제, 헌장 ①)
     shift_h  : 이 데이터셋만의 표시 시각 보정(전역 시프트에 더해짐). 원본 time은 불변.
+    derived  : 파생 열 list[{"name","expr","unit"}] — **식을 저장**하고 값은 `apply_derived`가
+               cols에 채운다(캐시). 목록 순서대로 평가하므로 앞의 파생 열을 뒤에서 쓸 수 있다.
+    derived_errors : {이름: 오류문} — 깨진 식은 조용히 빼지 않고 여기 남겨 트리에 빨갛게 보인다.
     """
     __slots__ = ("name", "path", "time", "cols", "units", "errs", "cats",
-                 "rules", "rules_on", "shift_h", "_hidden")
+                 "rules", "rules_on", "shift_h", "_hidden", "derived", "derived_errors", "_dcols")
+
+    # 식에서 열 이름 대신 쓸 수 있는 예약 변수 — 파생 열 이름으로 못 쓴다.
+    RESERVED = ("time", "hour")
 
     def __init__(self, name, path, time, cols, units=None, errs=None, cats=None,
-                 rules=None, rules_on=True, shift_h=0.0):
+                 rules=None, rules_on=True, shift_h=0.0, derived=None):
         self.name = name
         self.path = path
         self.time = time
@@ -46,9 +52,76 @@ class Dataset:
         self.rules_on = bool(rules_on)
         self.shift_h = float(shift_h or 0.0)
         self._hidden = None
+        self.derived = [dict(d) for d in (derived or [])]
+        self.derived_errors = {}
+        self._dcols = ()     # 마지막으로 cols에 채운 파생 열 이름 — 지우거나 이름을 바꾸면 옛 값을 걷어낸다
+        if self.derived:
+            self.apply_derived()
 
     def __len__(self):
         return max((len(v) for v in self.cols.values()), default=0)
+
+    # ── 파생 열 (D1) ────────────────────────────────────────────────────
+    def derived_names(self):
+        return [d["name"] for d in self.derived]
+
+    def n_rows(self):
+        """원본 열 기준 행 수(파생 열은 같은 길이로 만들어진다)."""
+        dn = set(self._dcols)
+        return max((len(v) for k, v in self.cols.items() if k not in dn), default=0)
+
+    def variables(self, upto=None):
+        """식에 넘길 변수 — 숫자 열·범주형 열·time·hour.
+        upto=i면 파생 열은 i번째 **앞**까지만(편집 중인 열이 자기·뒤 열을 못 보게)."""
+        hide = set(self.derived_names()[upto:]) if upto is not None else set()
+        v = {k: a for k, a in self.cols.items() if k not in hide}
+        for k, a in self.cats.items():
+            v.setdefault(k, a)
+        if self.time is not None:
+            v["time"] = self.time
+            v["hour"] = local_hour(self.time, self.shift_h)
+        return v
+
+    def check_derived_name(self, name, editing=None):
+        """새 파생 열 이름 검사 — 문제 있으면 오류문, 없으면 None."""
+        name = (name or "").strip()
+        if not name:
+            return "Name is empty"
+        if ":" in name:
+            return "Name can't contain ':' (it separates dataset and column)"
+        if name in self.RESERVED:
+            return f"'{name}' is reserved in expressions"
+        if name == editing:
+            return None
+        if name in self.cols or name in self.cats or name in self.derived_errors:
+            return f"'{name}' already exists in this dataset"
+        return None
+
+    def apply_derived(self):
+        """파생 열을 식에서 다시 계산한다(파일을 다시 읽었거나 식·시프트가 바뀌었을 때).
+        깨진 식은 그 열만 빠지고 오류가 `derived_errors`에 남는다 — 다른 열은 산다."""
+        from core.expr import eval_column
+        # 걷어내는 건 **내가 채웠던** 열뿐 — 원본 열은 어떤 경우에도 건드리지 않는다
+        for nm in self._dcols:
+            self.cols.pop(nm, None)
+            self.units.pop(nm, None)
+        base = set(self.cols) | set(self.cats)
+        self.derived_errors = {}
+        n = self.n_rows()
+        for d in self.derived:
+            nm = d["name"]
+            if nm in base:              # 손으로 고친 설정 등 — 원본을 덮어쓰지 않는다
+                self.derived_errors[nm] = f"'{nm}' clashes with an original column — rename it"
+                continue
+            try:
+                self.cols[nm] = eval_column(d["expr"], self.variables(), n)
+                if d.get("unit"):
+                    self.units[nm] = d["unit"]
+            except Exception as e:      # ExprError + 데이터 의존 오류(길이 불일치 등)
+                self.derived_errors[nm] = str(e)
+        self._dcols = tuple(nm for nm in self.derived_names()
+                            if nm in self.cols and nm not in base)
+        self._hidden = None
 
     def set_rules(self, rules=None, rules_on=None):
         """규칙 교체/켜고 끄기 — 캐시된 마스크를 버린다."""
@@ -79,17 +152,32 @@ class Dataset:
     def to_spec(self):
         """설정 파일용 레시피 — 열 때 `load_spec`으로 그대로 되살린다."""
         return {"path": self.path, "rules": [dict(r) for r in self.rules],
-                "rules_on": self.rules_on, "shift_h": self.shift_h}
+                "rules_on": self.rules_on, "shift_h": self.shift_h,
+                "derived": [dict(d) for d in self.derived]}
+
+
+def local_hour(t, shift_h=0.0):
+    """epoch초 → 로컬 시각의 시(0~24, 소수). 머신 TZ 오프셋 하나를 쓴다 — 한국은 DST가
+    없어 충분하다(DST 지역이면 전환일 앞뒤 1시간 어긋남). 데이터셋 시프트를 더한다."""
+    import time as _time
+    t = np.asarray(t, float)
+    fin = t[np.isfinite(t)]
+    off = _time.localtime(float(np.median(fin))).tm_gmtoff if fin.size else 0
+    with np.errstate(invalid="ignore"):
+        return np.mod((t + off + shift_h * 3600.0) / 3600.0, 24.0)
 
 
 def load_spec(spec) -> Dataset:
-    """레시피(경로 문자열 또는 {"path","rules","rules_on","shift_h"}) → Dataset.
-    파일은 항상 다시 읽고 규칙을 다시 건다 — 값은 캐시일 뿐이다."""
+    """레시피(경로 문자열 또는 {"path","rules","rules_on","shift_h","derived"}) → Dataset.
+    파일은 항상 다시 읽고 규칙·파생 식을 다시 건다 — 값은 캐시일 뿐이다."""
     if isinstance(spec, str):
         spec = {"path": spec}
     ds = load_dataset(spec["path"])
     ds.set_rules(spec.get("rules") or [], spec.get("rules_on", True))
     ds.shift_h = float(spec.get("shift_h") or 0.0)
+    ds.derived = [dict(d) for d in (spec.get("derived") or [])]
+    if ds.derived:
+        ds.apply_derived()
     ds.hidden_mask()          # 규칙이 이 파일에 맞지 않으면(모르는 kind 등) 지금 터뜨린다
     return ds
 

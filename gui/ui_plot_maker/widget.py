@@ -1959,10 +1959,19 @@ class PlotMakerWidget(QWidget):
     def _on_tree_menu(self, pos):
         """데이터셋 우클릭 — 실어 온 숨김 규칙·시프트를 켜고 끄거나 지운다."""
         from PyQt6.QtWidgets import QMenu
-        ds = self._dataset_at(self._tree.itemAt(pos))
+        item = self._tree.itemAt(pos)
+        ds = self._dataset_at(item)
         if ds is None:
             return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        col = data[2] if data[0] in ("col", "bad") else None
         menu = QMenu(self)
+        a_new = menu.addAction("New column…")
+        a_edit = a_del = None
+        if col in ds.derived_names():
+            a_edit = menu.addAction(f"Edit column '{col}'…")
+            a_del = menu.addAction(f"Delete column '{col}'")
+        menu.addSeparator()
         a_on = menu.addAction("Filters on")
         a_on.setCheckable(True)
         a_on.setChecked(ds.rules_on)
@@ -1974,7 +1983,15 @@ class PlotMakerWidget(QWidget):
         act = menu.exec(self._tree.viewport().mapToGlobal(pos))
         if act is None:
             return
-        if act is a_on:
+        if act is a_new or act is a_edit:
+            from .derived_dialog import DerivedColumnDialog
+            editing = col if act is a_edit else None
+            dlg = DerivedColumnDialog(ds, editing=editing, parent=self)
+            if dlg.exec():
+                self.set_derived(ds.name, dlg.spec(), replace=editing)
+        elif act is a_del:
+            self.delete_derived(ds.name, col)
+        elif act is a_on:
             self.set_dataset_view(ds.name, rules_on=a_on.isChecked())
         elif act is a_clr:
             self.set_dataset_view(ds.name, rules=[])
@@ -1989,11 +2006,50 @@ class PlotMakerWidget(QWidget):
         ds.set_rules(rules, rules_on)
         if shift_h is not None:
             ds.shift_h = float(shift_h)
+            if ds.derived:
+                ds.apply_derived()        # `hour`는 데이터셋 시프트를 따른다
         self._refresh_tree()
         self._notify_modes()
         self._mode.render()
         state = ("off" if not ds.rules_on else f"{ds.n_hidden()} hidden") if ds.rules else "none"
         self.set_status(f"{name}: filters {state} · shift {ds.shift_h:+g}h")
+
+    def set_derived(self, name, spec, replace=None):
+        """파생 열 추가(replace=None) 또는 교체. 이름을 바꿔 교체하면 그 열을 쓰던 시리즈는
+        on_shelf_changed가 정리한다(없는 열을 가리키게 두지 않는다). 반환: 오류문|None."""
+        ds = self.shelf.get(name)
+        if ds is None:
+            return "no such dataset"
+        err = ds.check_derived_name(spec.get("name"), editing=replace)
+        if err:
+            return err
+        spec = {"name": spec["name"].strip(), "expr": (spec.get("expr") or "").strip(),
+                **({"unit": spec["unit"]} if spec.get("unit") else {})}
+        if replace is not None and replace in ds.derived_names():
+            ds.derived[ds.derived_names().index(replace)] = spec
+        else:
+            ds.derived.append(spec)
+        ds.apply_derived()
+        self._after_derived_change(ds, spec["name"])
+        return ds.derived_errors.get(spec["name"])
+
+    def delete_derived(self, name, col):
+        ds = self.shelf.get(name)
+        if ds is None or col not in ds.derived_names():
+            return
+        ds.derived = [d for d in ds.derived if d["name"] != col]
+        ds.apply_derived()          # 이 열을 쓰던 다른 파생 열은 빨갛게 드러난다
+        self._after_derived_change(ds, col, deleted=True)
+
+    def _after_derived_change(self, ds, col, deleted=False):
+        self._refresh_tree()
+        self._notify_modes()
+        self._mode.render()
+        bad = [n for n in ds.derived_errors]
+        msg = f"{ds.name}: column '{col}' {'deleted' if deleted else 'updated'}"
+        if bad:
+            msg += f" · ✗ broken: {', '.join(bad)}"
+        self.set_status(msg)
 
     def _remove_data(self):
         names = set()
@@ -2030,11 +2086,28 @@ class PlotMakerWidget(QWidget):
                 tip += [f"  • {describe_rule(r)}" for r in ds.rules]
             if ds.shift_h:
                 tip.append(f"dataset time shift {ds.shift_h:+g}h (display only)")
-            tip.append("Right-click: filters on/off · clear")
+            tip.append("Right-click: new column · filters on/off · clear")
             top.setToolTip(0, f"{ds.path}\n" + "\n".join(tip))
             for col in ds.cols:
+                if col in ds._dcols:
+                    continue                  # 파생 열은 아래에 식 순서대로
                 ch = QTreeWidgetItem([col])
                 ch.setData(0, Qt.ItemDataRole.UserRole, ("col", name, col))
+                top.addChild(ch)
+            for d in ds.derived:
+                col = d["name"]
+                if col in ds.derived_errors:
+                    # 깨진 식은 조용히 빼지 않는다 — 빨갛게 보이고, 플롯 대상은 아니다
+                    ch = QTreeWidgetItem([f"ƒ {col}  ✗"])
+                    ch.setData(0, Qt.ItemDataRole.UserRole, ("bad", name, col))
+                    ch.setForeground(0, pg.mkColor(AUGUR.fail))
+                    ch.setToolTip(0, f"{col} = {d['expr']}\n✗ {ds.derived_errors[col]}\n"
+                                     "Right-click → Edit column…")
+                else:
+                    ch = QTreeWidgetItem([f"ƒ {col}"])
+                    ch.setData(0, Qt.ItemDataRole.UserRole, ("col", name, col))
+                    ch.setToolTip(0, f"{col} = {d['expr']}\n(derived — recomputed from the "
+                                     "expression whenever the dataset is loaded)")
                 top.addChild(ch)
             self._tree.addTopLevelItem(top)
             top.setExpanded(True)

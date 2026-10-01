@@ -74,6 +74,9 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 34. Result Lab → Plot Maker 다리 : Hide QC·사후 QC K·구간·시프트가 **경로 + 규칙**으로
     넘어가 Result Lab 선택과 행 단위로 같은 숨김을 만드나 · 끄면 복원 · 원본 불변 ·
     설정 저장/열기 왕복 · 옛 형식 호환 (D0, 2026-10-01)
+35. 파생 열 : 단위변환·연쇄·범주형 비교·hour 식이 맞게 계산되나 · 깨진/위험한 식은
+    실행 없이 빨갛게 남나 · 원본 열 보호 · **식만** 저장되고 열 때 재계산되나 ·
+    Result Lab 계산기와 같은 엔진(core/expr.py) (D1, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1309,6 +1312,121 @@ def c_resultlab_bridge():
         return "FAIL", "옛 형식 설정(경로 문자열)이 안 열리거나 규칙이 생김"
     return "PASS", (f"규칙 3종+9h 전달 · 숨김 {int(hid.sum())}행 = RL 선택과 행 단위 동일 · "
                     "끄면 복원 · 원본 불변 · Publish 표기 · 설정 왕복·옛 형식 호환")
+
+
+# ── 35. 파생 열: 식을 저장하고 값은 다시 계산 (D1) ─────────────────────────────
+@check("파생 열: 단위변환·연쇄·범주형·hour · 깨진 식은 빨갛게 · 안전 · 설정 왕복")
+def c_derived_columns():
+    import json, tempfile
+    from unittest import mock
+    from gui.ui_plot_maker.data import local_hour
+    from gui.ui_plot_maker.derived_dialog import DerivedColumnDialog
+    from gui.dlg_calculator import safe_eval as calc_eval
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+    w = PlotMakerWidget()
+    w.add_specs([{"path": p, "rules": [{"kind": "status_qc"}]}])
+    name = next(iter(w.shelf))
+    ds = w.shelf[name]
+    no2 = ds.cols["NO2"].copy()
+
+    for spec in ({"name": "NO2_ugm3", "expr": "NO2 * 1.88", "unit": "µg/m³"},
+                 {"name": "anom", "expr": "NO2_ugm3 - mean(NO2_ugm3)"},
+                 {"name": "ok_only", "expr": 'where(Flag == "ok", NO2, nan)'},
+                 {"name": "daytime", "expr": "(hour >= 9) & (hour < 18)"}):
+        err = w.set_derived(name, spec)
+        if err:
+            return "FAIL", f"{spec['name']} 실패: {err}"
+    c = ds.cols
+    if not np.allclose(c["NO2_ugm3"], no2 * 1.88) or ds.units.get("NO2_ugm3") != "µg/m³":
+        return "FAIL", "단위 변환 값/단위 불일치"
+    if not np.allclose(c["anom"], c["NO2_ugm3"] - np.nanmean(c["NO2_ugm3"])):
+        return "FAIL", "앞 파생 열을 쓰는 연쇄 식 불일치"
+    okm = ds.cats["Flag"] == "ok"
+    if not (np.allclose(c["ok_only"][okm], no2[okm]) and np.all(np.isnan(c["ok_only"][~okm]))):
+        return "FAIL", "범주형 비교(Flag == \"ok\") 불일치"
+    hr = local_hour(ds.time)
+    if not np.array_equal(c["daytime"], ((hr >= 9) & (hr < 18)).astype(float)):
+        return "FAIL", "hour 변수 불일치"
+
+    # 숨김 규칙은 파생 열에도 같은 행에 걸린다(resolve 한 길목)
+    _, _, y, _ = w.resolve(f"{name}:NO2_ugm3")
+    hid = ds.hidden_mask()
+    if not (hid.any() and np.all(np.isnan(y[hid]))):
+        return "FAIL", "숨김 규칙이 파생 열에 안 걸림"
+
+    # 깨진 식: 그 열만 빠지고 오류가 남는다(조용히 사라지지 않음) · 안전: 실행 안 됨
+    if not w.set_derived(name, {"name": "bad", "expr": "NO2 * nosuch"}):
+        return "FAIL", "모르는 이름이 오류 없이 통과"
+    sentinel = os.path.join(tmpd, "pwned")
+    evil = f'__import__("os").makedirs(r"{sentinel}")'
+    if not w.set_derived(name, {"name": "evil", "expr": evil}) or os.path.exists(sentinel):
+        return "FAIL", "위험한 식이 거부되지 않음"
+    for bad in ("bad", "evil"):
+        if bad in ds.cols or bad not in ds.derived_errors:
+            return "FAIL", f"깨진 식 {bad}가 cols에 있거나 오류 기록이 없음"
+    top = w._tree.topLevelItem(0)
+    kinds = [top.child(j).data(0, 0x0100)[0] for j in range(top.childCount())]
+    if kinds.count("bad") != 2:
+        return "FAIL", f"트리에 깨진 열 표시가 없음: {kinds}"
+    if w.set_derived(name, {"name": "NO2", "expr": "1"}) is None:
+        return "FAIL", "원본 열 이름(NO2)을 덮어쓰는 파생 열이 허용됨"
+    # 손으로 고친 설정에 원본과 같은 이름이 와도 원본은 산다
+    from gui.ui_plot_maker import load_spec
+    dsx = load_spec({"path": p, "derived": [{"name": "NO2", "expr": "NO2 * 0"}]})
+    if not np.array_equal(dsx.cols["NO2"], no2) or "NO2" not in dsx.derived_errors:
+        return "FAIL", "원본과 같은 이름의 파생 식이 원본 열을 덮어씀"
+    dsx.apply_derived()
+    if "NO2" not in dsx.cols:
+        return "FAIL", "재계산이 원본 열을 걷어냄"
+
+    # 그림에 실제로 쓰인다 (화면 + Publish)
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([f"{name}:NO2_ugm3", "L", None, None])
+    ts.render()
+    w._build_publish_fig()
+
+    # 설정 저장 → 새 위젯: 식이 저장되고 값은 다시 계산
+    cfgp = os.path.join(tmpd, "d.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"][name]["derived"]
+    if [d["name"] for d in saved] != ["NO2_ugm3", "anom", "ok_only", "daytime", "bad", "evil"]:
+        return "FAIL", f"설정에 식 목록이 안 저장됨: {saved}"
+    if any("values" in d for d in saved):
+        return "FAIL", "값이 설정에 박힘 — 식만 저장해야 한다"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    ds2 = w2.shelf[name]
+    if not (np.allclose(ds2.cols["anom"], c["anom"]) and set(ds2.derived_errors) == {"bad", "evil"}):
+        return "FAIL", "설정 왕복 후 파생 값/오류 상태가 다름"
+
+    # 의존 열 삭제 → 그 열을 쓰던 열은 빨갛게 드러난다
+    w.delete_derived(name, "NO2_ugm3")
+    if "anom" in ds.cols or "anom" not in ds.derived_errors:
+        return "FAIL", "의존 열 삭제 후 연쇄 열이 조용히 남거나 사라짐"
+
+    # 대화상자: 미리보기 평가 + 잘못된 식이면 OK 비활성
+    from PyQt6.QtWidgets import QDialogButtonBox
+    dlg = DerivedColumnDialog(ds)
+    dlg._name.setText("x2"); dlg._expr.setText("NO2 * 2"); dlg._validate()
+    okb = dlg._bb.button(QDialogButtonBox.StandardButton.Ok)
+    if not okb.isEnabled() or "✓" not in dlg._msg.text():
+        return "FAIL", f"대화상자 미리보기 실패: {dlg._msg.text()}"
+    dlg._expr.setText("NO2 *"); dlg._validate()
+    if okb.isEnabled():
+        return "FAIL", "문법 오류인데 OK가 눌림"
+
+    # 계산기(Result Lab)도 같은 엔진 — 예전 식 그대로 동작
+    A, B = np.array([1.0, 4.0]), np.array([2.0, 0.0])
+    r = calc_eval("(A - B) / B", {"A": A, "B": B})
+    if not (r[0] == -0.5 and np.isinf(r[1])):
+        return "FAIL", "계산기 식 결과가 바뀜"
+    return "PASS", ("4종 식·연쇄·hour·숨김 연동 · 깨진/위험 식은 빨간 표시(실행 안 됨) · "
+                    "원본 열 보호 · 식만 저장·재계산 · 의존 삭제 드러남 · 계산기 호환")
 
 
 def main():

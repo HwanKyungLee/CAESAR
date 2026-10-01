@@ -7,7 +7,6 @@
 경계: 컬럼 연산이 '의미 있는 새 값'을 만들어 저장 → Result Lab 영역(Plot Maker는 그림만).
 안전성: eval() 안 씀. ast 화이트리스트로 +−×÷**·괄호·소수의 함수만 허용.
 """
-import ast
 import os
 
 import numpy as np
@@ -18,57 +17,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from core.expr import safe_eval   # 단일 출처 — Plot Maker 파생 열과 같은 엔진
 from gui.result_viewer_io import load_fit_table
 from gui.theme import AUGUR
 
-# 수식에서 허용하는 element-wise 함수
-_ALLOWED_FUNCS = {
-    "abs": np.abs, "sqrt": np.sqrt, "log": np.log, "log10": np.log10,
-    "exp": np.exp, "where": np.where,
-}
 _VAR_LETTERS = "ABCDEFGH"
-
-
-def safe_eval(expr, variables):
-    """ast 화이트리스트 안전 평가. variables: {name: ndarray|scalar}.
-    허용: 숫자·변수명·+ - * / ** · 단항 ± · 괄호 · _ALLOWED_FUNCS 함수호출."""
-    try:
-        node = ast.parse(expr, mode="eval").body
-    except SyntaxError as e:
-        raise ValueError(f"Expression syntax error: {e}")
-
-    def ev(n):
-        if isinstance(n, ast.BinOp):
-            l, r = ev(n.left), ev(n.right)
-            if isinstance(n.op, ast.Add):  return l + r
-            if isinstance(n.op, ast.Sub):  return l - r
-            if isinstance(n.op, ast.Mult): return l * r
-            if isinstance(n.op, ast.Div):
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    return l / r
-            if isinstance(n.op, ast.Pow):  return l ** r
-            raise ValueError("Operator not allowed (only + - * / **)")
-        if isinstance(n, ast.UnaryOp):
-            v = ev(n.operand)
-            if isinstance(n.op, ast.USub): return -v
-            if isinstance(n.op, ast.UAdd): return +v
-            raise ValueError("Unary operation not allowed")
-        if isinstance(n, ast.Constant):
-            if isinstance(n.value, (int, float)):
-                return n.value
-            raise ValueError("Only numeric constants allowed")
-        if isinstance(n, ast.Name):
-            if n.id in variables:
-                return variables[n.id]
-            raise ValueError(f"Unknown variable '{n.id}'")
-        if isinstance(n, ast.Call):
-            if (isinstance(n.func, ast.Name) and n.func.id in _ALLOWED_FUNCS
-                    and not n.keywords):
-                return _ALLOWED_FUNCS[n.func.id](*[ev(a) for a in n.args])
-            raise ValueError(f"Function not allowed (available: {', '.join(_ALLOWED_FUNCS)})")
-        raise ValueError(f"Expression not allowed: {type(n).__name__}")
-
-    return ev(node)
 
 
 class CalculatorDialog(QDialog):
@@ -112,7 +65,8 @@ class CalculatorDialog(QDialog):
         exprbar.addWidget(QLabel("Expression:"))
         self._expr = QLineEdit("A - B")
         self._expr.setToolTip("e.g. A-B,  (A-B)/C,  A*2+B,  sqrt(abs(A)),  A/C*100\n"
-                              "Allowed: + - * / **, parentheses, numbers, abs/sqrt/log/log10/exp/where")
+                              "Allowed: + - * / **, parentheses, numbers, comparisons < > ==, & | ~,\n"
+                              "abs/sqrt/log/log10/exp/where/isfinite/clip/mean/median/std  (core/expr.py)")
         exprbar.addWidget(self._expr, 1)
         left.addLayout(exprbar)
 
