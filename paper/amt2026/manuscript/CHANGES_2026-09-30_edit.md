@@ -75,3 +75,12 @@ New `\fieldnum` values (A, B, C, D5, D6, D7): r 0.985, ≤0.03; slopes 0.61, 0.5
 - 20 May slope kept as 0.59 (confirmed by the lead).
 - Rebuilt: 45 pages, 0 errors, 0 undefined references/citations, 0 overfull boxes.
 - **§3.6 lab-path update (lead edit)**: laboratory standard delivered through the inlet and ovens; laboratory bounds 1.08/0.87; field standard-addition sentence (+~30 words). Rebuilt: 45 pages, 0 errors, 0 undefined references/citations.
+
+## 6. G — residual-correlation test (lead edit; source `diagnostics/residual_corr_2026-09-30/README.md`)
+
+- §3.4 (end of group-B paragraph): sandwich covariance $\mathbf{G}\boldsymbol{\Sigma}_r\mathbf{G}^\top$ brings the autocorrelated case to 1.04 (1.08 with the shift fixed), white-noise ratios 1.31 and 1.08; joint covariance of Eq. (8) (`eq:9`) changes no ratio by more than 0.1 %. Sentence split at the semicolon (was 64 words; now 50 + 15). No number changed.
+- §4.6: field test — median lag-one residual autocorrelation 0.06 (300 °C) and 0.01 (180 °C); median ΣANs sigma +12 %; structural terms 1.14 (robust) to 2.03 (SD) times the corrected sigma, against 1.28 and 2.28 before the correction on the same records (absolute sigma values removed by the lead to avoid the 0.0546 vs 0.0541 ppb basis conflict with §4.4). "no inflation … can recover them" → "an inflation … should not recover them".
+- New `\fieldnum` values: 1.04, 1.08, 1.31, 1.08, 0.1 %, 0.06, 0.01, 12 %, 1.14, 2.03, 1.28, 2.28 (0.0546 and 0.0613 removed in the lead's revision). All match the diagnostics README.
+- Word delta: §3 2194 → 2259, §4 2010 → 2079; main text 12653 → 12794 (**+141**, after the lead's revision of the §4.6 sentence; §4 now 2086). The internal counter does not count math, so the §3.6 lab-path edit is part of the 12653 baseline.
+- Note (resolved in text): the uncorrected median ΣANs sigma in the diagnostics is 0.0546 ppb, against 0.0541 ppb in §4.4; the sentence now states ratios on the same records only. The structural/sigma ratios are 1.28/2.28 in the diagnostics README, against 1.28/2.29 in §4.4, and the structural rSD/SD are 0.0701/0.1245 against Table 6's 0.0693/0.1236. These are slightly different record selections; not reconciled.
+- Rebuilt: 45 pages, 0 errors, 0 undefined references/citations, 0 overfull boxes.

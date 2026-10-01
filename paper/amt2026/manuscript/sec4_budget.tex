@@ -223,6 +223,11 @@ Residual-based error estimates address a third quantity. \citet{Platt} set out t
 least-squares error holds, and corrections such as the correlation factor of \citet{Stutz_1996}, which accounts for
 random residual structures and the wavelength-mapping correction, and the bootstrap and Monte Carlo estimates of
 \citet{Hausmann_1999} address structure that appears in the residual. The structural terms here leave the residual
-unchanged (Sect.~\ref{sec:4.1}), so no inflation derived from the residual can recover them. A further step, not attempted here, would treat the zero-air reference and the reflectivity as
+unchanged (Sect.~\ref{sec:4.1}), so an inflation derived from the residual should not recover them. We tested this with
+the sandwich covariance of Sect.~\ref{sec:3.4}, which removes the correlated-noise deficit of the benchmark. On the budget
+records the residual is nearly white (median lag-one autocorrelation \fieldnum{0.06} at 300\,$^{\circ}$C and \fieldnum{0.01} at
+180\,$^{\circ}$C); the correction raises the median $\Sigma$ANs sigma by \fieldnum{12}\,\%, and the structural terms remain \fieldnum{1.14} (robust
+scale) to \fieldnum{2.03} (standard deviation) times the corrected sigma, against \fieldnum{1.28} and \fieldnum{2.28} before the correction on
+the same records. A further step, not attempted here, would treat the zero-air reference and the reflectivity as
 measured quantities with their own covariance and propagate the structural term inside the fit rather than
 afterwards. What the product should carry in consequence is specified once, in Sect.~\ref{sec:6.1}.

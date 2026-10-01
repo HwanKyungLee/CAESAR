@@ -185,7 +185,11 @@ the wavelength shift at its true value brings Augur's white-noise ratio to 1.19,
 in the nonlinear degree of freedom and its search box, not in the propagated covariance. An AR(1) residual with
 $\rho = 0.5$ inflates the variance of a sum by $(1+\rho)/(1-\rho) = 3$, so a covariance built on independence understates
 the scatter by $\sqrt{3} = 1.73$. The measured 1.57 and 1.65 sit just below it, and fixing the shift moves Augur to 1.75,
-because the free shift had absorbed part of the correlated structure (Fig.~\ref{fig:3}f).
+because the free shift had absorbed part of the correlated structure (Fig.~\ref{fig:3}f). A sandwich covariance built
+from the residual autocorrelation, $\mathbf{G}\boldsymbol{\Sigma}_r\mathbf{G}^{\top}$ with $\mathbf{G}$ the pseudo-inverse of the
+design matrix and $\boldsymbol{\Sigma}_r$ Toeplitz in the residual autocovariance up to its first non-positive lag, brings the
+autocorrelated case to \fieldnum{1.04} (\fieldnum{1.08} with the shift fixed) and leaves the white-noise ratios at \fieldnum{1.31} and
+\fieldnum{1.08}. The joint covariance of Eq.~(\ref{eq:9}) changes none of the ratios by more than \fieldnum{0.1}\,\%.
 
 A deliberately plain profiled grid search is included as a reference implementation whose scorecard shows how a
 submission is read. The benchmark does not rank codes: groups C and E are reported rather than passed or failed,
