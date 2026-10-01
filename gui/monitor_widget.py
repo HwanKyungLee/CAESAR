@@ -30,6 +30,7 @@ class MonitorWidget(QWidget):
     [V11.0 Ultra-fast Hybrid Monitor - Anti-Flicker & Easy Navigation]
     """
     roi_selected = pyqtSignal(int, int)
+    conc_point_clicked = pyqtSignal(object)   # result dict of a clicked Conc point
     
     def __init__(self, engine):
         super().__init__()
@@ -631,9 +632,12 @@ class MonitorWidget(QWidget):
             self._conc_data[gas] = {}
             for ch, col in self._CONC_CH_COLORS.items():
                 pen = pg.mkPen(col, width=1.5)
-                self._conc_curves[gas][ch] = p.plot(pen=pen, symbol='o', symbolSize=4,
-                                                    symbolBrush=col, name=f"CH{ch}")
-                self._conc_data[gas][ch] = {'x': [], 'y': []}
+                curve = p.plot(pen=pen, symbol='o', symbolSize=4,
+                               symbolBrush=col, name=f"CH{ch}")
+                curve.sigPointsClicked.connect(
+                    lambda _c, pts, _ev, g=gas, c=ch: self._on_conc_click(g, c, pts))
+                self._conc_curves[gas][ch] = curve
+                self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
         # 가스 선택 콤보 갱신
         if hasattr(self, 'cb_conc_gas'):
             self.cb_conc_gas.blockSignals(True)
@@ -678,6 +682,7 @@ class MonitorWidget(QWidget):
             d = self._conc_data[gas][ch]
             d['x'].append(x)
             d['y'].append(y)
+            d['r'].append(result_dict)
         import time as _t
         if (_t.monotonic() - getattr(self, '_last_conc_draw', 0.0)) < 0.15:
             return
@@ -723,7 +728,7 @@ class MonitorWidget(QWidget):
         """농도 시계열 히스토리 초기화."""
         for gas in self._conc_gases:
             for ch in self._CONC_CH_COLORS:
-                self._conc_data[gas][ch] = {'x': [], 'y': []}
+                self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
                 self._conc_curves[gas][ch].setData([], [])
 
     def rebuild_conc(self, results):
@@ -734,7 +739,7 @@ class MonitorWidget(QWidget):
             return
         for gas in self._conc_gases:
             for ch in self._CONC_CH_COLORS:
-                self._conc_data[gas][ch] = {'x': [], 'y': []}
+                self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
         for i, r in enumerate(results):
             ch = r.get('Channel', 1)
             if ch not in self._CONC_CH_COLORS:
@@ -752,10 +757,24 @@ class MonitorWidget(QWidget):
                 d = self._conc_data[gas][ch]
                 d['x'].append(x)
                 d['y'].append(y)
+                d['r'].append(r)
         for gas in self._conc_gases:
             for ch in self._CONC_CH_COLORS:
                 d = self._conc_data[gas][ch]
                 self._conc_curves[gas][ch].setData(d['x'], d['y'])
+
+    def _on_conc_click(self, gas, ch, pts):
+        """Clicked Conc point → its result dict (for the stored-fit replay).
+
+        Matched by position, not spot index: with clipToView the scatter only holds
+        the visible slice, so its indices don't line up with _conc_data."""
+        d = self._conc_data.get(gas, {}).get(ch)
+        if not pts or not d or not d['r']:
+            return
+        pos = pts[0].pos()
+        px, py = pos.x(), pos.y()
+        k = min(range(len(d['x'])), key=lambda i: (abs(d['x'][i] - px), abs(d['y'][i] - py)))
+        self.conc_point_clicked.emit(d['r'][k])
 
     def _export_conc_png(self):
         """현재 농도 그래프(보이는 레이아웃)를 PNG로 저장."""

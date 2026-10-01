@@ -333,33 +333,18 @@ class SaveExportMixin:
     # ---------------------------------------------------------
     # Viewer Events (Table Click Sync)
     # ---------------------------------------------------------
+    def _replay_fail(self, msg):
+        self.status.setText(f"Replay: {msg}")
+        self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
+
     def on_table_double_click(self, row, col):
-        """
-        Replays the stored fit for a completed row.
-
-        Double-clicking a result row re-evaluates the engine model using the
-        fit parameters (shifts, squeezes, gas_coeffs, etc.) that were saved for
-        that file, then sends the result to the monitor — allowing you to inspect
-        any individual spectrum without re-running the full analysis.
-        """
-        def _fail(msg):
-            self.status.setText(f"Double-click: {msg}")
-            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
-
-        # Bring the Analysis Monitor into view regardless of which main tab the
-        # user is currently looking at — otherwise the replay can render correctly
-        # in the background while looking, from the user's seat, like nothing happened.
-        try:
-            self.main_tabs.setCurrentWidget(self._tab_pages.get(self.monitor, self.monitor))
-        except Exception:
-            pass
-
+        """Replay the stored fit of a result-table row (see _replay_result)."""
         # File name lives in col 0 normally, but col 1 when the "Ch" column is
         # prepended in multi-channel mode.
         fc = 1 if getattr(self, '_multi_channel_mode', False) else 0
         item = self.table.item(row, fc)
         if item is None:
-            _fail(f"no cell at row {row}, col {fc}")
+            self._replay_fail(f"no cell at row {row}, col {fc}")
             return
         fname = item.text()
 
@@ -370,15 +355,6 @@ class SaveExportMixin:
         # "파일을 못 찾음"으로 조용히 실패했다(지금은 메시지로 뜸).
         ch_txt = self.table.item(row, 0).text() if fc == 1 else ''
         want_ch = int(ch_txt.replace('CH', '')) if ch_txt.startswith('CH') else None
-        search_list = self._channel_files.get(want_ch, self.file_list) if want_ch else self.file_list
-
-        entry = self._entry_from_display_name(fname, search_list)
-        if not entry:
-            _fail(f"'{fname}' not found in CH{want_ch or self._active_channel}'s file list "
-                  "(switch to that channel's tab and try again)")
-            return
-        filepath = self._entry_filepath(entry)
-        row_idx  = self._row_index_from_display_name(fname)
 
         # 파일명으로 결과 조회 (행 인덱스가 아니라 → 정렬/순서 어긋나도 안전).
         # 멀티채널이면 같은 파일명이 채널마다 있을 수 있으니 클릭한 행의 채널까지 일치시킨다.
@@ -389,8 +365,41 @@ class SaveExportMixin:
         _res = (self.results[row] if (row < len(self.results) and _match(self.results[row]))
                 else next((r for r in self.results if _match(r)), None))
         if _res is None:
-            _fail(f"no stored result matches '{fname}'" + (f" CH{want_ch}" if want_ch else ""))
+            self._replay_fail(f"no stored result matches '{fname}'" + (f" CH{want_ch}" if want_ch else ""))
             return
+        self._replay_result(_res)
+
+    def _replay_result(self, _res):
+        """
+        Replays the stored fit of one result dict (table row or Conc-plot point).
+
+        Re-evaluates the engine model using the fit parameters (shifts, squeezes,
+        gas_coeffs, etc.) saved for that scan, then sends the result to the
+        monitor — inspect any individual spectrum without re-running the analysis.
+        Works the same for Step and Fast runs: both store 'Params' per result.
+        """
+        _fail = self._replay_fail
+
+        # Bring the Analysis Monitor into view regardless of which main tab the
+        # user is currently looking at — otherwise the replay can render correctly
+        # in the background while looking, from the user's seat, like nothing happened.
+        try:
+            self.main_tabs.setCurrentWidget(self._tab_pages.get(self.monitor, self.monitor))
+        except Exception:
+            pass
+
+        fname = _res.get('File', '')
+        want_ch = int(_res.get('Channel', 1)) if getattr(self, '_multi_channel_mode', False) else None
+        search_list = self._channel_files.get(want_ch, self.file_list) if want_ch else self.file_list
+
+        entry = self._entry_from_display_name(fname, search_list)
+        if not entry:
+            _fail(f"'{fname}' not found in CH{want_ch or self._active_channel}'s file list "
+                  "(switch to that channel's tab and try again)")
+            return
+        filepath = self._entry_filepath(entry)
+        row_idx  = self._row_index_from_display_name(fname)
+
         params = _res.get('Params')
         if not params:
             _fail(f"'{fname}' has no saved fit parameters (Status={_res.get('Status', '?')})")

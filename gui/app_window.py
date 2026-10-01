@@ -828,6 +828,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # Keep Existing Signal Connections
         self.monitor.cb_view.currentIndexChanged.connect(self.refresh_viewer)
         self.monitor.roi_selected.connect(self.apply_roi_from_graph)
+        self.monitor.conc_point_clicked.connect(self._replay_result)
 
         splitter.addWidget(right_widget)
         # 시작 시 좌:우 분배 명시 — 왼쪽이 너무 좁게 시작해 사용자가 매번 스플리터를
