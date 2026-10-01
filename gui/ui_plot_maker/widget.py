@@ -132,6 +132,15 @@ _THEMES = {
     "Paper":  {"font": 11, "line": 1, "legend": 9,  "grid": True},
     "PPT":   {"font": 16, "line": 3, "legend": 15, "grid": True},
     "Dark":  {"font": 13, "line": 2, "legend": 12, "grid": True},
+    # 저널 프리셋 — 크기·색까지 한 번에. **규정에서 온 것**: 폭(8.3/17 cm), 벡터+폰트 임베딩
+    # (M-F에서 이미 기본), 한 sans-serif 패밀리(M-K). **우리가 고른 출발값**(규정 아님):
+    # 8 pt 라벨·7 pt 눈금/범례(1열 폭에서 읽히는 최소 근처), 눈금 안쪽, 격자 끔, Okabe-Ito.
+    "Copernicus (ACP/AMT) — 1 column": {
+        "font": 8, "line": 1, "legend": 7, "grid": False, "tick": 7, "tick_dir": "In",
+        "palette": "Okabe-Ito (colorblind-safe)", "publish": "Paper, 1 column (8.3 cm)"},
+    "Copernicus (ACP/AMT) — 2 columns": {
+        "font": 9, "line": 1, "legend": 8, "grid": False, "tick": 8, "tick_dir": "In",
+        "palette": "Okabe-Ito (colorblind-safe)", "publish": "Paper, 2 columns (17 cm)"},
 }
 
 
@@ -294,7 +303,12 @@ class PlotMakerWidget(QWidget):
         prow.addWidget(self._palette_combo, 1); sv.addLayout(prow)
         thr = QHBoxLayout(); thr.addWidget(QLabel("Theme"))
         self._theme_combo = QComboBox(); self._theme_combo.addItems(list(_THEMES.keys()))
-        self._theme_combo.setToolTip("Look preset: font, line width, legend and grid in one go (colors unaffected)")
+        self._theme_combo.setToolTip(
+            "Look preset: font, line width, legend and grid in one go (colors unaffected).\n"
+            "Copernicus (ACP/AMT) presets also set the Publish size (8.3 / 17 cm @ 300 dpi),\n"
+            "tick size/direction and the Okabe-Ito palette. Width, vector output with embedded\n"
+            "fonts and one sans-serif family follow the journal guidelines; the font sizes,\n"
+            "inward ticks and no grid are our starting choice, not a journal rule.")
         self._theme_combo.activated.connect(lambda *_: self._on_theme_combo_changed())
         thr.addWidget(self._theme_combo, 1); sv.addLayout(thr)
         crow = QHBoxLayout()
@@ -2365,7 +2379,24 @@ class PlotMakerWidget(QWidget):
             for lab in [s[0] for s in getattr(ts, "_series", [])]:
                 st = ts._styles.setdefault(lab, {})
                 st["width"] = int(th["line"])
-        self.set_status(f"Theme applied: {name}")
+        # 저널 프리셋의 추가 항목(일반 테마엔 없다 — 색·크기는 안 건드린다)
+        extra = []
+        if "tick" in th:
+            self._tick_size.blockSignals(True); self._tick_size.setValue(int(th["tick"]))
+            self._tick_size.blockSignals(False)
+        if "tick_dir" in th:
+            self._tick_dir.blockSignals(True); self._tick_dir.setCurrentText(th["tick_dir"])
+            self._tick_dir.blockSignals(False)
+        if th.get("palette"):
+            self._palette_combo.setCurrentText(th["palette"])
+            self._apply_palette(th["palette"])
+            extra.append(th["palette"].split(" (")[0])
+        if th.get("publish"):
+            self._preset_combo.setCurrentText(th["publish"])
+            self._apply_publish_preset(th["publish"])
+            w, h, dpi = _PUBLISH_PRESETS[th["publish"]]
+            extra.append(f"{w}×{h} in @ {dpi} dpi")
+        self.set_status(f"Theme applied: {name}" + (f" — {', '.join(extra)}" if extra else ""))
         self._mode.render()
 
     def _on_transform_changed(self, *_):

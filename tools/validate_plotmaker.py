@@ -85,6 +85,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     재료 삭제 시 묵은 값 없이 ✗ (D1+, 2026-10-01)
 38. Deming·구간 추세 : x에도 오차가 있을 때 Deming이 OLS 감쇠를 보정하나(합성 참값) ·
     기본 OLS 제목·범례 불변 · λ from 1σ · Result Lab Σ Stats 구간 추세 (2026-10-01)
+39. Copernicus 프리셋 : Theme 하나로 Publish 폭·dpi·라벨/눈금 크기·눈금 방향·Okabe-Ito·
+    격자 끔이 실제 Publish 그림에 들어가나 · autosize 해제 (2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1698,6 +1700,43 @@ def c_deming_and_trend():
         return "FAIL", "Result Lab Stats에 구간 추세가 없음"
     return "PASS", (f"OLS {s_ols:.3f} → Deming {s_dem:.3f} (참 1.5) · 추세 {tr[0]:.4f}/h (참 0.25) · "
                     "OLS 제목 불변 · λ from 1σ · Publish 표기 · 설정 왕복 · Stats 추세 열")
+
+
+# ── 39. Copernicus 저널 프리셋 ───────────────────────────────────────────
+@check("Copernicus 프리셋: 폭·dpi·글자/눈금 크기·눈금 방향·Okabe-Ito가 Publish에 한 번에")
+def c_copernicus_preset():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:NO2", "L", None, None])
+    ts._series.append(["fixture:CHOCHO", "L", None, None])
+    ts._refresh_list()
+    name = "Copernicus (ACP/AMT) — 1 column"
+    w._theme_combo.setCurrentText(name)
+    w._apply_theme(name)
+    fig = w._build_publish_fig()
+    wi, hi = fig.get_size_inches()
+    if (round(wi, 2), round(hi, 2)) != (3.27, 2.45) or w._dpi_spin.value() != 300:
+        return "FAIL", f"크기/dpi 불일치: {wi:.2f}×{hi:.2f} @ {w._dpi_spin.value()}"
+    if w._chk_autosize.isChecked():
+        return "FAIL", "모드별 자동 크기가 안 꺼짐(모드 바꾸면 논문 폭이 덮인다)"
+    ax = fig.axes[0]
+    tl = ax.get_xticklabels() + ax.get_yticklabels()
+    sizes = {round(t.get_fontsize()) for t in tl if t.get_text()}
+    if sizes and sizes != {7}:
+        return "FAIL", f"눈금 글자 크기 ≠ 7 pt: {sizes}"
+    if round(ax.yaxis.label.get_fontsize()) != 8:
+        return "FAIL", f"축 라벨 크기 ≠ 8 pt: {ax.yaxis.label.get_fontsize()}"
+    tdir = ax.xaxis.get_major_ticks()[0]._tickdir if ax.xaxis.get_major_ticks() else "in"
+    if tdir != "in":
+        return "FAIL", f"눈금 방향이 안쪽이 아님: {tdir}"
+    from matplotlib.colors import to_hex
+    cols = [to_hex(l.get_color()).lower() for l in ax.get_lines()[:2]]
+    if cols != ["#000000", "#e69f00"]:
+        return "FAIL", f"Okabe-Ito 순서 색이 아님: {cols}"
+    if ax.xaxis._major_tick_kw.get("gridOn", False):
+        return "FAIL", "격자가 켜져 있음"
+    return "PASS", "3.27×2.45 in @300 · autosize 끔 · 8 pt 라벨/7 pt 눈금 · 눈금 안쪽 · Okabe-Ito · 격자 끔"
 
 
 def main():
