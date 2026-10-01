@@ -1,3 +1,4 @@
+import ntpath
 import os
 import re
 import sys
@@ -1158,7 +1159,8 @@ class DataIO:
         `ncols`(데이터행 폭)를 이미 알면 넘겨라 — 없으면 파일을 펼쳐서 센다(비쌈).
         날짜 범위를 먼저 보므로 대다수 파일은 아무것도 읽지 않고 0.0으로 끝난다."""
         try:
-            stem = os.path.splitext(os.path.basename(filepath))[0]
+            # ntpath: Windows 경로를 Linux(CI)에서 받아도 파일명을 맞게 뽑는다(Windows 에선 동일).
+            stem = os.path.splitext(ntpath.basename(filepath))[0]
             if not (DataIO.HOT_DEPLOY_STEM <= stem < DataIO.HOT_UTC_TOGGLE_STEM):
                 return 0.0
             if ncols is None:

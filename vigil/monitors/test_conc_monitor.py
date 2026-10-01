@@ -222,6 +222,10 @@ def test_fail_streak_to_p0():
 
 
 def main():
+    if not os.path.isfile(OP.FITSET):
+        # 실 FitSet(이 PC 의 Output/)이 있어야 하는 테스트다 — CI·다른 PC 에선 건너뛴다.
+        print(f"conc_monitor tests: SKIP — FitSet 없음 ({OP.FITSET})")
+        return 0
     for t in (test_pick_fitset_channel, test_gas_policy_source_and_legacy_migration,
               test_i0_buffer_and_fit_and_throttle,
               test_throttle_blocks_immediate_refit, test_classify, test_fail_streak_to_p0):
