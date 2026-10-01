@@ -4,10 +4,8 @@
   1. `RefPropertiesTable.get_properties()`가 넣은 정책을 **그대로** 돌려준다
      (Free/Limit/Fix/Link/Center 다섯 모드 전부). 여기가 틀리면 shift 정책이
      조용히 바뀌어 핏 결과가 달라진다.
-  2. `RefPropertiesDialog.get_properties()`가 위젯과 **같은 값**을 준다 —
-     기존 호출부(`app_window.open_ref_properties`)의 계약 불변.
-  3. `set_gases()`로 가스 목록이 바뀌어도(레퍼런스 재락) 깨지지 않는다.
-  4. Center 모드가 살아있다 — 0을 안 품는 Limit이 첫 스캔에서 죽는 문제의 해법이라
+  2. `set_gases()`로 가스 목록이 바뀌어도(레퍼런스 재락) 깨지지 않는다.
+  3. Center 모드가 살아있다 — 0을 안 품는 Limit이 첫 스캔에서 죽는 문제의 해법이라
      (`fit_optimizer_handoff.md` §16) 추출 과정에서 빠뜨리면 안 된다.
 
     python tools/test_ref_properties_table.py
@@ -30,7 +28,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")   # 헤드리스
 
 from PyQt6.QtWidgets import QApplication
 
-from gui.ref_properties_dialog import RefPropertiesDialog, RefPropertiesTable
+from gui.ref_properties_dialog import RefPropertiesTable
 
 GASES = ["NO2", "CHOCHO", "H2O", "O4"]
 PROPS = {
@@ -76,15 +74,6 @@ def test_link_excludes_self():
     for gas in GASES:
         c = t.param_widgets[gas]["sh_lnk"]
         assert gas not in [c.itemText(i) for i in range(c.count())], gas
-
-
-def test_dialog_matches_widget():
-    """다이얼로그는 위젯을 감싸기만 한다 — 값이 같아야 계약 불변."""
-    d = RefPropertiesDialog(None, GASES, PROPS)
-    _same(d.get_properties(), PROPS, "dialog")
-    assert d.gas_list == GASES                 # 하위호환 프로퍼티
-    assert d.table.rowCount() == 4
-    assert set(d.param_widgets) == set(GASES)
 
 
 def test_set_gases_rebuild():
@@ -133,7 +122,7 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     assert app is not None
     for fn in (test_widget_roundtrip, test_center_mode_survives,
-               test_link_excludes_self, test_dialog_matches_widget,
+               test_link_excludes_self,
                test_set_gases_rebuild, test_unknown_gas_defaults,
                test_summary_line_shows_center):
         fn()

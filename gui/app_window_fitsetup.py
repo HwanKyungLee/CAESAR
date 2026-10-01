@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdi
 from core.data_io import DataIO
 from gui.theme import AUGUR
 from .test_fit_dialog import TestFitDialog
-from .ui_dialogs import (MaskDialog, RCalibratorDialog, RefPropertiesDialog, ReferenceGeneratorDialog,
+from .ui_dialogs import (MaskDialog, RCalibratorDialog, ReferenceGeneratorDialog,
                          WavelengthCalibrationDialog)
 
 
@@ -27,18 +27,6 @@ class FitSetupMixin:
     # ══════════════════════════════════════════════════════════════════════
     # §7  다이얼로그 런처: ref / R / wavecal
     # ══════════════════════════════════════════════════════════════════════
-    def open_ref_properties(self):
-        """Opens the RefPropertiesDialog to configure Shift/Squeeze bounds."""
-        if not hasattr(self, 'engine') or len(self.engine.gas_list) == 0:
-            QMessageBox.warning(self, "Warning", "Please load and lock references first!")
-            return
-            
-        dialog = RefPropertiesDialog(self, self.engine.gas_list, getattr(self, 'ref_props', {}))
-        if dialog.exec():
-            self.ref_props = dialog.get_properties()
-            print("⚙️ Reference properties successfully saved:", self.ref_props)
-            self._refresh_shsq_summary()   # L7: 그리드 요약 갱신
-
     def open_reference_generator(self):
         """Opens the Ultimate Reference Generator, auto-syncing available lamp/wavelength data."""
         wave_data = getattr(self, 'wavelengths', None)

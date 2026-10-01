@@ -63,7 +63,7 @@ CLASS_ATTRS = """
     browse_offset_file browse_r_file closeEvent del_ref export_alpha_files
     get_auto_scale_exponent guess_gas_name init_ui load_data load_scenario load_wavelength_cal
     lock_ref on_table_double_click on_table_single_click open_alpha_generator open_mask_dialog
-    open_peak_trend open_r_trend_monitor open_ref_properties open_reference_generator
+    open_peak_trend open_r_trend_monitor open_reference_generator
     open_selector open_wavelength_calibration reapply_qc refresh_viewer save save_scenario
     set_i0_from_table set_i0_path set_range_from_nm setup_cavity_tab setup_daily_run_tab
     showEvent show_table_context_menu start_analysis stop_analysis update_diagnostic_plot

@@ -1,5 +1,6 @@
 """gui/ref_properties_dialog.py
-RefPropertiesDialog — ui_dialogs_ref.py에서 분리(클래스 단위).
+RefPropertiesTable — the Reference policy editor in the main-window Parameters panel.
+The RefPropertiesDialog popup wrapping it was removed 2026-10-02.
 """
 import sys
 import os
@@ -246,44 +247,3 @@ class RefPropertiesTable(QWidget):
             }
         return props
 
-
-class RefPropertiesDialog(QDialog):
-    """`RefPropertiesTable`을 감싼 팝업. 기존 호출부와 계약이 같다.
-
-    상시 노출 패널(C1)이 생겼어도 이 팝업은 남긴다 — 넓은 창에서 한 번에 훑고
-    **Cancel로 되돌릴 수 있는** 편집 경로가 여전히 필요하다(패널은 즉시 반영이라
-    취소가 없다).
-    """
-
-    def __init__(self, parent, gas_list, current_props):
-        super().__init__(parent)
-        self.setWindowTitle("Edit Reference Properties")
-        _s = _ui_scale()
-        self.resize(int(1200 * _s), int(350 * _s))
-        layout = QVBoxLayout(self)
-
-        self._w = RefPropertiesTable(gas_list, current_props, self)
-        layout.addWidget(self._w)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
-
-    # 하위호환 — 예전에 dialog.table / .gas_list / .param_widgets를 직접 보던 코드용
-    @property
-    def table(self):
-        return self._w.table
-
-    @property
-    def gas_list(self):
-        return self._w.gas_list
-
-    @property
-    def param_widgets(self):
-        return self._w.param_widgets
-
-    def get_properties(self):
-        """계약 불변 — 호출부는 이 메서드만 안다."""
-        return self._w.get_properties()
