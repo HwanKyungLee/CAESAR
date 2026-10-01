@@ -1,5 +1,8 @@
 # Oculus hot 프로파일 정정안 (2026-09-27)
 
+> **✅ 2026-10-01 적용됨** — `vigil/profiles/caesar_hot.example.json` 1.2.0. 이 폴더는 근거 기록으로 남긴다.
+> wavecal 짝(FitSet 기준 ANs=roi1)과 `CHANNEL_IDENTITY_YEOSU2026.md` 표(ANs=roi2)의 차이는 미결로 그 문서에 메모.
+
 `oculus/` 폴더는 Windows 권한 때문에 이 작업 환경에서 읽기·쓰기가 막혀 있다. 그래서 **git에 커밋된 판**
 (`oculus/profiles/caesar_hot.example.json`, profile_version 1.0.0)을 git 객체에서 직접 읽어 점검했고,
 정정한 파일을 여기에 둔다. 작업트리의 `oculus/` 판이 커밋 판과 다를 수 있으니 적용 전에 diff를 볼 것.

@@ -11,6 +11,8 @@
 | **2053–4100** (primary, "ch1") | **청색**, 반치 약 428–456 nm | **ΣANs 300 °C** | 429.5–461.9 nm, poly4 | roi2 | `hot\ch1\*_ANs_*` |
 | **4101–6148** (secondary, "ch2") | **청록 469 nm**, 반치 약 451–471 nm | **ΣPNs 180 °C** | 444.1–470.6 nm, poly3 | roi1 | `hot\ch2\*_PNs_*` |
 
+> **wavecal 열 미결 (2026-10-01)**: 위 표의 wavecal(ANs=roi2, PNs=roi1)은 2026-09-14 계기 담당자 메모(`tools/channel_map.json`)에서 온 값이고, 9-27 실험이 가린 것은 셀 정체·압력 짝이지 wavecal 짝이 아니다. 실제 Augur FitSet(`FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_…`)은 **ANs 채널(1) = wv_cal/roi1, PNs 채널(2) = roi2** 를 쓴다. Vigil 핫 프로파일 1.2.0 은 FitSet 을 따랐다(Augur 와 같은 처리). 두 wavecal 차이는 전 구간 약 0.034 nm(0.7 px)로 핏 shift 가 흡수한다. 어느 Hg 교정이 어느 CCD 영역 것인지 원자료로 확인되면 이 표 또는 FitSet 을 고칠 것 (`tools/test_raw_layout.py` [5] 의 pending 집합도 함께 비운다).
+
 - 적용 범위: 2026-05-18 ~ 07-11 여수 캠페인, 그리고 **같은 배치인 2026-08-10/11 실험실** 파일.
 - ΣANs = (2053 블록 NO2) − g′ × (4101 블록 NO2). 원래 운영 라벨(파일명 `ANs_430-462`, 핏셋 channel 1 = ANs)이 **맞았다**.
 - **2026-09-25 ~ 27 동안 쓴 'ch2(4101) = 300 °C' 규약은 틀렸다(철회).** 그 기간 산출물·문서는 아래 5절 참조.

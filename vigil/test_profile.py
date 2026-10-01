@@ -138,7 +138,8 @@ def test_channels():
     hot = ProfileSet.load_default().by_id(HOT_ID)
     cold = ProfileSet.load_default().by_id(COLD_ID)
     sig_hot = [c.id for c in hot.signal_channels()]
-    check("hot signal 2채널 (PNs,ANs)", sig_hot == ["ch_pns", "ch_ans"], f"got {sig_hot}")
+    # block 2053 = ANs, 4101 = PNs (docs/채널정체_판정_2026-09-27.md, 프로파일 1.2.0)
+    check("hot signal 2채널 (ANs,PNs)", sig_hot == ["ch_ans", "ch_pns"], f"got {sig_hot}")
     check("cold signal 1채널 (NO2)",
           [c.id for c in cold.signal_channels()] == ["ch_no2"])
     # slice: PNs 채널 columns (2053,4100) → 길이 2048
