@@ -87,6 +87,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     기본 OLS 제목·범례 불변 · λ from 1σ · Result Lab Σ Stats 구간 추세 (2026-10-01)
 39. Copernicus 프리셋 : Theme 하나로 Publish 폭·dpi·라벨/눈금 크기·눈금 방향·Okabe-Ito·
     격자 끔이 실제 Publish 그림에 들어가나 · autosize 해제 (2026-10-01)
+40. Preview 모덜리스 : 싱글턴 · 무변화면 안 그림 · 바뀐 뒤 한 박자 동안 그대로면 다시 그림 ·
+    시리즈 스타일 변경도 감지 · 렌더 오류는 팝업 아닌 창 안 (M-P, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1737,6 +1739,45 @@ def c_copernicus_preset():
     if ax.xaxis._major_tick_kw.get("gridOn", False):
         return "FAIL", "격자가 켜져 있음"
     return "PASS", "3.27×2.45 in @300 · autosize 끔 · 8 pt 라벨/7 pt 눈금 · 눈금 안쪽 · Okabe-Ito · 격자 끔"
+
+
+# ── 40. Preview 모덜리스 + 자동 갱신 (M-P) ─────────────────────────────────
+@check("Preview: 모덜리스·싱글턴 · 설정 바뀌면 한 박자 뒤 다시 그림 · 그대로면 안 그림 · 오류는 창 안에")
+def c_preview_modeless():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None]); ts._refresh_list()
+    w._preview_publish()
+    dlg = w._preview_dlg
+    if dlg.isModal() or not dlg.isVisible() or dlg._lbl.pixmap().isNull():
+        return "FAIL", "Preview가 모덜이거나 안 보이거나 그림이 없음"
+    n0 = dlg.n_renders
+    w._preview_publish()                         # 다시 눌러도 창은 하나
+    if w._preview_dlg is not dlg or dlg.n_renders != n0 + 1:
+        return "FAIL", "Preview 창이 여러 개 생기거나 즉시 갱신 안 됨"
+    n1 = dlg.n_renders
+    dlg._tick(); dlg._tick()                     # 아무것도 안 바뀜 → 다시 그리지 않는다
+    if dlg.n_renders != n1:
+        return "FAIL", "변화가 없는데 다시 그림(헛수고)"
+    w._ed_title.setText("Changed title"); w.custom["title"] = "Changed title"
+    dlg._tick()                                  # 바뀐 직후 — 한 박자 기다림
+    if dlg.n_renders != n1:
+        return "FAIL", "바뀐 직후 바로 그림(타이핑 중 렌더 폭탄)"
+    dlg._tick()                                  # 그대로 → 이제 그린다
+    if dlg.n_renders != n1 + 1:
+        return "FAIL", "설정이 바뀌었는데 자동 갱신 안 됨"
+    ts._styles["fixture:NO2"] = {"kind": "bar"}  # 시리즈 스타일 변경도 지문에 잡혀야
+    dlg._tick(); dlg._tick()
+    if dlg.n_renders != n1 + 2:
+        return "FAIL", "시리즈 스타일 변경이 자동 갱신을 못 깨움"
+    # 렌더 오류는 팝업이 아니라 창 안에 (자동 갱신 중 메시지박스 폭탄 금지)
+    from unittest import mock
+    with mock.patch.object(type(w), "_build_publish_fig", side_effect=RuntimeError("boom")):
+        dlg.refresh()
+    if "boom" not in dlg._info.text():
+        return "FAIL", "렌더 오류가 창 안에 표시 안 됨"
+    dlg.close()
+    return "PASS", "모덜리스·싱글턴 · 무변화 시 안 그림 · 변화 후 한 박자 뒤 갱신 · 스타일 변경 감지 · 오류는 창 안"
 
 
 def main():

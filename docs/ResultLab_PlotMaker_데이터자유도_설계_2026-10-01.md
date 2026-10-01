@@ -175,7 +175,14 @@ Plot Maker 설정(`.pmcfg.json`)은 데이터셋을 `이름 → 경로`로 저�
 
 ### 그래프 트랙 (09-21 문서 이어서)
 
-- **M-P** Preview 모덜리스 + 자동 갱신
+- **M-P** Preview 모덜리스 + 자동 갱신 — **완료(2026-10-01, 검증 40번)**
+  - `gui/ui_plot_maker/preview_window.py`. Preview 버튼 = 싱글턴 창(이미 열려 있으면 앞으로 + 즉시 갱신).
+  - 갱신 규칙: 화면을 바꾸는 경로마다 훅을 거는 대신 500 ms마다 `preview_signature()`(설정 저장과
+    같은 `config_dict()` + 모드 색·범례 크기)를 보고 **바뀐 뒤 한 박자 동안 그대로면** 다시 그린다.
+    타이핑 중엔 안 그리고, 무변화면 안 그리고, 빠뜨리는 경로가 없다. `Auto-refresh` 체크로 끌 수 있다.
+  - 그리는 함수는 Publish와 같은 `_build_publish_fig` → 미리보기 = 저장 파일. 렌더 오류는 팝업이 아니라
+    창 상단 줄에(자동 갱신 중 메시지박스 폭탄 금지).
+  - 덤: `_save_cfg`의 dict 조립을 `config_dict()`로 뽑았다(지문과 저장이 같은 출처).
 - **M1** `render_mpl(fig)` → `render_mpl(fig, ax)`
 - **M2** Composer (패널 그리드, (a)(b)(c), 공유축, inset) — 결정 (B)
 

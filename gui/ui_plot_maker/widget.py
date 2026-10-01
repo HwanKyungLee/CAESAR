@@ -2579,42 +2579,32 @@ class PlotMakerWidget(QWidget):
         fig.tight_layout()
         return fig
 
-    def _preview_publish(self):
-        """Publish 결과를 그대로 다이얼로그에 띄워 미리보기(저장 안 함).
-        범례·폰트·마커·축범위 등 모든 커스텀이 출력과 동일하게 보인다."""
-        try:
-            fig = self._build_publish_fig()
-            if fig is None:
-                return
-            import io
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")  # 화면용 해상도
-            buf.seek(0)
-        except NotImplementedError:
-            QMessageBox.information(self, "Preview",
-                                   "This mode does not support high-res output yet.")
-            return
-        except Exception as e:
-            QMessageBox.warning(self, "Preview", f"Failed: {e}")
-            return
-        from PyQt6.QtGui import QPixmap
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea
-        pix = QPixmap()
-        pix.loadFromData(buf.getvalue(), "PNG")
+    def render_preview_png(self, dpi=110):
+        """Publish와 **같은 함수**(`_build_publish_fig`)로 그린 PNG 바이트 — 미리보기 = 저장 파일.
+        None = 그릴 게 없음. NotImplementedError/예외는 호출측이 처리."""
+        fig = self._build_publish_fig()
+        if fig is None:
+            return None
+        import io
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")  # 화면용 해상도
         mixed = self._mixed_hangul_mathtext()
         if mixed:
             self.set_status(f"⚠ {len(mixed)} label(s) mix Korean text and math — the Korean renders as □"
                             f" (e.g. {mixed[0][:20]}). Remove $…$ from Korean labels.")
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Publish preview — exactly as output (save with Publish)")
-        lay = QVBoxLayout(dlg)
-        sa = QScrollArea(); sa.setWidgetResizable(True)
-        lbl = QLabel(); lbl.setPixmap(pix)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sa.setWidget(lbl)
-        lay.addWidget(sa)
-        dlg.resize(min(pix.width() + 40, 1280), min(pix.height() + 60, 820))
-        dlg.exec()
+        return buf.getvalue()
+
+    def _preview_publish(self):
+        """Publish 미리보기 — **모덜리스** 창(M-P). 띄워둔 채 고치면 자동으로 다시 그린다.
+        이미 열려 있으면 앞으로 가져와 즉시 갱신(창은 하나만)."""
+        from .preview_window import PreviewWindow
+        dlg = getattr(self, "_preview_dlg", None)
+        if dlg is None:
+            dlg = self._preview_dlg = PreviewWindow(self)
+        dlg.refresh()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _figure_dir(self):
         """그림 저장 다이얼로그가 처음 열릴 폴더: `{마지막 폴더}/{campaign}/figures/`.
@@ -2798,7 +2788,27 @@ class PlotMakerWidget(QWidget):
                                              "Plot config (*.json)")
         if not out:
             return
-        cfg = {
+        cfg = self.config_dict()
+        try:
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            self.set_status(f"Config saved: {os.path.basename(out)}")
+        except Exception as e:
+            QMessageBox.warning(self, "Save config", f"Failed: {e}")
+
+    def preview_signature(self):
+        """그림을 바꿀 수 있는 상태 전부의 지문 — Preview 자동 갱신이 '바뀌었나'를 이것 하나로 본다.
+        설정 저장과 같은 dict(그림을 재현하는 전부)를 쓰고, 화면 전용인 것(창 크기 등)은 안 든다.
+        시리즈 색처럼 설정 dict 밖에 있는 것도 있어 모드 색·팔레트를 덧붙인다."""
+        cfg = self.config_dict()
+        cfg["_mode_colors"] = {m.key: dict(getattr(m, "colors", {}) or {}) for m in self._modes}
+        cfg["_legend"] = (self._legend_combo.currentText(), self._legend_size.value(),
+                          self._lbl_size.value())
+        return json.dumps(cfg, sort_keys=True, ensure_ascii=False, default=str)
+
+    def config_dict(self):
+        """`.pmcfg.json`에 쓰는 dict — 그림을 재현하는 전부(데이터 레시피·모드·라벨·축·주석)."""
+        return {
             "_version": self._CFG_VERSION,
             # 이름 → 레시피(경로 + 숨김 규칙 + 데이터셋 시프트). 옛 형식(이름 → 경로)도 읽힌다.
             "datasets": {n: ds.to_spec() for n, ds in self.shelf.items()},
@@ -2829,12 +2839,6 @@ class PlotMakerWidget(QWidget):
             # 여기(plot config)에 저장한다. 전엔 아예 저장되지 않아 불러오면 사라졌다.
             "annots": [self._annot_norm(a) for a in self._annots],
         }
-        try:
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2, ensure_ascii=False)
-            self.set_status(f"Config saved: {os.path.basename(out)}")
-        except Exception as e:
-            QMessageBox.warning(self, "Save config", f"Failed: {e}")
 
     def _load_cfg(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load plot config", "",
