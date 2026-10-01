@@ -149,8 +149,10 @@ class BootSplash(QSplashScreen):
         self._subtitle = subtitle
         self._n_steps = max(1, n_steps)
         self._steps: list = []            # (status, label, value)
+        # 시계는 restart() 에서 처음 켠다. 여기서 켜면 restart 전 준비(설정·git·레이아웃, 1.3 s 넘게
+        # 걸리기도 한다) 동안 모션이 다 재생돼 완성 그림이 먼저 보이고, restart 에서 처음부터 다시
+        # 재생됐다(2026-10-01 지적). 그 전까지는 첫 프레임(빈 장면 + 부팅 로그)에 멈춰 있다.
         self._clock = QElapsedTimer()
-        self._clock.start()
         self._mono = _family("IBM Plex Mono", "Consolas")
 
     # ── 공개 API ────────────────────────────────────────────────────────
@@ -162,8 +164,11 @@ class BootSplash(QSplashScreen):
     def restart(self) -> None:
         """모션을 처음부터. 메인 스레드를 막는 가벼운 준비(설정·git·레이아웃)를 첫 장면에서 끝낸
         뒤 부른다 — 그 사이 흐른 시간만큼 모션이 건너뛰어지지 않게."""
-        self._clock.restart()
+        self._clock.start()               # restart() 는 무효 타이머에서 정의되지 않음
         self.pump()
+
+    def _elapsed_ms(self) -> int:
+        return self._clock.elapsed() if self._clock.isValid() else 0
 
     def pump(self) -> None:
         self.repaint()
@@ -177,11 +182,11 @@ class BootSplash(QSplashScreen):
             # 모션(T_END)이 끝나면 화면은 멈춰 있다 — 그 뒤에도 12 ms 마다 다시 그리면 그리기(파이썬)가
             # 백그라운드 임포트와 GIL 을 다퉈 부팅이 늦어진다(2026-10-01 실측: 임포트 4.0 s → 7 s).
             # 정지 화면은 Vigil LIVE 시계(초 단위)만 바뀌므로 0.2 s 마다로 충분하다.
-            time.sleep(0.012 if self._clock.elapsed() < T_END * 1000 else 0.2)
+            time.sleep(0.012 if self._elapsed_ms() < T_END * 1000 else 0.2)
 
     def wait_settled(self) -> None:
         """모션이 끝날 때까지(최대 SETTLE_MS) 돌린다. 이미 지났으면 즉시 반환."""
-        self.wait_while(lambda: self._clock.elapsed() < SETTLE_MS, max_s=SETTLE_MS / 1000)
+        self.wait_while(lambda: self._elapsed_ms() < SETTLE_MS, max_s=SETTLE_MS / 1000)
 
     # ── 공통 그리기 ─────────────────────────────────────────────────────
     def _text(self, p, x, baseline, s, font, color, anchor="left"):
@@ -205,7 +210,7 @@ class BootSplash(QSplashScreen):
 
     def drawContents(self, p: QPainter) -> None:            # noqa: N802 (Qt 규약)
         th = self.THEME
-        t = self._clock.elapsed() / 1000.0
+        t = self._elapsed_ms() / 1000.0
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(QRectF(0, 0, self.W, self.H), QColor(th["bg"]))
         self._draw_scene(p, t)
