@@ -96,6 +96,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 43. R축(twinx)·컬러바 눈금은 오른쪽에만 — 왼쪽 숫자 옆에 겹쳐 찍히던 버그의 가드 (2026-10-01)
 44. 콘솔 : df()=보이는 그대로·push 시각 왕복·입력 기록 부착 · 예외 격리·여러 줄 · 설정 저장은
     기록만 · **설정을 열 때 기록을 자동 실행하지 않나**(센티넬 파일) · rerun()으로만 재생성 (D3, 2026-10-01)
+45. 주석 시각 : 연도 생략 값이 서기 1년·UTC가 아니라 데이터 연도·로컬로 · 깨진 주석은
+    Publish를 죽이지 않고 건너뛰며 이름이 남나 (R1, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2028,6 +2030,36 @@ def c_console():
         return "FAIL", f"rerun()이 데이터셋을 못 되살림: {w2._console_dlg.out.toPlainText()[-300:]}"
     return "PASS", ("df 보이는 그대로·push 시각 왕복·기록 부착 · 예외 격리·여러 줄 · 설정 저장=기록만 · "
                     "열 때 자동 실행 안 함(센티넬) · rerun으로만 재생성")
+
+
+# ── 45. 주석 시각 파서 = _parse_x · 깨진 주석은 건너뛰고 지목 (R1, 2026-10-02) ──
+@check("주석 시각: 'MM-DD HH:MM'=데이터 연도·로컬 · 깨진 주석이 Publish를 안 죽이고 지목됨")
+def c_annot_time_parse():
+    import datetime as _dt
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()                                        # _time_axis=True
+    yr = _dt.datetime.fromtimestamp(float(w.shelf["fixture"].time[0])).year
+    want = _dt.datetime(yr, 5, 20, 12, 0).timestamp()
+    for txt in ("05-20 12:00", f"{yr}-05-20 12:00"):
+        got = w._parse_annot_x(txt)
+        if got != want:
+            return "FAIL", f"{txt!r} → {got} (기대 {want}: 데이터 연도·로컬 시각)"
+    w._annots = [{"kind": "vline", "x1": -6.2e10, "label": "bad", "color": "#d32f2f"},
+                 {"kind": "vline", "x1": float(np.median(w.shelf["fixture"].time)),
+                  "label": "good", "color": "#d32f2f"}]
+    fig = w._build_publish_fig()
+    if fig is None:
+        return "FAIL", "깨진 주석 하나로 Publish 실패"
+    import io
+    fig.savefig(io.BytesIO(), format="png")
+    if len(w._annot_skipped) != 1 or "bad" not in w._annot_skipped[0]:
+        return "FAIL", f"건너뛴 주석 지목 안 됨: {w._annot_skipped}"
+    texts = {t.get_text().strip() for a in fig.axes for t in a.texts}
+    if "good" not in texts:
+        return "FAIL", f"정상 주석까지 사라짐: {texts}"
+    return "PASS", "연도 생략·포함 모두 로컬 같은 시각 · 깨진 주석만 건너뛰고 이름 남김"
 
 
 def main():

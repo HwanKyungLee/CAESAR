@@ -869,17 +869,15 @@ class PlotMakerWidget(QWidget):
                     self.p1.addItem(ti, ignoreBounds=True)
 
     def _parse_annot_x(self, text):
-        """주석 세로선 값 파싱: 시간축이면 날짜시각→epoch, 아니면 숫자. 실패 None."""
-        text = (text or "").strip()
-        if self._time_axis:
-            try:
-                import pandas as pd
-                ts = pd.to_datetime(text)
-                return float(ts.timestamp())
-            except Exception:
-                pass
+        """Annotation x value: same parser as the X-range box (`_parse_x` — local time, data year
+        when the year is omitted), with a plain-number fallback. Unparseable = None.
+        The old pd.to_datetime().timestamp() path stored 'MM-DD HH:MM' as year 1 (every Publish
+        then died with OSError 22) and read naive date-times as UTC (+9 h in KST)."""
+        v = self._parse_x(text)
+        if v is not None:
+            return v
         try:
-            return float(text)
+            return float((text or "").strip())
         except ValueError:
             return None
 
@@ -1799,6 +1797,18 @@ class PlotMakerWidget(QWidget):
             col = an.get("color") or "#555"
             lbl = an.get("label") or None
             x1, y1, x2, y2 = an.get("x1"), an.get("y1"), an.get("x2"), an.get("y2")
+            if self._time_axis:
+                # A broken time (e.g. year 1 from the old annotation parser) used to raise
+                # OSError 22 here and kill every Publish. Skip that annotation and name it.
+                try:
+                    if any(_dt.datetime.fromtimestamp(v).year < 1970
+                           for v in (x1, x2) if v is not None):
+                        raise ValueError
+                except (OSError, OverflowError, ValueError):
+                    skipped = getattr(self, "_annot_skipped", None)
+                    if skipped is not None:
+                        skipped.append(f"{kind} '{lbl or ''}' (x={x1})")
+                    continue
             for ai, a in enumerate(axes):
                 show_label = (ai == 0) and lbl   # 라벨은 첫 패널에만(중복 방지)
                 # 라벨은 axvline(label=)이 아니라 text()로 — 범례를 꺼도 보여야 한다
@@ -2656,6 +2666,7 @@ class PlotMakerWidget(QWidget):
             QMessageBox.warning(self, "Publish", f"matplotlib unavailable: {e}")
             return None
         self._apply_mpl_rc(matplotlib)
+        self._annot_skipped = []          # filled by _apply_axes_mpl (annotations it could not draw)
         fig = Figure(figsize=(self._fig_w.value(), self._fig_h.value()))
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
         notes = []
@@ -2685,6 +2696,10 @@ class PlotMakerWidget(QWidget):
             fig.tight_layout()
         return fig
 
+    def _annot_skipped_msg(self):
+        return (f"⚠ {len(self._annot_skipped)} annotation(s) skipped — invalid time: "
+                + "; ".join(self._annot_skipped) + " (fix or remove in Annotate…)")
+
     def render_preview_png(self, dpi=110):
         """Publish와 **같은 함수**(`_build_publish_fig`)로 그린 PNG 바이트 — 미리보기 = 저장 파일.
         None = 그릴 게 없음. NotImplementedError/예외는 호출측이 처리."""
@@ -2694,6 +2709,8 @@ class PlotMakerWidget(QWidget):
         import io
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")  # 화면용 해상도
+        if self._annot_skipped:
+            self.set_status(self._annot_skipped_msg())
         mixed = self._mixed_hangul_mathtext()
         if mixed:
             self.set_status(f"⚠ {len(mixed)} label(s) mix Korean text and math — the Korean renders as □"
@@ -2749,6 +2766,8 @@ class PlotMakerWidget(QWidget):
             ext = os.path.splitext(out)[1].lstrip(".").upper()
             extra = f" @ {self._dpi_spin.value()}dpi" if ext == "PNG" else " (vector)"
             msg = f"Published: {os.path.basename(out)} [{ext}{extra}]"
+            if self._annot_skipped:
+                msg += "  " + self._annot_skipped_msg()
             mixed = self._mixed_hangul_mathtext()
             if mixed:
                 msg += (f"  ⚠ {len(mixed)} label(s) mixing Korean text and math will render the Korean as □"
