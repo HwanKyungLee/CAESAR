@@ -19,6 +19,7 @@ from typing import Optional
 import numpy as np
 
 from vigil.alert_engine import OK, P0, P1, P2
+from vigil.monitors.running_mean import RunningMean
 
 # 연속 이 횟수 이상 R 산출 실패하면 "정지 수준"으로 격상(§5 P0 예시: "R 산출 연속 실패").
 FAIL_STREAK_FOR_P0 = 3
@@ -48,19 +49,28 @@ class RMonitor:
         self.warn_drop = warn_drop
         self.alarm_drop = alarm_drop
 
-        self._za_buf: list = []
-        self._he_buf: list = []
+        self._za_buf = self._new_buf()
+        self._he_buf = self._new_buf()
         self._last_za: Optional[tuple] = None   # (spectrum, T, P) — 가장 최근 완결된 윈도우 평균
         self._last_he: Optional[tuple] = None
         self._history: deque = deque(maxlen=history_window)
         self._fail_streak = 0
 
     @staticmethod
-    def _avg(buf: list) -> tuple:
-        spec = np.mean(np.array([b[0] for b in buf], dtype=float), axis=0)
-        t = float(np.mean([b[1] for b in buf]))
-        p = float(np.mean([b[2] for b in buf]))
-        return spec, t, p
+    def _avg(buf) -> tuple:
+        spec, t, p = buf
+        return spec.mean(), float(t.mean()), float(p.mean())
+
+    @staticmethod
+    def _new_buf() -> tuple:
+        """(스펙트럼, 온도, 압력) 누적 평균 — 행을 쌓지 않는다(running_mean 참조)."""
+        return RunningMean(), RunningMean(), RunningMean()
+
+    @staticmethod
+    def _add(buf, spectrum, temp_c, press_mbar) -> None:
+        buf[0].add(spectrum)
+        buf[1].add(temp_c)
+        buf[2].add(press_mbar)
 
     def observe(self, role: Optional[str], spectrum, temp_c: float, press_mbar: float):
         """새 행 한 개 관측. za_inject/he_inject 구간 동안 버퍼링하고, **둘 다** 갓
@@ -68,15 +78,15 @@ class RMonitor:
         그래야 이전 사이클의 묵은 za/he 평균이 이번 사이클의 새 평균과 잘못 짝지어져
         엉뚱한 R이 나오는 걸 막는다. 이번 행으로 새 R이 안 나왔으면 None."""
         if role == "za_inject":
-            self._za_buf.append((spectrum, temp_c, press_mbar))
-        elif self._za_buf:   # za 윈도우가 방금 끝남
+            self._add(self._za_buf, spectrum, temp_c, press_mbar)
+        elif self._za_buf[0]:   # za 윈도우가 방금 끝남
             self._last_za = self._avg(self._za_buf)
-            self._za_buf = []
+            self._za_buf = self._new_buf()
         if role == "he_inject":
-            self._he_buf.append((spectrum, temp_c, press_mbar))
-        elif self._he_buf:   # he 윈도우가 방금 끝남
+            self._add(self._he_buf, spectrum, temp_c, press_mbar)
+        elif self._he_buf[0]:   # he 윈도우가 방금 끝남
             self._last_he = self._avg(self._he_buf)
-            self._he_buf = []
+            self._he_buf = self._new_buf()
 
         if self._last_za is not None and self._last_he is not None:
             result = self._compute()

@@ -56,24 +56,36 @@ class IngestCursor:
         entry = self._data.get(os.path.abspath(path))
         return int(entry["offset"]) if entry else 0
 
-    def set(self, path: str, offset: int, mtime: Optional[float] = None) -> None:
-        """오프셋 갱신 + 즉시 저장. mtime은 참고용(파일 교체 감지에 쓸 수 있음)."""
+    def has(self, path: str) -> bool:
+        return os.path.abspath(path) in self._data
+
+    def set(self, path: str, offset: int, mtime: Optional[float] = None, save: bool = True) -> None:
+        """오프셋 갱신 + 즉시 저장. mtime은 참고용(파일 교체 감지에 쓸 수 있음).
+        여러 파일을 한꺼번에 갱신할 땐 save=False 로 모은 뒤 save() 한 번."""
         key = os.path.abspath(path)
         self._data[key] = {"offset": int(offset), "mtime": float(mtime or 0.0)}
+        if save:
+            self._save()
+
+    def save(self) -> None:
         self._save()
 
     def clamp_to_size(self, path: str) -> int:
         """저장된 오프셋이 실제 파일 크기보다 크면(파일이 잘렸다/교체됐다) 0으로
         되돌리고 그 값을 반환. 정상이면 저장된 오프셋을 그대로 반환."""
+        return self.offset_and_size(path)[0]
+
+    def offset_and_size(self, path: str) -> tuple:
+        """(clamp 된 오프셋, 파일 크기). 크기를 못 읽으면 크기는 None."""
         off = self.get(path)
         try:
             size = os.path.getsize(path)
         except OSError:
-            return off
+            return off, None
         if off > size:
             self.set(path, 0)
-            return 0
-        return off
+            return 0, size
+        return off, size
 
     def known_files(self) -> list:
         return list(self._data.keys())

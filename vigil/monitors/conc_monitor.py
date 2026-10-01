@@ -30,6 +30,7 @@ import numpy as np
 from core.doas_fit import DoasFitter
 from core import param_optimizer as PO
 from vigil.alert_engine import OK, P0, P1, P2, worse
+from vigil.monitors.running_mean import RunningMean
 from tools import optimize_params as OP
 
 FAIL_STREAK_FOR_P0 = 3   # 연속 이 이상 핏 실패하면 P0로 격상(r_monitor.py와 같은 관례)
@@ -81,7 +82,7 @@ class ConcMonitor:
             self.allow_negative_gas = cfg.allow_negative_gas
             self.gas_policy_provenance = "legacy FitSet fallback: Vigil profile"
 
-        self._za_buf: list = []
+        self._za_buf = RunningMean()   # I0 누적 평균 — 행을 쌓지 않는다(running_mean 참조)
         self._i0: Optional[np.ndarray] = None
         self._last_fit_time: Optional[datetime] = None
         self._last_shift: Optional[float] = None
@@ -100,11 +101,11 @@ class ConcMonitor:
         (throttle 통과 + I0 있을 때) 경량 핏을 돌려 (status, msg, metrics)를 반환.
         핏이 안 돌면 None(호출부는 이전 상태를 유지하면 된다)."""
         if role == "za_inject":
-            self._za_buf.append(spectrum)
+            self._za_buf.add(spectrum)
             return None
         if self._za_buf:   # za 윈도우가 방금 끝남 — I0 갱신
-            self._i0 = np.mean(np.array(self._za_buf, dtype=float), axis=0)
-            self._za_buf = []
+            self._i0 = self._za_buf.mean()
+            self._za_buf = RunningMean()
 
         if role != "sampling" or self._i0 is None:
             return None

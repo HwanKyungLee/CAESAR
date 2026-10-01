@@ -12,12 +12,23 @@ raw 폴더를 폴링해 새로 append된 완성된 줄만 읽어 RowEvent로 흘
 중에도 안전해야 하므로, **완성된 줄만** 소비한다 — 마지막 줄이 개행으로 안
 끝나면(DAQ가 그 줄을 쓰는 중) 커서를 그 줄 시작까지만 전진시키고 다음 폴링에
 다시 읽는다.
+
+메모리 상한(2026-10-01, 현장 PC 다운 사고): 예전엔 커서 없는 파일을 처음부터 끝까지
+**한 tick 에 전부** 읽어 행마다 float 리스트로 만들었다. 핫 행 6181열 ≈ 200 KB/행이라
+한 시간치 백로그가 ~0.7 GB, 캠페인 폴더 전체면 수십 GB — 켜자마자 GUI 가 멈추고 메모리가
+바닥나 LabVIEW 와 함께 PC 가 죽었다. 지금은 두 겹으로 막는다:
+  1. tick 당 읽는 바이트에 상한(`max_bytes_per_tick`) — 밀린 분량은 여러 tick 에 나눠
+     따라잡는다(커서는 실제로 소비한 완성된 줄까지만 전진하므로 빠지는 행은 없다).
+  2. 시작 시점에 커서가 없고 `backlog_age_sec` 넘게 안 바뀐 파일은 끝에서 시작한다.
+     실시간 감시기라 지난 데이터는 볼 이유가 없다(사후 분석은 Augur 몫). 건너뛴 건
+     `skipped_backlog` 로 남겨 진입점이 로그에 적는다 — 조용히 버리지 않는다.
 """
 from __future__ import annotations
 
 import glob
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -39,6 +50,13 @@ class RowEvent:
 
 
 _DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+# 핫 행 텍스트 ≈ 45–60 KB → 4 MB ≈ 70–90 행/tick(파싱 후 ~15 MB). 1 h 파일(~160 MB)을
+# ~40 s 에 따라잡는다. 정상 유입은 ~50 KB/s 라 상한에 닿지 않는다.
+DEFAULT_MAX_BYTES_PER_TICK = 4 * 1024 * 1024
+# 시작 시 커서 없는 파일 중 이보다 오래 안 바뀐 건 끝에서 시작(1 h 파일 rollover 주기).
+DEFAULT_BACKLOG_AGE_SEC = 3600.0
+_EXTEND_BYTES = 1024 * 1024   # 상한 안에 개행이 하나도 없을 때(행 하나가 상한보다 김) 더 읽는 단위
 
 
 def _year_from_filename(path: str, default: Optional[int] = None) -> int:
@@ -68,13 +86,21 @@ class Watcher:
     """
 
     def __init__(self, watch_dir: str, profiles: ProfileSet, cursor: IngestCursor,
-                 file_glob: str = "*.dat"):
+                 file_glob: str = "*.dat",
+                 max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
+                 backlog_age_sec: Optional[float] = DEFAULT_BACKLOG_AGE_SEC):
         self.watch_dir = watch_dir
         self.profiles = profiles
         self.cursor = cursor
         self.file_glob = file_glob
+        self.max_bytes_per_tick = int(max_bytes_per_tick)
+        self.backlog_age_sec = backlog_age_sec   # None 이면 건너뛰지 않음(처음부터 다 읽음)
         self._profile_cache: dict = {}   # {path: Profile|False(=매치실패, 재시도 방지)}
         self._warned_dupes: set = set()  # 중복 파일명 경고를 한 번만(폴링 1초 주기)
+        self._started = False
+        self._truncated = False
+        self.skipped_backlog: tuple = (0, 0)   # (파일 수, 바이트) — 시작 시 건너뛴 백로그
+        self.catching_up = False               # 직전 poll 이 상한에 닿았다 = 밀린 분량을 따라잡는 중
 
     def _route(self, path: str, n_columns: int) -> Optional[Profile]:
         """성공만 캐시한다. LabVIEW가 파일 첫 행에 쓰는 flag=0 헤더행은 데이터행보다
@@ -92,13 +118,47 @@ class Watcher:
             self._profile_cache[path] = prof
         return prof
 
-    def _read_new_lines(self, path: str) -> list:
-        """오프셋 이후 **완성된** 줄만 읽고 커서를 그만큼만 전진시킨다."""
-        offset = self.cursor.clamp_to_size(path)
+    def _skip_stale_backlog(self, paths: list) -> None:
+        """첫 poll 한 번만: 커서 없고 오래된 파일은 커서를 파일 끝으로 둔다(모듈 docstring 2)."""
+        if self.backlog_age_sec is None:
+            return
+        cutoff = time.time() - self.backlog_age_sec
+        n = nbytes = 0
+        for path in paths:
+            if self.cursor.has(path):
+                continue
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            if st.st_mtime < cutoff:
+                self.cursor.set(path, st.st_size, mtime=st.st_mtime, save=False)
+                n += 1
+                nbytes += st.st_size
+        if n:
+            self.cursor.save()
+        self.skipped_backlog = (n, nbytes)
+
+    def _read_new_lines(self, path: str, max_bytes: Optional[int] = None) -> list:
+        """오프셋 이후 **완성된** 줄만 읽고 커서를 그만큼만 전진시킨다.
+        max_bytes 가 있으면 그만큼만 읽는다(단, 완성된 줄이 하나는 나오도록 필요하면 더 읽음)."""
+        self._truncated = False
+        offset, size = self.cursor.offset_and_size(path)
+        if size is not None and offset >= size:
+            return []   # 새로 붙은 게 없으면 열지도 않는다(폴링 1초 × 파일 수)
         try:
             with open(path, "rb") as fh:
                 fh.seek(offset)
-                chunk = fh.read()
+                if max_bytes is None or (size is not None and size - offset <= max_bytes):
+                    chunk = fh.read()
+                else:
+                    chunk = fh.read(max_bytes)
+                    while len(chunk) >= max_bytes and b"\n" not in chunk:
+                        more = fh.read(_EXTEND_BYTES)
+                        if not more:
+                            break
+                        chunk += more
+                    self._truncated = bool(fh.read(1))   # 상한 때문에 남긴 게 있다
         except OSError:
             return []
         if not chunk:
@@ -140,13 +200,26 @@ class Watcher:
 
 
     def poll(self) -> list:
-        """한 tick: 감시폴더의 모든 파일에서 새 행을 모아 RowEvent 리스트로 반환."""
+        """한 tick: 감시폴더의 파일들에서 새 행을 모아 RowEvent 리스트로 반환.
+        이번 tick 에 읽는 총량은 max_bytes_per_tick 까지 — 남은 건 다음 tick 에."""
         events: list = []
         pattern = os.path.join(self.watch_dir, "**", self.file_glob)
         paths = sorted(glob.glob(pattern, recursive=True))
         self._warn_duplicate_basenames(paths)
+        if not self._started:
+            self._skip_stale_backlog(paths)
+            self._started = True
+        budget = self.max_bytes_per_tick
+        pending = False
         for path in paths:
-            for line in self._read_new_lines(path):
+            if budget <= 0:
+                pending = True
+                break
+            before = self.cursor.get(path)
+            lines = self._read_new_lines(path, max_bytes=budget)
+            budget -= max(0, self.cursor.get(path) - before)
+            pending = pending or self._truncated
+            for line in lines:
                 row = _parse_row(line)
                 if row is None:
                     continue
@@ -166,4 +239,5 @@ class Watcher:
                     flag=flag, role=role, row_time=row_time,
                     arrival_time=datetime.now(), row=row,
                 ))
+        self.catching_up = pending
         return events

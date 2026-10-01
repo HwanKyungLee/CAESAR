@@ -21,7 +21,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from vigil.alert_engine import P1, SKIP, aggregate, worse
+from vigil.alert_engine import OK, P1, SKIP, aggregate, worse
 from vigil.ingest_cursor import IngestCursor
 from vigil.monitors.hk_monitor import evaluate_hk
 from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
@@ -29,7 +29,7 @@ from vigil.monitors.lamp_monitor import LampMonitor
 from vigil.monitors.r_monitor import RMonitor
 from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from vigil.state_log import StateLog
-from vigil.watcher import Watcher
+from vigil.watcher import DEFAULT_BACKLOG_AGE_SEC, DEFAULT_MAX_BYTES_PER_TICK, Watcher
 
 TREND_MAXLEN = 300   # ponytail: 그래프 표시용 최근 N개 — 부족하면 늘릴 것
 
@@ -59,12 +59,16 @@ class VigilApp:
     """감시 루프 상태 컨테이너. QTimer가 매 tick `.tick()`을 부른다."""
 
     def __init__(self, watch_dir: str, profile_dir: str, state_dir: str,
-                 dashboard=None):
+                 dashboard=None, max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
+                 backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC):
         self.watch_dir = watch_dir
         self.profiles = ProfileSet.load(profile_dir)
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
-        self.watcher = Watcher(watch_dir, self.profiles, self.cursor)
+        self.watcher = Watcher(watch_dir, self.profiles, self.cursor,
+                               max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec)
+        self._backlog_logged = False
+        self._was_catching_up = False
         self.dashboard = dashboard
 
         self._last_arrival = None          # 전체 최신 관측 벽시계 시각
@@ -221,9 +225,30 @@ class VigilApp:
                     f"[{os.path.basename(ev.file)}] Conc {combined_status}: {combined_msg}")
         self._conc_last_status[ev.file] = combined_status
 
+    def _log_ingest_state(self) -> None:
+        """백로그 건너뜀(시작 1회)과 따라잡기 시작/끝을 로그에 남긴다 — 조용히 버리지 않는다."""
+        w = self.watcher
+        if not self._backlog_logged:
+            self._backlog_logged = True
+            n, nbytes = w.skipped_backlog
+            if n:
+                msg = (f"시작 시 오래된 raw {n}개 파일({nbytes / 1e6:.0f} MB)은 건너뛰고 끝에서 시작 "
+                       f"(커서 없음·{w.backlog_age_sec / 60:.0f}분 넘게 안 바뀜 — 지난 데이터는 Augur 몫)")
+                self.state_log.append(OK, msg, kind="ingest", skipped_files=n, skipped_bytes=nbytes)
+                if self.dashboard is not None:
+                    self.dashboard.log_line(msg)
+        if w.catching_up != self._was_catching_up:
+            self._was_catching_up = w.catching_up
+            msg = (f"밀린 raw 따라잡는 중 (tick 당 {w.max_bytes_per_tick / 2**20:.0f} MB씩)"
+                   if w.catching_up else "따라잡기 끝 — 실시간")
+            self.state_log.append(OK, msg, kind="ingest")
+            if self.dashboard is not None:
+                self.dashboard.log_line(msg)
+
     def tick(self) -> None:
         events = self.watcher.poll()
         now = datetime.now()
+        self._log_ingest_state()
         for ev in events:
             self._files_seen[ev.file] = now
             if not ev.profile_id:
@@ -309,6 +334,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--state-dir", default=_default_state_dir(),
                     help="커서·로그 저장 폴더 (기본 <repo>/vigil_state, 옛 oculus_state 가 있으면 그것)")
     ap.add_argument("--poll-sec", type=float, default=1.0, help="폴링 주기(초, 기본 1.0)")
+    ap.add_argument("--max-mb-per-tick", type=float, default=DEFAULT_MAX_BYTES_PER_TICK / 2**20,
+                    help="tick 당 읽는 raw 상한(MB, 기본 %(default).0f) — 밀린 분량은 나눠 따라잡는다")
+    ap.add_argument("--backlog-age-min", type=float, default=DEFAULT_BACKLOG_AGE_SEC / 60,
+                    help="시작 시 커서 없는 파일 중 이보다 오래 안 바뀐 건 건너뜀(분, 기본 %(default).0f). "
+                         "음수면 건너뛰지 않고 처음부터 읽음")
     return ap
 
 
@@ -345,7 +375,7 @@ def main(argv=None) -> int:
     _cursors = os.path.join(args.state_dir, "cursors.json")
     _resume = os.path.isfile(_cursors)
     splash.step("state", f"{os.path.basename(args.state_dir)} · "
-                         f"{'resume' if _resume else 'fresh (reads raw from the start)'}",
+                         f"{'resume' if _resume else 'fresh (skips raw older than %.0f min)' % args.backlog_age_min}",
                 "ok" if _resume else "skip")
     from core.provenance import code_version
     _ver = code_version()
@@ -353,7 +383,9 @@ def main(argv=None) -> int:
 
     from vigil.dashboard.dashboard_window import DashboardWindow
     win = DashboardWindow(title=f"Vigil — {args.dir}")
-    core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win)
+    core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win,
+                    max_bytes_per_tick=int(args.max_mb_per_tick * 2**20),
+                    backlog_age_sec=(args.backlog_age_min * 60 if args.backlog_age_min >= 0 else None))
     splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
     win.log_line(f"watching {args.dir} (poll {args.poll_sec:.1f}s, "
                 f"{len(core.profiles)} profile(s) loaded)")
