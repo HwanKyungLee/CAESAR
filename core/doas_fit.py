@@ -157,6 +157,8 @@ class DoasFitter:
           per_gas: {gas: {"r": float, "vif": float, "vif_no_etalon": float}}
           e_f: 사용한 각주파수, warn: |r| > ETALON_CORR_WARN 인 기체 목록
         비활성/영-노름 열은 NaN. 실패해도 예외를 밖으로 던지지 않는 건 호출부 책임."""
+        if fixed_e_f is None:   # etalon OFF → 진단할 etalon 열이 없다(format 은 n/a)
+            return {"per_gas": {}, "e_f": None, "warn": []}
         pixel_idx = np.asarray(pixel_idx, dtype=float)
         n = len(pixel_idx)
         gases = list(self.engine.gas_list)

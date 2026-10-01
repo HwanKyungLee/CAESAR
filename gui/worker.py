@@ -909,7 +909,8 @@ class AnalysisWorker(QThread):
                         )
                         
                         abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
-                        etalon_part_orig = (etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                        etalon_part_orig = ((etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                                            if fixed_e_f is not None else 0.0)   # etalon OFF: 사인 열 없음
 
                         y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
                         # residual must be in the same units as the fitted signal (optical_depth)
@@ -1198,7 +1199,8 @@ class AnalysisWorker(QThread):
                         _, abs_val_scaled, poly_val_scaled, _, _ = self.engine.get_model_components(
                             pixel_idx, opt_shifts, opt_squeezes, gas_coeffs_scaled, poly_coeffs_scaled)
                         abs_val_orig, poly_val_orig = abs_val_scaled / scale_factor, poly_val_scaled / scale_factor
-                        etalon_part_orig = (etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                        etalon_part_orig = ((etalon_amp_scaled * np.sin(fixed_e_f * pixel_idx + best_ep)) / scale_factor
+                                            if fixed_e_f is not None else 0.0)   # etalon OFF: 사인 열 없음
                         y_fit_model_orig = poly_val_orig + (fit_sign * abs_val_orig) + etalon_part_orig
                         residual = intensity_raw - y_fit_model_orig
                         rms = np.sqrt(np.mean(residual ** 2))
