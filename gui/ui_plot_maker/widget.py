@@ -2805,6 +2805,18 @@ class PlotMakerWidget(QWidget):
         cols = list(dict.fromkeys(s[0] for s in ts._series))   # "ds:col" 중복제거, 순서유지
         saved, failed = [], []
         dpi = self._dpi_spin.value()
+        used = set()
+
+        def _out_path(prefix, lab):
+            # File name carries the dataset tag — CH1:NO2 and CH2:NO2 both used to become
+            # 'timeseries_NO2.png', the second overwrote the first and both were listed as saved.
+            import re as _re
+            base = prefix + "_" + _re.sub(r"[^0-9A-Za-z가-힣._-]+", "-", lab).strip("-")
+            name, k = base, 2
+            while name.lower() in used:
+                name, k = f"{base}_{k}", k + 1
+            used.add(name.lower())
+            return os.path.join(out_dir, name + ".png")
 
         if self._mode.key == "timeseries":
             orig_series = ts._series
@@ -2818,8 +2830,7 @@ class PlotMakerWidget(QWidget):
                         fig = self._build_publish_fig()
                         if fig is None:
                             failed.append(f"{lab}: figure creation failed"); continue
-                        col = lab.split(":", 1)[-1]
-                        path = os.path.join(out_dir, f"timeseries_{col}.png")
+                        path = _out_path("timeseries", lab)
                         fig.savefig(path, dpi=dpi, bbox_inches="tight")
                         saved.append(os.path.basename(path))
                     except Exception as e:
@@ -2840,8 +2851,7 @@ class PlotMakerWidget(QWidget):
                         fig = self._build_publish_fig()
                         if fig is None:
                             failed.append(f"{lab}: figure creation failed"); continue
-                        col = lab.split(":", 1)[-1]
-                        path = os.path.join(out_dir, f"diurnal_{col}.png")
+                        path = _out_path("diurnal", lab)
                         fig.savefig(path, dpi=dpi, bbox_inches="tight")
                         saved.append(os.path.basename(path))
                     except Exception as e:

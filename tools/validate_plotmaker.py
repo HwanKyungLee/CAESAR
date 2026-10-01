@@ -19,7 +19,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 7. 시리즈 리스트 id무결성 : id조회·드래그순서·삭제
 8. Undo          : 데이터셋·시리즈 제거 복원
 9. 창 상태 기억   : QSettings 스플리터·탭·테마 저장→복원 왕복(2026-06 UX개편 회귀가드)
-10. Batch Publish : 종별 일괄저장 후 원래 시리즈목록/콤보선택 상태 복원되나
+10. Batch Publish : 종별 일괄저장 후 원래 시리즈목록/콤보선택 상태 복원되나 ·
+    같은 종·다른 데이터셋 파일명이 겹쳐 덮어쓰지 않나(R2, 2026-10-02)
 11. X축 DateAxisItem 재생성 방지 : 같은 시간축 상태로 연달아 render해도 축
     객체가 교체 안 되나(2026-07-03 실GUI 발견 — 교체되면 pg가 눈금 캐시를
     못 넘겨받아 초기뷰 X라벨이 "00.050" 식으로 깨짐)
@@ -386,6 +387,10 @@ def c_batch_publish():
         ts.options_widget()
         ts._series.append(["fixture:NO2", "L", None, None])
         ts._series.append(["fixture:CHOCHO", "R", "#00FF00", None])
+        # 같은 종·다른 데이터셋(CH1/CH2 NO2) — 예전엔 둘 다 timeseries_NO2.png라 덮어썼다(R2)
+        ds2 = _fixture_dataset("fixture2", seed=3)
+        w.shelf[ds2.name] = ds2; w._refresh_tree(); w._notify_modes()
+        ts._series.append(["fixture2:NO2", "L", None, None])
         ts._refresh_list()
         orig_series_obj = ts._series
 
@@ -394,8 +399,8 @@ def c_batch_publish():
             QMessageBox.information = staticmethod(lambda *a, **k: None)   # 모달 차단 방지
             w._batch_publish()
             pngs = sorted(os.path.basename(p) for p in glob.glob(os.path.join(tmp, "*.png")))
-            if len(pngs) != 2:
-                return "FAIL", f"TimeSeries 배치 파일 개수 이상: {pngs}"
+            if len(pngs) != 3:
+                return "FAIL", f"TimeSeries 배치 파일 개수 이상(같은 종 덮어쓰기?): {pngs}"
             if ts._series is not orig_series_obj:
                 return "FAIL", "배치 후 원래 시리즈 리스트 객체로 복원 안 됨"
 
@@ -408,7 +413,7 @@ def c_batch_publish():
             w._batch_publish()
             if dm._c.currentIndex() != -1:
                 return "FAIL", f"diurnal 콤보 복원 실패(index={dm._c.currentIndex()})"
-        return "PASS", "TimeSeries 2파일 + Diurnal 콤보(-1) 복원 확인"
+        return "PASS", "TimeSeries 3파일(같은 종·다른 데이터셋 구분) + Diurnal 콤보(-1) 복원 확인"
     finally:
         QFileDialog.getExistingDirectory, QMessageBox.information = orig_dlg, orig_msg
 
