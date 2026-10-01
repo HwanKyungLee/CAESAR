@@ -530,12 +530,11 @@ class MonitorWidget(QWidget):
         rms_arr = np.array(td['rms'])
         rms_arr[rms_arr <= 0] = 1e-9
         tc['rms'].setData(td['x'], rms_arr)
-        if self.p_sh.getViewBox().autoRangeEnabled():
-            self.p_sh.enableAutoRange(axis='x', enable=True)
-        if self.p_sq.getViewBox().autoRangeEnabled():
-            self.p_sq.enableAutoRange(axis='x', enable=True)
-        if self.p_rms.getViewBox().autoRangeEnabled():
-            self.p_rms.enableAutoRange(axis='x', enable=True)
+        # autoRangeEnabled() is a [x, y] list — always truthy, so test x alone or a
+        # user's x zoom is reset on the next redraw during a live run.
+        for p in (self.p_sh, self.p_sq, self.p_rms):
+            if p.getViewBox().autoRangeEnabled()[0]:
+                p.enableAutoRange(axis='x', enable=True)
 
     def flush_plots(self):
         """Force a final redraw of trend + concentration curves (call when a run
@@ -697,7 +696,7 @@ class MonitorWidget(QWidget):
                 if d['x']:
                     self._conc_curves[gas][cch].setData(d['x'], d['y'])
             p = self._conc_plots[gas]
-            if p.getViewBox().autoRangeEnabled():
+            if p.getViewBox().autoRangeEnabled()[0]:     # [x, y] list — x only
                 p.enableAutoRange(axis='x', enable=True)
 
     def rebuild_trend(self, results):
