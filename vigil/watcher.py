@@ -25,7 +25,7 @@ raw 폴더를 폴링해 새로 append된 완성된 줄만 읽어 RowEvent로 흘
 """
 from __future__ import annotations
 
-import glob
+import fnmatch
 import logging
 import os
 import re
@@ -60,6 +60,15 @@ DEFAULT_MAX_BYTES_PER_TICK = 4 * 1024 * 1024
 # 시작 시 커서 없는 파일 중 이보다 오래 안 바뀐 건 끝에서 시작(1 h 파일 rollover 주기).
 DEFAULT_BACKLOG_AGE_SEC = 3600.0
 _EXTEND_BYTES = 1024 * 1024   # 상한 안에 개행이 하나도 없을 때(행 하나가 상한보다 김) 더 읽는 단위
+
+# 파일 목록(2026-10-01, 응답없음 사고): 감시 폴더 아래 .dat 가 13.6만 개(raw 1.3천 + 분석
+# 산출물 alpha/·doasis/)인 곳을 가리키자, 파일마다 os.stat 을 따로 불러 tick 하나가 25 s —
+# 1초 타이머라 창이 영영 '응답 없음'이었다. 지금은 폴더 나열(os.scandir) 한 번에 크기·수정시각을
+# 같이 받는다(Windows 는 나열 결과에 들어 있어 추가 디스크 조회가 없다). 나열 자체가 비싼
+# 큰 트리는 전체 나열을 드물게 하고, 사이에는 최근에 바뀌는 파일이 있는 폴더만 다시 본다.
+FULL_SCAN_CHEAP_SEC = 0.05       # 전체 나열이 이보다 빠르면 매 poll 전체 나열(raw 전용 폴더)
+FULL_SCAN_MIN_INTERVAL_SEC = 10  # 비싸면 최소 이 간격, 또는 나열 시간의 20배 중 큰 쪽
+HUGE_TREE_FILES = 20000          # 이보다 많으면 'raw 폴더만 가리키라'고 한 번 경고
 
 
 def _year_from_filename(path: str, default: Optional[int] = None) -> int:
@@ -109,6 +118,60 @@ class Watcher:
         self._truncated = False
         self.skipped_backlog: tuple = (0, 0)   # (파일 수, 바이트) — 시작 시 건너뛴 백로그
         self.catching_up = False               # 직전 poll 이 상한에 닿았다 = 밀린 분량을 따라잡는 중
+        self._files: dict = {}                 # {path: (size, mtime)} — 마지막 나열 결과
+        self._paths: list = []                 # sorted(self._files) — 목록이 바뀔 때만 다시 정렬
+        self._done: dict = {}                  # {path: size} 끝까지 읽은 크기 — 같으면 커서도 안 본다
+        self._hot_dirs: set = set()            # 전체 나열 사이에 다시 볼 폴더(최근 변경·안 읽은 것)
+        self._next_full = 0.0                  # 다음 전체 나열 시각(monotonic)
+        self.huge_tree = 0                     # 경고한 파일 수(0 = 경고 안 함)
+
+    def _scan_dir(self, d: str, recursive: bool, out: dict) -> None:
+        """폴더 나열로 (크기, 수정시각)을 같이 받는다 — 파일마다 stat 하지 않는다."""
+        try:
+            it = os.scandir(d)
+        except OSError:
+            return
+        with it:
+            for e in it:
+                try:
+                    if e.is_dir(follow_symlinks=False):
+                        if recursive:
+                            self._scan_dir(e.path, True, out)
+                    elif fnmatch.fnmatch(e.name, self.file_glob):
+                        st = e.stat()
+                        out[e.path] = (st.st_size, st.st_mtime)
+                except OSError:
+                    continue
+
+    def _refresh_files(self) -> None:
+        now = time.monotonic()
+        if now >= self._next_full:
+            t0 = time.perf_counter()
+            files: dict = {}
+            self._scan_dir(self.watch_dir, True, files)
+            dur = time.perf_counter() - t0
+            self._files = files
+            self._paths = sorted(files)
+            interval = 0.0 if dur < FULL_SCAN_CHEAP_SEC else max(FULL_SCAN_MIN_INTERVAL_SEC, 20 * dur)
+            self._next_full = now + interval
+            recent = time.time() - (self.backlog_age_sec or DEFAULT_BACKLOG_AGE_SEC)
+            self._hot_dirs = {os.path.dirname(p) for p, (size, mtime) in files.items()
+                              if mtime >= recent or (self._done.get(p) != size
+                                                     and self.cursor.get(p) < size)}
+            self._warn_duplicate_basenames(list(files))
+            if len(files) > HUGE_TREE_FILES and not self.huge_tree:
+                self.huge_tree = len(files)
+                log.warning("감시 폴더에 %s 파일이 %d개 — raw 가 아닌 분석 산출물이 섞인 듯하다. "
+                            "전체 나열 %.1f s → %.0f s 마다만 한다. raw 폴더만 가리킬 것: %s",
+                            self.file_glob, len(files), dur, interval, self.watch_dir)
+        else:
+            for d in self._hot_dirs:
+                fresh: dict = {}
+                self._scan_dir(d, False, fresh)
+                new = fresh.keys() - self._files.keys()
+                self._files.update(fresh)
+                if new:                              # rollover 로 새 파일이 생겼다
+                    self._paths = sorted(self._files)
 
     def _route(self, path: str, n_columns: int) -> Optional[Profile]:
         """성공만 캐시한다. LabVIEW가 파일 첫 행에 쓰는 flag=0 헤더행은 데이터행보다
@@ -133,25 +196,30 @@ class Watcher:
         cutoff = time.time() - self.backlog_age_sec
         n = nbytes = 0
         for path in paths:
-            if self.cursor.has(path):
+            if self.cursor.has(path) or path not in self._files:
                 continue
-            try:
-                st = os.stat(path)
-            except OSError:
-                continue
-            if st.st_mtime < cutoff:
-                self.cursor.set(path, st.st_size, mtime=st.st_mtime, save=False)
+            size, mtime = self._files[path]          # 나열 결과 — 파일마다 stat 하지 않는다
+            if mtime < cutoff:
+                self.cursor.set(path, size, mtime=mtime, save=False)
                 n += 1
-                nbytes += st.st_size
+                nbytes += size
         if n:
             self.cursor.save()
         self.skipped_backlog = (n, nbytes)
 
-    def _read_new_lines(self, path: str, max_bytes: Optional[int] = None) -> list:
+    def _read_new_lines(self, path: str, max_bytes: Optional[int] = None,
+                        size: Optional[int] = None) -> list:
         """오프셋 이후 **완성된** 줄만 읽고 커서를 그만큼만 전진시킨다.
-        max_bytes 가 있으면 그만큼만 읽는다(단, 완성된 줄이 하나는 나오도록 필요하면 더 읽음)."""
+        max_bytes 가 있으면 그만큼만 읽는다(단, 완성된 줄이 하나는 나오도록 필요하면 더 읽음).
+        size 를 주면(폴더 나열 결과) 크기를 다시 묻지 않는다."""
         self._truncated = False
-        offset, size = self.cursor.offset_and_size(path)
+        if size is None:
+            offset, size = self.cursor.offset_and_size(path)
+        else:
+            offset = self.cursor.get(path)
+            if offset > size:                         # 잘렸거나 교체됨 — 처음부터
+                self.cursor.set(path, 0)
+                offset = 0
         if size is not None and offset >= size:
             return []   # 새로 붙은 게 없으면 열지도 않는다(폴링 1초 × 파일 수)
         try:
@@ -202,20 +270,26 @@ class Watcher:
         seen: dict = {}
         for p in paths:
             seen.setdefault(os.path.basename(p), []).append(p)
+        shown = hidden = 0
         for name, group in seen.items():
             if len(group) > 1 and name not in self._warned_dupes:
                 self._warned_dupes.add(name)
-                log.warning("같은 파일명이 %d곳에 있다 — 같은 스캔을 중복 수집한다: %s | %s",
-                            len(group), name, " | ".join(group))
+                if shown < 20:                        # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
+                    shown += 1
+                    log.warning("같은 파일명이 %d곳에 있다 — 같은 스캔을 중복 수집한다: %s | %s",
+                                len(group), name, " | ".join(group))
+                else:
+                    hidden += 1
+        if hidden:
+            log.warning("같은 파일명 중복 %d건 더(생략) — 감시 폴더를 raw 폴더로 좁힐 것", hidden)
 
 
     def poll(self) -> list:
         """한 tick: 감시폴더의 파일들에서 새 행을 모아 RowEvent 리스트로 반환.
         이번 tick 에 읽는 총량은 max_bytes_per_tick 까지 — 남은 건 다음 tick 에."""
         events: list = []
-        pattern = os.path.join(self.watch_dir, "**", self.file_glob)
-        paths = sorted(glob.glob(pattern, recursive=True))
-        self._warn_duplicate_basenames(paths)
+        self._refresh_files()
+        paths = self._paths
         if not self._started:
             self._skip_stale_backlog(paths)
             self._started = True
@@ -225,9 +299,19 @@ class Watcher:
             if budget <= 0:
                 pending = True
                 break
-            before = self.cursor.get(path)
-            lines = self._read_new_lines(path, max_bytes=budget)
-            budget -= max(0, self.cursor.get(path) - before)
+            size = self._files[path][0]
+            if self._done.get(path) == size:
+                continue                              # 지난번 끝까지 읽었고 크기 그대로 — 커서 조회도 생략
+            before = self.cursor.get(path)            # (13.6만 파일에 매 tick 조회하면 200 ms)
+            if before == size:
+                self._done[path] = size               # 새로 붙은 게 없다 — 열지 않는다
+                continue                              # (커서 > 크기 = 잘린 파일은 읽기에서 0 으로)
+            self._hot_dirs.add(os.path.dirname(path))  # 읽을 게 있는 폴더는 계속 본다
+            lines = self._read_new_lines(path, max_bytes=budget, size=size)
+            after = self.cursor.get(path)
+            budget -= max(0, after - before)
+            if after == size:
+                self._done[path] = size
             pending = pending or self._truncated
             for line in lines:
                 row = _parse_row(line)

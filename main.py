@@ -1,6 +1,11 @@
 import sys
 import os
 
+# WMI 우회 — Python 3.13 의 platform.machine() 은 WMI 에 묻는데, WMI 서비스가 멈추면 영영
+# 안 돌아온다. pandas 가 임포트 중에 그걸 불러 Augur 가 로딩에서 멈췄다(2026-10-01 실측).
+# _wmi 를 '없음'으로 두면 platform 이 환경변수로 판단한다. platform 이 임포트되기 전이어야 한다.
+sys.modules.setdefault("_wmi", None)
+
 # ── 크래시 로그 ──────────────────────────────────────────────────────────────
 # 밤샘 런 중 프로세스가 소리없이 죽으면(OOM/액세스 위반/미처리 예외) 원인을 알 수
 # 없으므로, 하드크래시는 faulthandler가, 파이썬 예외는 excepthook이 logs/에 남긴다.

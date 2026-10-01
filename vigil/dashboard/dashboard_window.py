@@ -134,13 +134,17 @@ class DashboardWindow(QMainWindow):
         return col
 
     # ── 공개 API — run_vigil의 poll 루프가 매 tick 호출 ─────────────────
-    def _toggle_run(self) -> None:
-        self._paused = not self._paused
-        self.btn_run.setText("▶ Start" if self._paused else "■ Stop")
-        if self._paused:
+    def set_running(self, running: bool) -> None:
+        """버튼·배지만 맞춘다(시그널 없음) — 시작 상태를 정할 때."""
+        self._paused = not running
+        self.btn_run.setText("■ Stop" if running else "▶ Start")
+        if not running:
             # 정지 배지는 '경보'가 아니라 '사용자가 멈춤' — 경보색을 쓰지 않는다
-            self.badge.setText("⏸ 감시 정지됨 — Start 를 누르면 밀린 줄부터 이어 읽는다")
+            self.badge.setText("⏸ 감시 정지됨 — Start 를 누르면 읽기 시작(밀린 줄부터)")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + " font-size:20px; font-weight:bold; padding:12px;")
+
+    def _toggle_run(self) -> None:
+        self.set_running(self._paused)
         self.run_toggled.emit(not self._paused)
 
     def set_status(self, status: str, msg: str) -> None:

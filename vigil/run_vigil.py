@@ -15,6 +15,11 @@ import json
 import logging
 import os
 import sys
+
+# WMI 우회 — main.py 와 같은 이유(Python 3.13 platform.machine() 이 멈춘 WMI 에 묶인다).
+# platform 이 임포트되기 전이어야 한다.
+sys.modules.setdefault("_wmi", None)
+
 from collections import deque
 from datetime import datetime
 
@@ -263,14 +268,14 @@ class VigilApp:
             if self.dashboard is not None:
                 self.dashboard.log_line(msg)
 
-    def pause(self) -> None:
+    def pause(self, reason: str = "감시 정지(사용자 Stop)") -> None:
         """대시보드 Stop. raw 는 계속 쌓이고 커서는 그 자리에 멈춘다 — resume 하면 밀린 줄부터
         (읽기 상한대로 나눠) 이어 읽는다. 정지 즉시 커서를 저장한다(정지한 채 창을 닫아도 안전)."""
         if self.paused:
             return
         self.paused = True
         self.cursor.flush()
-        self._note_control("감시 정지(사용자 Stop)")
+        self._note_control(reason)
 
     def resume(self) -> None:
         if not self.paused:
@@ -417,6 +422,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--state-dir", default=None,
                     help="커서·로그 저장 폴더 (기본: 소스 실행은 <repo>/vigil_state, exe 는 %%LOCALAPPDATA%%\\Vigil)")
     ap.add_argument("--poll-sec", type=float, default=1.0, help="폴링 주기(초, 기본 1.0)")
+    ap.add_argument("--autostart", action="store_true",
+                    help="켜자마자 감시 시작(무인 운용·재부팅 후 자동 실행용). 기본은 정지 상태로 켜져 Start 를 기다린다")
     ap.add_argument("--max-mb-per-tick", type=float, default=DEFAULT_MAX_BYTES_PER_TICK / 2**20,
                     help="tick 당 읽는 raw 상한(MB, 기본 %(default).0f) — 밀린 분량은 나눠 따라잡는다")
     ap.add_argument("--backlog-age-min", type=float, default=DEFAULT_BACKLOG_AGE_SEC / 60,
@@ -508,6 +515,10 @@ def main(argv=None) -> int:
     timer.start(int(args.poll_sec * 1000))
     app.aboutToQuit.connect(core.shutdown)
     win.run_toggled.connect(lambda running: core.resume() if running else core.pause())
+    if not args.autostart:
+        # 기본은 정지 상태로 켠다 — 폴더·설정을 확인하고 사람이 Start 를 누를 때 읽기 시작.
+        core.pause("시작: 정지 상태 — Start 를 누르면 감시를 시작한다(바로 시작은 --autostart)")
+        win.set_running(False)
 
     win.log_line(f"log: {log_path}")
     win.show()
