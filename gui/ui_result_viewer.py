@@ -55,7 +55,8 @@ _KIND_KO = {
     "reference": "Reference",
     "concentration": "Concentration",
 }
-from gui.theme import SERIES as _SERIES, species_color
+from PyQt6.QtGui import QColor
+from gui.theme import AUGUR, SERIES as _SERIES, species_color
 _PALETTE = list(_SERIES)   # gui/theme.py 공통 팔레트
 
 
@@ -86,12 +87,12 @@ class ResultViewerWidget(QWidget):
         # ── 툴바 1줄: [열기] | [보기] ────────────────────────────────────
         def _sep():
             s = QLabel("|")
-            s.setStyleSheet("color:#bbb; padding:0 4px;")
+            s.setStyleSheet(f"color:{AUGUR.faint}; padding:0 4px;")
             return s
 
         def _grp(text):
             l = QLabel(text)
-            l.setStyleSheet("color:#888; font-weight:bold;")
+            l.setStyleSheet(f"color:{AUGUR.muted}; font-weight:bold;")
             return l
 
         bar = FlowLayout(spacing=6)
@@ -168,7 +169,7 @@ class ResultViewerWidget(QWidget):
         root.addLayout(bar)
 
         self._lbl = QLabel("Open a result file or folder.")
-        self._lbl.setStyleSheet("color:#666;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.muted};")
         # 긴 상태문구가 툴바 최소폭을 강제(→그래프 잘림)하지 않게 가로 Ignored
         from PyQt6.QtWidgets import QSizePolicy
         self._lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -231,7 +232,7 @@ class ResultViewerWidget(QWidget):
         fbar.addWidget(self._btn_png)
 
         self._stats_lbl = QLabel("")
-        self._stats_lbl.setStyleSheet("color:#444;")
+        self._stats_lbl.setStyleSheet(f"color:{AUGUR.sub};")
         from PyQt6.QtWidgets import QSizePolicy as _QSP
         self._stats_lbl.setSizePolicy(_QSP.Policy.Ignored, _QSP.Policy.Preferred)
         root.addLayout(fbar)
@@ -256,7 +257,7 @@ class ResultViewerWidget(QWidget):
         _vl.setContentsMargins(0, 4, 0, 0)
         _vl.setSpacing(2)
         self._ver_hdr = QLabel("Versions")
-        self._ver_hdr.setStyleSheet("color:#888; font-weight:bold;")
+        self._ver_hdr.setStyleSheet(f"color:{AUGUR.muted}; font-weight:bold;")
         _vl.addWidget(self._ver_hdr)
         self._ver_list = QListWidget()
         self._ver_list.setToolTip(
@@ -370,7 +371,7 @@ class ResultViewerWidget(QWidget):
             it.setData(Qt.ItemDataRole.UserRole, ("file", p))
             self._list.addItem(it)
         self._lbl.setText(f"{len(dlg.loaded_paths)} merged series — click to view")
-        self._lbl.setStyleSheet("color:#1565C0;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.info};")
         self._path = dlg.loaded_paths[0]
         self._reload()
 
@@ -414,7 +415,7 @@ class ResultViewerWidget(QWidget):
             self._list.addItem(it)
         self._lbl.setText(f"{os.path.basename(d) or d}  —  {len(subdirs)} folders · {len(files)} files"
                           + ("  (double-click folder to enter)" if subdirs else ""))
-        self._lbl.setStyleSheet("color:#1565C0;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.info};")
 
     def _on_list_item(self, item):
         """단일클릭: 파일이면 표시. 폴더면 무시(더블클릭으로 진입)."""
@@ -447,7 +448,7 @@ class ResultViewerWidget(QWidget):
         if not versions:
             self._ver_hdr.setText("Versions  —  no .meta.json found")
             it = QListWidgetItem("(run tools/backfill_meta.py to index existing results)")
-            it.setForeground(Qt.GlobalColor.gray)
+            it.setForeground(QColor(AUGUR.muted))
             self._ver_list.addItem(it)
             return
 
@@ -553,10 +554,10 @@ class ResultViewerWidget(QWidget):
             shift_tag = (f"time shift {self._time_shift_hours:+g}h (display only)"
                         if self._time_shift_hours else "")
             self._lbl.setText(f"{os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
-            self._lbl.setStyleSheet("color:#C62828;" if self._time_shift_hours else "color:#1565C0;")
+            self._lbl.setStyleSheet(f"color:{AUGUR.fail};" if self._time_shift_hours else f"color:{AUGUR.info};")
         except Exception as e:
             self._lbl.setText(f"Failed to display: {e}  (try selecting Type manually)")
-            self._lbl.setStyleSheet("color:#C62828;")
+            self._lbl.setStyleSheet(f"color:{AUGUR.fail};")
         # 버전 목록은 핏 결과에만 의미가 있다(R 커브·α엔 meta가 없다).
         # 표시가 실패해도 목록은 갱신한다 — 어느 버전이 열려 있는지가 그때 더 궁금하다.
         try:
@@ -800,10 +801,10 @@ class ResultViewerWidget(QWidget):
     # 사용자가 명시적으로 켰을 때만 숨기고, 그때도 숨긴 개수를 제목에 적는다.
     _FLAG_COLOR = {
         "ok":       None,          # 가스 고유색 그대로
-        "unstable": "#c62828",     # 붉음 — 핏이 흔들린 스캔
-        "settling": "#9e9e9e",     # 회색 — 정착 구간(값은 살아있음)
-        "qc":       "#e0a020",     # 주황 — 자동 QC가 걸러낸 스캔
-        "cal":      "#7e57c2",     # 보라 — ZA/He 등 교정 스캔
+        "unstable": AUGUR.fail,     # 붉음 — 핏이 흔들린 스캔
+        "settling": AUGUR.faint,     # 회색 — 정착 구간(값은 살아있음)
+        "qc":       AUGUR.warn,      # 주황 — 자동 QC가 걸러낸 스캔
+        "cal":      AUGUR.special,     # 보라 — ZA/He 등 교정 스캔
     }
 
     @staticmethod
@@ -926,11 +927,11 @@ class ResultViewerWidget(QWidget):
             elif kind == "shsq":
                 sh, sq = t.get("shift"), t.get("squeeze")
                 if sh is not None:
-                    pw.plot(x, sh, pen=pg.mkPen("#1f5fa9", width=1.2), name="Shift (px)")
+                    pw.plot(x, sh, pen=pg.mkPen(_PALETTE[0], width=1.2), name="Shift (px)")
                 if sq is not None:
                     # squeeze는 1.0 근처라 shift(px)와 축이 다르다 → 1을 뺀 편차로 겹친다
                     pw.plot(x, np.asarray(sq, float) - 1.0,
-                            pen=pg.mkPen("#7e57c2", width=1.2), name="Squeeze - 1")
+                            pen=pg.mkPen(_PALETTE[4], width=1.2), name="Squeeze - 1")
                 pw.setLabel("left", "Shift px / Sq-1")
 
             else:  # rms
@@ -1016,7 +1017,7 @@ class ResultViewerWidget(QWidget):
             self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   row {row_idx} not in alpha_trace")
             return
         xs = wave if (wave is not None and len(wave) == len(alpha)) else np.arange(len(alpha))
-        self._pw_detail.plot(xs, alpha, pen=pg.mkPen("#1f5fa9", width=1.4),
+        self._pw_detail.plot(xs, alpha, pen=pg.mkPen(AUGUR.info, width=1.4),
                              name=f"alpha (row {row_idx})")
         self._pw_detail.setLabel("left", "alpha (cm^-1)")
         self._pw_detail.setLabel(
@@ -1056,7 +1057,7 @@ class ResultViewerWidget(QWidget):
 
         x = np.asarray(r["wave"], dtype=float)
         self._pw_resid.plot(x, np.asarray(r["residual"], dtype=float),
-                            pen=pg.mkPen("#c0392b", width=1.2), name="residual")
+                            pen=pg.mkPen(AUGUR.muted, width=1.2), name="residual")
         head = "Residual - RMS %.3g" % r["rms"]
         if r.get("rms_sig") is not None and np.isfinite(r["rms_sig"]):
             head += "  ·  rms/sig %.1f%%" % (r["rms_sig"] * 100)
@@ -1065,7 +1066,7 @@ class ResultViewerWidget(QWidget):
         self._pw_resid.setTitle(head)
         # 모델을 α 위에 겹쳐 그린다 — "얼마나 맞았나"가 한 화면에서 보인다.
         self._pw_detail.plot(x, np.asarray(r["model"], dtype=float),
-                             pen=pg.mkPen("#e67e22", width=1.2,
+                             pen=pg.mkPen(AUGUR.fail, width=1.2,
                                           style=Qt.PenStyle.DashLine),
                              name="model (refit)")
 

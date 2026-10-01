@@ -17,6 +17,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QMenu, QMessageBox
 from core.data_io import DataIO
 from core.paths import WV_CAL_DIR
+from gui.theme import AUGUR
 from .worker import AlphaExportWorker
 
 
@@ -61,7 +62,7 @@ class InputsAlphaMixin:
                 _, dark_raw = DataIO.load_measurement(filepath, pixel_min=0)
             self.dark_data = dark_raw
             self.lbl_dark_path.setText(os.path.basename(filepath))
-            self.lbl_dark_path.setStyleSheet("color: green; font-weight: bold;")
+            self.lbl_dark_path.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
             self.status.setText(
                 f"Dark current loaded: {os.path.basename(filepath)}  "
                 f"({len(dark_raw)} px, mean={dark_raw.mean():.1f})"
@@ -79,7 +80,7 @@ class InputsAlphaMixin:
             _, offset_raw = DataIO.load_measurement(filepath, pixel_min=0)
             self.offset_data = offset_raw
             self.lbl_offset_path.setText(os.path.basename(filepath))
-            self.lbl_offset_path.setStyleSheet("color: green; font-weight: bold;")
+            self.lbl_offset_path.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
             self.status.setText(f"Detector offset loaded: {os.path.basename(filepath)}")
         except Exception as e:
             QMessageBox.warning(self, "Load Error", f"Failed to load offset file:\n{e}")
@@ -98,7 +99,7 @@ class InputsAlphaMixin:
         if d:
             self.alpha_save_dir = d
             self.lbl_alpha_dir.setText(os.path.basename(d) or d)
-            self.lbl_alpha_dir.setStyleSheet("color: #1565C0; font-weight: bold;")
+            self.lbl_alpha_dir.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
 
     @staticmethod
     def _read_drnam_std_t(mat_path):
@@ -468,7 +469,7 @@ class InputsAlphaMixin:
         i0_avg = np.mean([s[:min_len] for s in za_spectra], axis=0)
         self.i0_data = i0_avg
         self.lbl_i0_path.setText(f"Auto ({len(za_spectra)} ZA scans averaged)")
-        self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
+        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
         self.status.setText(f"Auto I0: averaged {len(za_spectra)} ZA scans.")
         self.update_diagnostic_plot()
         self._refresh_setup_status()
@@ -496,7 +497,7 @@ class InputsAlphaMixin:
         self._dlg_dir('rcurve', filepath)
         if filepath:
             self.lbl_r_path.setText(os.path.basename(filepath))
-            self.lbl_r_path.setStyleSheet("color: blue; font-weight: bold;")
+            self.lbl_r_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
             
             # 🌟 Load R data and plot
             try:
@@ -538,7 +539,7 @@ class InputsAlphaMixin:
     def set_i0_path(self, filepath):
         """Updates the I0 state, loads data, and updates UI."""
         self.lbl_i0_path.setText(os.path.basename(filepath))
-        self.lbl_i0_path.setStyleSheet("color: blue; font-weight: bold;")
+        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
         self.status.setText(f"I0 set to: {os.path.basename(filepath)}")
         
         # 🌟 Load I0 data and plot

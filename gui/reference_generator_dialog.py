@@ -45,6 +45,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
+from gui.theme import AUGUR
 
 
 class ReferenceGeneratorDialog(QDialog):
@@ -89,7 +90,7 @@ class ReferenceGeneratorDialog(QDialog):
 
         if self.target_wavelengths is not None:
             self.lbl_wave_info.setText(f"Status: Synced with Main ({len(self.target_wavelengths)} px)")
-            self.lbl_wave_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
+            self.lbl_wave_info.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
     def init_ui(self):
         layout = QHBoxLayout(self)
@@ -163,13 +164,13 @@ class ReferenceGeneratorDialog(QDialog):
         lay_hitran_action.addWidget(self.combo_hitran_gas)
         
         self.btn_hitran = QPushButton("Generate from HITRAN")
-        self.btn_hitran.setStyleSheet("background-color: #e3f2fd; font-weight: bold;")
+        self.btn_hitran.setStyleSheet(f"background-color: {AUGUR.info_bg}; color: {AUGUR.ink}; font-weight: bold;")
         self.btn_hitran.clicked.connect(self.generate_hitran_gas)
         lay_hitran_action.addWidget(self.btn_hitran)
         lay_raw.addLayout(lay_hitran_action)
         
         self.lbl_raw_info = QLabel("Loaded: None")
-        self.lbl_raw_info.setStyleSheet("color: blue;")
+        self.lbl_raw_info.setStyleSheet(f"color: {AUGUR.info};")
         lay_raw.addWidget(self.lbl_raw_info)
         grp_raw.setLayout(lay_raw)
         right_layout.addWidget(grp_raw)
@@ -181,7 +182,7 @@ class ReferenceGeneratorDialog(QDialog):
         # One-shot auto-pickup: grabs Calib + FWHM from the same campaign
         # wv_cal folder (remembers it across sessions via QSettings).
         self.btn_auto_pickup = QPushButton("Auto-pickup Calib + FWHM from campaign wv_cal folder")
-        self.btn_auto_pickup.setStyleSheet("background-color: #1565C0; color: white; font-weight: bold;")
+        self.btn_auto_pickup.setStyleSheet(f"background-color: {AUGUR.info}; color: white; font-weight: bold;")
         self.btn_auto_pickup.clicked.connect(self._auto_pickup_calib_fwhm)
         lay_wave.addWidget(self.btn_auto_pickup)
 
@@ -201,7 +202,7 @@ class ReferenceGeneratorDialog(QDialog):
         self.btn_load_fwhm = QPushButton("Load FWHM Profile (.txt)")
         self.btn_load_fwhm.clicked.connect(self.load_fwhm_profile)
         self.lbl_fwhm_info = QLabel("Status: Not Loaded")
-        self.lbl_fwhm_info.setStyleSheet("color: #d32f2f;")
+        self.lbl_fwhm_info.setStyleSheet(f"color: {AUGUR.fail};")
         
         lay_conv.addWidget(self.btn_load_fwhm)
         lay_conv.addWidget(self.lbl_fwhm_info)
@@ -214,7 +215,7 @@ class ReferenceGeneratorDialog(QDialog):
         
         # --- 4. Generate & Save ---
         self.btn_generate = QPushButton("Generate Ultimate Reference")
-        self.btn_generate.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; font-size: 14px;")
+        self.btn_generate.setStyleSheet(f"background-color: {AUGUR.warn}; color: white; font-weight: bold; font-size: 14px;")
         self.btn_generate.clicked.connect(self.apply_convolution)
         self.btn_generate.setMinimumHeight(int(50 * self._s))
         right_layout.addWidget(self.btn_generate)
@@ -259,18 +260,18 @@ class ReferenceGeneratorDialog(QDialog):
         self.btn_sweep_outdir.clicked.connect(self._pick_sweep_outdir)
         lay_sweep_out.addWidget(self.btn_sweep_outdir)
         self.lbl_sweep_outdir = QLabel("Status: Not Selected")
-        self.lbl_sweep_outdir.setStyleSheet("color: #d32f2f;")
+        self.lbl_sweep_outdir.setStyleSheet(f"color: {AUGUR.fail};")
         lay_sweep_out.addWidget(self.lbl_sweep_outdir, stretch=1)
         lay_sweep.addLayout(lay_sweep_out)
 
         self.btn_run_sweep = QPushButton("Run FWHM Sweep")
-        self.btn_run_sweep.setStyleSheet("background-color: #6a1b9a; color: white; font-weight: bold;")
+        self.btn_run_sweep.setStyleSheet(f"background-color: {AUGUR.special}; color: white; font-weight: bold;")
         self.btn_run_sweep.clicked.connect(self.run_fwhm_sweep)
         self.btn_run_sweep.setMinimumHeight(int(40 * self._s))
         lay_sweep.addWidget(self.btn_run_sweep)
 
         _hint = QLabel("After sweep finishes, validate in Setup tab →  FWHM Best-Match")
-        _hint.setStyleSheet("color: #555; font-style: italic;")
+        _hint.setStyleSheet(f"color: {AUGUR.muted}; font-style: italic;")
         _hint.setWordWrap(True)
         lay_sweep.addWidget(_hint)
 
@@ -456,7 +457,7 @@ class ReferenceGeneratorDialog(QDialog):
         self.lbl_wave_info.setText(
             f"Loaded: {os.path.basename(path)} ({len(self.target_wavelengths)} px)"
         )
-        self.lbl_wave_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_wave_info.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
     def _auto_pickup_calib_fwhm(self):
         """Pick one campaign wv_cal folder, then load Calib_*.txt and
@@ -609,7 +610,7 @@ class ReferenceGeneratorDialog(QDialog):
                 f"Loaded: {len(self.ils_pixels)} Sigma points "
                 f"(mean FWHM ≈ {mean_fwhm_nm:.3f} nm)"
             )
-            self.lbl_fwhm_info.setStyleSheet("color: #2E7D32; font-weight: bold;")
+            self.lbl_fwhm_info.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
             QMessageBox.information(self, "Success",
                                     f"FWHM Profile loaded successfully.{auto_msg}")
             
@@ -628,7 +629,7 @@ class ReferenceGeneratorDialog(QDialog):
                 self.spin_peak_px.setValue(peak_idx)
             if hasattr(self, 'btn_load_lamp'):
                 self.btn_load_lamp.setText("Lamp Synced from Calibration")
-                self.btn_load_lamp.setStyleSheet("background-color: #E8F5E9; color: #2E7D32; font-weight: bold;")
+                self.btn_load_lamp.setStyleSheet(f"background-color: {AUGUR.ok_bg}; color: {AUGUR.ok}; font-weight: bold;")
 
     # ---------------------------------------------------------
     # 🌟 Core Feature: Advanced Deconvolution Algorithm
@@ -716,7 +717,7 @@ class ReferenceGeneratorDialog(QDialog):
             
             self.suggested_filename = f"Ref_{self.gas_name}_{self.gen_info}.dat"
             self.btn_save.setEnabled(True)
-            self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+            self.btn_save.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold;")
             
             QMessageBox.information(self, "Success", "Dynamic ILS Convolution applied successfully!")
             
@@ -758,7 +759,7 @@ class ReferenceGeneratorDialog(QDialog):
             return
         self._sweep_outdir = dirpath
         self.lbl_sweep_outdir.setText(f"{dirpath}")
-        self.lbl_sweep_outdir.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.lbl_sweep_outdir.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
     def run_fwhm_sweep(self):
         """Generate references at FWHM = center ± n·step (uniform Gaussian).
@@ -831,7 +832,7 @@ class ReferenceGeneratorDialog(QDialog):
             ax_bottom.text(0.5, 0.5,
                            "Validation moved to:\nSetup tab →  FWHM Best-Match",
                            ha="center", va="center", transform=ax_bottom.transAxes,
-                           fontsize=11, color="#555", style="italic")
+                           fontsize=11, color=AUGUR.muted, style="italic")
             ax_bottom.set_xticks([]); ax_bottom.set_yticks([])
 
             self.canvas.draw()

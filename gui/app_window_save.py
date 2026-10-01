@@ -15,6 +15,7 @@ from core import run_meta
 from core.data_io import DataIO
 from core.result_io import MISFIT_CHI2 as _MISFIT_CHI2
 from core.engine import UniversalEngine
+from gui.theme import AUGUR
 from core.paths import (DEFAULT_CAMPAIGN, DEFAULT_OUTPUT_DIR, campaign_dir as _campaign_dir, out_path as _out_path,
                         resolve_ref_path)
 
@@ -343,7 +344,7 @@ class SaveExportMixin:
         """
         def _fail(msg):
             self.status.setText(f"Double-click: {msg}")
-            self.status.setStyleSheet("color: red; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
 
         # Bring the Analysis Monitor into view regardless of which main tab the
         # user is currently looking at — otherwise the replay can render correctly
@@ -462,7 +463,7 @@ class SaveExportMixin:
                       "— plot was skipped by the channel filter.")
             else:
                 self.status.setText(f"Replay: {fname} (CH{ch})")
-                self.status.setStyleSheet("color: green;")
+                self.status.setStyleSheet(f"color: {AUGUR.ok};")
         except Exception as e:
             print(f"Double-click viewer failed to load: {e}")
             _fail(f"failed to load '{fname}': {e}")

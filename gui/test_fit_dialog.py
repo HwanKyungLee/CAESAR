@@ -32,6 +32,7 @@ import core.param_optimizer as PO
 import core.fit_physics as FP
 from core.fitset_builder import validate_fitset
 from core.param_optimizer import AC1_DEGENERATE_THRESHOLD as _AC1_DEGENERATE_THRESHOLD
+from gui.theme import AUGUR, species_color
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -219,7 +220,7 @@ def _format_v2_recommendation(recommendation: dict) -> str:
     candidate = recommendation.get("candidate_id") or "none"
     return (f"<h3>V2 recommendation: {status}</h3>"
             f"<p><b>Candidate:</b> {candidate}<br><b>Scope:</b> {recommendation.get('scope', '?')}</p>"
-            "<p style='color:#C62828; font-weight:bold;'>Saving a new FitSet requires the separate Export button; "
+            f"<p style='color:{AUGUR.fail}; font-weight:bold;'>Saving a new FitSet requires the separate Export button; "
             "the current FitSet and channel settings are not changed automatically.</p>")
 
 
@@ -459,7 +460,7 @@ def _format_explorer_review(review: dict) -> str:
             f"<p><b>Reason:</b> {reason}</p>"
             f"<p>{_summary('Stage 2', review.get('stage2'))}<br>"
             f"{_summary('Holdout', review.get('holdout'))}</p>{relative_html}"
-            "<p style='color:#C62828; font-weight:bold;'>"
+            f"<p style='color:{AUGUR.fail}; font-weight:bold;'>"
             "This card only displays evidence; it does not change the current FitSet or channel settings automatically. "
             "You must confirm that the current data matches this report's mission/data.</p>")
 
@@ -506,7 +507,7 @@ class TestFitDialog(QDialog):
             self._cb_target.setCurrentText(default)
         bar.addWidget(self._cb_target)
         self._btn_run = QPushButton("▶ Run Optimizer (24-scan sample, joint poly×shift search)")
-        self._btn_run.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
+        self._btn_run.setStyleSheet(f"font-weight: bold; padding: 6px; border: 1px solid {AUGUR.ok};")
         self._btn_run.clicked.connect(self._run_optimizer)
         bar.addWidget(self._btn_run)
         bar.addStretch(1)
@@ -517,7 +518,7 @@ class TestFitDialog(QDialog):
         self._progress.setVisible(False)
         lay.addWidget(self._progress)
         self._lbl_status = QLabel("")
-        self._lbl_status.setStyleSheet("color:#1565C0;")
+        self._lbl_status.setStyleSheet(f"color:{AUGUR.info};")
         lay.addWidget(self._lbl_status)
 
         self._results_html = []
@@ -540,11 +541,11 @@ class TestFitDialog(QDialog):
 
     def _add_result_label(self, html: str, warn: bool = False, err: bool = False):
         if err:
-            color = "#C62828; font-weight:bold"
+            color = f"{AUGUR.fail}; font-weight:bold"
         elif warn:
-            color = "#E65100; font-weight:bold"
+            color = f"{AUGUR.warn}; font-weight:bold"
         else:
-            color = "#333"
+            color = AUGUR.ink
         self._results_html.append(f"<div style='color:{color}; margin-bottom:8px;'>{html}</div>")
         self._results_edit.setHtml("".join(self._results_html))
 
@@ -570,7 +571,7 @@ class TestFitDialog(QDialog):
             collinear = np.isfinite(multi_r) and multi_r > PO.POLY_COLLIN_R_MAX
             marks = ("degenerate?" if degenerate else "") + ("collinear?" if collinear else "")
             mark = f" {marks}" if marks else ("" if r["poly"] == rec_poly else "")
-            style = "color:#E65100;font-weight:bold" if (degenerate or collinear) else (
+            style = f"color:{AUGUR.warn};font-weight:bold" if (degenerate or collinear) else (
                 "font-weight:bold" if r["poly"] == rec_poly else "")
             rows.append(
                 f"<tr style='{style}'><td>{r['poly']}{mark}</td><td>{r['n_ok']}</td>"
@@ -762,13 +763,13 @@ class TestFitDialog(QDialog):
         self._btn_explorer_dry_run.clicked.connect(lambda: self._run_explorer_batch(dry_run=True))
         run_bar.addWidget(self._btn_explorer_dry_run)
         self._btn_explorer_run = QPushButton("▶ Run Explorer Batch")
-        self._btn_explorer_run.setStyleSheet("font-weight: bold; padding: 6px; border: 1px solid #A5D6A7;")
+        self._btn_explorer_run.setStyleSheet(f"font-weight: bold; padding: 6px; border: 1px solid {AUGUR.ok};")
         self._btn_explorer_run.clicked.connect(lambda: self._run_explorer_batch(dry_run=False))
         run_bar.addWidget(self._btn_explorer_run)
         run_bar.addStretch(1)
         lay.addLayout(run_bar)
         self._explorer_run_status = QLabel("Choose a batch config, validate it, then run it.")
-        self._explorer_run_status.setStyleSheet("color:#1565C0;")
+        self._explorer_run_status.setStyleSheet(f"color:{AUGUR.info};")
         lay.addWidget(self._explorer_run_status)
         self._explorer_run_edit = QTextEdit()
         self._explorer_run_edit.setReadOnly(True)
@@ -778,7 +779,7 @@ class TestFitDialog(QDialog):
 
         v2_note = QLabel("V2: freezes a candidate plan from a mission JSON. A V2 plan does not run any fitting yet; "
                          "actual repeated fitting/resume uses the existing Batch Config path above.")
-        v2_note.setWordWrap(True); v2_note.setStyleSheet("color:#455A64;")
+        v2_note.setWordWrap(True); v2_note.setStyleSheet(f"color:{AUGUR.muted};")
         lay.addWidget(v2_note)
         v2_bar = QHBoxLayout()
         plan_btn = QPushButton("Build V2 Plan…")
@@ -961,12 +962,11 @@ class TestFitDialog(QDialog):
         if collin is not None:
             from core.doas_fit import DoasFitter as _DF
             _cl = QLabel(_DF.format_etalon_collinearity(collin))
-            _cl.setStyleSheet("color:#E65100;font-weight:bold;" if collin.get("warn") else "color:#555;")
+            _cl.setStyleSheet(f"color:{AUGUR.warn};font-weight:bold;" if collin.get("warn") else f"color:{AUGUR.muted};")
             _cl.setWordWrap(True)
             _cl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             lay.addWidget(_cl)
 
-        _pal = ["#388E3C", "#7B1FA2", "#0097A7", "#C2185B", "#5D4037"]
         gms = [(gi, nm, gas_models[gi]) for gi, nm in enumerate(self._app.engine.gas_list)
                if gas_models and gi < len(gas_models) and gas_models[gi] is not None
                and len(gas_models[gi]) == len(wl)]
@@ -984,7 +984,7 @@ class TestFitDialog(QDialog):
         pw2 = pg.PlotWidget(); pw2.setBackground('w'); pw2.showGrid(x=True, y=True, alpha=0.3)
         pw2.addLegend(offset=(10, 6))
         for gi, nm, gm in gms:
-            pw2.plot(wl, gm, pen=pg.mkPen(_pal[gi % len(_pal)], width=1.5),
+            pw2.plot(wl, gm, pen=pg.mkPen(species_color(nm), width=1.5),
                      name=f'{nm}  ({ppb.get(nm, float("nan")):.2f} ppb)')
         pw2.setLabel('left', 'Diff α (cm⁻¹)')
         pw2.setTitle('Reference contributions (per gas)')

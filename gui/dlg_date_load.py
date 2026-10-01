@@ -18,6 +18,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QDateEdit, QCheckBox, QFileDialog, QMessageBox)
 
+from gui.theme import AUGUR
+
 _DAY_DIR = re.compile(r'^\d{6}$')
 _ISO_DAY = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
@@ -169,7 +171,7 @@ class DateLoadDialog(QDialog):
         v.addWidget(self._list, 1)
 
         self._lbl = QLabel("")
-        self._lbl.setStyleSheet("color:#666;")
+        self._lbl.setStyleSheet(f"color:{AUGUR.muted};")
         v.addWidget(self._lbl)
 
         brow = QHBoxLayout()

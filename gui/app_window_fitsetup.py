@@ -15,6 +15,7 @@ import pandas as pd
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
                              QWidget)
 from core.data_io import DataIO
+from gui.theme import AUGUR
 from .test_fit_dialog import TestFitDialog
 from .ui_dialogs import (MaskDialog, RCalibratorDialog, RefPropertiesDialog, ReferenceGeneratorDialog,
                          WavelengthCalibrationDialog)
@@ -109,7 +110,7 @@ class FitSetupMixin:
             target_label = getattr(self, 'lbl_fwhm_display', getattr(self, 'fwhm_label', None))
             if target_label:
                 target_label.setText(fwhm_text)
-                target_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
+                target_label.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
 
             self._refresh_setup_status()
 
@@ -124,7 +125,7 @@ class FitSetupMixin:
             
             msg = f"Wavelength Updated: {wl_array.min():.2f} ~ {wl_array.max():.2f} nm"
             self.status.setText(msg)
-            self.status.setStyleSheet("color: blue; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
             
             QMessageBox.information(self, "Applied", "New wavelength calibration applied to the system instantly.")
         except Exception as e:
@@ -178,7 +179,7 @@ class FitSetupMixin:
                     _el = _fm.elidedText(f"{os.path.basename(filepath)}",
                                          _Qt.TextElideMode.ElideMiddle, int(180 * self._s))
                     self.lbl_wavecal.setText(_el)
-                    self.lbl_wavecal.setStyleSheet("color: #1565C0; font-weight: bold; padding: 2px;")
+                    self.lbl_wavecal.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold; padding: 2px;")
                     self.lbl_wavecal.setToolTip(f"Wavecal for this channel:\n{filepath}")
                 # X3: Calib 헤더에 ILS FWHM이 있으면 채운다. 예전엔 웨이브캘
                 # **다이얼로그를 그 세션에 직접 돌린 경우에만** 채워져, 파일을
@@ -498,7 +499,7 @@ class FitSetupMixin:
         self._refs_dirty = True
         if hasattr(self, '_btn_lock_ref'):
             self._btn_lock_ref.setStyleSheet(
-                "font-weight: bold; padding: 5px; background-color: #FFCDD2; color: #B71C1C;")
+                f"font-weight: bold; padding: 5px; background-color: {AUGUR.fail_bg}; color: {AUGUR.fail};")
 
     def del_ref(self, widget):
         """Removes a reference row from the UI."""

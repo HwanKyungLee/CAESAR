@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QCheckBox, QSpinBox,
 )
 from PyQt6.QtCore import Qt
+from gui.theme import AUGUR
 
 from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
                    mathtext_to_html)
@@ -1110,7 +1111,7 @@ class HeatmapMode(PlotMode):
         row.addWidget(b_pin); row.addWidget(b_unpin)
         lay.addLayout(row)
         self._lbl_pin = QLabel("")
-        self._lbl_pin.setStyleSheet("color:#666;")
+        self._lbl_pin.setStyleSheet(f"color:{AUGUR.muted};")
         lay.addWidget(self._lbl_pin)
         b = QPushButton("Compute")
         b.clicked.connect(self.render)

@@ -55,7 +55,7 @@ from gui.r_workers import (_LiveStream, _RTrendWorker, _RTExportWorker,
 
 
 # ── 채널 색상 팔레트 ─────────────────────────────────────────────────────────
-from gui.theme import CHANNELS as _THEME_CHANNELS
+from gui.theme import AUGUR, CHANNELS as _THEME_CHANNELS
 _CH_COLORS = list(_THEME_CHANNELS)   # 모든 Augur 그래프 공통 채널 색(gui/theme.py)
 
 
@@ -131,7 +131,7 @@ class RCalibratorDialog(QDialog):
         hdr = QHBoxLayout()
         btn_load_panel = QPushButton("Load channels from left panel")
         btn_load_panel.setStyleSheet(
-            "background-color:#1565C0;color:white;font-weight:bold;")
+            f"background-color:{AUGUR.info};color:white;font-weight:bold;")
         btn_load_panel.setToolTip(
             "Reads the left panel's channel settings (wavecal·R-window·TZ) to fill the rows.\n"
             "Click to sync if you changed or added channels.")
@@ -205,7 +205,7 @@ class RCalibratorDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_run = QPushButton("▶  Start")
         btn_run.setStyleSheet(
-            "background-color:#4CAF50;color:white;font-weight:bold;height:36px;")
+            f"background-color:{AUGUR.ok};color:white;font-weight:bold;height:36px;")
         btn_run.clicked.connect(self._run)
         self._btn_run = btn_run
         btn_row.addWidget(btn_run)
@@ -235,7 +235,7 @@ class RCalibratorDialog(QDialog):
         # 설정 변경/손상 시 npz를 처음부터 다시 만드는 비상용 탈출구(덮어쓰기).
         btn_rt = QPushButton("Rebuild npz (full)")
         btn_rt.setStyleSheet(
-            "background-color:#1976D2;color:white;font-weight:bold;height:36px;")
+            f"background-color:{AUGUR.info};color:white;font-weight:bold;height:36px;")
         btn_rt.setToolTip(
             "Recompute every file from scratch and OVERWRITE R_<channel>.npz.\n"
             "Use only when settings changed (cavity/RL/R-window) or the npz is damaged.\n"
@@ -259,7 +259,7 @@ class RCalibratorDialog(QDialog):
         # npz에 기록하면 α 생성 시 그 시각에서 R(t) PCHIP 보간이 강제 분절된다.
         btn_breaks = QPushButton("R(t) Breaks…")
         btn_breaks.setStyleSheet(
-            "background-color:#5D4037;color:white;font-weight:bold;height:36px;")
+            f"background-color:{AUGUR.special};color:white;font-weight:bold;height:36px;")
         btn_breaks.setToolTip(
             "Manual step-change breaks for R(t) interpolation (step guard).\n"
             "Enter known events (mirror cleaning / realignment) as datetimes;\n"
@@ -276,7 +276,7 @@ class RCalibratorDialog(QDialog):
         self._progress.setRange(0, 0); self._progress.setFixedHeight(16)
         self._progress.setVisible(False)
         self._lbl_elapsed = QLabel("")
-        self._lbl_elapsed.setStyleSheet("color:#555;font-size:11px;min-width:80px;")
+        self._lbl_elapsed.setStyleSheet(f"color:{AUGUR.sub};font-size:11px;min-width:80px;")
         prog_row.addWidget(self._progress, stretch=1); prog_row.addWidget(self._lbl_elapsed)
         main.addLayout(prog_row)
 
@@ -323,13 +323,13 @@ class RCalibratorDialog(QDialog):
         frame = QFrame()
         frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame.setStyleSheet(
-            "QFrame{background:#FAFAFA;border:1px solid #CCC;border-radius:3px;}")
+            f"QFrame{{background:{AUGUR.surface};color:{AUGUR.ink};border:1px solid {AUGUR.rule};border-radius:3px;}}")
         row = QHBoxLayout(frame)
         row.setContentsMargins(6, 2, 6, 2)
         row.setSpacing(5)
 
         lbl_num = QLabel(f"CH{ch_num}")
-        lbl_num.setStyleSheet("font-weight:bold;color:#1565C0;")
+        lbl_num.setStyleSheet(f"font-weight:bold;color:{AUGUR.info};")
         lbl_num.setFixedWidth(34)
         row.addWidget(lbl_num)
 
@@ -361,7 +361,7 @@ class RCalibratorDialog(QDialog):
 
         lbl_wv = QLabel("wavecal" if wv_ok else "no wavecal")
         lbl_wv.setStyleSheet(
-            "color:#2E7D32;font-weight:bold;" if wv_ok else "color:#C62828;")
+            f"color:{AUGUR.ok};font-weight:bold;" if wv_ok else f"color:{AUGUR.fail};")
         lbl_wv.setFixedWidth(104)
         lbl_wv.setToolTip("Wavecal status loaded from the left panel")
         row.addWidget(lbl_wv)
@@ -381,14 +381,14 @@ class RCalibratorDialog(QDialog):
         row.addWidget(sp_r_end)
 
         lbl_tz = QLabel(tz_str)
-        lbl_tz.setStyleSheet("color:#555;font-size:11px;")
+        lbl_tz.setStyleSheet(f"color:{AUGUR.sub};font-size:11px;")
         lbl_tz.setFixedWidth(36)
         lbl_tz.setToolTip("TZ — set in left panel")
         row.addWidget(lbl_tz)
 
         btn_del = QPushButton("X")
         btn_del.setFixedWidth(22)
-        btn_del.setStyleSheet("color:#AAA;")
+        btn_del.setStyleSheet(f"color:{AUGUR.faint};")
         btn_del.setToolTip("Delete this channel row")
         btn_del.clicked.connect(lambda _f=frame: self._del_ch_row(_f))
         row.addWidget(btn_del)

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from gui.result_viewer_io import load_fit_table
+from gui.theme import AUGUR
 
 # 수식에서 허용하는 element-wise 함수
 _ALLOWED_FUNCS = {
@@ -127,7 +128,7 @@ class CalculatorDialog(QDialog):
 
         actbar = QHBoxLayout()
         b_calc = QPushButton("▶ Compute")
-        b_calc.setStyleSheet("font-weight:bold; background:#2196F3; color:white; padding:4px;")
+        b_calc.setStyleSheet(f"font-weight:bold; background:{AUGUR.info}; color:white; padding:4px;")
         b_calc.clicked.connect(self._compute)
         b_save = QPushButton("Save CSV")
         b_save.clicked.connect(self._save_csv)
@@ -138,7 +139,7 @@ class CalculatorDialog(QDialog):
 
         self._msg = QLabel("")
         self._msg.setWordWrap(True)
-        self._msg.setStyleSheet("color:#555;")
+        self._msg.setStyleSheet(f"color:{AUGUR.muted};")
         left.addWidget(self._msg)
         left.addStretch(1)
 
@@ -259,7 +260,7 @@ class CalculatorDialog(QDialog):
         col_combo.blockSignals(False)
         if path and not cols and getattr(self, "_last_col_err", "") and hasattr(self, "_msg"):
             self._msg.setText(f"{self._last_col_err}")
-            self._msg.setStyleSheet("color:#c62828;")
+            self._msg.setStyleSheet(f"color:{AUGUR.fail};")
 
     def _refresh_ref(self):
         cur = self._ref.currentText()
@@ -315,7 +316,7 @@ class CalculatorDialog(QDialog):
             res = np.asarray(res, float) * np.ones_like(ref_t)  # 스칼라 결과 방어
         except Exception as e:
             self._msg.setText(f"{e}")
-            self._msg.setStyleSheet("color:#c62828;")
+            self._msg.setStyleSheet(f"color:{AUGUR.fail};")
             return
 
         self._result = (ref_t, res, self._name.text().strip() or "result")
@@ -330,7 +331,7 @@ class CalculatorDialog(QDialog):
             f"{expr}  →  n={n_ok}/{len(res)} finite, "
             f"min={np.nanmin(res):.4g}  max={np.nanmax(res):.4g}  "
             f"mean={np.nanmean(res):.4g}   (aligned to {ref})")
-        self._msg.setStyleSheet("color:#2E7D32;")
+        self._msg.setStyleSheet(f"color:{AUGUR.ok};")
 
     def _save_csv(self):
         if not self._result:

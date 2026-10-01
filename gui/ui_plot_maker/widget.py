@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings
 
 from .core import _MODES, _shade, mathtext_to_html, has_markup
+from gui.theme import AUGUR
 from .data import Dataset, load_dataset
 from . import modes as _modes_registration  # noqa: F401 — import 자체가 @register_mode 실행(등록) 트리거
 
@@ -192,7 +193,7 @@ class PlotMakerWidget(QWidget):
 
         def _hline():
             f = QFrame(); f.setFrameShape(QFrame.Shape.HLine)
-            f.setFrameShadow(QFrame.Shadow.Sunken); f.setStyleSheet("color:#ddd;")
+            f.setFrameShadow(QFrame.Shadow.Sunken); f.setStyleSheet(f"color:{AUGUR.rule};")
             return f
 
         def _scroll(inner):
@@ -596,7 +597,7 @@ class PlotMakerWidget(QWidget):
         self.p1.scene().sigMouseClicked.connect(self._on_plot_clicked)
         rv.addWidget(self.pw, 1)
         self._status = QLabel("")
-        self._status.setStyleSheet("color:#444;")
+        self._status.setStyleSheet(f"color:{AUGUR.sub};")
         self._status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         rv.addWidget(self._status)
         split.addWidget(right)
@@ -1369,7 +1370,7 @@ class PlotMakerWidget(QWidget):
     def _mark_invalid(edit, invalid):
         """입력값이 비어있지 않은데 파싱 실패면 빨간 테두리로 표시(조용히 무시 X).
         빈칸/파싱성공이면 원상복구. apply_axes()가 매 변경마다 호출하므로 그때그때 갱신."""
-        edit.setStyleSheet("border: 1px solid #d32f2f;" if invalid else "")
+        edit.setStyleSheet(f"border: 1px solid {AUGUR.fail};" if invalid else "")
 
     def _x_ref_year(self):
         """날짜 입력에 연도를 안 적었을 때 쓸 기준연도 = 현재 데이터의 연도."""

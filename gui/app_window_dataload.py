@@ -11,6 +11,7 @@ import re
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTableWidgetItem,
                              QVBoxLayout)
 from core.data_io import DataIO
+from gui.theme import AUGUR
 from .ui_dialogs import RangeSelectorDialog
 
 
@@ -319,9 +320,9 @@ class DataLoadMixin:
             label = ch_labels.get(n, f"{n}CH")
             self.lbl_channel_info.setText(label)
             # (채널별 설정은 좌측 채널 탭으로 — 여기선 감지 정보만 표시)
-            colours = {1: "#1565C0", 2: "#6A1B9A", 3: "#2E7D32"}
+            colours = {1: AUGUR.info, 2: AUGUR.special, 3: AUGUR.ok}
             self.lbl_channel_info.setStyleSheet(
-                f"color: {colours.get(n, '#333')}; font-weight: bold;")
+                f"color: {colours.get(n, AUGUR.ink)}; font-weight: bold;")
             self.status.setText(
                 f"{len(self.file_list)} file(s) loaded  —  {ch_names.get(n, str(n)+'CH')} detected")
         except Exception as e:

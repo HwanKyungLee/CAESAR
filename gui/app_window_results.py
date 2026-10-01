@@ -9,6 +9,7 @@ import pyqtgraph as pg
 
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem
+from gui.theme import AUGUR
 
 
 class ResultsQCMixin:
@@ -143,9 +144,9 @@ class ResultsQCMixin:
         try:
             status = result_dict.get('Status', '')
             if status not in ("OK", "Recovered"):
-                item_status.setBackground(QColor(255, 100, 100))
+                item_status.setBackground(QColor(AUGUR.fail_bg)); item_status.setForeground(QColor(AUGUR.ink))
             elif status == "Recovered":
-                item_status.setBackground(QColor(255, 220, 100))
+                item_status.setBackground(QColor(AUGUR.warn_bg)); item_status.setForeground(QColor(AUGUR.ink))
         except Exception:
             pass
         self.table.setItem(row, c + 5, item_status)
@@ -241,7 +242,7 @@ class ResultsQCMixin:
             self.b_run.setEnabled(True)
             self.b_stop.setEnabled(False)
             self.status.setText("Analysis stopped by user.")
-            self.status.setStyleSheet("color: red; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
             return
 
         # Count completed workers; wait until the last one finishes
@@ -273,10 +274,10 @@ class ResultsQCMixin:
         self._stop_requested = False
         if was_stopped:
             self.status.setText(f"Stopped — partial results ({len(self.results):,} rows)")
-            self.status.setStyleSheet("color: orange; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.warn}; font-weight: bold;")
         else:
             self.status.setText(f"{ch_label}Analysis Completed!")
-            self.status.setStyleSheet("color: green; font-weight: bold;")
+            self.status.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
         # L3: 완료 시 자동 저장 (QC 적용 후, 정식 파일명 규칙)
         saved_msg = ""
         if (not was_stopped and hasattr(self, 'chk_auto_save')
@@ -479,9 +480,9 @@ class ResultsQCMixin:
                 st = str(r.get('Status', ''))
                 it = QTableWidgetItem(st)
                 if st.startswith('QC-') or st not in ("OK", "Recovered"):
-                    it.setBackground(QColor(255, 100, 100))
+                    it.setBackground(QColor(AUGUR.fail_bg)); it.setForeground(QColor(AUGUR.ink))
                 elif st == "Recovered":
-                    it.setBackground(QColor(255, 220, 100))
+                    it.setBackground(QColor(AUGUR.warn_bg)); it.setForeground(QColor(AUGUR.ink))
                 self.table.setItem(i, c + 5, it)
                 for gi, gas in enumerate(self.engine.gas_list):
                     try:

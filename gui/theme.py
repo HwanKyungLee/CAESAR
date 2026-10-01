@@ -32,6 +32,21 @@ class AugurTokens:
     button: str = "#E9E5DB"
     select: str = "#3B63B5"      # 선택 강조 = 성분색 1번(청)
     components: tuple = ("#3B63B5", "#5B4FA6", "#7E4A86", "#4C6A7C", "#2F7A8C", "#6A5D9E")
+    # ── 화면 요소의 의미 역할 색(2026-10-01) — 창마다 같은 '성공 초록'이 #2E7D32·#388E3C·#4CAF50,
+    # '오류 빨강'이 #C62828·#D32F2F·#B71C1C·#CC0000, '흐림 회색'이 6가지로 흩어져 있던 것을 하나로.
+    # 글자색은 종이 바탕에서 읽히는 진한 톤, *_bg 는 칸·상자 배경용 옅은 톤. 그래프 데이터 색은 아래
+    # SERIES/CHANNELS/SPECIES 가 따로 맡는다.
+    ok: str = "#2E7D32"          # 성공·로드됨·통과
+    warn: str = "#E65100"        # 주의·확인 필요
+    fail: str = "#C62828"        # 오류·실패·없음(필수인데)
+    info: str = "#1565C0"        # 안내·섹션 제목·링크·강조 버튼
+    muted: str = "#6B6F78"       # 보조 설명·비활성 안내(= grey)
+    special: str = "#6A1B9A"     # 수동 덮어쓰기·고급 설정처럼 '보통과 다른 경로' 표시
+    ok_bg: str = "#E8F5E9"
+    warn_bg: str = "#FFF3E0"
+    fail_bg: str = "#FFEBEE"
+    info_bg: str = "#E3F2FD"
+    neutral_bg: str = "#ECE8DE"  # 회색 칸·눌리지 않은 토글(종이 톤)
 
 
 @dataclass(frozen=True)
