@@ -35,7 +35,7 @@ class Dataset:
     """
     __slots__ = ("name", "path", "time", "cols", "units", "errs", "cats",
                  "rules", "rules_on", "shift_h", "_hidden", "derived", "derived_errors", "_dcols",
-                 "rule_errors")
+                 "rule_errors", "join", "join_info")
 
     # 식에서 열 이름 대신 쓸 수 있는 예약 변수 — 파생 열 이름으로 못 쓴다.
     RESERVED = ("time", "hour")
@@ -54,6 +54,8 @@ class Dataset:
         self.shift_h = float(shift_h or 0.0)
         self._hidden = None
         self.rule_errors = {}   # {규칙 번호: 오류문} — 깨진 조건식 규칙(hidden_mask가 채움)
+        self.join = None        # Join 데이터셋이면 레시피 dict(파일이 아니라 다른 데이터셋에서 만든다)
+        self.join_info = {}
         self.derived = [dict(d) for d in (derived or [])]
         self.derived_errors = {}
         self._dcols = ()     # 마지막으로 cols에 채운 파생 열 이름 — 지우거나 이름을 바꾸면 옛 값을 걷어낸다
@@ -169,8 +171,31 @@ class Dataset:
         m = self.hidden_mask()
         return int(m.sum()) if m is not None else 0
 
+    def rebuild_join(self, shelf):
+        """Join 데이터셋을 재료(선반의 다른 데이터셋)에서 다시 만든다. 규칙·파생 식은 유지.
+        재료가 사라졌으면 열을 비우고 join_info["error"] — 묵은 값을 남기지 않는다."""
+        if not self.join:
+            return
+        for nm in self._dcols:
+            self.cols.pop(nm, None)
+        self._dcols = ()
+        try:
+            t, cols, units, errs, cats, info = build_join(self.join, shelf)
+        except ValueError as e:
+            t, cols, units, errs, cats, info = None, {}, {}, {}, {}, {"error": str(e)}
+        self.time, self.cols, self.units, self.errs, self.cats = t, cols, units, errs, cats
+        self.join_info = info
+        self.shift_h = 0.0           # 시각은 이미 base 시프트를 품고 있다
+        self.derived_errors = {}
+        if self.derived and self.cols:
+            self.apply_derived()
+        self._hidden = None
+
     def to_spec(self):
-        """설정 파일용 레시피 — 열 때 `load_spec`으로 그대로 되살린다."""
+        """설정 파일용 레시피 — 열 때 `load_spec`(Join은 `make_join`)으로 그대로 되살린다."""
+        if self.join:
+            return {"join": dict(self.join), "rules": [dict(r) for r in self.rules],
+                    "rules_on": self.rules_on, "derived": [dict(d) for d in self.derived]}
         return {"path": self.path, "rules": [dict(r) for r in self.rules],
                 "rules_on": self.rules_on, "shift_h": self.shift_h,
                 "derived": [dict(d) for d in self.derived]}
@@ -185,6 +210,73 @@ def local_hour(t, shift_h=0.0):
     off = _time.localtime(float(np.median(fin))).tm_gmtoff if fin.size else 0
     with np.errstate(invalid="ignore"):
         return np.mod((t + off + shift_h * 3600.0) / 3600.0, 24.0)
+
+
+# ── Join 데이터셋 (D1+) — 두 데이터셋을 한 시간축에 ─────────────────────────────
+JOIN_METHODS = ("linear", "nearest")
+
+
+def join_source_view(ds):
+    """Join 재료로 쓸 (시각, {열: 값}, {열: 오차}) — **보이는 그대로**: 데이터셋 시프트를
+    더한 시각, 숨김 규칙에 걸린 행은 NaN. 원본 ds는 건드리지 않는다."""
+    t = None if ds.time is None else ds.time + ds.shift_h * 3600.0
+    hid = ds.hidden_mask()
+    def view(a):
+        a = np.asarray(a, float)
+        return np.where(hid, np.nan, a) if hid is not None and hid.any() else a
+    return (t, {c: view(v) for c, v in ds.cols.items()},
+            {c: view(e) for c, e in ds.errs.items() if e is not None})
+
+
+def build_join(join, shelf):
+    """join 레시피 {"base","other","suffix","method","max_gap_s"} + 선반 → Dataset 재료.
+
+    시간축 = base(시프트 반영). base 열은 이름 그대로, other 열은 `열+suffix`로 base 시각에
+    `core.align.align_to`로 옮긴다 — 결손(other 간격 중앙값 × GAP_FACTOR_FAIL 초과)은 잇지 않는다.
+    범주형 열은 base 것만(Status·Flag는 행마다의 사실이라 보간할 수 없다).
+    반환 (time, cols, units, errs, cats, info). 재료가 없으면 ValueError."""
+    from core.align import align_to, auto_max_gap
+    b, o = shelf.get(join.get("base")), shelf.get(join.get("other"))
+    if b is None or o is None:
+        miss = [n for n in (join.get("base"), join.get("other")) if shelf.get(n) is None]
+        raise ValueError(f"source dataset missing: {', '.join(map(str, miss))}")
+    if b.time is None or o.time is None:
+        raise ValueError("both datasets need a time axis to join")
+    method = join.get("method", "linear")
+    if method not in JOIN_METHODS:
+        raise ValueError(f"unknown join method: {method!r}")
+    suffix = join.get("suffix") or "_B"
+    tb, cb, eb = join_source_view(b)
+    to, co, eo = join_source_view(o)
+    gap = join.get("max_gap_s")
+    gap = auto_max_gap(to) if gap is None else float(gap)
+    cols = dict(cb)
+    units = dict(b.units)
+    errs = dict(eb)
+    # 짝지어진 행 수는 값과 무관하게 '시각만'으로 센다(열마다 NaN이 달라도 한 숫자)
+    _, tinfo = align_to(tb, to, np.ones(len(to)), max_gap=gap, method=method)
+    for c, v in co.items():
+        nm = f"{c}{suffix}"
+        if nm in cols:
+            raise ValueError(f"column name clash '{nm}' — choose another suffix")
+        cols[nm], _ = align_to(tb, to, v, max_gap=gap, method=method)
+        if c in o.units:
+            units[nm] = o.units[c]
+        if c in eo:
+            errs[nm], _ = align_to(tb, to, eo[c], max_gap=gap, method=method)
+    info = {"rows": len(tb), "matched": tinfo["n_ok"], "n_gap": tinfo["n_gap"],
+            "max_gap_s": gap, "method": method}
+    return tb, cols, units, errs, {k: v.copy() for k, v in b.cats.items()}, info
+
+
+def make_join(name, join, shelf, rules=None, rules_on=True, derived=None):
+    """Join 레시피로 새 Dataset. 실패해도 죽지 않는다 — 빈 데이터셋 + join_info["error"]."""
+    ds = Dataset(name, f"<join: {join.get('base')} ⋈ {join.get('other')}>", None, {},
+                 rules=rules, rules_on=rules_on)
+    ds.join = dict(join)
+    ds.derived = [dict(d) for d in (derived or [])]
+    ds.rebuild_join(shelf)
+    return ds
 
 
 def load_spec(spec) -> Dataset:

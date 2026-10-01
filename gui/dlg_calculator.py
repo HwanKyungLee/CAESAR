@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from core.align import align_to   # 단일 출처 — Plot Maker 정렬과 같은 결손 가드
 from core.expr import safe_eval   # 단일 출처 — Plot Maker 파생 열과 같은 엔진
 from gui.result_viewer_io import load_fit_table
 from gui.theme import AUGUR
@@ -256,13 +257,15 @@ class CalculatorDialog(QDialog):
             if ref not in vars_raw:
                 ref = next(iter(vars_raw))
             ref_t, _ = vars_raw[ref]
-            # 모든 변수를 기준 시각격자에 보간(범위 밖 NaN). 같은 격자면 사실상 동일.
-            aligned = {}
+            # 모든 변수를 기준 시각격자에 정렬(범위 밖·결손 구간 NaN). 같은 격자면 그대로.
+            # core.align 단일 출처 — 예전 np.interp는 결손을 가로질러 직선으로 메웠다.
+            aligned, n_gap = {}, 0
             for letter, (tt, vv) in vars_raw.items():
                 if np.array_equal(tt, ref_t):
                     aligned[letter] = vv
                 else:
-                    aligned[letter] = np.interp(ref_t, tt, vv, left=np.nan, right=np.nan)
+                    aligned[letter], info = align_to(ref_t, tt, vv)
+                    n_gap += info["n_gap"]
             expr = self._expr.text().strip()
             if not expr:
                 raise ValueError("Enter an expression.")
@@ -284,7 +287,8 @@ class CalculatorDialog(QDialog):
         self._msg.setText(
             f"{expr}  →  n={n_ok}/{len(res)} finite, "
             f"min={np.nanmin(res):.4g}  max={np.nanmax(res):.4g}  "
-            f"mean={np.nanmean(res):.4g}   (aligned to {ref})")
+            f"mean={np.nanmean(res):.4g}   (aligned to {ref}"
+            + (f"; {n_gap} points not bridged across data gaps)" if n_gap else ")"))
         self._msg.setStyleSheet(f"color:{AUGUR.ok};")
 
     def _save_csv(self):

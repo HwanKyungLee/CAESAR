@@ -22,7 +22,7 @@ from PyQt6.QtCore import Qt, QSettings
 
 from .core import _MODES, _shade, mathtext_to_html, has_markup
 from gui.theme import AUGUR
-from .data import Dataset, load_spec
+from .data import Dataset, load_spec, make_join
 from . import modes as _modes_registration  # noqa: F401 — import 자체가 @register_mode 실행(등록) 트리거
 
 
@@ -1967,6 +1967,8 @@ class PlotMakerWidget(QWidget):
         col = data[2] if data[0] in ("col", "bad") else None
         menu = QMenu(self)
         a_new = menu.addAction("New column…")
+        a_join = menu.addAction("Join with another dataset…")
+        a_join.setEnabled(ds.time is not None and len(self.shelf) > 1)
         a_edit = a_del = None
         if col in ds.derived_names():
             a_edit = menu.addAction(f"Edit column '{col}'…")
@@ -1992,6 +1994,11 @@ class PlotMakerWidget(QWidget):
                 self.set_derived(ds.name, dlg.spec(), replace=editing)
         elif act is a_del:
             self.delete_derived(ds.name, col)
+        elif act is a_join:
+            from .join_dialog import JoinDialog
+            dlg = JoinDialog(ds.name, self.shelf, parent=self)
+            if dlg.exec():
+                self.add_join(dlg.spec())
         elif act is a_flt:
             from .filters_dialog import FiltersDialog
             dlg = FiltersDialog(ds, parent=self)
@@ -2074,11 +2081,40 @@ class PlotMakerWidget(QWidget):
             self._refresh_tree()
             self._notify_modes()
 
+    def _rebuild_joins(self):
+        """Join 데이터셋을 재료에서 다시 만든다 — 재료의 규칙·파생 열·시프트가 바뀌었거나
+        재료가 지워졌을 때. 선반 순서대로(Join의 Join도 재료가 앞에 있으면 된다)."""
+        for ds in self.shelf.values():
+            if ds.join:
+                ds.rebuild_join(self.shelf)
+
+    def add_join(self, join, name=None):
+        """Join 데이터셋을 선반에 추가 → 이름(실패면 None, 오류는 상태줄)."""
+        base = name or f"{join['base']}⋈{join['other']}"
+        name, i = base, 2
+        while name in self.shelf:
+            name = f"{base}#{i}"; i += 1
+        ds = make_join(name, join, self.shelf)
+        if ds.join_info.get("error"):
+            self.set_status(f"Join failed: {ds.join_info['error']}")
+            return None
+        self.shelf[name] = ds
+        self._refresh_tree()
+        self._notify_modes()
+        ji = ds.join_info
+        self.set_status(f"Joined {name}: {ji['matched']} of {ji['rows']} rows paired · "
+                        f"{ji['n_gap']} left empty (gap > {ji['max_gap_s'] / 60:.3g} min)")
+        return name
+
     def _refresh_tree(self):
+        self._rebuild_joins()          # 트리를 다시 그리는 모든 경로 = 선반이 바뀐 경로
         self._tree.clear()
         from gui.result_viewer_io import describe_rule
         for name, ds in self.shelf.items():
             tags = []
+            if ds.join:
+                tags.append("⋈ " + ("✗ " + ds.join_info["error"] if ds.join_info.get("error")
+                                    else f"{ds.join_info.get('matched', 0)} paired"))
             if ds.rules:
                 tags.append(f"{ds.n_hidden()} hidden" if ds.rules_on else "filters off")
                 if ds.rule_errors:            # n_hidden()이 방금 갱신했다
@@ -2089,6 +2125,15 @@ class PlotMakerWidget(QWidget):
             top = QTreeWidgetItem([f"{name}  ({len(ds)}×{len(ds.cols)}){tag}"])
             top.setData(0, Qt.ItemDataRole.UserRole, ("ds", name))
             tip = ["time axis " if ds.time is not None else "no time axis"]
+            if ds.join:
+                j, ji = ds.join, ds.join_info
+                tip.append(f"join: {j['base']} (time axis) ⋈ {j['other']} → columns +'{j.get('suffix', '_B')}'")
+                if ji.get("error"):
+                    tip.append(f"✗ {ji['error']}")
+                else:
+                    tip.append(f"  {ji['method']} · max gap {ji['max_gap_s'] / 60:.3g} min · "
+                               f"{ji['matched']} of {ji['rows']} rows paired, {ji['n_gap']} left empty")
+                tip.append("  rebuilt from its sources whenever they change (sources' filters apply)")
             if ds.cats:
                 tip.append("categorical: " + ", ".join(ds.cats))
             if ds.rules:
@@ -2773,8 +2818,12 @@ class PlotMakerWidget(QWidget):
             return
         cfg = self._migrate_cfg(cfg)
         missing = []
+        joins = []
         for name, spec in cfg.get("datasets", {}).items():
             if name in self.shelf:
+                continue
+            if isinstance(spec, dict) and spec.get("join"):
+                joins.append((name, spec))     # 재료(파일 데이터셋)를 다 연 뒤에 만든다
                 continue
             p = spec if isinstance(spec, str) else (spec or {}).get("path")
             if not (p and os.path.isfile(p)):
@@ -2786,6 +2835,12 @@ class PlotMakerWidget(QWidget):
                 self.shelf[name] = ds
             except Exception:
                 missing.append(name)
+        for name, spec in joins:
+            ds = make_join(name, spec["join"], self.shelf, rules=spec.get("rules"),
+                           rules_on=spec.get("rules_on", True), derived=spec.get("derived"))
+            self.shelf[name] = ds              # 재료가 없으면 ✗로 남는다(조용히 빠지지 않게)
+            if ds.join_info.get("error"):
+                missing.append(f"{name} ({ds.join_info['error']})")
         self._refresh_tree()
         self._notify_modes()
         self._res_custom_spin.setValue(float(cfg.get("resample_custom_min", 2.0)))

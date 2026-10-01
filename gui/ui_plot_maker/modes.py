@@ -20,7 +20,7 @@ from gui.result_viewer_io import flag_color, FLAG_KEYS
 from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
                    mathtext_to_html)
 from .processing import (resample_mean, smooth, regress, allan_deviation,
-                         step_xy, bar_width)
+                         step_xy, bar_width, align_to)
 
 
 @register_mode
@@ -926,8 +926,10 @@ class ScatterMode(PlotMode):
             self._chk_ct.setChecked(bool(cfg.get("color_time", False)))
 
     def _xy(self):
-        """선택한 X/Y → (xv, yv, tcolor). 다른 데이터셋이면 시간 보간. tcolor=X시각(없으면 None)."""
+        """선택한 X/Y → (xv, yv, tcolor). 다른 데이터셋이면 Y를 X 시각으로 정렬
+        (core.align — 결손을 가로질러 잇지 않는다). tcolor=X시각(없으면 None)."""
         host = self.host
+        self._align_info = None
         rx = host.resolve(self._cx.currentText())
         ry = host.resolve(self._cy.currentText())
         if rx is None or ry is None:
@@ -935,11 +937,9 @@ class ScatterMode(PlotMode):
         dx, cx, xv, tx = rx
         dy, cy, yv, ty = ry
         if dx is not dy and tx is not None and ty is not None:
-            mt = np.isfinite(ty) & np.isfinite(yv)
-            if mt.sum() >= 2:
-                o = np.argsort(ty[mt])
-                yv = np.interp(tx, ty[mt][o], yv[mt][o], left=np.nan, right=np.nan)
-                xv = xv.copy()
+            # 예전 np.interp는 몇 시간 떨어진 두 점 사이도 직선으로 메워 짝지었다(부록 ④).
+            yv, self._align_info = align_to(tx, ty, yv)
+            xv = xv.copy()
             tcolor = tx
         else:
             n = min(len(xv), len(yv))
@@ -980,7 +980,10 @@ class ScatterMode(PlotMode):
                          pen=pg.mkPen(self.color("fit", "#D32F2F"), width=2), name="fit")
             host.pg_label("title", host.lbl("title",
                           f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
-            host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}")
+            ai = getattr(self, "_align_info", None)
+            gap = (f"  ·  {ai['n_gap']} X times left unpaired (Y gap > {ai['max_gap'] / 60:.3g} min)"
+                   if ai and ai["n_gap"] else "")
+            host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}{gap}")
         else:
             host.pg_label("title", host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")

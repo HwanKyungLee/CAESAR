@@ -153,6 +153,26 @@ Plot Maker 설정(`.pmcfg.json`)은 데이터셋을 `이름 → 경로`로 저�
   Scatter `_xy()`(`modes.py`)의 `np.interp`와 Calculator 정렬이 이걸 쓰게 한다(부록 ④의 앞절반).
 - 결과는 새 가상 데이터셋 `A⋈B`(규칙: 두 출처 + max_gap — 역시 레시피).
 
+**구현 메모 (2026-10-01, 완료 — 검증 37번 + `tools/test_core_align.py`)**
+
+- 정렬 함수는 **`core/align.py`**(Qt 비의존) `align_to(t_ref, t_src, v_src, max_gap, method)`.
+  Plot Maker `processing`은 재노출만. linear = 감싸는 두 점 간격 ≤ max_gap일 때만 보간,
+  nearest = 가장 가까운 점이 max_gap/2 안일 때만(동점은 앞 점). 같은 시각은 언제나 그 값.
+- 기본 max_gap = 원본 간격 중앙값 × **`core/day_audit.GAP_FACTOR_FAIL`(2.8, 연속 결손)** — 판정
+  배수 단일 출처. 같은 파일의 1.8(`GAP_FACTOR`)은 너무 예민해 정상 지터에도 끊긴다.
+- **출력이 바뀌는 곳 둘** (부록 ④의 수정 자체):
+  1. Scatter에서 X·Y가 다른 데이터셋이면, 예전엔 `np.interp`가 결손을 가로질러 직선으로 메운 점까지
+     짝지어 회귀·R²에 넣었다. 이제 그 점은 빠지고 상태줄에 `N X times left unpaired (Y gap > … min)`.
+  2. Result Lab 데이터 계산기도 같은 함수 — 결손 구간 결과가 NaN이 되고 메시지에 개수를 적는다.
+- **Join(⋈) 데이터셋**: 데이터셋 우클릭 → *Join with another dataset…* (상대·접미사·방법·max gap
+  auto/분, 미리보기 `N of M base rows get a value · K left empty`). 시간축 = base(데이터셋 시프트 반영),
+  base 열은 그대로, 상대 열은 `열+접미사`(기본 `_B`). 범주형 열은 base 것만(Status를 보간할 수는 없다).
+- 재료는 **보이는 그대로** 들어간다(재료의 시프트·숨김 규칙·파생 열). 재료가 바뀌면 `_refresh_tree()`
+  한 곳에서 다시 만든다 — 선반이 바뀌는 모든 경로가 거기를 지난다. 재료 숨김 행은 '없는 점'이라
+  양옆 간격이 max_gap 안이면 보간된다(점 하나 거른 자리를 이웃이 메우는 것은 정렬이지 날조가 아님).
+- 저장: `{"join": {...}, "rules", "derived"}` — 열 때 파일 데이터셋을 먼저 다 열고 Join을 만든다.
+  재료가 없으면 **열을 비우고** `⋈ ✗ source dataset missing` — 묵은 값을 남기지 않는다.
+
 ### 그래프 트랙 (09-21 문서 이어서)
 
 - **M-P** Preview 모덜리스 + 자동 갱신
@@ -175,7 +195,7 @@ Plot Maker 설정(`.pmcfg.json`)은 데이터셋을 `이름 → 경로`로 저�
 ## 4. 순서
 
 1. ~~**D0** 모델·다리~~ — 완료(2026-10-01, 검증 34번)
-2. ~~**D1** 파생 열~~ — 완료(2026-10-01, 검증 35번) → ~~**D2** 필터·flag 색~~ — 완료(검증 36번) → **D1+** 정렬 (+ 구간 피팅)
+2. ~~**D1** 파생 열~~ — 완료(2026-10-01, 검증 35번) → ~~**D2** 필터·flag 색~~ — 완료(검증 36번) → ~~**D1+** 정렬·Join~~ — 완료(검증 37번) (+ 구간 피팅은 아직)
 3. **M-P** → **M1** → **M2** (+ Copernicus 프리셋)
 4. **D3** 콘솔
 

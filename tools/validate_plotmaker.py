@@ -80,6 +80,9 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 36. 행 필터 + Flag 색칠 : keep/hide 조건식·파생 열 조건·규칙 개별 on/off(삭제 아님) ·
     깨진 조건은 그 규칙만 무효+✗(데이터셋은 열림) · 설정 왕복 · Flag 점이 pg·mpl 같은 수 ·
     리샘플 중엔 끄고 안내 · 스타일 편집이 숨김을 안 풀어버리나 (D2, 2026-10-01)
+37. 정렬·Join : Scatter의 다른 데이터셋 짝짓기가 결손을 가로질러 잇지 않나 · Join(⋈)
+    데이터셋이 같은 값을 내나 · 재료 필터 반영 · Join 위 파생 열 · 레시피 저장/왕복 ·
+    재료 삭제 시 묵은 값 없이 ✗ (D1+, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1201,21 +1204,26 @@ def c_visibility_and_click():
 # ── 34. Result Lab → Plot Maker 다리: 보던 상태가 레시피로 넘어가나 (D0) ─────────
 # 전엔 경로만 넘겨서 Hide QC·K·구간·시프트가 증발했다. 이제 경로 + 재계산 가능한
 # 규칙을 넘긴다. 숨김은 삭제가 아니다 — 끄면 돌아오고, 설정을 다시 열어도 같다.
-def _write_report_fixture(path, n=120, seed=1):
-    """GUI 리포트 포맷(File\\tChannel\\tTime…) 합성 파일 — 두 채널, 일부 QC·튀는 RMS."""
+def _write_report_fixture(path, n=120, seed=1, offset_s=0.0, step_min=2, skip=()):
+    """GUI 리포트 포맷(File\\tChannel\\tTime…) 합성 파일 — 두 채널, 일부 QC·튀는 RMS.
+    offset_s·step_min·skip(빠뜨릴 행 번호 = 결손)은 정렬/Join 검증용. 기본값 출력은 그대로."""
     from datetime import datetime, timedelta
     rng = np.random.default_rng(seed)
-    t0 = datetime(2026, 5, 20, 0, 0, 0)
+    t0 = datetime(2026, 5, 20, 0, 0, 0) + timedelta(seconds=offset_s)
+    skip = set(skip)
     with open(path, "w", encoding="utf-8") as f:
         f.write("# synthetic report for validate_plotmaker #34\n")
         f.write("File\tChannel\tTime\tRMS\tChi2\tStatus\tNO2\tNO2_Error\tShift\tSqueeze\n")
         for i in range(n):
+            if i in skip:
+                rng.normal(); rng.normal(); rng.normal()   # 난수열은 그대로 소비(나머지 행 값 불변)
+                continue
             ch = "1" if i % 2 == 0 else "2"
             rms = 1e-3 * (1 + 0.05 * rng.normal())
             if i in (7, 30, 31, 90):
                 rms *= 8                       # 사후 QC(K)가 잡을 튀는 점
             st = "QC-RMS" if i in (12, 13, 60) else ("Unstable" if i == 44 else "")
-            f.write(f"s{i}.txt\t{ch}\t{(t0 + timedelta(minutes=2 * i)):%Y-%m-%d %H:%M:%S}\t"
+            f.write(f"s{i}.txt\t{ch}\t{(t0 + timedelta(minutes=step_min * i)):%Y-%m-%d %H:%M:%S}\t"
                     f"{rms:.6g}\t1.0\t{st}\t{5 + rng.normal():.4f}\t0.2\t{0.1 * rng.normal():.4f}\t1.0001\n")
 
 
@@ -1550,6 +1558,83 @@ def c_filters_and_flag_colors():
         return "FAIL", "스타일 편집이 숨김/색칠 설정을 풀어버림"
     return "PASS", ("keep/hide·파생 열 조건·개별 off·깨진 규칙 ✗(데이터셋은 열림)·설정 왕복 · "
                     "Flag 점 pg=mpl {unstable 1, qc 3} · 리샘플 시 끄고 안내")
+
+
+# ── 37. 데이터셋 간 정렬: 결손 가드 + Join 데이터셋 (D1+) ─────────────────────
+@check("정렬: Scatter 결손 가드 · Join(⋈) 데이터셋 — 재료 필터 반영·파생 열·설정 왕복·재료 삭제 ✗")
+def c_alignment_and_join():
+    import json, tempfile
+    from unittest import mock
+    from gui.ui_plot_maker.join_dialog import JoinDialog
+    tmpd = tempfile.mkdtemp()
+    pa = os.path.join(tmpd, "chA.dat")
+    pb = os.path.join(tmpd, "chB.dat")
+    _write_report_fixture(pa)                                   # 2분 간격 120행
+    _write_report_fixture(pb, seed=7, offset_s=30, skip=range(40, 80))   # +30 s, 80분 결손
+    w = PlotMakerWidget()
+    w.add_specs([pa, pb])
+    A, B = w.shelf["chA"], w.shelf["chB"]
+    hole = (A.time > B.time[39]) & (A.time < B.time[40])         # B 결손 안에 있는 A 시각
+
+    # Scatter: 다른 데이터셋 짝짓기 — 결손을 가로질러 잇지 않는다
+    sc = next(m for m in w._modes if m.key == "scatter")
+    sc.options_widget()
+    sc._cx.setCurrentText("chA:NO2"); sc._cy.setCurrentText("chB:NO2")
+    xv, yv, _ = sc._xy()
+    if not (np.all(np.isnan(yv[hole])) and np.isfinite(yv[~hole][1:-1]).all()):
+        return "FAIL", "Scatter가 결손 구간을 보간으로 메움(또는 정상 구간을 버림)"
+    w._mode_combo.setCurrentIndex([m.key for m in w._modes].index("scatter"))
+    sc.render()
+    if "left unpaired" not in w._status.text():
+        return "FAIL", f"짝 못 지은 점 안내 없음: {w._status.text()}"
+
+    # Join 대화상자 미리보기 → Join 데이터셋
+    dlg = JoinDialog("chA", w.shelf)
+    dlg._other.setCurrentText("chB"); dlg._preview()
+    if "✓" not in dlg._msg.text():
+        return "FAIL", f"Join 미리보기 실패: {dlg._msg.text()}"
+    jn = w.add_join(dlg.spec())
+    J = w.shelf.get(jn)
+    if J is None or "NO2_B" not in J.cols or not np.array_equal(J.cols["NO2"], A.cols["NO2"]):
+        return "FAIL", f"Join 열 구성 이상: {None if J is None else list(J.cols)}"
+    if not np.all(np.isnan(J.cols["NO2_B"][hole])) or J.join_info["n_gap"] != int(hole.sum()):
+        return "FAIL", f"Join이 결손을 메움 / n_gap {J.join_info['n_gap']} ≠ {int(hole.sum())}"
+    if not np.allclose(J.cols["NO2_B"][~hole][1:-1], yv[~hole][1:-1]):
+        return "FAIL", "Join 값 ≠ Scatter 짝 값(같은 정렬 함수여야)"
+    if w.set_derived(jn, {"name": "dNO2", "expr": "NO2 - NO2_B"}):
+        return "FAIL", "Join 위 파생 열(데이터셋 간 차이) 실패"
+
+    # 재료 필터를 바꾸면 Join이 다시 만들어진다(보이는 그대로)
+    w.set_dataset_view("chB", rules=[{"kind": "expr", "expr": "NO2 < 5", "mode": "keep"}])
+    if np.isfinite(J.cols["NO2_B"]).sum() >= np.isfinite(yv).sum() or "dNO2" not in J.cols:
+        return "FAIL", "재료 필터 변경이 Join에 반영 안 됨(또는 파생 열이 사라짐)"
+    w.set_dataset_view("chB", rules=[])
+
+    # 설정 왕복 — Join은 재료 다음에, 레시피로
+    cfgp = os.path.join(tmpd, "j.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"][jn]
+    if "join" not in saved or "path" in saved:
+        return "FAIL", f"Join이 레시피로 저장 안 됨: {list(saved)}"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    J2 = w2.shelf.get(jn)
+    if J2 is None or not np.allclose(J2.cols["dNO2"], J.cols["dNO2"], equal_nan=True):
+        return "FAIL", "설정 왕복 후 Join/파생 값 다름"
+
+    # 재료 삭제 → 묵은 값 없이 ✗
+    w2.shelf.pop("chB"); w2._refresh_tree()
+    J2 = w2.shelf[jn]
+    if J2.cols or "error" not in J2.join_info:
+        return "FAIL", "재료가 사라졌는데 Join에 묵은 값이 남음"
+    top = [w2._tree.topLevelItem(i).text(0) for i in range(w2._tree.topLevelItemCount())]
+    if not any("⋈ ✗" in t for t in top):
+        return "FAIL", f"트리에 Join 오류 표시 없음: {top}"
+    return "PASS", (f"결손 {int(hole.sum())}점 안 메움(Scatter·Join 같은 값) · 안내 · Join 위 파생 열 · "
+                    "재료 필터 반영 · 레시피 저장·왕복 · 재료 삭제 시 ✗")
 
 
 def main():
