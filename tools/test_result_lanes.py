@@ -224,6 +224,17 @@ def test_big_file_thinning_keeps_flag_share(w):
     assert got == j, (got, j)
     w._chk_hide_qc.setChecked(True)
 
+    # the next (small) file must get x auto-range back — 2026-10-02 R5: after a >20k-row file
+    # every later file was drawn inside the stale x window of the big one
+    w._path = _write_fit(tempfile.mkdtemp())
+    w._reload()
+    QApplication.processEvents()
+    vb = w._lanes[0].getViewBox()
+    assert vb.autoRangeEnabled()[0], "x auto-range left off after a big file"
+    (x0, x1), _ = vb.viewRange()
+    tt = w._fit_cache["time"]
+    assert x0 <= tt.min() and x1 >= tt.max() and (x1 - x0) < 3600, (x0, x1, tt.min(), tt.max())
+
 
 def test_residual_refuses_without_meta(w):
     """레거시 결과(= `.meta.json` 없음)는 잔차를 **그리지 않고 사유를 적는다**.

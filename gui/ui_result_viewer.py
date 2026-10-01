@@ -886,7 +886,9 @@ class ResultViewerWidget(QWidget):
         self._lane_hits = {}      # id(레인) → (x, y, x 정렬 순서) — 클릭 판정은 원본 전부로
         self._lane_thin = {}      # id(레인) → 큰 파일 화면 솎아내기 상태(줌하면 다시 고른다)
         # 화면 솎아내기 배율은 '지금 보이는 x 범위'로 정해진다(gui/pg_perf.py) — 큰 파일이면
-        # 그리기 전에 데이터 범위로 잡아둬야 첫 계산부터 맞는다. 다 그린 뒤 자동 범위로 되돌린다.
+        # 그리기 전에 데이터 범위로 잡아둬야 첫 계산부터 맞는다. That turns x auto-range off, so
+        # every other file turns it back on (lane 0; the rest follow via the x link) — otherwise
+        # all later files were drawn in the big file's stale x window (2026-10-02 audit R5).
         fin_x = x[np.isfinite(x)]
         pre_range = (len(x) > _BIG and fin_x.size > 1 and fin_x.max() > fin_x.min())
         for i, (kind, g) in enumerate(lanes_spec):
@@ -895,6 +897,8 @@ class ResultViewerWidget(QWidget):
                 # padding=None = 자동 범위와 같은 여백. x 자동 범위를 다시 켜지 않는다 — 켜면 연결된
                 # 레인들이 연쇄로 범위를 바꿔 마커를 수십 번 다시 만든다(실측 setData 23회). 'A'로 복귀.
                 pw.getViewBox().setXRange(float(fin_x.min()), float(fin_x.max()), padding=None)
+            elif i == 0:
+                pw.getViewBox().enableAutoRange(x=True)
             self._set_time_axis(pw, has_time)
             if i == n_lanes - 1:
                 pw.setLabel("bottom", xlabel)
