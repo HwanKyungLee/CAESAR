@@ -31,6 +31,33 @@ class AnalysisRunMixin:
     # §11 분석 실행 / 워커 / autosave / closeEvent
     # ══════════════════════════════════════════════════════════════════════
     def start_analysis(self):
+        """RUN entry (button and F5). Refuses re-entry while workers run — a second RUN used to
+        replace `_workers` and orphan the first set (still fitting after STOP, progress "70 / 14").
+        Any early return of the body leaves no stale running flag behind."""
+        if any(w.isRunning() for w in (getattr(self, '_workers', None) or [])):
+            self.status.setText("Analysis already running — press STOP first")
+            return
+        try:
+            self._start_analysis_body()
+        finally:
+            if not any(w.isRunning() for w in (getattr(self, '_workers', None) or [])):
+                self._analysis_running = False
+                self._set_run_inputs_locked(False)
+
+    def _set_run_inputs_locked(self, locked):
+        """Enable/disable everything that defines a run (see `_run_lock_widgets`)."""
+        ws = list(getattr(self, '_run_lock_widgets', []))
+        ws += [getattr(self, n, None) for n in ('_adv_params_container', 'spin_d_len', 'spin_rl_factor')]
+        for w in ws:
+            if w is not None:
+                w.setEnabled(not locked)
+
+    def _unlock_inputs_if_done(self):
+        # Connected after analysis_finished, which re-enables RUN only when every channel is done.
+        if self.b_run.isEnabled():
+            self._set_run_inputs_locked(False)
+
+    def _start_analysis_body(self):
         """
         Validates settings, builds the initial parameter vector p0, and starts
         the AnalysisWorker background thread.
@@ -416,6 +443,7 @@ class AnalysisRunMixin:
                 lambda m, _ch=ch: (print(f"[Analysis CH{_ch}] {m}"),
                                    self.status.setText(f"[CH{_ch}] {m}")))
             w.finished.connect(self.analysis_finished)
+            w.finished.connect(self._unlock_inputs_if_done)
             w.r_curve_update.connect(self._on_r_curve_update)
             w.scan_count_ready.connect(lambda n, ch=ch: self._on_scan_count_ready(n, ch))
 
@@ -481,6 +509,7 @@ class AnalysisRunMixin:
         # Lock UI controls to prevent interference
         self.b_run.setEnabled(False)
         self.b_stop.setEnabled(True)
+        self._set_run_inputs_locked(True)
         self.status.setText("Analysis in progress...")
 
         # Switch to the Analysis Monitor automatically
