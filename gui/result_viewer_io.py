@@ -278,3 +278,113 @@ def load_fit_table(path):
             out["time"] = ts
     return out
 
+
+# ── 행 flag · 숨김 규칙 — Result Lab과 Plot Maker가 같이 쓰는 단일 출처 ──────────
+# 숨김은 삭제가 아니다(헌장 ①): 여기 함수들은 마스크만 만들고 값은 건드리지 않는다.
+# RMS 임계식 자체는 core.result_io.robust_rms_thresholds 한 곳에만 있다.
+
+def flag_of(status):
+    """Status 문자열 → flag 키(ok/qc/unstable/settling/cal). 자유형식이라 부분일치로 본다."""
+    s = (status or "").strip().lower()
+    if not s:
+        return "ok"
+    if s.startswith("qc"):
+        return "qc"
+    if "unstable" in s:
+        return "unstable"
+    if "settl" in s:
+        return "settling"
+    if "zero-air" in s or "helium" in s or s.startswith("skip"):
+        return "cal"
+    return "ok"
+
+
+def qc_hidden_mask(n, status=None, rms=None, channel=None, hide_status_qc=False, K=0.0):
+    """숨길 행 마스크(True) — 두 기준의 OR:
+      (1) hide_status_qc 이면 Status가 QC-* 인 행
+      (2) K>0이면 RMS 분포에서 채널별 robust 임계 초과 행 (사후 QC)."""
+    mask = np.zeros(n, bool)
+    if hide_status_qc and status is not None and len(status):
+        mask |= np.array([str(s).startswith("QC") for s in status], bool)[:n]
+    if K > 0 and rms is not None:
+        from core.result_io import robust_rms_thresholds
+        rms = np.asarray(rms, float)
+        chans = [channel[i] if (channel is not None and i < len(channel)) else 0
+                 for i in range(n)]
+        thr = robust_rms_thresholds(rms, chans, K=K, min_n=5)
+        for i in range(n):
+            ti = thr.get(chans[i], np.inf)
+            if np.isfinite(rms[i]) and rms[i] > ti:
+                mask[i] = True
+    return mask
+
+
+def rules_hidden_mask(rules, n, time=None, status=None, rms=None, channel=None,
+                      variables=None):
+    """보기 규칙(list[dict]) → 숨길 행 마스크. 규칙은 재계산 가능한 레시피라
+    설정 파일에 그대로 저장되고 열 때 다시 적용된다(원칙 ④).
+
+      {"kind": "status_qc"}            Status QC-* 행
+      {"kind": "rms_k", "K": 3.0}      채널별 robust RMS 임계 초과 행
+      {"kind": "time_range", "t0", "t1"}  [t0, t1](원본 epoch초) 밖 + 시각 없는 행
+      {"kind": "expr", "expr": "T > 290", "mode": "keep"|"hide"}
+                                       조건식(core/expr.py). keep = 조건이 **참인 행만** 남김
+                                       (NaN 비교는 거짓 → 숨김), hide = 참인 행을 숨김.
+                                       variables(열 이름 → 배열)가 필요하다.
+    모든 규칙은 "on": False 로 개별로 끌 수 있다(지우지 않고).
+
+    모르는 kind는 ValueError — 조용히 무시하면 사용자는 걸렀다고 믿는다.
+    식 오류는 core.expr.ExprError(ValueError 하위)로 그대로 올린다."""
+    mask = np.zeros(n, bool)
+    for r in rules or ():
+        if not r.get("on", True):
+            continue
+        k = r.get("kind")
+        if k == "expr":
+            from core.expr import eval_mask
+            cond = eval_mask(r.get("expr", ""), variables or {}, n)
+            mask |= ~cond if r.get("mode", "keep") == "keep" else cond
+        elif k == "status_qc":
+            mask |= qc_hidden_mask(n, status=status, hide_status_qc=True)
+        elif k == "rms_k":
+            mask |= qc_hidden_mask(n, rms=rms, channel=channel, K=float(r.get("K", 0.0)))
+        elif k == "time_range":
+            if time is None:
+                continue          # 시각축 없는 데이터셋엔 구간 규칙이 의미 없다
+            t = np.asarray(time, float)
+            ok = np.isfinite(t) & (t >= float(r["t0"])) & (t <= float(r["t1"]))
+            mask |= ~ok
+        else:
+            raise ValueError(f"unknown view rule kind: {k!r}")
+    return mask
+
+
+def describe_rule(r):
+    """규칙 한 줄 설명(툴팁·상태줄용)."""
+    import datetime as _dt
+    k = r.get("kind")
+    off = "" if r.get("on", True) else "  (off)"
+    if k == "expr":
+        verb = "Keep rows where" if r.get("mode", "keep") == "keep" else "Hide rows where"
+        return f"{verb} {r.get('expr', '')}{off}"
+    if k == "status_qc":
+        return "Hide Status QC-*" + off
+    if k == "rms_k":
+        return f"Post-hoc QC: RMS > robust K={float(r.get('K', 0)):g} (per channel){off}"
+    if k == "time_range":
+        f = lambda e: _dt.datetime.fromtimestamp(float(e)).strftime("%Y-%m-%d %H:%M")
+        return f"Time range {f(r['t0'])} ~ {f(r['t1'])}{off}"
+    return str(r)
+
+
+# flag 키 → 의미 역할 색(gui/theme). Result Lab 점 색과 Plot Maker 'Color by Flag'가 같은 색.
+_FLAG_ROLE = {"unstable": "fail", "settling": "faint", "qc": "warn", "cal": "special"}
+FLAG_KEYS = ("ok", "unstable", "settling", "qc", "cal")
+
+
+def flag_color(key):
+    """flag 키의 색(hex). ok는 None = 시리즈 고유색 그대로."""
+    from gui.theme import AUGUR
+    role = _FLAG_ROLE.get(key)
+    return getattr(AUGUR, role) if role else None
+

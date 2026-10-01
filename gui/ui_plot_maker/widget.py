@@ -22,7 +22,7 @@ from PyQt6.QtCore import Qt, QSettings
 
 from .core import _MODES, _shade, mathtext_to_html, has_markup
 from gui.theme import AUGUR
-from .data import Dataset, load_dataset
+from .data import Dataset, load_spec, make_join
 from . import modes as _modes_registration  # noqa: F401 — import 자체가 @register_mode 실행(등록) 트리거
 
 
@@ -240,6 +240,8 @@ class PlotMakerWidget(QWidget):
         self._tree.setToolTip("Double-click a column = plot it now (current mode). For several, select them and add in the Style tab.\n"
                               "Files dropped onto this window are added too.")
         self._tree.itemDoubleClicked.connect(self._on_tree_double_click)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._on_tree_menu)
         dv.addWidget(self._tree, 1)
         mrow = QHBoxLayout(); mrow.addWidget(QLabel("Mode"))
         self._mode_combo = QComboBox()
@@ -1847,7 +1849,10 @@ class PlotMakerWidget(QWidget):
 
     def resolve(self, label):
         """"ds:col" → (Dataset, col, y, t) 또는 None.
-        t는 time_shift_hours가 있으면 표시용으로만 이동(ds.time 원본은 불변)."""
+
+        모든 모드·Publish가 데이터를 받는 **유일한 길목**이다. 그래서 보기 상태도 여기서만 건다:
+          · t: 전역 time_shift_hours + 데이터셋 shift_h 만큼 표시용으로 이동(ds.time 원본 불변)
+          · y: 데이터셋 숨김 규칙에 걸린 행은 NaN(사본) — ds.cols 원본 불변, 규칙 끄면 복원"""
         if not label or ":" not in label:
             return None
         name, col = label.split(":", 1)
@@ -1855,9 +1860,14 @@ class PlotMakerWidget(QWidget):
         if ds is None or col not in ds.cols:
             return None
         t = ds.time
-        if t is not None and self.time_shift_hours:
-            t = t + self.time_shift_hours * 3600.0
-        return ds, col, ds.cols[col], t
+        shift_h = self.time_shift_hours + ds.shift_h
+        if t is not None and shift_h:
+            t = t + shift_h * 3600.0
+        y = ds.cols[col]
+        hidden = ds.hidden_mask()
+        if hidden is not None and hidden.any():
+            y = np.where(hidden, np.nan, y)
+        return ds, col, y, t
 
     # 명시 단위가 없을 때 ppb로 볼 미량기체 농도 컬럼(정확 매칭 — _Shift/_Squeeze 등 제외).
     _PPB_COLS = {"no2", "ans", "pns", "chocho", "glyoxal", "h2o",
@@ -1901,14 +1911,22 @@ class PlotMakerWidget(QWidget):
             self.add_paths(dlg.loaded_paths)
 
     def add_paths(self, paths):
-        """파일 경로 목록을 선반에 로드(결과뷰어의 'Send to Plot Maker' 등에서 호출)."""
+        """파일 경로 목록을 선반에 로드(파일 추가·날짜 로드·드롭에서 호출)."""
+        return self.add_specs(paths)
+
+    def add_specs(self, specs):
+        """레시피 목록을 선반에 로드 — 경로 문자열 또는 {"path","rules","shift_h"}.
+        Result Lab의 'To Plot Maker'가 보던 상태(QC·구간·시프트)를 규칙으로 실어 보낸다."""
         added = 0
-        for p in paths:
+        n_hidden = 0
+        for spec in specs:
+            p = spec if isinstance(spec, str) else spec.get("path", "")
             try:
-                ds = load_dataset(p)
+                ds = load_spec(spec)
             except Exception as e:
                 QMessageBox.warning(self, "Load failed", f"{os.path.basename(p)}: {e}")
                 continue
+            n_hidden += ds.n_hidden()
             name = ds.name
             i = 2
             while name in self.shelf:        # 이름 충돌 → 번호
@@ -1920,7 +1938,9 @@ class PlotMakerWidget(QWidget):
         if added:
             self._refresh_tree()
             self._notify_modes()
-            self.set_status(f"Added {added} dataset(s) · {len(self.shelf)} on shelf")
+            hid = (f" · {n_hidden} rows hidden by carried filters (right-click dataset to turn off)"
+                   if n_hidden else "")
+            self.set_status(f"Added {added} dataset(s) · {len(self.shelf)} on shelf{hid}")
         return added
 
     def _on_tree_double_click(self, item, _col=0):
@@ -1931,6 +1951,120 @@ class PlotMakerWidget(QWidget):
         label = f"{data[1]}:{data[2]}"
         if self._mode.on_column_activated(label):
             self.set_status(f"Plotted: {label} ({self._mode.label})")
+
+    def _dataset_at(self, item):
+        data = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        return self.shelf.get(data[1]) if isinstance(data, tuple) else None
+
+    def _on_tree_menu(self, pos):
+        """데이터셋 우클릭 — 실어 온 숨김 규칙·시프트를 켜고 끄거나 지운다."""
+        from PyQt6.QtWidgets import QMenu
+        item = self._tree.itemAt(pos)
+        ds = self._dataset_at(item)
+        if ds is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        col = data[2] if data[0] in ("col", "bad") else None
+        menu = QMenu(self)
+        a_new = menu.addAction("New column…")
+        a_join = menu.addAction("Join with another dataset…")
+        a_join.setEnabled(ds.time is not None and len(self.shelf) > 1)
+        a_edit = a_del = None
+        if col in ds.derived_names():
+            a_edit = menu.addAction(f"Edit column '{col}'…")
+            a_del = menu.addAction(f"Delete column '{col}'")
+        menu.addSeparator()
+        a_flt = menu.addAction("Filters…")
+        a_on = menu.addAction("Filters on")
+        a_on.setCheckable(True)
+        a_on.setChecked(ds.rules_on)
+        a_on.setEnabled(bool(ds.rules))
+        a_clr = menu.addAction("Clear filters")
+        a_clr.setEnabled(bool(ds.rules))
+        a_sh = menu.addAction(f"Clear dataset time shift ({ds.shift_h:+g}h)")
+        a_sh.setEnabled(bool(ds.shift_h))
+        act = menu.exec(self._tree.viewport().mapToGlobal(pos))
+        if act is None:
+            return
+        if act is a_new or act is a_edit:
+            from .derived_dialog import DerivedColumnDialog
+            editing = col if act is a_edit else None
+            dlg = DerivedColumnDialog(ds, editing=editing, parent=self)
+            if dlg.exec():
+                self.set_derived(ds.name, dlg.spec(), replace=editing)
+        elif act is a_del:
+            self.delete_derived(ds.name, col)
+        elif act is a_join:
+            from .join_dialog import JoinDialog
+            dlg = JoinDialog(ds.name, self.shelf, parent=self)
+            if dlg.exec():
+                self.add_join(dlg.spec())
+        elif act is a_flt:
+            from .filters_dialog import FiltersDialog
+            dlg = FiltersDialog(ds, parent=self)
+            if dlg.exec():
+                rules, on = dlg.chosen()
+                self.set_dataset_view(ds.name, rules=rules, rules_on=on)
+        elif act is a_on:
+            self.set_dataset_view(ds.name, rules_on=a_on.isChecked())
+        elif act is a_clr:
+            self.set_dataset_view(ds.name, rules=[])
+        elif act is a_sh:
+            self.set_dataset_view(ds.name, shift_h=0.0)
+
+    def set_dataset_view(self, name, rules=None, rules_on=None, shift_h=None):
+        """데이터셋 보기 상태 변경 → 트리·모드 갱신. 원본 값은 건드리지 않는다."""
+        ds = self.shelf.get(name)
+        if ds is None:
+            return
+        ds.set_rules(rules, rules_on)
+        if shift_h is not None:
+            ds.shift_h = float(shift_h)
+            if ds.derived:
+                ds.apply_derived()        # `hour`는 데이터셋 시프트를 따른다
+        ds.hidden_mask()                  # rule_errors 갱신(트리 ✗ 표시용)
+        self._refresh_tree()
+        self._notify_modes()
+        self._mode.render()
+        state = ("off" if not ds.rules_on else f"{ds.n_hidden()} hidden") if ds.rules else "none"
+        self.set_status(f"{name}: filters {state} · shift {ds.shift_h:+g}h")
+
+    def set_derived(self, name, spec, replace=None):
+        """파생 열 추가(replace=None) 또는 교체. 이름을 바꿔 교체하면 그 열을 쓰던 시리즈는
+        on_shelf_changed가 정리한다(없는 열을 가리키게 두지 않는다). 반환: 오류문|None."""
+        ds = self.shelf.get(name)
+        if ds is None:
+            return "no such dataset"
+        err = ds.check_derived_name(spec.get("name"), editing=replace)
+        if err:
+            return err
+        spec = {"name": spec["name"].strip(), "expr": (spec.get("expr") or "").strip(),
+                **({"unit": spec["unit"]} if spec.get("unit") else {})}
+        if replace is not None and replace in ds.derived_names():
+            ds.derived[ds.derived_names().index(replace)] = spec
+        else:
+            ds.derived.append(spec)
+        ds.apply_derived()
+        self._after_derived_change(ds, spec["name"])
+        return ds.derived_errors.get(spec["name"])
+
+    def delete_derived(self, name, col):
+        ds = self.shelf.get(name)
+        if ds is None or col not in ds.derived_names():
+            return
+        ds.derived = [d for d in ds.derived if d["name"] != col]
+        ds.apply_derived()          # 이 열을 쓰던 다른 파생 열은 빨갛게 드러난다
+        self._after_derived_change(ds, col, deleted=True)
+
+    def _after_derived_change(self, ds, col, deleted=False):
+        self._refresh_tree()
+        self._notify_modes()
+        self._mode.render()
+        bad = [n for n in ds.derived_errors]
+        msg = f"{ds.name}: column '{col}' {'deleted' if deleted else 'updated'}"
+        if bad:
+            msg += f" · ✗ broken: {', '.join(bad)}"
+        self.set_status(msg)
 
     def _remove_data(self):
         names = set()
@@ -1947,16 +2081,90 @@ class PlotMakerWidget(QWidget):
             self._refresh_tree()
             self._notify_modes()
 
+    def _rebuild_joins(self):
+        """Join 데이터셋을 재료에서 다시 만든다 — 재료의 규칙·파생 열·시프트가 바뀌었거나
+        재료가 지워졌을 때. 선반 순서대로(Join의 Join도 재료가 앞에 있으면 된다)."""
+        for ds in self.shelf.values():
+            if ds.join:
+                ds.rebuild_join(self.shelf)
+
+    def add_join(self, join, name=None):
+        """Join 데이터셋을 선반에 추가 → 이름(실패면 None, 오류는 상태줄)."""
+        base = name or f"{join['base']}⋈{join['other']}"
+        name, i = base, 2
+        while name in self.shelf:
+            name = f"{base}#{i}"; i += 1
+        ds = make_join(name, join, self.shelf)
+        if ds.join_info.get("error"):
+            self.set_status(f"Join failed: {ds.join_info['error']}")
+            return None
+        self.shelf[name] = ds
+        self._refresh_tree()
+        self._notify_modes()
+        ji = ds.join_info
+        self.set_status(f"Joined {name}: {ji['matched']} of {ji['rows']} rows paired · "
+                        f"{ji['n_gap']} left empty (gap > {ji['max_gap_s'] / 60:.3g} min)")
+        return name
+
     def _refresh_tree(self):
+        self._rebuild_joins()          # 트리를 다시 그리는 모든 경로 = 선반이 바뀐 경로
         self._tree.clear()
+        from gui.result_viewer_io import describe_rule
         for name, ds in self.shelf.items():
-            top = QTreeWidgetItem([f"{name}  ({len(ds)}×{len(ds.cols)})"])
+            tags = []
+            if ds.join:
+                tags.append("⋈ " + ("✗ " + ds.join_info["error"] if ds.join_info.get("error")
+                                    else f"{ds.join_info.get('matched', 0)} paired"))
+            if ds.rules:
+                tags.append(f"{ds.n_hidden()} hidden" if ds.rules_on else "filters off")
+                if ds.rule_errors:            # n_hidden()이 방금 갱신했다
+                    tags.append(f"✗ {len(ds.rule_errors)} broken filter")
+            if ds.shift_h:
+                tags.append(f"{ds.shift_h:+g}h")
+            tag = ("  · " + " · ".join(tags)) if tags else ""
+            top = QTreeWidgetItem([f"{name}  ({len(ds)}×{len(ds.cols)}){tag}"])
             top.setData(0, Qt.ItemDataRole.UserRole, ("ds", name))
-            tip = "time axis " if ds.time is not None else "no time axis"
-            top.setToolTip(0, f"{ds.path}\n{tip}")
+            tip = ["time axis " if ds.time is not None else "no time axis"]
+            if ds.join:
+                j, ji = ds.join, ds.join_info
+                tip.append(f"join: {j['base']} (time axis) ⋈ {j['other']} → columns +'{j.get('suffix', '_B')}'")
+                if ji.get("error"):
+                    tip.append(f"✗ {ji['error']}")
+                else:
+                    tip.append(f"  {ji['method']} · max gap {ji['max_gap_s'] / 60:.3g} min · "
+                               f"{ji['matched']} of {ji['rows']} rows paired, {ji['n_gap']} left empty")
+                tip.append("  rebuilt from its sources whenever they change (sources' filters apply)")
+            if ds.cats:
+                tip.append("categorical: " + ", ".join(ds.cats))
+            if ds.rules:
+                tip.append(f"filters ({'on' if ds.rules_on else 'OFF'}) — hidden, not deleted:")
+                tip += [f"  • {describe_rule(r)}"
+                        + (f"   ✗ {ds.rule_errors[i]} (hides nothing)" if i in ds.rule_errors else "")
+                        for i, r in enumerate(ds.rules)]
+            if ds.shift_h:
+                tip.append(f"dataset time shift {ds.shift_h:+g}h (display only)")
+            tip.append("Right-click: new column · Filters… · on/off · clear")
+            top.setToolTip(0, f"{ds.path}\n" + "\n".join(tip))
             for col in ds.cols:
+                if col in ds._dcols:
+                    continue                  # 파생 열은 아래에 식 순서대로
                 ch = QTreeWidgetItem([col])
                 ch.setData(0, Qt.ItemDataRole.UserRole, ("col", name, col))
+                top.addChild(ch)
+            for d in ds.derived:
+                col = d["name"]
+                if col in ds.derived_errors:
+                    # 깨진 식은 조용히 빼지 않는다 — 빨갛게 보이고, 플롯 대상은 아니다
+                    ch = QTreeWidgetItem([f"ƒ {col}  ✗"])
+                    ch.setData(0, Qt.ItemDataRole.UserRole, ("bad", name, col))
+                    ch.setForeground(0, pg.mkColor(AUGUR.fail))
+                    ch.setToolTip(0, f"{col} = {d['expr']}\n✗ {ds.derived_errors[col]}\n"
+                                     "Right-click → Edit column…")
+                else:
+                    ch = QTreeWidgetItem([f"ƒ {col}"])
+                    ch.setData(0, Qt.ItemDataRole.UserRole, ("col", name, col))
+                    ch.setToolTip(0, f"{col} = {d['expr']}\n(derived — recomputed from the "
+                                     "expression whenever the dataset is loaded)")
                 top.addChild(ch)
             self._tree.addTopLevelItem(top)
             top.setExpanded(True)
@@ -2327,8 +2535,15 @@ class PlotMakerWidget(QWidget):
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
         self._mode.render_mpl(fig)
         self._apply_axes_mpl(fig)
+        # 조용한 시각 조작 금지 — 전역이든 데이터셋별이든 시프트가 걸렸으면 그림에 적는다.
+        notes = []
         if self.time_shift_hours:
-            fig.text(0.995, 0.005, f"time shift {self.time_shift_hours:+g}h applied (display only)",
+            notes.append(f"time shift {self.time_shift_hours:+g}h applied (display only)")
+        ds_sh = [f"{n} {ds.shift_h:+g}h" for n, ds in self.shelf.items() if ds.shift_h]
+        if ds_sh:
+            notes.append("dataset shift: " + ", ".join(ds_sh))
+        if notes:
+            fig.text(0.995, 0.005, " · ".join(notes),
                      ha="right", va="bottom", fontsize=7, color="#b00")
         fig.tight_layout()
         return fig
@@ -2554,7 +2769,8 @@ class PlotMakerWidget(QWidget):
             return
         cfg = {
             "_version": self._CFG_VERSION,
-            "datasets": {n: ds.path for n, ds in self.shelf.items()},
+            # 이름 → 레시피(경로 + 숨김 규칙 + 데이터셋 시프트). 옛 형식(이름 → 경로)도 읽힌다.
+            "datasets": {n: ds.to_spec() for n, ds in self.shelf.items()},
             "mode": self._mode.key,
             "resample": self._res_combo.currentText(),
             "resample_custom_min": self._res_custom_spin.value(),
@@ -2602,18 +2818,29 @@ class PlotMakerWidget(QWidget):
             return
         cfg = self._migrate_cfg(cfg)
         missing = []
-        for name, p in cfg.get("datasets", {}).items():
+        joins = []
+        for name, spec in cfg.get("datasets", {}).items():
             if name in self.shelf:
                 continue
+            if isinstance(spec, dict) and spec.get("join"):
+                joins.append((name, spec))     # 재료(파일 데이터셋)를 다 연 뒤에 만든다
+                continue
+            p = spec if isinstance(spec, str) else (spec or {}).get("path")
             if not (p and os.path.isfile(p)):
                 missing.append(name)
                 continue
             try:
-                ds = load_dataset(p)
+                ds = load_spec(spec)
                 ds.name = name
                 self.shelf[name] = ds
             except Exception:
                 missing.append(name)
+        for name, spec in joins:
+            ds = make_join(name, spec["join"], self.shelf, rules=spec.get("rules"),
+                           rules_on=spec.get("rules_on", True), derived=spec.get("derived"))
+            self.shelf[name] = ds              # 재료가 없으면 ✗로 남는다(조용히 빠지지 않게)
+            if ds.join_info.get("error"):
+                missing.append(f"{name} ({ds.join_info['error']})")
         self._refresh_tree()
         self._notify_modes()
         self._res_custom_spin.setValue(float(cfg.get("resample_custom_min", 2.0)))

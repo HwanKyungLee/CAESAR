@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.align import align_to, auto_max_gap  # noqa: F401 — 단일 출처(core/align.py) 재노출
+
 
 def resample_mean(t, y, sec):
     """시간 t(epoch초)를 sec 간격 버킷으로 묶어 평균. t 없으면 그대로."""

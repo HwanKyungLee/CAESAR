@@ -816,9 +816,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # 직접 붙이면 툴바(상단 고정)+플롯(stretch)으로 스크롤 없이 한 화면에 들어온다.
         self.main_tabs.addTab(self.plot_maker, "Plot Maker")
         self._tab_pages[self.plot_maker] = self.plot_maker
-        # 결과뷰어 → Plot Maker 브리지: 선택 파일을 선반에 싣고 탭 전환
+        # 결과뷰어 → Plot Maker 브리지: 선택 파일을 보던 상태(규칙)째 선반에 싣고 탭 전환
         self.result_viewer.send_to_plotmaker.connect(
-            lambda paths: (self.plot_maker.add_paths(paths),
+            lambda specs: (self.plot_maker.add_specs(specs),
                            self.main_tabs.setCurrentWidget(self._tab_pages[self.plot_maker])))
         # 결과뷰어·Plot Maker 탭에서는 왼쪽 분석패널을 접어 그래프가 전체 폭을 쓰게 한다.
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)

@@ -71,6 +71,18 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     한글+수식 혼합 라벨 감지(mathtext 엔진엔 한글이 없어 □가 된다) (2026-09-21)
 33. 표시 토글 : 시리즈·주석 체크 해제가 화면·Publish 양쪽에서 숨기되 **삭제하지
     않나** · 곡선에 시리즈 라벨이 태깅돼 클릭→편집이 가능한가 (2026-09-21)
+34. Result Lab → Plot Maker 다리 : Hide QC·사후 QC K·구간·시프트가 **경로 + 규칙**으로
+    넘어가 Result Lab 선택과 행 단위로 같은 숨김을 만드나 · 끄면 복원 · 원본 불변 ·
+    설정 저장/열기 왕복 · 옛 형식 호환 (D0, 2026-10-01)
+35. 파생 열 : 단위변환·연쇄·범주형 비교·hour 식이 맞게 계산되나 · 깨진/위험한 식은
+    실행 없이 빨갛게 남나 · 원본 열 보호 · **식만** 저장되고 열 때 재계산되나 ·
+    Result Lab 계산기와 같은 엔진(core/expr.py) (D1, 2026-10-01)
+36. 행 필터 + Flag 색칠 : keep/hide 조건식·파생 열 조건·규칙 개별 on/off(삭제 아님) ·
+    깨진 조건은 그 규칙만 무효+✗(데이터셋은 열림) · 설정 왕복 · Flag 점이 pg·mpl 같은 수 ·
+    리샘플 중엔 끄고 안내 · 스타일 편집이 숨김을 안 풀어버리나 (D2, 2026-10-01)
+37. 정렬·Join : Scatter의 다른 데이터셋 짝짓기가 결손을 가로질러 잇지 않나 · Join(⋈)
+    데이터셋이 같은 값을 내나 · 재료 필터 반영 · Join 위 파생 열 · 레시피 저장/왕복 ·
+    재료 삭제 시 묵은 값 없이 ✗ (D1+, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1187,6 +1199,442 @@ def c_visibility_and_click():
     if "fixture:NO2" not in tagged:
         return "FAIL", f"곡선에 시리즈 라벨 태그 없음 — 클릭해도 뭘 편집할지 모른다: {tagged}"
     return "PASS", "시리즈·주석 숨김이 화면·Publish 양쪽에 · _series 보존 · 곡선 태깅 확인"
+
+
+# ── 34. Result Lab → Plot Maker 다리: 보던 상태가 레시피로 넘어가나 (D0) ─────────
+# 전엔 경로만 넘겨서 Hide QC·K·구간·시프트가 증발했다. 이제 경로 + 재계산 가능한
+# 규칙을 넘긴다. 숨김은 삭제가 아니다 — 끄면 돌아오고, 설정을 다시 열어도 같다.
+def _write_report_fixture(path, n=120, seed=1, offset_s=0.0, step_min=2, skip=()):
+    """GUI 리포트 포맷(File\\tChannel\\tTime…) 합성 파일 — 두 채널, 일부 QC·튀는 RMS.
+    offset_s·step_min·skip(빠뜨릴 행 번호 = 결손)은 정렬/Join 검증용. 기본값 출력은 그대로."""
+    from datetime import datetime, timedelta
+    rng = np.random.default_rng(seed)
+    t0 = datetime(2026, 5, 20, 0, 0, 0) + timedelta(seconds=offset_s)
+    skip = set(skip)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# synthetic report for validate_plotmaker #34\n")
+        f.write("File\tChannel\tTime\tRMS\tChi2\tStatus\tNO2\tNO2_Error\tShift\tSqueeze\n")
+        for i in range(n):
+            if i in skip:
+                rng.normal(); rng.normal(); rng.normal()   # 난수열은 그대로 소비(나머지 행 값 불변)
+                continue
+            ch = "1" if i % 2 == 0 else "2"
+            rms = 1e-3 * (1 + 0.05 * rng.normal())
+            if i in (7, 30, 31, 90):
+                rms *= 8                       # 사후 QC(K)가 잡을 튀는 점
+            st = "QC-RMS" if i in (12, 13, 60) else ("Unstable" if i == 44 else "")
+            f.write(f"s{i}.txt\t{ch}\t{(t0 + timedelta(minutes=step_min * i)):%Y-%m-%d %H:%M:%S}\t"
+                    f"{rms:.6g}\t1.0\t{st}\t{5 + rng.normal():.4f}\t0.2\t{0.1 * rng.normal():.4f}\t1.0001\n")
+
+
+@check("Result Lab → Plot Maker: QC·구간·시프트가 규칙으로 넘어가고, 끄면 복원·설정 왕복")
+def c_resultlab_bridge():
+    import json, tempfile
+    from PyQt6.QtCore import QDateTime
+    from gui.ui_result_viewer import ResultViewerWidget
+    from gui.ui_plot_maker import load_dataset
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+
+    rv = ResultViewerWidget()
+    rv._path = p
+    rv._reload()
+    if rv._current_kind != "fit":
+        return "FAIL", f"리포트 fixture가 fit으로 판별 안 됨: {rv._current_kind}"
+    rv._chk_hide_qc.setChecked(True)
+    rv._spin_qc_k.setValue(3.0)
+    rv._spin_shift.setValue(9.0)          # → _reload, 입력칸은 시프트된 전체 범위로 재초기화
+    t = rv._fit_cache
+    a, b = float(t["time"][20]), float(t["time"][100])   # 원본 시각
+    off = 9 * 3600
+    rv._dt_from.setDateTime(QDateTime.fromSecsSinceEpoch(int(a + off)))
+    rv._dt_to.setDateTime(QDateTime.fromSecsSinceEpoch(int(b + off)))
+
+    got = []
+    rv.send_to_plotmaker.connect(got.append)
+    rv._to_plot_maker()
+    if not got or not isinstance(got[0][0], dict):
+        return "FAIL", f"다리가 레시피(dict)를 안 보냄: {got[:1]}"
+    spec = got[0][0]
+    kinds = [r["kind"] for r in spec["rules"]]
+    if kinds != ["status_qc", "rms_k", "time_range"] or spec["shift_h"] != 9.0:
+        return "FAIL", f"규칙 번역 불일치: {kinds}, shift={spec['shift_h']}"
+
+    # Result Lab이 Stats에 쓰는 선택 마스크와 Plot Maker 숨김 마스크가 행 단위로 같아야 한다
+    _, sel = rv._stats_arrays()
+    w = PlotMakerWidget()
+    w.add_specs(got[0])
+    ds = next(iter(w.shelf.values()))
+    hid = ds.hidden_mask()
+    if hid is None or not np.array_equal(hid, ~sel):
+        return "FAIL", (f"숨김 마스크 ≠ Result Lab 선택 (PM {0 if hid is None else int(hid.sum())}"
+                        f" vs RL {int((~sel).sum())})")
+    if not {"Status", "Flag", "Channel"} <= set(ds.cats) or "Shift" not in ds.cols:
+        return "FAIL", f"범주형/진단 열 누락: cats={list(ds.cats)} cols={list(ds.cols)}"
+    if ds.cats["Flag"][44] != "unstable" or ds.cats["Flag"][12] != "qc":
+        return "FAIL", "Flag 열이 flag_of와 다름"
+
+    label = f"{ds.name}:NO2"
+    _, _, y, tt = w.resolve(label)
+    raw = load_dataset(p).cols["NO2"]
+    if not (np.all(np.isnan(y[hid])) and np.array_equal(y[~hid], raw[~hid])):
+        return "FAIL", "resolve()가 숨김 행만 NaN으로 내지 않음"
+    if not np.allclose(tt, ds.time + off):
+        return "FAIL", "데이터셋 시프트가 resolve() 시각에 안 걸림"
+    if not np.array_equal(ds.cols["NO2"], raw):
+        return "FAIL", "원본 ds.cols가 변조됨 — 숨김은 삭제가 아니다(헌장 ①)"
+
+    w.set_dataset_view(ds.name, rules_on=False)        # 끄면 전부 돌아온다
+    _, _, y_off, _ = w.resolve(label)
+    if not np.array_equal(y_off, raw, equal_nan=True):
+        return "FAIL", "필터를 껐는데 값이 안 돌아옴"
+    w.set_dataset_view(ds.name, rules_on=True)
+
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([label, "L", None, None])
+    fig = w._build_publish_fig()
+    if not any("dataset shift" in tx.get_text() for tx in fig.texts):
+        return "FAIL", "Publish에 데이터셋 시프트 표기가 없음(조용한 시각 조작 금지)"
+
+    # 설정 저장 → 새 위젯에서 열기: 같은 마스크·시프트 (파일 다시 읽고 규칙 재적용)
+    from unittest import mock
+    cfgp = os.path.join(tmpd, "x.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"][ds.name]
+    if not isinstance(saved, dict) or saved.get("rules") != spec["rules"]:
+        return "FAIL", f"설정에 레시피가 안 저장됨: {saved}"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    ds2 = w2.shelf.get(ds.name)
+    if ds2 is None or not np.array_equal(ds2.hidden_mask(), hid) or ds2.shift_h != 9.0:
+        return "FAIL", "설정 왕복 후 숨김 마스크/시프트가 다름"
+
+    # 옛 형식(이름 → 경로 문자열)도 열린다
+    with open(cfgp, "w", encoding="utf-8") as f:
+        json.dump({"_version": w._CFG_VERSION, "datasets": {"old": p}}, f)
+    w3 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w3._load_cfg()
+    if "old" not in w3.shelf or w3.shelf["old"].hidden_mask() is not None:
+        return "FAIL", "옛 형식 설정(경로 문자열)이 안 열리거나 규칙이 생김"
+    return "PASS", (f"규칙 3종+9h 전달 · 숨김 {int(hid.sum())}행 = RL 선택과 행 단위 동일 · "
+                    "끄면 복원 · 원본 불변 · Publish 표기 · 설정 왕복·옛 형식 호환")
+
+
+# ── 35. 파생 열: 식을 저장하고 값은 다시 계산 (D1) ─────────────────────────────
+@check("파생 열: 단위변환·연쇄·범주형·hour · 깨진 식은 빨갛게 · 안전 · 설정 왕복")
+def c_derived_columns():
+    import json, tempfile
+    from unittest import mock
+    from gui.ui_plot_maker.data import local_hour
+    from gui.ui_plot_maker.derived_dialog import DerivedColumnDialog
+    from gui.dlg_calculator import safe_eval as calc_eval
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+    w = PlotMakerWidget()
+    w.add_specs([{"path": p, "rules": [{"kind": "status_qc"}]}])
+    name = next(iter(w.shelf))
+    ds = w.shelf[name]
+    no2 = ds.cols["NO2"].copy()
+
+    for spec in ({"name": "NO2_ugm3", "expr": "NO2 * 1.88", "unit": "µg/m³"},
+                 {"name": "anom", "expr": "NO2_ugm3 - mean(NO2_ugm3)"},
+                 {"name": "ok_only", "expr": 'where(Flag == "ok", NO2, nan)'},
+                 {"name": "daytime", "expr": "(hour >= 9) & (hour < 18)"}):
+        err = w.set_derived(name, spec)
+        if err:
+            return "FAIL", f"{spec['name']} 실패: {err}"
+    c = ds.cols
+    if not np.allclose(c["NO2_ugm3"], no2 * 1.88) or ds.units.get("NO2_ugm3") != "µg/m³":
+        return "FAIL", "단위 변환 값/단위 불일치"
+    if not np.allclose(c["anom"], c["NO2_ugm3"] - np.nanmean(c["NO2_ugm3"])):
+        return "FAIL", "앞 파생 열을 쓰는 연쇄 식 불일치"
+    okm = ds.cats["Flag"] == "ok"
+    if not (np.allclose(c["ok_only"][okm], no2[okm]) and np.all(np.isnan(c["ok_only"][~okm]))):
+        return "FAIL", "범주형 비교(Flag == \"ok\") 불일치"
+    hr = local_hour(ds.time)
+    if not np.array_equal(c["daytime"], ((hr >= 9) & (hr < 18)).astype(float)):
+        return "FAIL", "hour 변수 불일치"
+
+    # 숨김 규칙은 파생 열에도 같은 행에 걸린다(resolve 한 길목)
+    _, _, y, _ = w.resolve(f"{name}:NO2_ugm3")
+    hid = ds.hidden_mask()
+    if not (hid.any() and np.all(np.isnan(y[hid]))):
+        return "FAIL", "숨김 규칙이 파생 열에 안 걸림"
+
+    # 깨진 식: 그 열만 빠지고 오류가 남는다(조용히 사라지지 않음) · 안전: 실행 안 됨
+    if not w.set_derived(name, {"name": "bad", "expr": "NO2 * nosuch"}):
+        return "FAIL", "모르는 이름이 오류 없이 통과"
+    sentinel = os.path.join(tmpd, "pwned")
+    evil = f'__import__("os").makedirs(r"{sentinel}")'
+    if not w.set_derived(name, {"name": "evil", "expr": evil}) or os.path.exists(sentinel):
+        return "FAIL", "위험한 식이 거부되지 않음"
+    for bad in ("bad", "evil"):
+        if bad in ds.cols or bad not in ds.derived_errors:
+            return "FAIL", f"깨진 식 {bad}가 cols에 있거나 오류 기록이 없음"
+    top = w._tree.topLevelItem(0)
+    kinds = [top.child(j).data(0, 0x0100)[0] for j in range(top.childCount())]
+    if kinds.count("bad") != 2:
+        return "FAIL", f"트리에 깨진 열 표시가 없음: {kinds}"
+    if w.set_derived(name, {"name": "NO2", "expr": "1"}) is None:
+        return "FAIL", "원본 열 이름(NO2)을 덮어쓰는 파생 열이 허용됨"
+    # 손으로 고친 설정에 원본과 같은 이름이 와도 원본은 산다
+    from gui.ui_plot_maker import load_spec
+    dsx = load_spec({"path": p, "derived": [{"name": "NO2", "expr": "NO2 * 0"}]})
+    if not np.array_equal(dsx.cols["NO2"], no2) or "NO2" not in dsx.derived_errors:
+        return "FAIL", "원본과 같은 이름의 파생 식이 원본 열을 덮어씀"
+    dsx.apply_derived()
+    if "NO2" not in dsx.cols:
+        return "FAIL", "재계산이 원본 열을 걷어냄"
+
+    # 그림에 실제로 쓰인다 (화면 + Publish)
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([f"{name}:NO2_ugm3", "L", None, None])
+    ts.render()
+    w._build_publish_fig()
+
+    # 설정 저장 → 새 위젯: 식이 저장되고 값은 다시 계산
+    cfgp = os.path.join(tmpd, "d.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"][name]["derived"]
+    if [d["name"] for d in saved] != ["NO2_ugm3", "anom", "ok_only", "daytime", "bad", "evil"]:
+        return "FAIL", f"설정에 식 목록이 안 저장됨: {saved}"
+    if any("values" in d for d in saved):
+        return "FAIL", "값이 설정에 박힘 — 식만 저장해야 한다"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    ds2 = w2.shelf[name]
+    if not (np.allclose(ds2.cols["anom"], c["anom"]) and set(ds2.derived_errors) == {"bad", "evil"}):
+        return "FAIL", "설정 왕복 후 파생 값/오류 상태가 다름"
+
+    # 의존 열 삭제 → 그 열을 쓰던 열은 빨갛게 드러난다
+    w.delete_derived(name, "NO2_ugm3")
+    if "anom" in ds.cols or "anom" not in ds.derived_errors:
+        return "FAIL", "의존 열 삭제 후 연쇄 열이 조용히 남거나 사라짐"
+
+    # 대화상자: 미리보기 평가 + 잘못된 식이면 OK 비활성
+    from PyQt6.QtWidgets import QDialogButtonBox
+    dlg = DerivedColumnDialog(ds)
+    dlg._name.setText("x2"); dlg._expr.setText("NO2 * 2"); dlg._validate()
+    okb = dlg._bb.button(QDialogButtonBox.StandardButton.Ok)
+    if not okb.isEnabled() or "✓" not in dlg._msg.text():
+        return "FAIL", f"대화상자 미리보기 실패: {dlg._msg.text()}"
+    dlg._expr.setText("NO2 *"); dlg._validate()
+    if okb.isEnabled():
+        return "FAIL", "문법 오류인데 OK가 눌림"
+
+    # 계산기(Result Lab)도 같은 엔진 — 예전 식 그대로 동작
+    A, B = np.array([1.0, 4.0]), np.array([2.0, 0.0])
+    r = calc_eval("(A - B) / B", {"A": A, "B": B})
+    if not (r[0] == -0.5 and np.isinf(r[1])):
+        return "FAIL", "계산기 식 결과가 바뀜"
+    return "PASS", ("4종 식·연쇄·hour·숨김 연동 · 깨진/위험 식은 빨간 표시(실행 안 됨) · "
+                    "원본 열 보호 · 식만 저장·재계산 · 의존 삭제 드러남 · 계산기 호환")
+
+
+# ── 36. 행 필터(조건식) + Flag 색칠 (D2) ───────────────────────────────────
+@check("행 필터: keep/hide 조건식·개별 on/off·깨진 규칙 표시 · Flag 색칠 pg↔mpl")
+def c_filters_and_flag_colors():
+    import json, tempfile
+    from unittest import mock
+    from PyQt6.QtCore import Qt as Qt_
+    from gui.ui_plot_maker import load_spec
+    from gui.ui_plot_maker.filters_dialog import FiltersDialog
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+
+    # ── 필터 ──
+    w = PlotMakerWidget()
+    w.add_specs([{"path": p, "rules": [{"kind": "status_qc"}]}])
+    name = next(iter(w.shelf)); ds = w.shelf[name]
+    w.set_derived(name, {"name": "NO2x2", "expr": "NO2 * 2"})
+    flag, rms = ds.cats["Flag"], ds.cols["RMS"]
+    qc = np.array([str(s).startswith("QC") for s in ds.cats["Status"]])
+
+    dlg = FiltersDialog(ds)
+    dlg._mode.setCurrentIndex(0); dlg._expr.setText('Flag != "unstable"'); dlg._update_preview()
+    if "hides 1 of" not in dlg._preview.text():
+        return "FAIL", f"미리보기 개수 틀림: {dlg._preview.text()}"
+    dlg._commit(new=True)
+    dlg._mode.setCurrentIndex(1); dlg._expr.setText("NO2x2 > 2 * median(NO2)"); dlg._update_preview()
+    dlg._commit(new=True)                                  # 파생 열을 쓰는 hide 규칙
+    dlg._expr.setText("nosuch > 1"); dlg._update_preview()
+    if dlg._btn_add.isEnabled():
+        return "FAIL", "깨진 조건인데 Add가 눌림"
+    rules, on = dlg.chosen()
+    w.set_dataset_view(name, rules=rules, rules_on=on)
+    want = qc | (flag == "unstable") | (ds.cols["NO2x2"] > 2 * np.nanmedian(ds.cols["NO2"]))
+    if not np.array_equal(ds.hidden_mask(), want):
+        return "FAIL", "keep/hide 조건식 마스크 불일치"
+
+    # 규칙 하나만 끄기 (지우지 않고)
+    dlg2 = FiltersDialog(ds)
+    dlg2._list.item(0).setCheckState(Qt_.CheckState.Unchecked)   # status_qc 끔
+    rules2, _ = dlg2.chosen()
+    if len(rules2) != 3 or rules2[0].get("on") is not False:
+        return "FAIL", "개별 끄기가 삭제로 동작하거나 저장 안 됨"
+    w.set_dataset_view(name, rules=rules2)
+    want2 = (flag == "unstable") | (ds.cols["NO2x2"] > 2 * np.nanmedian(ds.cols["NO2"]))
+    if not np.array_equal(ds.hidden_mask(), want2) or np.array_equal(want2, want):
+        return "FAIL", "끈 규칙이 여전히 숨기고 있음"
+
+    # 깨진 조건식 규칙: 그 규칙만 아무것도 안 숨기고 ✗ — 데이터셋은 열린다
+    bad_rules = rules2 + [{"kind": "expr", "expr": "nosuch > 1", "mode": "hide"}]
+    w.set_dataset_view(name, rules=bad_rules)
+    if 3 not in ds.rule_errors or "broken filter" not in w._tree.topLevelItem(0).text(0):
+        return "FAIL", "깨진 규칙이 표시되지 않음"
+    dsb = load_spec({"path": p, "rules": bad_rules})
+    if 3 not in dsb.rule_errors:
+        return "FAIL", "깨진 규칙이 있는 레시피를 못 열거나 오류가 안 남음"
+    try:
+        load_spec({"path": p, "rules": [{"kind": "nosuchkind"}]})
+        return "FAIL", "모르는 규칙 kind가 조용히 통과"
+    except ValueError:
+        pass
+
+    # 설정 왕복 — expr 규칙·개별 off 상태 보존
+    cfgp = os.path.join(tmpd, "f.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    if not np.array_equal(w2.shelf[name].hidden_mask(), ds.hidden_mask()):
+        return "FAIL", "설정 왕복 후 필터 마스크 다름"
+
+    # ── Flag 색칠 ──
+    w3 = PlotMakerWidget()
+    w3.add_specs([p])                                       # 규칙 없음 → qc 점도 보인다
+    n3 = next(iter(w3.shelf)); lab = f"{n3}:NO2"
+    ts = next(m for m in w3._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([lab, "L", None, None]); ts._refresh_list()
+    ts._styles[lab] = {"color_by": "Flag"}
+    ts.render()
+    import pyqtgraph as pg_
+    pg_flag = {it.opts.get("name"): len(it.xData) for it in w3.p1.items
+               if isinstance(it, pg_.PlotDataItem) and str(it.opts.get("name") or "").startswith("flag:")}
+    if pg_flag != {"flag: unstable": 1, "flag: qc": 3}:
+        return "FAIL", f"화면 flag 점 불일치: {pg_flag}"
+    fig = w3._build_publish_fig()
+    leg = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    # 범례 핸들은 범례용 복제본이라 점 개수가 다르다 → 축에 그려진 실제 선을 색으로 센다
+    from matplotlib.colors import to_hex
+    from gui.result_viewer_io import flag_color
+    by_col = {to_hex(flag_color(k)).lower(): f"flag: {k}" for k in ("unstable", "settling", "qc", "cal")}
+    mpl_n = {}
+    for ln in fig.axes[0].lines:
+        lb = by_col.get(to_hex(ln.get_color()).lower())
+        if lb and ln.get_linestyle() == "None":
+            mpl_n[lb] = mpl_n.get(lb, 0) + len(ln.get_xdata())
+    if not {"flag: unstable", "flag: qc"} <= set(leg):
+        return "FAIL", f"Publish 범례에 flag 항목이 없음: {leg}"
+    if mpl_n != pg_flag:
+        return "FAIL", f"Publish flag 점 ≠ 화면: {mpl_n} vs {pg_flag}"
+    if w3.p1.items and any(it.opts.get("symbolBrush") is None for it in w3.p1.items
+                           if isinstance(it, pg_.PlotDataItem) and str(it.opts.get("name") or "").startswith("flag:")):
+        return "FAIL", "flag 점에 색이 없음"
+    w3._res_combo.setCurrentText("5 min")                   # 리샘플 → 끄고 이유를 말한다
+    ts.render()
+    if any(str(getattr(it, "opts", {}).get("name") or "").startswith("flag:") for it in w3.p1.items):
+        return "FAIL", "리샘플 중에도 flag 색이 칠해짐(평균 점엔 flag가 없다)"
+    if "flag colours off" not in w3._status.text():
+        return "FAIL", "리샘플로 꺼졌다는 안내가 없음"
+    # 스타일 창에서 OK → 숨겨둔 시리즈가 다시 나타나면 안 된다(전엔 dict 통째 덮어써서 풀렸다)
+    from PyQt6.QtWidgets import QDialog
+    ts._styles[lab]["visible"] = False
+    ts._list.setCurrentRow(0)
+    with mock.patch.object(QDialog, "exec", return_value=QDialog.DialogCode.Accepted):
+        ts._edit_style()
+    if ts._style_of(lab)["visible"] or ts._style_of(lab)["color_by"] != "Flag":
+        return "FAIL", "스타일 편집이 숨김/색칠 설정을 풀어버림"
+    return "PASS", ("keep/hide·파생 열 조건·개별 off·깨진 규칙 ✗(데이터셋은 열림)·설정 왕복 · "
+                    "Flag 점 pg=mpl {unstable 1, qc 3} · 리샘플 시 끄고 안내")
+
+
+# ── 37. 데이터셋 간 정렬: 결손 가드 + Join 데이터셋 (D1+) ─────────────────────
+@check("정렬: Scatter 결손 가드 · Join(⋈) 데이터셋 — 재료 필터 반영·파생 열·설정 왕복·재료 삭제 ✗")
+def c_alignment_and_join():
+    import json, tempfile
+    from unittest import mock
+    from gui.ui_plot_maker.join_dialog import JoinDialog
+    tmpd = tempfile.mkdtemp()
+    pa = os.path.join(tmpd, "chA.dat")
+    pb = os.path.join(tmpd, "chB.dat")
+    _write_report_fixture(pa)                                   # 2분 간격 120행
+    _write_report_fixture(pb, seed=7, offset_s=30, skip=range(40, 80))   # +30 s, 80분 결손
+    w = PlotMakerWidget()
+    w.add_specs([pa, pb])
+    A, B = w.shelf["chA"], w.shelf["chB"]
+    hole = (A.time > B.time[39]) & (A.time < B.time[40])         # B 결손 안에 있는 A 시각
+
+    # Scatter: 다른 데이터셋 짝짓기 — 결손을 가로질러 잇지 않는다
+    sc = next(m for m in w._modes if m.key == "scatter")
+    sc.options_widget()
+    sc._cx.setCurrentText("chA:NO2"); sc._cy.setCurrentText("chB:NO2")
+    xv, yv, _ = sc._xy()
+    if not (np.all(np.isnan(yv[hole])) and np.isfinite(yv[~hole][1:-1]).all()):
+        return "FAIL", "Scatter가 결손 구간을 보간으로 메움(또는 정상 구간을 버림)"
+    w._mode_combo.setCurrentIndex([m.key for m in w._modes].index("scatter"))
+    sc.render()
+    if "left unpaired" not in w._status.text():
+        return "FAIL", f"짝 못 지은 점 안내 없음: {w._status.text()}"
+
+    # Join 대화상자 미리보기 → Join 데이터셋
+    dlg = JoinDialog("chA", w.shelf)
+    dlg._other.setCurrentText("chB"); dlg._preview()
+    if "✓" not in dlg._msg.text():
+        return "FAIL", f"Join 미리보기 실패: {dlg._msg.text()}"
+    jn = w.add_join(dlg.spec())
+    J = w.shelf.get(jn)
+    if J is None or "NO2_B" not in J.cols or not np.array_equal(J.cols["NO2"], A.cols["NO2"]):
+        return "FAIL", f"Join 열 구성 이상: {None if J is None else list(J.cols)}"
+    if not np.all(np.isnan(J.cols["NO2_B"][hole])) or J.join_info["n_gap"] != int(hole.sum()):
+        return "FAIL", f"Join이 결손을 메움 / n_gap {J.join_info['n_gap']} ≠ {int(hole.sum())}"
+    if not np.allclose(J.cols["NO2_B"][~hole][1:-1], yv[~hole][1:-1]):
+        return "FAIL", "Join 값 ≠ Scatter 짝 값(같은 정렬 함수여야)"
+    if w.set_derived(jn, {"name": "dNO2", "expr": "NO2 - NO2_B"}):
+        return "FAIL", "Join 위 파생 열(데이터셋 간 차이) 실패"
+
+    # 재료 필터를 바꾸면 Join이 다시 만들어진다(보이는 그대로)
+    w.set_dataset_view("chB", rules=[{"kind": "expr", "expr": "NO2 < 5", "mode": "keep"}])
+    if np.isfinite(J.cols["NO2_B"]).sum() >= np.isfinite(yv).sum() or "dNO2" not in J.cols:
+        return "FAIL", "재료 필터 변경이 Join에 반영 안 됨(또는 파생 열이 사라짐)"
+    w.set_dataset_view("chB", rules=[])
+
+    # 설정 왕복 — Join은 재료 다음에, 레시피로
+    cfgp = os.path.join(tmpd, "j.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"][jn]
+    if "join" not in saved or "path" in saved:
+        return "FAIL", f"Join이 레시피로 저장 안 됨: {list(saved)}"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    J2 = w2.shelf.get(jn)
+    if J2 is None or not np.allclose(J2.cols["dNO2"], J.cols["dNO2"], equal_nan=True):
+        return "FAIL", "설정 왕복 후 Join/파생 값 다름"
+
+    # 재료 삭제 → 묵은 값 없이 ✗
+    w2.shelf.pop("chB"); w2._refresh_tree()
+    J2 = w2.shelf[jn]
+    if J2.cols or "error" not in J2.join_info:
+        return "FAIL", "재료가 사라졌는데 Join에 묵은 값이 남음"
+    top = [w2._tree.topLevelItem(i).text(0) for i in range(w2._tree.topLevelItemCount())]
+    if not any("⋈ ✗" in t for t in top):
+        return "FAIL", f"트리에 Join 오류 표시 없음: {top}"
+    return "PASS", (f"결손 {int(hole.sum())}점 안 메움(Scatter·Join 같은 값) · 안내 · Join 위 파생 열 · "
+                    "재료 필터 반영 · 레시피 저장·왕복 · 재료 삭제 시 ✗")
 
 
 def main():

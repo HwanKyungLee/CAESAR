@@ -15,11 +15,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from gui.theme import AUGUR
+from gui.result_viewer_io import flag_color, FLAG_KEYS
 
 from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
                    mathtext_to_html)
 from .processing import (resample_mean, smooth, regress, allan_deviation,
-                         step_xy, bar_width)
+                         step_xy, bar_width, align_to)
 
 
 @register_mode
@@ -335,13 +336,67 @@ class TimeSeriesMode(PlotMode):
                 if err is not None and len(err) == len(y):
                     _, yse = self._proc(err, t)
                     elo, ehi = ys - yse, ys + yse
+            # Flag 색칠: 행 하나 = 점 하나일 때만 의미가 있다. 리샘플·평활은 여러 행을
+            # 섞어서 '그 점의 flag'가 없다 → 끄고 이유를 남긴다(조용히 틀린 색 금지).
+            flags = flag_note = None
+            if st["color_by"] == "Flag":
+                fl = ds.cats.get("Flag")
+                if fl is None:
+                    flag_note = "no Flag column (not a fit result)"
+                elif host.resample_sec or host.smooth_n > 1:
+                    flag_note = "off while resampled/smoothed"
+                elif len(fl) == len(ys):
+                    flags = fl
             out.append(ResolvedSeries(
                 label=lab, display_name=disp, color=ci, axis=axis,
                 x=xs, y=ys, err_lo=elo, err_hi=ehi,
                 width=st["width"], dash=st["dash"], marker=st["marker"],
                 msize=st["msize"], kind=st["kind"], alpha=st["alpha"],
                 unit=host.unit_of(lab),
-                extra={"has_time": t is not None, "col": col}))
+                extra={"has_time": t is not None, "col": col,
+                       "flags": flags, "flag_note": flag_note}))
+        return out
+
+    @staticmethod
+    def _flag_groups(s):
+        """[(flag 키, 행 마스크)] — ok가 아닌 flag 중 보이는 점이 있는 것만, 고정 순서."""
+        fl = s.extra.get("flags")
+        if fl is None:
+            return []
+        fin = np.isfinite(s.y)
+        out = []
+        for k in FLAG_KEYS:
+            if k == "ok":
+                continue
+            m = np.asarray(fl == k, bool) & fin
+            if m.any():
+                out.append((k, m))
+        return out
+
+    def _draw_flags_pg(self, host, specs):
+        """flag 점 덧그리기(화면). 범례 항목은 flag마다 한 번."""
+        seen = set()
+        for s in specs:
+            vb = host.vb_right if s.axis == "R" else host.p1
+            for k, m in self._flag_groups(s):
+                name = None if k in seen else f"flag: {k}"
+                seen.add(k)
+                it = pg.PlotDataItem(s.x[m], s.y[m], pen=None, symbol="o",
+                                     symbolSize=s.msize + 3, symbolBrush=flag_color(k),
+                                     symbolPen=None, name=name)
+                it.setZValue(10)
+                self._add_pg(host, vb, it, name)
+
+    def _draw_flags_mpl(self, target, s, xv, seen):
+        """flag 점 덧그리기(Publish) — _draw_flags_pg와 같은 규칙. 새 범례 (handle, label) 목록."""
+        out = []
+        xa = np.asarray(xv, dtype=object) if s.extra.get("has_time") else np.asarray(xv)
+        for k, m in self._flag_groups(s):
+            h, = target.plot(list(xa[m]), s.y[m], ls="None", marker="o", ms=s.msize + 3,
+                             color=flag_color(k), mew=0, zorder=5)
+            if k not in seen:
+                seen.add(k)
+                out.append((h, f"flag: {k}"))
         return out
 
     def _auto_ylabel_from_specs(self, specs, axis, default):
@@ -374,7 +429,9 @@ class TimeSeriesMode(PlotMode):
                  "band = fill to the **next series in the list** (drag to reorder)\n"
                  "errorbar = error bars (caps). Needs ± Error band checked to have values")
     _STYLE_DEFAULT = {"width": 2, "dash": "solid", "marker": "o", "msize": 3,
-                      "kind": "line", "alpha": 1.0, "visible": True}
+                      "kind": "line", "alpha": 1.0, "visible": True, "color_by": "none"}
+    # 점 색을 범주형 열로 — 지금은 Flag 하나(Result Lab 점 색과 같은 규칙·같은 색).
+    COLOR_BY = ["none", "Flag"]
 
     def _style_of(self, lab):
         """라벨별 스타일 dict(빠진 키는 기본값으로 채워서 반환).
@@ -387,6 +444,8 @@ class TimeSeriesMode(PlotMode):
         st["visible"] = bool(st["visible"])
         if st["kind"] not in self.KINDS:      # 옛/깨진 설정 방어
             st["kind"] = "line"
+        if st["color_by"] not in self.COLOR_BY:
+            st["color_by"] = "none"
         return st
 
     def _edit_style(self):
@@ -414,12 +473,17 @@ class TimeSeriesMode(PlotMode):
         sp_a = QDoubleSpinBox(); sp_a.setRange(0.05, 1.0); sp_a.setSingleStep(0.05)
         sp_a.setDecimals(2); sp_a.setValue(st0["alpha"])
         sp_a.setToolTip("Opacity (1 = opaque). Lower it when overlapping series hide each other.")
+        cb_c = QComboBox(); cb_c.addItems(self.COLOR_BY); cb_c.setCurrentText(st0["color_by"])
+        cb_c.setToolTip("Flag = overlay non-ok points in the Result Lab flag colours\n"
+                        "(unstable / settling / qc / cal). Needs a fit result and Resample = Raw,\n"
+                        "smooth 1 — averaged points have no single flag.")
         form.addRow("Type", cb_k)
         form.addRow("Line width", sp_w)
         form.addRow("Line style", cb_d)
         form.addRow("Marker", cb_m)
         form.addRow("Marker size", sp_m)
         form.addRow("Opacity", sp_a)
+        form.addRow("Color points by", cb_c)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
                               QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
@@ -429,9 +493,11 @@ class TimeSeriesMode(PlotMode):
         # 선택한 모든 시리즈에 적용
         style = {"width": sp_w.value(), "dash": cb_d.currentText(),
                  "marker": cb_m.currentText(), "msize": sp_m.value(),
-                 "kind": cb_k.currentText(), "alpha": sp_a.value()}
+                 "kind": cb_k.currentText(), "alpha": sp_a.value(),
+                 "color_by": cb_c.currentText()}
         for s in sel:
-            self._styles[s[0]] = dict(style)
+            # visible 등 대화상자에 없는 키는 보존(전엔 통째로 덮어 숨김 상태가 풀렸다)
+            self._styles[s[0]] = {**self._styles.get(s[0], {}), **style}
         self.render()
 
     # ── 야간음영 ──────────────────────────────────────────────
@@ -664,6 +730,7 @@ class TimeSeriesMode(PlotMode):
             if s.err_lo is not None and s.kind != "errorbar":
                 self._draw_err_band(host, s.axis, s.x, s.err_lo, s.err_hi, s.color)
             self._draw_pg_series(host, s, specs)
+        self._draw_flags_pg(host, specs)
         if (self._chk_night.isChecked() if hasattr(self, "_chk_night") else False) \
                 and any_time and tspan[0] is not None:
             self._draw_night_pg(host, tspan[0], tspan[1])
@@ -678,7 +745,9 @@ class TimeSeriesMode(PlotMode):
             host.set_status(f"{len(specs)} series"
                             + (f" · resample {host.resample_sec:g}s" if host.resample_sec else "")
                             + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else "")
-                            + (f"·  time shift {host.time_shift_hours:+g}h" if host.time_shift_hours else ""))
+                            + (f"·  time shift {host.time_shift_hours:+g}h" if host.time_shift_hours else "")
+                            + "".join(f" · {s.display_name}: flag colours {s.extra['flag_note']}"
+                                      for s in specs if s.extra.get("flag_note")))
 
     def _render_mpl_split(self, specs, fig):
         """Publish 분할: 시리즈마다 패널 1개(세로 스택, x축 공유). 종별 분리 그림.
@@ -697,6 +766,8 @@ class TimeSeriesMode(PlotMode):
                     a.axvspan(_dt.datetime.fromtimestamp(s0), _dt.datetime.fromtimestamp(s1),
                               color=self._night_color, alpha=0.18, lw=0, zorder=0)
             self._draw_mpl_series(a, s, specs)
+            for h, lb in self._draw_flags_mpl(a, s, xv, set()):   # 패널마다 자기 범례
+                h.set_label(lb)
             if s.err_lo is not None and s.kind != "errorbar":
                 a.fill_between(xv, s.err_lo, s.err_hi, color=s.color, alpha=0.2, lw=0)
             a.set_ylabel(f"{s.display_name} [{s.unit}]" if s.unit else s.display_name)
@@ -723,6 +794,7 @@ class TimeSeriesMode(PlotMode):
         any_time = any(s.extra["has_time"] for s in specs)
         tspan = self._tspan(specs)
         hl, ll = [], []   # 두 축 범례 통합
+        flag_hl, flag_seen = [], set()   # flag 범례는 시리즈 뒤에, flag마다 한 번
         for s in specs:
             xv = ([datetime.fromtimestamp(v) for v in s.x] if s.extra["has_time"] else s.x)
             if s.axis == "R":
@@ -732,11 +804,15 @@ class TimeSeriesMode(PlotMode):
             else:
                 target = ax
             line, lbl = self._draw_mpl_series(target, s, specs)
+            flag_hl += self._draw_flags_mpl(target, s, xv, flag_seen)
             if s.err_lo is not None and s.kind != "errorbar":
                 target.fill_between(xv, s.err_lo, s.err_hi, color=s.color, alpha=0.2, lw=0)
             if line is not None:
                 hl.append(line)
                 ll.append(f"{lbl} (R)" if s.axis == "R" else lbl)
+        for h, lb in flag_hl:
+            hl.append(h)
+            ll.append(lb)
         if (self._chk_night.isChecked() if hasattr(self, "_chk_night") else False) \
                 and any_time and tspan[0] is not None:
             import datetime as _dt
@@ -850,8 +926,10 @@ class ScatterMode(PlotMode):
             self._chk_ct.setChecked(bool(cfg.get("color_time", False)))
 
     def _xy(self):
-        """선택한 X/Y → (xv, yv, tcolor). 다른 데이터셋이면 시간 보간. tcolor=X시각(없으면 None)."""
+        """선택한 X/Y → (xv, yv, tcolor). 다른 데이터셋이면 Y를 X 시각으로 정렬
+        (core.align — 결손을 가로질러 잇지 않는다). tcolor=X시각(없으면 None)."""
         host = self.host
+        self._align_info = None
         rx = host.resolve(self._cx.currentText())
         ry = host.resolve(self._cy.currentText())
         if rx is None or ry is None:
@@ -859,11 +937,9 @@ class ScatterMode(PlotMode):
         dx, cx, xv, tx = rx
         dy, cy, yv, ty = ry
         if dx is not dy and tx is not None and ty is not None:
-            mt = np.isfinite(ty) & np.isfinite(yv)
-            if mt.sum() >= 2:
-                o = np.argsort(ty[mt])
-                yv = np.interp(tx, ty[mt][o], yv[mt][o], left=np.nan, right=np.nan)
-                xv = xv.copy()
+            # 예전 np.interp는 몇 시간 떨어진 두 점 사이도 직선으로 메워 짝지었다(부록 ④).
+            yv, self._align_info = align_to(tx, ty, yv)
+            xv = xv.copy()
             tcolor = tx
         else:
             n = min(len(xv), len(yv))
@@ -904,7 +980,10 @@ class ScatterMode(PlotMode):
                          pen=pg.mkPen(self.color("fit", "#D32F2F"), width=2), name="fit")
             host.pg_label("title", host.lbl("title",
                           f"y = {slope:.4g}·x + {inter:.4g}   R² = {r2:.4f}   n = {n}"))
-            host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}")
+            ai = getattr(self, "_align_info", None)
+            gap = (f"  ·  {ai['n_gap']} X times left unpaired (Y gap > {ai['max_gap'] / 60:.3g} min)"
+                   if ai and ai["n_gap"] else "")
+            host.set_status(f"slope={slope:.5g}  intercept={inter:.5g}  R²={r2:.5f}  n={n}{gap}")
         else:
             host.pg_label("title", host.lbl("title", "Scatter"))
             host.set_status("Not enough finite points for regression.")
