@@ -169,6 +169,8 @@ class PlotMakerWidget(QWidget):
         self._mode = self._modes[0]
         from .composer import Composer
         self.composer = Composer(self)   # 다중 패널 조판(M2) — Layout 탭
+        self._console_pending = {}       # 설정에서 읽은 콘솔 데이터셋 {이름: spec} — rerun() 전까지 대기
+        self._console_dlg = None
         self._init_ui()
         self._rebuild_mode_options()
         self.setAcceptDrops(True)   # 탐색기에서 파일을 창에 끌어놓으면 선반에 추가
@@ -221,6 +223,8 @@ class PlotMakerWidget(QWidget):
                 ("By date", self._add_data_by_date,
                  "Pick a date range and series from daily fit buckets, auto-merge, and add to the shelf"),
                 ("Preview", self._preview_publish, "Preview exactly as Publish will output"),
+                ("Console", self._open_console,
+                 "Python console with the shelf loaded (df(name), push(obj, name)) — for one-off analysis"),
                 ("Publish", self._export_publish, "Save high-res PNG / vector PDF·SVG")):
             b = QPushButton(txt); b.setToolTip(tip); b.clicked.connect(fn)
             bar.addWidget(b)
@@ -2106,6 +2110,36 @@ class PlotMakerWidget(QWidget):
             self._refresh_tree()
             self._notify_modes()
 
+    def add_dataset(self, ds):
+        """메모리에서 만든 데이터셋(콘솔 push 등)을 선반에 → 실제 이름. 설정에서 대기 중이던
+        같은 이름의 콘솔 데이터셋이면 저장돼 있던 필터·파생 열을 다시 건다."""
+        base, name, i = ds.name, ds.name, 2
+        while name in self.shelf:
+            name = f"{base}#{i}"; i += 1
+        ds.name = name
+        spec = self._console_pending.pop(name, None)
+        if spec and ds.origin:
+            ds.set_rules(spec.get("rules") or [], spec.get("rules_on", True))
+            ds.derived = [dict(d) for d in (spec.get("derived") or [])]
+            if ds.derived:
+                ds.apply_derived()
+        self.shelf[name] = ds
+        self._refresh_tree()
+        self._notify_modes()
+        return name
+
+    def _open_console(self):
+        from .console import ConsoleWindow
+        if self._console_dlg is None:
+            self._console_dlg = ConsoleWindow(self)
+        self._console_dlg.show()
+        self._console_dlg.raise_()
+        self._console_dlg.activateWindow()
+        if self._console_pending:
+            self._console_dlg._write(
+                "# saved console datasets (not re-run automatically): "
+                + ", ".join(f"rerun({n!r})" for n in self._console_pending) + "\n")
+
     def _rebuild_joins(self):
         """Join 데이터셋을 재료에서 다시 만든다 — 재료의 규칙·파생 열·시프트가 바뀌었거나
         재료가 지워졌을 때. 선반 순서대로(Join의 Join도 재료가 앞에 있으면 된다)."""
@@ -2140,6 +2174,8 @@ class PlotMakerWidget(QWidget):
             if ds.join:
                 tags.append("⋈ " + ("✗ " + ds.join_info["error"] if ds.join_info.get("error")
                                     else f"{ds.join_info.get('matched', 0)} paired"))
+            if ds.origin and ds.origin.get("kind") == "console":
+                tags.append("⌨ console")
             if ds.rules:
                 tags.append(f"{ds.n_hidden()} hidden" if ds.rules_on else "filters off")
                 if ds.rule_errors:            # n_hidden()이 방금 갱신했다
@@ -2159,6 +2195,10 @@ class PlotMakerWidget(QWidget):
                     tip.append(f"  {ji['method']} · max gap {ji['max_gap_s'] / 60:.3g} min · "
                                f"{ji['matched']} of {ji['rows']} rows paired, {ji['n_gap']} left empty")
                 tip.append("  rebuilt from its sources whenever they change (sources' filters apply)")
+            if ds.origin and ds.origin.get("kind") == "console":
+                hist = ds.origin.get("history") or []
+                tip.append(f"made in the console — not reproducible from files. {len(hist)} input line(s) saved:")
+                tip += [f"  >>> {ln}" for ln in hist[-8:]]
             if ds.cats:
                 tip.append("categorical: " + ", ".join(ds.cats))
             if ds.rules:
@@ -2920,6 +2960,11 @@ class PlotMakerWidget(QWidget):
                 continue
             if isinstance(spec, dict) and spec.get("join"):
                 joins.append((name, spec))     # 재료(파일 데이터셋)를 다 연 뒤에 만든다
+                continue
+            if isinstance(spec, dict) and spec.get("console"):
+                # 콘솔 데이터셋은 값이 없다 — 코드를 자동 실행하지 않고 대기만(rerun은 사람이)
+                self._console_pending[name] = spec
+                missing.append(f"{name} (console — open Console and type rerun({name!r}))")
                 continue
             p = spec if isinstance(spec, str) else (spec or {}).get("path")
             if not (p and os.path.isfile(p)):

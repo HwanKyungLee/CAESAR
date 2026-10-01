@@ -35,7 +35,7 @@ class Dataset:
     """
     __slots__ = ("name", "path", "time", "cols", "units", "errs", "cats",
                  "rules", "rules_on", "shift_h", "_hidden", "derived", "derived_errors", "_dcols",
-                 "rule_errors", "join", "join_info")
+                 "rule_errors", "join", "join_info", "origin")
 
     # 식에서 열 이름 대신 쓸 수 있는 예약 변수 — 파생 열 이름으로 못 쓴다.
     RESERVED = ("time", "hour")
@@ -56,6 +56,7 @@ class Dataset:
         self.rule_errors = {}   # {규칙 번호: 오류문} — 깨진 조건식 규칙(hidden_mask가 채움)
         self.join = None        # Join 데이터셋이면 레시피 dict(파일이 아니라 다른 데이터셋에서 만든다)
         self.join_info = {}
+        self.origin = None      # 콘솔에서 push한 데이터셋이면 {"kind": "console", "history": [...]}
         self.derived = [dict(d) for d in (derived or [])]
         self.derived_errors = {}
         self._dcols = ()     # 마지막으로 cols에 채운 파생 열 이름 — 지우거나 이름을 바꾸면 옛 값을 걷어낸다
@@ -193,6 +194,12 @@ class Dataset:
 
     def to_spec(self):
         """설정 파일용 레시피 — 열 때 `load_spec`(Join은 `make_join`)으로 그대로 되살린다."""
+        if self.origin and self.origin.get("kind") == "console":
+            # 값은 저장하지 않는다 — 입력 기록만. 열 때 **자동 실행하지 않는다**(공유받은 설정이
+            # 임의 코드를 돌리면 안 된다). 콘솔에서 rerun(이름)을 사람이 친다.
+            return {"console": {"history": list(self.origin.get("history") or [])},
+                    "rules": [dict(r) for r in self.rules], "rules_on": self.rules_on,
+                    "derived": [dict(d) for d in self.derived]}
         if self.join:
             return {"join": dict(self.join), "rules": [dict(r) for r in self.rules],
                     "rules_on": self.rules_on, "derived": [dict(d) for d in self.derived]}

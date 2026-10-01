@@ -94,6 +94,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 42. Composer : 패널 조각으로 그림 · 편집기·화면 무오염 · Edit 연결(추가 직후엔 안 묶임) · inset ·
     룩(눈금 크기) 전 패널 공통·inset은 작게 · x 공유 · 높이 비율 · 설정 왕복 · 끄면 단일 (M2, 2026-10-01)
 43. R축(twinx)·컬러바 눈금은 오른쪽에만 — 왼쪽 숫자 옆에 겹쳐 찍히던 버그의 가드 (2026-10-01)
+44. 콘솔 : df()=보이는 그대로·push 시각 왕복·입력 기록 부착 · 예외 격리·여러 줄 · 설정 저장은
+    기록만 · **설정을 열 때 기록을 자동 실행하지 않나**(센티넬 파일) · rerun()으로만 재생성 (D3, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1962,6 +1964,70 @@ def c_twin_ticks_right_only():
     if right.yaxis.get_major_ticks()[0].label2.get_visible():
         return "FAIL", "Y 숫자 끄기가 R축에 안 먹음"
     return "PASS", "R축 눈금은 오른쪽에만 · 숫자 끄기도 R축에 적용"
+
+
+# ── 44. 내장 콘솔 (D3) ────────────────────────────────────────────────────
+@check("콘솔: df/push 왕복·보이는 그대로·오류 격리·여러 줄 · 기록 저장 · 설정 열 때 자동 실행 금지 · rerun")
+def c_console():
+    import json, tempfile
+    from unittest import mock
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+    w = PlotMakerWidget()
+    w.add_specs([{"path": p, "rules": [{"kind": "status_qc"}]}])
+    name = next(iter(w.shelf)); src = w.shelf[name]
+    w._open_console()
+    con = w._console_dlg
+    con.execute(f"x = df({name!r})")
+    x = con.ns["x"]
+    hid = src.hidden_mask()
+    if not (np.all(np.isnan(x["NO2"].to_numpy()[hid])) and "Flag" in x.columns):
+        return "FAIL", "df()가 보이는 그대로(숨김 NaN·범주형 열)가 아님"
+    con.execute("y = x[['NO2']] * 2")
+    con.execute("push(y, 'dbl')")
+    d = w.shelf.get("dbl")
+    if d is None or not np.allclose(d.cols["NO2"], np.where(hid, np.nan, src.cols["NO2"]) * 2,
+                                    equal_nan=True):
+        return "FAIL", "push()가 선반에 맞는 값을 안 올림"
+    if not np.allclose(d.time, src.time):
+        return "FAIL", "push()가 시각을 잃음(DatetimeIndex 왕복)"
+    if d.origin is None or "push(y, 'dbl')" not in d.origin["history"]:
+        return "FAIL", "push한 데이터셋에 입력 기록이 안 붙음"
+    con.execute("1/0")
+    if "ZeroDivisionError" not in con.out.toPlainText():
+        return "FAIL", "예외가 창에 안 찍힘"
+    if not (con.execute("for i in range(3):") and con.execute("    z = i")) or con.execute(""):
+        return "FAIL", "여러 줄 블록 처리 이상"
+    if con.ns.get("z") != 2:
+        return "FAIL", "여러 줄 블록이 실행 안 됨"
+
+    # 기록에 '부작용 있는 코드'를 넣고 저장 → 설정을 열 때 자동 실행되면 안 된다
+    sentinel = os.path.join(tmpd, "ran_on_load.txt")
+    con.execute(f"open(r'{sentinel}', 'w').close()")
+    con.execute("push(y + 1, 'evil')")
+    os.remove(sentinel)
+    cfgp = os.path.join(tmpd, "c.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    with open(cfgp, encoding="utf-8") as f:
+        saved = json.load(f)["datasets"]
+    if "console" not in saved.get("evil", {}) or "path" in saved["evil"]:
+        return "FAIL", f"콘솔 데이터셋이 기록으로 저장 안 됨: {saved.get('evil')}"
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    if os.path.exists(sentinel):
+        return "FAIL", "설정을 열자 콘솔 기록이 자동 실행됨 — 공유 설정이 임의 코드를 돌린다!"
+    if "evil" in w2.shelf or "evil" not in w2._console_pending or "rerun" not in w2._status.text():
+        return "FAIL", "콘솔 데이터셋이 대기·안내 없이 사라지거나 몰래 만들어짐"
+    w2._open_console()
+    w2._console_dlg.execute("rerun('dbl')")              # 사람이 직접 칠 때만 다시 만든다
+    if "dbl" not in w2.shelf or not np.allclose(w2.shelf["dbl"].cols["NO2"], d.cols["NO2"],
+                                                  equal_nan=True):
+        return "FAIL", f"rerun()이 데이터셋을 못 되살림: {w2._console_dlg.out.toPlainText()[-300:]}"
+    return "PASS", ("df 보이는 그대로·push 시각 왕복·기록 부착 · 예외 격리·여러 줄 · 설정 저장=기록만 · "
+                    "열 때 자동 실행 안 함(센티넬) · rerun으로만 재생성")
 
 
 def main():

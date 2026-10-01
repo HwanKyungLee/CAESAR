@@ -12,6 +12,25 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-01 (4) — Result Lab · Plot Maker 데이터 자유도 로드맵 완주 (D0→D3, M-P·M1·M2)
+
+전 과정·결정·잡은 함정은 [`ResultLab_PlotMaker_데이터자유도_설계_2026-10-01.md`](ResultLab_PlotMaker_데이터자유도_설계_2026-10-01.md).
+한 줄씩:
+
+- **D0** Result Lab → Plot Maker가 경로 + **규칙(레시피)** 으로 — Hide QC·K·구간·시프트가 따라온다.
+  Dataset에 범주형 열(Status·Flag·Channel)·T/P/Shift/Squeeze.
+- **D1** 파생 열(식 저장, `core/expr.py` — 계산기와 공유) · **D2** 조건식 필터(keep/hide, 개별 on/off)·
+  TimeSeries `Color points by: Flag` · **D1+** `core/align.py` 결손 가드 정렬 + Join(⋈) 데이터셋.
+- Scatter `Fit: OLS | Deming`, Result Lab Σ Stats 구간 추세, Theme `Copernicus (ACP/AMT)`.
+- **M-P** Preview 모덜리스·자동 갱신 · **M1** `render_mpl(fig, ax)`(바이트 동일 확인) ·
+  **M2** Composer(Layout 탭: 패널·span·inset·x 공유·(a)(b)(c)) · **D3** 내장 콘솔(`code` 모듈,
+  push 데이터셋은 입력 기록만 저장·**열 때 자동 실행 안 함**, `rerun()`은 사람이).
+- **출력이 바뀐 곳** (전부 버그가 사라지는 쪽): Scatter 다른 데이터셋 짝·계산기의 결손 메움 제거,
+  R축 시계열·상관 히트맵 Publish의 왼쪽 눈금 겹침 제거, 열 미선택 상관 히트맵에 T/P/Shift/Squeeze 포함.
+- 검증: `validate_plotmaker` 33 → **44개**, `tools/test_core_expr.py`·`test_core_align.py` 신설.
+- **사람이 실제 창에서 볼 것**: 대화상자(New column·Filters·Join·Cell/inset) 글자 크기, Layout 탭 흐름,
+  콘솔 ↑/↓ 히스토리, Preview 자동 갱신 체감 속도(큰 데이터에선 Auto-refresh를 끄면 된다).
+
 ## 2026-10-01 (3) — 단일 출처 정리 + 레거시 R 경로의 하드코딩 셀 이름 제거
 
 ### 1. 숫자 무변경 정리 (커밋 `b67f15c`)

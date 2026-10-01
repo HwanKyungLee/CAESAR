@@ -29,6 +29,7 @@
 |---|---|
 | 핏세팅 자동 최적화 (`core/fit_optimizer.py`, `param_optimizer.py`, `fitset_builder.py`, `tools/optimize_*`, `tools/build_fitset.py`) | [`docs/fit_optimizer_handoff.md`](docs/fit_optimizer_handoff.md) 전체, 특히 **§15(알고리즘 명세)·§2-B(신뢰 3계층)·§16(Center 모드)** |
 | Vigil (실시간 감시) | [`docs/Vigil_설계_2026-07.md`](docs/Vigil_설계_2026-07.md) 전체 |
+| Result Lab · Plot Maker (데이터 가공·필터·Join·조판·콘솔) | [`docs/ResultLab_PlotMaker_데이터자유도_설계_2026-10-01.md`](docs/ResultLab_PlotMaker_데이터자유도_설계_2026-10-01.md) + 그래프 쪽 [`docs/PlotMaker_자유도_설계_2026-09-21.md`](docs/PlotMaker_자유도_설계_2026-09-21.md). 수정 후 `python tools/validate_plotmaker.py` |
 | 그 외 Augur GUI/코어 일반 작업 | [`docs/HANDOFF.md`](docs/HANDOFF.md)(최신 세션 노트) + `README.md`의 폴더구조·임포트구조 |
 | ANs/ANs 퇴화·NIER 제출 관련 | [`docs/ANs_분석_핸드오프_2026-07-23.md`](docs/ANs_분석_핸드오프_2026-07-23.md) |
 | NO2 인젝션 실험(g 축퇴·핫채널 30% 결손 해결) | [`docs/NO2_인젝션_실험_핸드오프_2026-08.md`](docs/NO2_인젝션_실험_핸드오프_2026-08.md) 전체 |
