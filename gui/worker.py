@@ -1091,7 +1091,9 @@ class AnalysisWorker(QThread):
                 self.needs_pre_calibration = True 
                 
             self.result_ready.emit(result, i)
-            time.sleep(self.delay_ms / 1000.0 if self.delay_ms > 0 else 0.001)
+            # delay_ms 가 0 이면 sleep(0) — GIL 을 한 번 놓아 GUI 스레드에 차례를 주는 양보만 한다.
+            # 예전 0.001 은 Windows 타이머 해상도 탓에 실측 ~1.8 ms 로, 2.5 ms 핏마다 70 % 를 더 썼다.
+            time.sleep(self.delay_ms / 1000.0 if self.delay_ms > 0 else 0)
 
         self.scan_count_ready.emit(i + 1)   # final actual count (in case estimate differed)
         self._close_residual_dump()

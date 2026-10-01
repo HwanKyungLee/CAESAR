@@ -2,6 +2,7 @@ import ntpath
 import os
 import re
 import sys
+import threading
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -62,6 +63,18 @@ class DataIO:
 
     _row_cache: dict = {}   # { (path, mtime): [row0_arr, row1_arr, ...] }
     _cached_key: tuple | None = None  # key of the currently cached file
+
+    # alpha_trace 파일 텍스트 캐시 (2026-10-01). 핏 루프는 스캔마다
+    # `load_alpha_trace_row_full`(파일 전체 읽기) + `parse_alpha_row_time`(두 번 열기) +
+    # `_alpha_layout`(헤더) 을 불러 파일 하나를 **행 수만큼 통째로** 다시 읽었다 — 행당 ~77 ms,
+    # 핏 2.5 ms 의 30배, 파일 크기에 대해 O(rows²). 이제 파일당 한 번 읽어 (헤더, 파장축,
+    # 데이터 줄 문자열)만 들고 있고, **각 행의 파싱은 종전 코드 그대로** 한다 — 출력 바이트동일.
+    # 키에 mtime_ns·size 를 넣어 파일이 바뀌면(재생성·append) 다시 읽는다. 작은 LRU + 락:
+    # 채널별 QThread 가 서로 다른 파일을 동시에 돈다.
+    _ALPHA_CACHE_MAX = 4
+    _alpha_cache: dict = {}            # {(abspath, mtime_ns, size): (hdr, wave_nm, data_rows)}
+    _alpha_cache_lock = threading.Lock()
+    _ncols_cache: dict = {}            # {(abspath, mtime_ns, size): 앞 10줄 최대 열 수} — clock_epoch_offset_sec
 
     @staticmethod
     def enforce_1d_array(data):
@@ -459,25 +472,12 @@ class DataIO:
         구포맷: row_idx  T_C  P_mbar  px...
         신포맷: row_idx  doy  datetime  T_C  P_mbar  px...   (타임스탬프 컬럼 추가)
         컬럼 위치를 헤더에서 읽어 둘 다 지원한다. wave_nm 은 '# wavelength_nm:' 배열."""
-        wave_nm = None
-        hdr = None
         try:
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    if line.startswith('# wavelength_nm:'):
-                        try:
-                            wave_nm = np.array([float(v) for v in line.split(':', 1)[1].strip().split('\t')
-                                                if v.strip()], dtype=float)
-                        except Exception:
-                            pass
-                        continue
-                    if line.startswith('row_idx'):
-                        hdr = line.rstrip('\n').split('\t')
-                        break
-                    if not line.startswith('#') and line.strip():
-                        break
+            hdr, wave_nm, _rows = DataIO._alpha_file(filepath)
         except Exception:
-            pass
+            hdr, wave_nm = None, None
+        if wave_nm is not None:
+            wave_nm = wave_nm.copy()   # 캐시 원본을 호출부가 고쳐 쓰지 않게(종전엔 매번 새 배열)
         if not hdr:
             return 3, 1, 2, 0, wave_nm
         first_px = next((i for i, c in enumerate(hdr) if c.startswith('px')), 3)
@@ -490,6 +490,52 @@ class DataIO:
             except ValueError:
                 px_start = 0
         return first_px, t_idx, p_idx, px_start, wave_nm
+
+    @staticmethod
+    def _alpha_file(filepath):
+        """alpha_trace 파일 → (hdr 열 이름 목록|None, wave_nm|None, 데이터 줄 문자열 목록). 캐시됨.
+
+        한 번의 통과로 종전 세 함수의 규칙을 그대로 재현한다:
+          - 헤더 탐색(`_alpha_layout`·`parse_alpha_row_time`): '# wavelength_nm:' 은 파장축,
+            'row_idx' 로 시작하면 헤더, 그 전에 주석 아닌 빈 줄 아닌 줄이 나오면 헤더 없음.
+          - 데이터 행(`load_alpha_trace_row_full`·`parse_alpha_row_time`): strip 한 줄 중
+            빈 줄·'#'·'row_idx' 로 시작하는 것 제외.
+        읽기 실패는 그대로 던진다(호출부마다 종전 처리 — 기본값/None/예외)."""
+        st = os.stat(filepath)
+        key = (os.path.abspath(filepath), st.st_mtime_ns, st.st_size)
+        with DataIO._alpha_cache_lock:
+            hit = DataIO._alpha_cache.pop(key, None)
+            if hit is not None:
+                DataIO._alpha_cache[key] = hit          # 최근 사용으로(dict 삽입 순서 = LRU)
+                return hit
+        wave_nm = None
+        hdr = None
+        hdr_done = False
+        data_rows = []
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                if not hdr_done:
+                    if line.startswith('# wavelength_nm:'):
+                        try:
+                            wave_nm = np.array([float(v) for v in line.split(':', 1)[1].strip().split('\t')
+                                                if v.strip()], dtype=float)
+                        except Exception:
+                            pass
+                    elif line.startswith('row_idx'):
+                        hdr = line.rstrip('\n').split('\t')
+                        hdr_done = True
+                    elif not line.startswith('#') and line.strip():
+                        hdr_done = True
+                s = line.strip()
+                if not s or s.startswith('#') or s.startswith('row_idx'):
+                    continue
+                data_rows.append(s)
+        entry = (hdr, wave_nm, data_rows)
+        with DataIO._alpha_cache_lock:
+            DataIO._alpha_cache[key] = entry
+            while len(DataIO._alpha_cache) > DataIO._ALPHA_CACHE_MAX:
+                DataIO._alpha_cache.pop(next(iter(DataIO._alpha_cache)))
+        return entry
 
     @staticmethod
     def read_alpha_trace_wavelengths(filepath):
@@ -605,13 +651,7 @@ class DataIO:
         AnalysisWorker가 알파를 그 채널 자체 파장축으로 피팅하도록 쓰는 경로
         (마스터 wavecal이 아니라 알파에 박힌 채널별 파장 사용)."""
         first_px, t_idx, p_idx, px_start, wave_nm = DataIO._alpha_layout(filepath)
-        data_rows = []
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-            for line in fh:
-                s = line.strip()
-                if not s or s.startswith('#') or s.startswith('row_idx'):
-                    continue
-                data_rows.append(s)
+        data_rows = DataIO._alpha_file(filepath)[2]   # 파일당 1회 읽기(캐시) — 행 파싱은 아래 그대로
         if row_index >= len(data_rows):
             raise RuntimeError(f"alpha row {row_index} not found ({len(data_rows)} rows)")
         parts = data_rows[row_index].split('\t')
@@ -1064,15 +1104,8 @@ class DataIO:
     def parse_alpha_row_time(filepath, row_index=0):
         """alpha_trace 한 행의 측정시각(datetime). 신포맷의 datetime 컬럼을 우선 읽고,
         없으면 doy 컬럼→datetime(파일 연도 기준). 둘 다 없으면(구포맷) None."""
-        hdr = None
         try:
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    if line.startswith('row_idx'):
-                        hdr = line.rstrip('\n').split('\t')
-                        break
-                    if not line.startswith('#') and line.strip():
-                        break
+            hdr, _wave, data_rows = DataIO._alpha_file(filepath)   # 파일당 1회 읽기(캐시)
         except Exception:
             return None
         if not hdr:
@@ -1081,21 +1114,8 @@ class DataIO:
         doy_idx = hdr.index('doy') if 'doy' in hdr else None
         if dt_idx is None and doy_idx is None:
             return None
-        # 해당 데이터 행 읽기
-        parts = None
-        try:
-            cnt = 0
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    s = line.strip()
-                    if not s or s.startswith('#') or s.startswith('row_idx'):
-                        continue
-                    if cnt == row_index:
-                        parts = s.split('\t')
-                        break
-                    cnt += 1
-        except Exception:
-            return None
+        # 해당 데이터 행 (종전: 줄을 세어 row_index 번째 — 음수·범위 밖은 None)
+        parts = data_rows[row_index].split('\t') if 0 <= row_index < len(data_rows) else None
         if not parts:
             return None
         if dt_idx is not None and dt_idx < len(parts):
@@ -1170,17 +1190,26 @@ class DataIO:
                 else:
                     # 앞 10줄 탭만 센다 — 파일 통째 로드(1.7 s → 캐시 없는 워커에선
                     # 파일마다 반복)를 피한다. 캐시 판정과 같은 strip·split 규칙.
-                    ncols = 0
-                    with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
-                        seen = 0
-                        for ln in fh:
-                            s = ln.strip()
-                            if not s:
-                                continue
-                            ncols = max(ncols, len(s.split('\t')))
-                            seen += 1
-                            if seen >= 10:
-                                break
+                    # 결과는 파일(경로·mtime·크기)별로 기억한다 — parse_row_timestamp 가 스캔마다
+                    # 불러 같은 파일을 스캔 수만큼 열고 있었다(2026-10-01).
+                    st = os.stat(filepath)
+                    nkey = (os.path.abspath(filepath), st.st_mtime_ns, st.st_size)
+                    ncols = DataIO._ncols_cache.get(nkey)
+                    if ncols is None:
+                        ncols = 0
+                        with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+                            seen = 0
+                            for ln in fh:
+                                s = ln.strip()
+                                if not s:
+                                    continue
+                                ncols = max(ncols, len(s.split('\t')))
+                                seen += 1
+                                if seen >= 10:
+                                    break
+                        if len(DataIO._ncols_cache) > 4096:
+                            DataIO._ncols_cache.clear()
+                        DataIO._ncols_cache[nkey] = ncols
             if int(ncols) != DataIO.HOT_NCOLS:
                 return 0.0
             return DataIO.HOT_PRE_TOGGLE_SHIFT_SEC

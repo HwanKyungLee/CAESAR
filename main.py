@@ -95,8 +95,11 @@ if __name__ == '__main__':
     # ≈ 1 s)는 스레드로 돌리며 1.3 s 모션을 끊김 없이 재생한다.
     import threading, importlib
     def _prewarm():
+        # pandas·pyplot·pyqtgraph·scipy.stats 도 여기서(2026-10-01) — 빠져 있으면 아래 창 모듈
+        # 임포트가 메인 스레드에서 그걸 끌어와 화면이 1.6 s 멈췄다(넣으면 0.45 s, 실측).
         for _m in ("scipy.interpolate", "scipy.optimize", "scipy.signal",
-                   "scipy.ndimage", "matplotlib", "matplotlib.figure"):
+                   "scipy.ndimage", "scipy.stats", "matplotlib", "matplotlib.figure",
+                   "matplotlib.pyplot", "pandas", "pyqtgraph"):
             try:
                 importlib.import_module(_m)
             except Exception:   # noqa: BLE001 — the real import below reports it
