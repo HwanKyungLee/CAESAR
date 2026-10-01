@@ -25,18 +25,8 @@ from .raw_parser import (
 )
 
 
-def ui_scale() -> float:
-    """Return a UI scale factor relative to 1080p reference height.
-    Clamps between 0.75 and 1.25 to avoid extreme layouts."""
-    try:
-        from PyQt6.QtWidgets import QApplication
-        screen = QApplication.primaryScreen()
-        if screen is None:
-            return 1.0
-        h = screen.availableGeometry().height()
-        return max(0.75, min(1.25, h / 1080.0))
-    except Exception:
-        return 1.0
+# ui_scale 은 core/ui_metrics.py 가 정의한다(부팅 경로가 data_io 전체를 끌어오지 않게). 기존 임포트 호환.
+from .ui_metrics import ui_scale  # noqa: E402,F401
 
 
 class DataIO:

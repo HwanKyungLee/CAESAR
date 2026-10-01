@@ -414,9 +414,33 @@ def _default_state_dir() -> str:
     return default_state_dir(_ROOT)
 
 
+def _resolve_watch_dir(requested, qs=None):
+    """감시 폴더를 정한다. 고정 감시 폴더는 두지 않는다 — 사람이 매번 고른다(2026-10-01).
+    `--dir` 로 명시했고 존재하면 그것(무인 자동 실행용). 아니면 폴더 선택 창을 띄운다 — 지난번 고른
+    폴더에서 **열기만** 하고 자동으로 그 폴더를 쓰지는 않는다. 취소하면 None.
+    `qs` 는 테스트용 설정 저장소(기본 QSettings("CAESAR", "vigil")). QApplication 이 있어야 한다."""
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+    qs = qs if qs is not None else QSettings("CAESAR", "vigil")
+    if requested and os.path.isdir(requested):
+        qs.setValue("watch_dir", os.path.abspath(requested))
+        return requested
+    last = qs.value("watch_dir", "", type=str)
+    if requested:
+        QMessageBox.warning(None, "Vigil", f"Watch folder not found:\n{requested}\n\nChoose the raw folder to monitor.")
+    start = last if last and os.path.isdir(last) else os.path.expanduser("~")
+    chosen = QFileDialog.getExistingDirectory(None, "Vigil — choose the raw .dat folder to monitor", start)
+    if not chosen:
+        return None
+    qs.setValue("watch_dir", chosen)
+    return chosen
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Vigil M0+M1+M2+M3 — real-time monitoring of raw inflow + HK + R + concentration")
-    ap.add_argument("--dir", required=True, help="raw .dat folder to monitor (recursive)")
+    ap.add_argument("--dir", default=None,
+                    help="raw .dat folder to monitor (recursive). If omitted or missing, a folder picker "
+                         "opens (the last chosen folder is remembered)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
                     help=f"instrument profile folder (default {DEFAULT_PROFILE_DIR})")
     ap.add_argument("--state-dir", default=None,
@@ -445,9 +469,6 @@ def main(argv=None) -> int:
     args = build_arg_parser().parse_args(argv)
     if args.state_dir is None:
         args.state_dir = _default_state_dir()
-    if not os.path.isdir(args.dir):
-        print(f"Watch folder not found: {args.dir}", file=sys.stderr)
-        return 1
 
     from vigil import runtime
     log_path = runtime.setup_logging(args.state_dir)
@@ -463,6 +484,35 @@ def main(argv=None) -> int:
     app = QApplication(sys.argv[:1])
     from gui.theme import apply_vigil
     apply_vigil(app)   # 밤·등불 팔레트를 어둡게 고정 + pyqtgraph 기본값(gui/theme.py)
+
+    # 무거운 임포트를 **앱 생성 직후** 스레드로 시작한다. 창에 필요한 것(프로파일 스키마 검증
+    # jsonschema 1.9 s · 대시보드 pyqtgraph)이 끝나면 `_ui_ready` 를 켜고, 농도 감시기(scipy·피팅
+    # 엔진)는 창이 뜬 뒤에도 계속 불러온다 — 첫 감시 tick 에서야 쓰이고, 기본은 정지 상태로 켜므로
+    # 사람이 Start 를 누르기 전에 끝난다. 2026-10-01 전엔 농도 감시기까지 다 불러와야 창을 띄웠고
+    # 그것도 프로파일 로드 뒤(5.6 s 시점)에 시작해서 창까지 ~10 s 였다.
+    import importlib, threading
+    _ui_ready = threading.Event()
+
+    def _prewarm():
+        for _m in ("jsonschema", "pyqtgraph", "vigil.dashboard.dashboard_window"):
+            try:
+                importlib.import_module(_m)
+            except Exception:   # noqa: BLE001 — 실제 임포트 자리가 보고한다
+                pass
+        _ui_ready.set()
+        try:
+            importlib.import_module("vigil.monitors.conc_monitor")
+        except Exception:       # noqa: BLE001
+            pass
+    _pre = threading.Thread(target=_prewarm, daemon=True)
+    _pre.start()
+
+    # 감시 폴더: 인자 → 없거나 사라졌으면 폴더 선택 창(지난번 폴더가 기본값). 2026-10-01 전엔 --dir 이
+    # 필수라, 바로가기(.bat)에 박힌 폴더가 없는 PC 에선 콘솔에 'not found' 만 뜨고 Vigil 이 안 켜졌다.
+    args.dir = _resolve_watch_dir(args.dir)
+    if not args.dir:
+        log.info("no watch folder chosen — exiting")
+        return 1
 
     # 한 PC 에 Vigil 두 개 금지 — 같은 cursors.json·status.jsonl 에 두 프로세스가 쓰고 CPU 도 두 배.
     lock = QLockFile(os.path.join(args.state_dir, "vigil.lock"))
@@ -503,12 +553,8 @@ def main(argv=None) -> int:
     # 모션은 여기서부터 — 위의 준비(git·대시보드 생성)는 메인 스레드를 막으므로 첫 장면에서
     # 끝낸다(실측 0.2–0.4 s 정지가 세 번). 농도 감시기(scipy·피팅 엔진 ≈ 1 s)는 Qt 를 안
     # 건드리므로 스레드로 미리 데우며 1.3 s 모션을 끊김 없이 재생한다.
-    import importlib, threading
-    _pre = threading.Thread(target=lambda: importlib.import_module("vigil.monitors.conc_monitor"),
-                            daemon=True)
     splash.restart()
-    _pre.start()
-    splash.wait_while(_pre.is_alive)
+    splash.wait_while(lambda: not _ui_ready.is_set())   # 창에 필요한 임포트까지만(농도 감시기는 계속 뒤에서)
     splash.wait_settled()
     splash.step("dashboard", "ready")
 

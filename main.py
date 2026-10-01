@@ -52,6 +52,23 @@ if __name__ == '__main__':
     from gui.theme import apply_augur
     apply_augur(app)
 
+    # 무거운 서드파티 임포트(scipy·matplotlib·pandas·pyqtgraph ≈ 4–5 s 콜드)를 **QApplication 직후, 스플래시보다 먼저**
+    # 스레드로 시작한다. 2026-10-01 전엔 아래 가벼운 단계들이 다 끝난 뒤(5.6 s 시점)에야 시작해서
+    # 그 앞 단계들과 순서대로 기다렸다(창까지 ~10 s). 스플래시 첫 그리기(~1.5 s)와도 겹치게 그보다 먼저 시작한다. 아래 단계들은 이 임포트를 필요로 하지 않는다.
+    import threading, importlib
+    def _prewarm():
+        # pandas·pyplot·pyqtgraph·scipy.stats 도 여기서 — 빠져 있으면 아래 창 모듈
+        # 임포트가 메인 스레드에서 그걸 끌어와 화면이 1.6 s 멈췄다(넣으면 0.45 s, 실측).
+        for _m in ("scipy.interpolate", "scipy.optimize", "scipy.signal",
+                   "scipy.ndimage", "scipy.stats", "matplotlib", "matplotlib.figure",
+                   "matplotlib.pyplot", "pandas", "pyqtgraph", "core.data_io"):
+            try:
+                importlib.import_module(_m)
+            except Exception:   # noqa: BLE001 — the real import below reports it
+                pass
+    _pre = threading.Thread(target=_prewarm, daemon=True)
+    _pre.start()
+
     # ── Splash screen ────────────────────────────────────────────────────────
     # Show it FIRST, before any heavy import or window build. Every log line on it
     # is a boot step that actually finished (gui/splash.py) — no canned text.
@@ -64,10 +81,11 @@ if __name__ == '__main__':
                          species=_species)
     splash.show()
     splash.pump()
+
     splash.step("engine", f"Augur v{__version__}")
 
     # Scale font size relative to screen height (reference: 1080p → 9pt)
-    from core.data_io import ui_scale
+    from core.ui_metrics import ui_scale   # 가벼운 모듈 — data_io(numpy·pandas)를 끌어오지 않는다
     _s = ui_scale()
     _font = app.font()
     _font.setPointSize(max(7, round(9 * _s)))
@@ -98,23 +116,9 @@ if __name__ == '__main__':
     _ver = code_version()
     splash.step("build", _ver, "ok" if not _ver.endswith(("-dirty", "-unknown")) and _ver != "nogit" else "skip")
 
-    # 모션은 여기서부터. 위의 가벼운 준비는 메인 스레드를 막으므로(실측 0.45 s — 스레드와
-    # numpy 임포트 잠금을 다툰다) 첫 장면에서 끝내고, 무거운 서드파티 임포트(scipy·matplotlib
-    # ≈ 1 s)는 스레드로 돌리며 1.3 s 모션을 끊김 없이 재생한다.
-    import threading, importlib
-    def _prewarm():
-        # pandas·pyplot·pyqtgraph·scipy.stats 도 여기서(2026-10-01) — 빠져 있으면 아래 창 모듈
-        # 임포트가 메인 스레드에서 그걸 끌어와 화면이 1.6 s 멈췄다(넣으면 0.45 s, 실측).
-        for _m in ("scipy.interpolate", "scipy.optimize", "scipy.signal",
-                   "scipy.ndimage", "scipy.stats", "matplotlib", "matplotlib.figure",
-                   "matplotlib.pyplot", "pandas", "pyqtgraph"):
-            try:
-                importlib.import_module(_m)
-            except Exception:   # noqa: BLE001 — the real import below reports it
-                pass
-    _pre = threading.Thread(target=_prewarm, daemon=True)
+    # 모션은 여기서부터. 무거운 임포트는 스플래시 직후 시작한 `_pre` 스레드가 이미 돌고 있다 —
+    # 끝날 때까지 1.3 s 모션을 끊김 없이 재생하며 기다린다(창 모듈 임포트·생성은 그 뒤 메인 스레드).
     splash.restart()
-    _pre.start()
     splash.wait_while(_pre.is_alive)
     splash.wait_settled()
 

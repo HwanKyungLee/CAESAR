@@ -184,9 +184,39 @@ def test_priority():
     check("우선순위 클래스 = BELOW_NORMAL", k.GetPriorityClass(k.GetCurrentProcess()) == 0x4000)
 
 
+def test_watch_dir_picker():
+    print("[7] 감시 폴더 — 고정 폴더 없이 사람이 고른다(2026-10-01)")
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+    from vigil.run_vigil import _resolve_watch_dir
+    _app = QApplication.instance() or QApplication([])
+    with tempfile.TemporaryDirectory() as d:
+        qs = QSettings(os.path.join(d, "vigil.ini"), QSettings.Format.IniFormat)   # 실제 설정은 안 건드림
+        a, b = os.path.join(d, "rawA"), os.path.join(d, "rawB")
+        os.makedirs(a); os.makedirs(b)
+        calls = []
+        orig = (QFileDialog.getExistingDirectory, QMessageBox.warning)
+        QMessageBox.warning = staticmethod(lambda *x, **k: None)
+        try:
+            QFileDialog.getExistingDirectory = staticmethod(lambda _p, _t, start: (calls.append(start), b)[1])
+            check("--dir 가 있으면 그대로(무인 실행)", _resolve_watch_dir(a, qs) == a and not calls)
+            got = _resolve_watch_dir(None, qs)
+            check("인자 없으면 선택 창 → 고른 폴더", got == b and len(calls) == 1, f"{got} {calls}")
+            calls.clear()
+            got = _resolve_watch_dir(None, qs)
+            check("다음 실행도 **선택 창이 뜨고**(자동 시작 안 함), 지난 폴더에서 열린다",
+                  len(calls) == 1 and calls[0] == b, str(calls))
+            calls.clear()
+            check("없는 --dir → 경고 후 선택 창", _resolve_watch_dir(os.path.join(d, "gone"), qs) == b and len(calls) == 1)
+            QFileDialog.getExistingDirectory = staticmethod(lambda *x: "")
+            check("취소하면 None(조용히 종료)", _resolve_watch_dir(None, qs) is None)
+        finally:
+            QFileDialog.getExistingDirectory, QMessageBox.warning = (staticmethod(orig[0]), staticmethod(orig[1]))
+
+
 def main():
     for t in (test_tick_guard, test_retire, test_cursor_save, test_state_log_failure,
-              test_default_state_dir, test_priority):
+              test_default_state_dir, test_priority, test_watch_dir_picker):
         t()
     print(f"\nruntime tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0

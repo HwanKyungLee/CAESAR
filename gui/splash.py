@@ -174,7 +174,10 @@ class BootSplash(QSplashScreen):
         t_end = time.monotonic() + max_s
         while busy() and self.isVisible() and time.monotonic() < t_end:
             self.pump()
-            time.sleep(0.012)
+            # 모션(T_END)이 끝나면 화면은 멈춰 있다 — 그 뒤에도 12 ms 마다 다시 그리면 그리기(파이썬)가
+            # 백그라운드 임포트와 GIL 을 다퉈 부팅이 늦어진다(2026-10-01 실측: 임포트 4.0 s → 7 s).
+            # 정지 화면은 Vigil LIVE 시계(초 단위)만 바뀌므로 0.2 s 마다로 충분하다.
+            time.sleep(0.012 if self._clock.elapsed() < T_END * 1000 else 0.2)
 
     def wait_settled(self) -> None:
         """모션이 끝날 때까지(최대 SETTLE_MS) 돌린다. 이미 지났으면 즉시 반환."""

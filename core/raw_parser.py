@@ -542,9 +542,13 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
         if os.path.basename(path).startswith("_"):
             continue                             # _schema.json 등 메타 파일
         try:
-            from core.profile import load_profile
-            prof = load_profile(path)
-            ncols = prof.match.n_columns if prof.match else None
+            # 열 수만 먼저 본다 — 이미 아는 구성이면 스키마 검증 없이 넘어간다. 검증용 jsonschema
+            # 임포트가 1.9 s 라(rfc3987_syntax 문법 빌드 1.5 s) 등록할 게 0개인 평소 부팅에서도
+            # Augur 시작이 그만큼 늦었다(2026-10-01 실측). 처음 보는 열 수만 아래에서 전체 검증·등록.
+            import json as _json
+            with open(path, encoding="utf-8") as _fh:
+                _peek = _json.load(_fh)
+            ncols = (_peek.get("match") or {}).get("n_columns") if isinstance(_peek, dict) else None
             if not ncols or ncols in CAMPAIGN_LAYOUTS:
                 continue                         # 이미 아는 구성 — 덮지 않는다
             out.append(load_campaign_layout(path))
