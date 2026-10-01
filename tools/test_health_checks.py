@@ -100,6 +100,11 @@ def test_overall():
     check("PASS+WARN → WARN", status == WARN, f"{status}: {msg}")
     status, msg = overall([("a", PASS, "x", {}), ("b", FAIL, "y", {})])
     check("PASS+FAIL → FAIL", status == FAIL, f"{status}: {msg}")
+    # 2026-10-02: Pipeline Check with nothing loaded = 4 SKIP + 1 constant PASS used to say "ready to fit".
+    status, msg = overall([("a", PASS, "x", {})] + [(f"s{i}", SKIP, "n/a", {}) for i in range(4)])
+    check("PASS+SKIP → WARN, not ready", status == WARN and "4 not checked" in msg, f"{status}: {msg}")
+    status, msg = overall([(f"s{i}", SKIP, "n/a", {}) for i in range(3)])
+    check("SKIP only → SKIP", status == SKIP, f"{status}: {msg}")
 
 
 def main():
