@@ -10,7 +10,7 @@
 import sys, os, json, glob
 import numpy as np
 
-from core.physics import air_number_density   # ppb 환산 단일 출처
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -119,7 +119,7 @@ def fit_one(eng, fitter, rp, wave, alpha, T_C, P_mbar, px_min, px_max, poly_deg)
     if "NO2" in eng.gas_list:
         gi = eng.gas_list.index("NO2")
         sc = eng.scaling_factors.get("NO2", 1.0); mu = eng.multipliers.get("NO2", 1.0)
-        no2 = (gco[gi] * mu / sc) / n_air * 1e9
+        no2 = coeff_to_ppb(gco[gi], mu, sc, n_air)
     return wl, resid, rms, sig, no2
 
 

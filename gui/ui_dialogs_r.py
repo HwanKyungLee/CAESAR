@@ -509,10 +509,12 @@ class RCalibratorDialog(QDialog):
                 SPEC_START_DEFAULT, SPEC_END_DEFAULT, SPEC_START_ANS, SPEC_END_ANS,
                 COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT_ANS, COL_TEMP_HOT)
         except ImportError:
-            SPEC_START_DEFAULT = 2053; SPEC_END_DEFAULT = 4101
-            SPEC_START_ANS = 4101;     SPEC_END_ANS = 6149
-            COL_PRESS_COLD = 6160;     COL_TEMP_COLD = 6173
-            COL_PRESS_HOT_ANS = 6164;  COL_TEMP_HOT = 6155
+            # 도구 폴더를 못 찾을 때도 숫자 사본을 두지 않는다 — raw 레이아웃 단일 출처에서.
+            from core.raw_parser import ColdHKMap, HotHKMap, SPEC_PRIMARY, SPEC_SECONDARY
+            SPEC_START_DEFAULT, SPEC_END_DEFAULT = SPEC_PRIMARY
+            SPEC_START_ANS, SPEC_END_ANS = SPEC_SECONDARY
+            COL_PRESS_COLD, COL_TEMP_COLD = ColdHKMap["cavity_P"][0], ColdHKMap["cavity_T"][0]
+            COL_PRESS_HOT_ANS, COL_TEMP_HOT = HotHKMap["P_ANs"][0], HotHKMap["cavity_gas_T"][0]
 
         out_dir = self._out_root()
         # R(t) npz는 하루짜리가 아니라 기간 전체의 교정 산출물이라 날짜 폴더가 아니라
@@ -554,7 +556,9 @@ class RCalibratorDialog(QDialog):
             fit_win = (frame.sp_r_start.value(), frame.sp_r_end.value())
             tz_h    = frame._panel_data.get('ts_tz_hours', 0)
 
-            if dio_ch >= 2:  # ch2, ch3 → ANs 영역
+            # 여기서 고르는 건 **스펙트럼 블록**뿐이다. col_p/col_t 는 RTConfig 서명 호환용으로
+            # 넘기지만 R 스캔은 T/P 를 data_io 가 채널 이름으로 고른 센서에서 읽는다(9-27 판정 짝).
+            if dio_ch >= 2:  # ch2, ch3 → secondary 블록(4101) — 2026 여수 핫에선 PNs
                 spec_s, spec_e = SPEC_START_ANS,     SPEC_END_ANS
                 col_p,  col_t  = COL_PRESS_HOT_ANS,  COL_TEMP_HOT
             else:            # ch1 default

@@ -37,7 +37,7 @@ from scipy.ndimage import uniform_filter1d
 
 
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
-from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처(이 모듈이 직접 호출)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -327,7 +327,7 @@ def scan_windows(eng, alphas, species, wave, T_C, P_mbar,
                 chi = model_adequacy(A, [np.asarray(a, float)[pmn:pmx + 1]
                                          for a in np.asarray(alphas, float)], noise_sl)
                 # 계수공간 σ → 수밀도 → ppb (핏의 환산과 동일 규약)
-                mdl = d["sigma"] * mu / sc / n_air * 1e9
+                mdl = coeff_to_ppb(d["sigma"], mu, sc, n_air)
                 # 강건성: 레퍼런스를 ±1px 흔들었을 때 σ가 얼마나 나빠지나(웨이브칼 오차 내성)
                 A2, n2 = design_matrix(eng, species, pmn, pmx, p, etalon_freq,
                                        shift=shift0 + robust_shift_px)
@@ -365,7 +365,7 @@ def compare_species(eng, alphas, base_species, candidate, wave, T_C, P_mbar,
                     ("with", list(base_species) + ([candidate] if candidate not in base_species else []))):
         A, names = design_matrix(eng, sp, px_min, px_max, poly_deg, etalon_freq)
         d = predicted_sigma(A, names, noise_sl, rho, target)
-        out[tag] = dict(mdl_ppb=d["sigma"] * mu / sc / n_air * 1e9,
+        out[tag] = dict(mdl_ppb=coeff_to_ppb(d["sigma"], mu, sc, n_air),
                         multiple_R=d["multiple_R"], cond=d["cond"])
     w, wo = out["with"]["mdl_ppb"], out["without"]["mdl_ppb"]
     out["ratio"] = float(w / wo) if wo > 0 else float("inf")

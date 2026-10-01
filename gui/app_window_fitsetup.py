@@ -331,12 +331,12 @@ class FitSetupMixin:
             except Exception:
                 gas_models.append(None)
         rms = float(np.sqrt(np.mean(resid ** 2)))
-        from core.physics import air_number_density
+        from core.physics import air_number_density, coeff_to_ppb
         n_air = air_number_density(T_C, P_mbar)   # ppb 환산 단일 출처
         ppb = {}
         for gi, nm in enumerate(eng.gas_list):
             sc = eng.scaling_factors.get(nm, 1.0); mu = eng.multipliers.get(nm, 1.0)
-            ppb[nm] = (gas_coeffs[gi] * mu / sc) / n_air * 1e9
+            ppb[nm] = coeff_to_ppb(gas_coeffs[gi], mu, sc, n_air)
 
         # etalon–기체 공선성 진단(보고 전용, 핏 불변) — RUN과 동일한 FFT 검출
         # 주파수(워커 기본 밴드 0.02~0.40 rad/px)에서 평가. 실패해도 팝업은 뜬다.

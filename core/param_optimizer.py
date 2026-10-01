@@ -42,7 +42,7 @@ def _require_bool(value):
 
 
 # ppb 환산(n_air)은 core/physics.py가 단일 출처 — 여기서 재정의하지 않는다.
-from core.physics import air_number_density   # ppb 환산 단일 출처(이 모듈이 직접 호출)
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처(이 모듈이 직접 호출)
 from core.doas_fit import alpha_fit_scale   # 알파 정규화 단일 출처
 
 
@@ -200,7 +200,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
         gi = eng.gas_list.index(target)
         sc = eng.scaling_factors.get(target, 1.0)
         mu = eng.multipliers.get(target, 1.0)
-        conc = float((gco[gi] * mu / sc) / n_air * 1e9)
+        conc = float(coeff_to_ppb(gco[gi], mu, sc, n_air))
         conc *= 1.0   # perr_rel은 단위 무관(계수/계수)
         perr_rel = float(perr[gi] / abs(gco[gi])) if abs(gco[gi]) > 0 else float("inf")
 
@@ -210,7 +210,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     for gi, g in enumerate(eng.gas_list):
         sc = eng.scaling_factors.get(g, 1.0)
         mu = eng.multipliers.get(g, 1.0)
-        conc_all[g] = float((gco[gi] * mu / sc) / n_air * 1e9)
+        conc_all[g] = float(coeff_to_ppb(gco[gi], mu, sc, n_air))
 
     shifts = {g: float(s) for g, s in zip(eng.gas_list, opt_sh)}
     squeezes = {g: float(s) for g, s in zip(eng.gas_list, opt_sq)}

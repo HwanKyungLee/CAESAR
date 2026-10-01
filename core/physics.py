@@ -68,6 +68,20 @@ def air_number_density(T_C: float, P_mbar: float) -> float:
     return N_LOSCHMIDT * (P_mbar / 1013.25) * (273.15 / (T_C + 273.15))
 
 
+def coeff_to_ppb(coeff, multiplier, scale_div, n_air):
+    """핏 계수(정규화된 레퍼런스 열의 계수) → ppb. **계수→ppb 환산의 단일 출처**(2026-10-01).
+
+        ppb = (coeff × multiplier / scale_div) / N_air × 1e9
+
+    multiplier·scale_div 는 엔진의 `multipliers[gas]`·`scaling_factors[gas]` — 정규화로 열에서
+    빠진 물리 단위를 되돌린다. 같은 식이 param_optimizer·fit_optimizer·window_designer·
+    Test Fit·도구 2개에 8번 복사돼 있었다. **연산 순서를 그 사본들과 똑같이 두어 결과가
+    비트 단위로 같다**(곱 → 나눔 → 나눔 → 곱, 왼쪽부터) — 순서를 바꾸면 끝자리가 달라질 수 있다.
+    배열도 받는다(numpy 브로드캐스트). gui/worker 는 계수를 미리 실농도로 바꿔 두므로
+    `(real / n_air) * 1e9` 를 쓴다(다른 단계라 이 함수 대상이 아니다)."""
+    return (coeff * multiplier / scale_div) / n_air * 1e9
+
+
 class RayleighPhysics:
     """
     Rayleigh scattering extinction α(λ) [cm⁻¹] — Sellmeier 굴절률 기반.

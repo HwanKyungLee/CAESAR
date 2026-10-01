@@ -170,8 +170,10 @@ CH_PIXELS = 2048            # 2048 pixels per spectral channel
 
 # Absolute spectrum slices (start, end_exclusive)
 SPEC_BLOCK_A = (5,         5 + CH_PIXELS)            # 5..2053  — empty / legacy 3-ch
-SPEC_PRIMARY = (META_COLS, META_COLS + CH_PIXELS)    # 2053..4101 — Cold NO2 / Hot PNs
-SPEC_SECONDARY = (META_COLS + CH_PIXELS,             # 4101..6149 — Hot ANs only
+# 블록이 어느 셀인지는 캠페인 레이아웃이 정한다(아래 register_campaign_layout). 2026 여수 핫은
+# primary = ANs(300 °C), secondary = PNs(180 °C) — docs/채널정체_판정_2026-09-27.md.
+SPEC_PRIMARY = (META_COLS, META_COLS + CH_PIXELS)    # 2053..4101 — Cold NO2 / 여수 Hot ANs
+SPEC_SECONDARY = (META_COLS + CH_PIXELS,             # 4101..6149 — 여수 Hot PNs (hot only)
                   META_COLS + 2 * CH_PIXELS)
 # Legacy aliases for code expecting the MATLAB nomenclature
 SPEC_CH1_NO2 = SPEC_PRIMARY        # MATLAB "ch1"
