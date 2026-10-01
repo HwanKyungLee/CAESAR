@@ -34,7 +34,8 @@ class Dataset:
     derived_errors : {이름: 오류문} — 깨진 식은 조용히 빼지 않고 여기 남겨 트리에 빨갛게 보인다.
     """
     __slots__ = ("name", "path", "time", "cols", "units", "errs", "cats",
-                 "rules", "rules_on", "shift_h", "_hidden", "derived", "derived_errors", "_dcols")
+                 "rules", "rules_on", "shift_h", "_hidden", "derived", "derived_errors", "_dcols",
+                 "rule_errors")
 
     # 식에서 열 이름 대신 쓸 수 있는 예약 변수 — 파생 열 이름으로 못 쓴다.
     RESERVED = ("time", "hour")
@@ -52,6 +53,7 @@ class Dataset:
         self.rules_on = bool(rules_on)
         self.shift_h = float(shift_h or 0.0)
         self._hidden = None
+        self.rule_errors = {}   # {규칙 번호: 오류문} — 깨진 조건식 규칙(hidden_mask가 채움)
         self.derived = [dict(d) for d in (derived or [])]
         self.derived_errors = {}
         self._dcols = ()     # 마지막으로 cols에 채운 파생 열 이름 — 지우거나 이름을 바꾸면 옛 값을 걷어낸다
@@ -131,18 +133,36 @@ class Dataset:
             self.rules_on = bool(rules_on)
         self._hidden = None
 
+    def rules_mask(self, rules):
+        """규칙 목록 → (숨김 마스크, {규칙 번호: 오류문}). 조건식(expr) 규칙이 깨지면
+        (열 이름이 바뀐 파일 등) **그 규칙만** 아무것도 안 숨기고 오류를 돌려준다 —
+        데이터셋을 통째로 못 여는 것보다 낫고, 트리에 ✗로 드러나니 조용하지도 않다.
+        모르는 kind는 그대로 ValueError(레시피 자체가 틀렸다)."""
+        from core.expr import ExprError
+        st = self.cats.get("Status")
+        ch = self.cats.get("Channel")
+        kw = dict(time=self.time, status=list(st) if st is not None else None,
+                  rms=self.cols.get("RMS"), channel=list(ch) if ch is not None else None,
+                  variables=self.variables())
+        n = len(self)
+        mask = np.zeros(n, bool)
+        errors = {}
+        for i, r in enumerate(rules):
+            try:
+                mask |= rules_hidden_mask([r], n, **kw)
+            except ExprError as e:
+                if r.get("kind") != "expr":
+                    raise
+                errors[i] = str(e)
+        return mask, errors
+
     def hidden_mask(self):
         """숨길 행(True). 규칙이 없거나 꺼져 있으면 None(= 아무것도 안 숨김)."""
         if not (self.rules and self.rules_on):
+            self.rule_errors = {}
             return None
         if self._hidden is None:
-            st = self.cats.get("Status")
-            ch = self.cats.get("Channel")
-            self._hidden = rules_hidden_mask(
-                self.rules, len(self), time=self.time,
-                status=list(st) if st is not None else None,
-                rms=self.cols.get("RMS"),
-                channel=list(ch) if ch is not None else None)
+            self._hidden, self.rule_errors = self.rules_mask(self.rules)
         return self._hidden
 
     def n_hidden(self):

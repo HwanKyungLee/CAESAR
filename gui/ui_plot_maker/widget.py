@@ -1972,6 +1972,7 @@ class PlotMakerWidget(QWidget):
             a_edit = menu.addAction(f"Edit column '{col}'…")
             a_del = menu.addAction(f"Delete column '{col}'")
         menu.addSeparator()
+        a_flt = menu.addAction("Filters…")
         a_on = menu.addAction("Filters on")
         a_on.setCheckable(True)
         a_on.setChecked(ds.rules_on)
@@ -1991,6 +1992,12 @@ class PlotMakerWidget(QWidget):
                 self.set_derived(ds.name, dlg.spec(), replace=editing)
         elif act is a_del:
             self.delete_derived(ds.name, col)
+        elif act is a_flt:
+            from .filters_dialog import FiltersDialog
+            dlg = FiltersDialog(ds, parent=self)
+            if dlg.exec():
+                rules, on = dlg.chosen()
+                self.set_dataset_view(ds.name, rules=rules, rules_on=on)
         elif act is a_on:
             self.set_dataset_view(ds.name, rules_on=a_on.isChecked())
         elif act is a_clr:
@@ -2008,6 +2015,7 @@ class PlotMakerWidget(QWidget):
             ds.shift_h = float(shift_h)
             if ds.derived:
                 ds.apply_derived()        # `hour`는 데이터셋 시프트를 따른다
+        ds.hidden_mask()                  # rule_errors 갱신(트리 ✗ 표시용)
         self._refresh_tree()
         self._notify_modes()
         self._mode.render()
@@ -2073,6 +2081,8 @@ class PlotMakerWidget(QWidget):
             tags = []
             if ds.rules:
                 tags.append(f"{ds.n_hidden()} hidden" if ds.rules_on else "filters off")
+                if ds.rule_errors:            # n_hidden()이 방금 갱신했다
+                    tags.append(f"✗ {len(ds.rule_errors)} broken filter")
             if ds.shift_h:
                 tags.append(f"{ds.shift_h:+g}h")
             tag = ("  · " + " · ".join(tags)) if tags else ""
@@ -2083,10 +2093,12 @@ class PlotMakerWidget(QWidget):
                 tip.append("categorical: " + ", ".join(ds.cats))
             if ds.rules:
                 tip.append(f"filters ({'on' if ds.rules_on else 'OFF'}) — hidden, not deleted:")
-                tip += [f"  • {describe_rule(r)}" for r in ds.rules]
+                tip += [f"  • {describe_rule(r)}"
+                        + (f"   ✗ {ds.rule_errors[i]} (hides nothing)" if i in ds.rule_errors else "")
+                        for i, r in enumerate(ds.rules)]
             if ds.shift_h:
                 tip.append(f"dataset time shift {ds.shift_h:+g}h (display only)")
-            tip.append("Right-click: new column · filters on/off · clear")
+            tip.append("Right-click: new column · Filters… · on/off · clear")
             top.setToolTip(0, f"{ds.path}\n" + "\n".join(tip))
             for col in ds.cols:
                 if col in ds._dcols:

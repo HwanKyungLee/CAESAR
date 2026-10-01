@@ -319,19 +319,32 @@ def qc_hidden_mask(n, status=None, rms=None, channel=None, hide_status_qc=False,
     return mask
 
 
-def rules_hidden_mask(rules, n, time=None, status=None, rms=None, channel=None):
+def rules_hidden_mask(rules, n, time=None, status=None, rms=None, channel=None,
+                      variables=None):
     """보기 규칙(list[dict]) → 숨길 행 마스크. 규칙은 재계산 가능한 레시피라
     설정 파일에 그대로 저장되고 열 때 다시 적용된다(원칙 ④).
 
       {"kind": "status_qc"}            Status QC-* 행
       {"kind": "rms_k", "K": 3.0}      채널별 robust RMS 임계 초과 행
       {"kind": "time_range", "t0", "t1"}  [t0, t1](원본 epoch초) 밖 + 시각 없는 행
+      {"kind": "expr", "expr": "T > 290", "mode": "keep"|"hide"}
+                                       조건식(core/expr.py). keep = 조건이 **참인 행만** 남김
+                                       (NaN 비교는 거짓 → 숨김), hide = 참인 행을 숨김.
+                                       variables(열 이름 → 배열)가 필요하다.
+    모든 규칙은 "on": False 로 개별로 끌 수 있다(지우지 않고).
 
-    모르는 kind는 ValueError — 조용히 무시하면 사용자는 걸렀다고 믿는다."""
+    모르는 kind는 ValueError — 조용히 무시하면 사용자는 걸렀다고 믿는다.
+    식 오류는 core.expr.ExprError(ValueError 하위)로 그대로 올린다."""
     mask = np.zeros(n, bool)
     for r in rules or ():
+        if not r.get("on", True):
+            continue
         k = r.get("kind")
-        if k == "status_qc":
+        if k == "expr":
+            from core.expr import eval_mask
+            cond = eval_mask(r.get("expr", ""), variables or {}, n)
+            mask |= ~cond if r.get("mode", "keep") == "keep" else cond
+        elif k == "status_qc":
             mask |= qc_hidden_mask(n, status=status, hide_status_qc=True)
         elif k == "rms_k":
             mask |= qc_hidden_mask(n, rms=rms, channel=channel, K=float(r.get("K", 0.0)))
@@ -350,12 +363,28 @@ def describe_rule(r):
     """규칙 한 줄 설명(툴팁·상태줄용)."""
     import datetime as _dt
     k = r.get("kind")
+    off = "" if r.get("on", True) else "  (off)"
+    if k == "expr":
+        verb = "Keep rows where" if r.get("mode", "keep") == "keep" else "Hide rows where"
+        return f"{verb} {r.get('expr', '')}{off}"
     if k == "status_qc":
-        return "Hide Status QC-*"
+        return "Hide Status QC-*" + off
     if k == "rms_k":
-        return f"Post-hoc QC: RMS > robust K={float(r.get('K', 0)):g} (per channel)"
+        return f"Post-hoc QC: RMS > robust K={float(r.get('K', 0)):g} (per channel){off}"
     if k == "time_range":
         f = lambda e: _dt.datetime.fromtimestamp(float(e)).strftime("%Y-%m-%d %H:%M")
-        return f"Time range {f(r['t0'])} ~ {f(r['t1'])}"
+        return f"Time range {f(r['t0'])} ~ {f(r['t1'])}{off}"
     return str(r)
+
+
+# flag 키 → 의미 역할 색(gui/theme). Result Lab 점 색과 Plot Maker 'Color by Flag'가 같은 색.
+_FLAG_ROLE = {"unstable": "fail", "settling": "faint", "qc": "warn", "cal": "special"}
+FLAG_KEYS = ("ok", "unstable", "settling", "qc", "cal")
+
+
+def flag_color(key):
+    """flag 키의 색(hex). ok는 None = 시리즈 고유색 그대로."""
+    from gui.theme import AUGUR
+    role = _FLAG_ROLE.get(key)
+    return getattr(AUGUR, role) if role else None
 

@@ -77,6 +77,9 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 35. 파생 열 : 단위변환·연쇄·범주형 비교·hour 식이 맞게 계산되나 · 깨진/위험한 식은
     실행 없이 빨갛게 남나 · 원본 열 보호 · **식만** 저장되고 열 때 재계산되나 ·
     Result Lab 계산기와 같은 엔진(core/expr.py) (D1, 2026-10-01)
+36. 행 필터 + Flag 색칠 : keep/hide 조건식·파생 열 조건·규칙 개별 on/off(삭제 아님) ·
+    깨진 조건은 그 규칙만 무효+✗(데이터셋은 열림) · 설정 왕복 · Flag 점이 pg·mpl 같은 수 ·
+    리샘플 중엔 끄고 안내 · 스타일 편집이 숨김을 안 풀어버리나 (D2, 2026-10-01)
 """
 from __future__ import annotations
 import os, sys
@@ -1427,6 +1430,126 @@ def c_derived_columns():
         return "FAIL", "계산기 식 결과가 바뀜"
     return "PASS", ("4종 식·연쇄·hour·숨김 연동 · 깨진/위험 식은 빨간 표시(실행 안 됨) · "
                     "원본 열 보호 · 식만 저장·재계산 · 의존 삭제 드러남 · 계산기 호환")
+
+
+# ── 36. 행 필터(조건식) + Flag 색칠 (D2) ───────────────────────────────────
+@check("행 필터: keep/hide 조건식·개별 on/off·깨진 규칙 표시 · Flag 색칠 pg↔mpl")
+def c_filters_and_flag_colors():
+    import json, tempfile
+    from unittest import mock
+    from PyQt6.QtCore import Qt as Qt_
+    from gui.ui_plot_maker import load_spec
+    from gui.ui_plot_maker.filters_dialog import FiltersDialog
+    tmpd = tempfile.mkdtemp()
+    p = os.path.join(tmpd, "fixture_report.dat")
+    _write_report_fixture(p)
+
+    # ── 필터 ──
+    w = PlotMakerWidget()
+    w.add_specs([{"path": p, "rules": [{"kind": "status_qc"}]}])
+    name = next(iter(w.shelf)); ds = w.shelf[name]
+    w.set_derived(name, {"name": "NO2x2", "expr": "NO2 * 2"})
+    flag, rms = ds.cats["Flag"], ds.cols["RMS"]
+    qc = np.array([str(s).startswith("QC") for s in ds.cats["Status"]])
+
+    dlg = FiltersDialog(ds)
+    dlg._mode.setCurrentIndex(0); dlg._expr.setText('Flag != "unstable"'); dlg._update_preview()
+    if "hides 1 of" not in dlg._preview.text():
+        return "FAIL", f"미리보기 개수 틀림: {dlg._preview.text()}"
+    dlg._commit(new=True)
+    dlg._mode.setCurrentIndex(1); dlg._expr.setText("NO2x2 > 2 * median(NO2)"); dlg._update_preview()
+    dlg._commit(new=True)                                  # 파생 열을 쓰는 hide 규칙
+    dlg._expr.setText("nosuch > 1"); dlg._update_preview()
+    if dlg._btn_add.isEnabled():
+        return "FAIL", "깨진 조건인데 Add가 눌림"
+    rules, on = dlg.chosen()
+    w.set_dataset_view(name, rules=rules, rules_on=on)
+    want = qc | (flag == "unstable") | (ds.cols["NO2x2"] > 2 * np.nanmedian(ds.cols["NO2"]))
+    if not np.array_equal(ds.hidden_mask(), want):
+        return "FAIL", "keep/hide 조건식 마스크 불일치"
+
+    # 규칙 하나만 끄기 (지우지 않고)
+    dlg2 = FiltersDialog(ds)
+    dlg2._list.item(0).setCheckState(Qt_.CheckState.Unchecked)   # status_qc 끔
+    rules2, _ = dlg2.chosen()
+    if len(rules2) != 3 or rules2[0].get("on") is not False:
+        return "FAIL", "개별 끄기가 삭제로 동작하거나 저장 안 됨"
+    w.set_dataset_view(name, rules=rules2)
+    want2 = (flag == "unstable") | (ds.cols["NO2x2"] > 2 * np.nanmedian(ds.cols["NO2"]))
+    if not np.array_equal(ds.hidden_mask(), want2) or np.array_equal(want2, want):
+        return "FAIL", "끈 규칙이 여전히 숨기고 있음"
+
+    # 깨진 조건식 규칙: 그 규칙만 아무것도 안 숨기고 ✗ — 데이터셋은 열린다
+    bad_rules = rules2 + [{"kind": "expr", "expr": "nosuch > 1", "mode": "hide"}]
+    w.set_dataset_view(name, rules=bad_rules)
+    if 3 not in ds.rule_errors or "broken filter" not in w._tree.topLevelItem(0).text(0):
+        return "FAIL", "깨진 규칙이 표시되지 않음"
+    dsb = load_spec({"path": p, "rules": bad_rules})
+    if 3 not in dsb.rule_errors:
+        return "FAIL", "깨진 규칙이 있는 레시피를 못 열거나 오류가 안 남음"
+    try:
+        load_spec({"path": p, "rules": [{"kind": "nosuchkind"}]})
+        return "FAIL", "모르는 규칙 kind가 조용히 통과"
+    except ValueError:
+        pass
+
+    # 설정 왕복 — expr 규칙·개별 off 상태 보존
+    cfgp = os.path.join(tmpd, "f.pmcfg.json")
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getSaveFileName", return_value=(cfgp, "")):
+        w._save_cfg()
+    w2 = PlotMakerWidget()
+    with mock.patch("gui.ui_plot_maker.widget.QFileDialog.getOpenFileName", return_value=(cfgp, "")):
+        w2._load_cfg()
+    if not np.array_equal(w2.shelf[name].hidden_mask(), ds.hidden_mask()):
+        return "FAIL", "설정 왕복 후 필터 마스크 다름"
+
+    # ── Flag 색칠 ──
+    w3 = PlotMakerWidget()
+    w3.add_specs([p])                                       # 규칙 없음 → qc 점도 보인다
+    n3 = next(iter(w3.shelf)); lab = f"{n3}:NO2"
+    ts = next(m for m in w3._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([lab, "L", None, None]); ts._refresh_list()
+    ts._styles[lab] = {"color_by": "Flag"}
+    ts.render()
+    import pyqtgraph as pg_
+    pg_flag = {it.opts.get("name"): len(it.xData) for it in w3.p1.items
+               if isinstance(it, pg_.PlotDataItem) and str(it.opts.get("name") or "").startswith("flag:")}
+    if pg_flag != {"flag: unstable": 1, "flag: qc": 3}:
+        return "FAIL", f"화면 flag 점 불일치: {pg_flag}"
+    fig = w3._build_publish_fig()
+    leg = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    # 범례 핸들은 범례용 복제본이라 점 개수가 다르다 → 축에 그려진 실제 선을 색으로 센다
+    from matplotlib.colors import to_hex
+    from gui.result_viewer_io import flag_color
+    by_col = {to_hex(flag_color(k)).lower(): f"flag: {k}" for k in ("unstable", "settling", "qc", "cal")}
+    mpl_n = {}
+    for ln in fig.axes[0].lines:
+        lb = by_col.get(to_hex(ln.get_color()).lower())
+        if lb and ln.get_linestyle() == "None":
+            mpl_n[lb] = mpl_n.get(lb, 0) + len(ln.get_xdata())
+    if not {"flag: unstable", "flag: qc"} <= set(leg):
+        return "FAIL", f"Publish 범례에 flag 항목이 없음: {leg}"
+    if mpl_n != pg_flag:
+        return "FAIL", f"Publish flag 점 ≠ 화면: {mpl_n} vs {pg_flag}"
+    if w3.p1.items and any(it.opts.get("symbolBrush") is None for it in w3.p1.items
+                           if isinstance(it, pg_.PlotDataItem) and str(it.opts.get("name") or "").startswith("flag:")):
+        return "FAIL", "flag 점에 색이 없음"
+    w3._res_combo.setCurrentText("5 min")                   # 리샘플 → 끄고 이유를 말한다
+    ts.render()
+    if any(str(getattr(it, "opts", {}).get("name") or "").startswith("flag:") for it in w3.p1.items):
+        return "FAIL", "리샘플 중에도 flag 색이 칠해짐(평균 점엔 flag가 없다)"
+    if "flag colours off" not in w3._status.text():
+        return "FAIL", "리샘플로 꺼졌다는 안내가 없음"
+    # 스타일 창에서 OK → 숨겨둔 시리즈가 다시 나타나면 안 된다(전엔 dict 통째 덮어써서 풀렸다)
+    from PyQt6.QtWidgets import QDialog
+    ts._styles[lab]["visible"] = False
+    ts._list.setCurrentRow(0)
+    with mock.patch.object(QDialog, "exec", return_value=QDialog.DialogCode.Accepted):
+        ts._edit_style()
+    if ts._style_of(lab)["visible"] or ts._style_of(lab)["color_by"] != "Flag":
+        return "FAIL", "스타일 편집이 숨김/색칠 설정을 풀어버림"
+    return "PASS", ("keep/hide·파생 열 조건·개별 off·깨진 규칙 ✗(데이터셋은 열림)·설정 왕복 · "
+                    "Flag 점 pg=mpl {unstable 1, qc 3} · 리샘플 시 끄고 안내")
 
 
 def main():

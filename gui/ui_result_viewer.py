@@ -27,7 +27,7 @@ import numpy as np
 import pyqtgraph as pg
 from gui.result_viewer_io import (load_result_time_gas, detect,
                                   detect_sep, load_fit_table,
-                                  flag_of, qc_hidden_mask)
+                                  flag_of, qc_hidden_mask, flag_color, FLAG_KEYS)
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QComboBox, QSplitter, QListWidget, QListWidgetItem,
@@ -799,13 +799,9 @@ class ResultViewerWidget(QWidget):
     # ── B2: flag 색 · 세로 스택 레인 ─────────────────────────────────
     # 값은 **절대 지우지 않는다**(헌장 ①) — 색으로만 구분한다. 'Hide QC' 체크박스는
     # 사용자가 명시적으로 켰을 때만 숨기고, 그때도 숨긴 개수를 제목에 적는다.
-    _FLAG_COLOR = {
-        "ok":       None,          # 가스 고유색 그대로
-        "unstable": AUGUR.fail,     # 붉음 — 핏이 흔들린 스캔
-        "settling": AUGUR.faint,     # 회색 — 정착 구간(값은 살아있음)
-        "qc":       AUGUR.warn,      # 주황 — 자동 QC가 걸러낸 스캔
-        "cal":      AUGUR.special,     # 보라 — ZA/He 등 교정 스캔
-    }
+    # ok=가스 고유색 · unstable=붉음(핏 흔들림) · settling=회색(정착 구간, 값은 살아있음)
+    # · qc=주황(자동 QC가 거른 스캔) · cal=보라(ZA/He 교정). 단일 출처: result_viewer_io.flag_color
+    _FLAG_COLOR = {k: flag_color(k) for k in FLAG_KEYS}
 
     _flag_of = staticmethod(flag_of)     # 단일 출처: gui.result_viewer_io.flag_of
 
