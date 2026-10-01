@@ -171,6 +171,7 @@ class MonitorWidget(QWidget):
         # _trend_data[ch][metric]   → list
         self._trend_curves = {}
         self._trend_data   = {}
+        self._last_trend_draw = {}     # ch → monotonic time of last redraw (throttle)
         for ch, col in _CH_COLORS.items():
             pen = pg.mkPen(col, width=1.5)
             lbl = f"CH{ch}"
@@ -516,10 +517,11 @@ class MonitorWidget(QWidget):
         # (which re-uploads the whole array) per scan is O(n²) and freezes the GUI.
         # Append every point but only redraw every ~150ms; flush_plots() forces a
         # final draw at the end. (Harmless in Step mode — scans are slower than 150ms.)
+        # Per channel: a shared timestamp let one channel's scans starve another's redraw.
         import time as _t
-        if (_t.monotonic() - getattr(self, '_last_trend_draw', 0.0)) < 0.15:
+        if (_t.monotonic() - self._last_trend_draw.get(ch, 0.0)) < 0.15:
             return
-        self._last_trend_draw = _t.monotonic()
+        self._last_trend_draw[ch] = _t.monotonic()
         self._redraw_trend(ch)
 
     def _redraw_trend(self, ch):

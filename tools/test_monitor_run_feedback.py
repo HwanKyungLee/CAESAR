@@ -50,6 +50,17 @@ def test_user_x_zoom_survives_live_redraw():
         assert not p.getViewBox().autoRangeEnabled()[0], p
 
 
+def test_trend_throttle_is_per_channel():
+    """R8: a shared throttle timestamp starved the second channel's redraw."""
+    m = _monitor()
+    for i in range(4):
+        for ch in (1, 2):
+            m.update_trend({'idx': i, 'shift': 0.0, 'squeeze': 1.0, 'rms': 1e-4,
+                            'channel': ch, 'Time': f"2026-05-20 00:{i:02d}:00"})
+    for ch in (1, 2):
+        assert m._trend_curves[ch]['sh'].xData is not None, ch
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):
