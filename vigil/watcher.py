@@ -26,6 +26,7 @@ raw 폴더를 폴링해 새로 append된 완성된 줄만 읽어 RowEvent로 흘
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import re
 import time
@@ -35,6 +36,8 @@ from typing import Optional
 
 from vigil.ingest_cursor import IngestCursor
 from vigil.profile import Profile, ProfileSet
+
+log = logging.getLogger("vigil")
 
 
 @dataclass
@@ -88,13 +91,18 @@ class Watcher:
     def __init__(self, watch_dir: str, profiles: ProfileSet, cursor: IngestCursor,
                  file_glob: str = "*.dat",
                  max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
-                 backlog_age_sec: Optional[float] = DEFAULT_BACKLOG_AGE_SEC):
+                 backlog_age_sec: Optional[float] = DEFAULT_BACKLOG_AGE_SEC,
+                 cursor_save_interval_sec: float = 0.0):
         self.watch_dir = watch_dir
         self.profiles = profiles
         self.cursor = cursor
         self.file_glob = file_glob
         self.max_bytes_per_tick = int(max_bytes_per_tick)
         self.backlog_age_sec = backlog_age_sec   # None 이면 건너뛰지 않음(처음부터 다 읽음)
+        # 커서를 디스크에 쓰는 최소 간격. 0 이면 새 행이 있는 poll 마다(파일마다가 아니라 poll 당 1회).
+        # 진입점은 몇 초로 둔다 — 매초 원자적 교체는 백신 잠금 경합과 디스크 소모만 늘린다.
+        self.cursor_save_interval_sec = cursor_save_interval_sec
+        self._last_cursor_save = 0.0
         self._profile_cache: dict = {}   # {path: Profile|False(=매치실패, 재시도 방지)}
         self._warned_dupes: set = set()  # 중복 파일명 경고를 한 번만(폴링 1초 주기)
         self._started = False
@@ -171,7 +179,11 @@ class Watcher:
             chunk = chunk[:complete_len]
         if complete_len == 0:
             return []
-        self.cursor.set(path, offset + complete_len, mtime=os.path.getmtime(path))
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = None
+        self.cursor.set(path, offset + complete_len, mtime=mtime, save=False)
         text = chunk.decode("utf-8", errors="replace")
         return text.split("\n")[:-1]   # split 끝의 빈 문자열(마지막 \n 뒤) 제거
 
@@ -193,10 +205,8 @@ class Watcher:
         for name, group in seen.items():
             if len(group) > 1 and name not in self._warned_dupes:
                 self._warned_dupes.add(name)
-                print(f"[vigil][WARN] 같은 파일명이 {len(group)}곳에 있다 — "
-                      f"같은 스캔을 중복 수집한다: {name}")
-                for p in group:
-                    print(f"[vigil][WARN]     {p}")
+                log.warning("같은 파일명이 %d곳에 있다 — 같은 스캔을 중복 수집한다: %s | %s",
+                            len(group), name, " | ".join(group))
 
 
     def poll(self) -> list:
@@ -240,4 +250,8 @@ class Watcher:
                     arrival_time=datetime.now(), row=row,
                 ))
         self.catching_up = pending
+        now = time.monotonic()
+        if now - self._last_cursor_save >= self.cursor_save_interval_sec:
+            if self.cursor.flush():
+                self._last_cursor_save = now
         return events

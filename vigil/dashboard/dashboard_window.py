@@ -93,6 +93,7 @@ class DashboardWindow(QMainWindow):
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
+        self.log.document().setMaximumBlockCount(2000)   # 몇 주 무인 운용에도 메모리가 안 자라게
         self.log.setMaximumHeight(160)
         self.log.setStyleSheet("font-family:Consolas,monospace; font-size:11px;")
 

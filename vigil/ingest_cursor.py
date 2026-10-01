@@ -9,9 +9,12 @@ Vigil은 raw를 절대 쓰지 않는다(§2 원칙2) — 커서는 별도 상태
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from typing import Optional
+
+log = logging.getLogger("vigil")
 
 
 class IngestCursor:
@@ -25,6 +28,7 @@ class IngestCursor:
     def __init__(self, state_path: str):
         self.state_path = state_path
         self._data: dict = {}
+        self._dirty = False
         self._load()
 
     def _load(self) -> None:
@@ -64,11 +68,26 @@ class IngestCursor:
         여러 파일을 한꺼번에 갱신할 땐 save=False 로 모은 뒤 save() 한 번."""
         key = os.path.abspath(path)
         self._data[key] = {"offset": int(offset), "mtime": float(mtime or 0.0)}
+        self._dirty = True
         if save:
-            self._save()
+            self.save()
 
-    def save(self) -> None:
-        self._save()
+    def save(self) -> bool:
+        """디스크에 쓴다. 실패(백신·인덱서가 cursors.json 을 잡고 있어 os.replace 가
+        PermissionError, 디스크 풀 등)해도 **예외를 던지지 않는다** — 감시 루프가 죽는 것보다
+        다음 기회에 다시 쓰는 게 낫다. 메모리의 오프셋은 그대로라 행이 중복되거나 빠지지 않는다
+        (최악은 재시작 시 마지막 저장 이후 분량을 다시 읽는 것)."""
+        try:
+            self._save()
+        except OSError as e:
+            log.warning("커서 저장 실패(다음에 다시 시도): %s", e)
+            return False
+        self._dirty = False
+        return True
+
+    def flush(self) -> bool:
+        """바뀐 게 있을 때만 저장."""
+        return self.save() if self._dirty else True
 
     def clamp_to_size(self, path: str) -> int:
         """저장된 오프셋이 실제 파일 크기보다 크면(파일이 잘렸다/교체됐다) 0으로

@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from collections import deque
 from datetime import datetime
+
+# LabVIEW 와 같은 PC — BLAS 가 코어를 다 잡지 않게 1 스레드로(설계문서 §8 CPU 예산).
+# numpy/scipy 가 임포트되기 **전**이어야 먹는다(아래 vigil.monitors 가 numpy 를 끌어온다).
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -31,7 +37,14 @@ from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
 from vigil.state_log import StateLog
 from vigil.watcher import DEFAULT_BACKLOG_AGE_SEC, DEFAULT_MAX_BYTES_PER_TICK, Watcher
 
+log = logging.getLogger("vigil")
+
 TREND_MAXLEN = 300   # ponytail: 그래프 표시용 최근 N개 — 부족하면 늘릴 것
+# 이만큼 새 행이 없는 파일은 파일별 상태(표·HK 판정)에서 뺀다. 1 h 파일 rollover 뒤 지난 파일의
+# P1 이 종합 상태를 영원히 붙잡고, 표가 캠페인 내내 늘어나던 것(2026-10-01). 측정 정지 자체는
+# liveness(전체 최신 행 기준)가 따로 잡으므로 여기서 빼도 숨겨지지 않는다.
+RETIRE_AFTER_SEC = 600.0
+CURSOR_SAVE_INTERVAL_SEC = 5.0
 
 
 def _grace_sec_for(profiles: ProfileSet, routed_ids: set) -> float:
@@ -60,13 +73,17 @@ class VigilApp:
 
     def __init__(self, watch_dir: str, profile_dir: str, state_dir: str,
                  dashboard=None, max_bytes_per_tick: int = DEFAULT_MAX_BYTES_PER_TICK,
-                 backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC):
+                 backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC, retire_after_sec: float = RETIRE_AFTER_SEC,
+                 cursor_save_interval_sec: float = CURSOR_SAVE_INTERVAL_SEC):
         self.watch_dir = watch_dir
         self.profiles = ProfileSet.load(profile_dir)
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
         self.watcher = Watcher(watch_dir, self.profiles, self.cursor,
-                               max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec)
+                               max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
+                               cursor_save_interval_sec=cursor_save_interval_sec)
+        self.retire_after_sec = retire_after_sec
+        self._tick_errors = 0              # 연속 tick 예외 수(성공하면 0)
         self._backlog_logged = False
         self._was_catching_up = False
         self.dashboard = dashboard
@@ -246,6 +263,47 @@ class VigilApp:
                 self.dashboard.log_line(msg)
 
     def tick(self) -> None:
+        """QTimer 슬롯. PyQt6 는 슬롯에서 새어 나간 예외에 프로세스를 abort 하므로, 여기서 다
+        받아 로그에 남기고 배지에 띄운 뒤 다음 tick 을 계속 돈다 — 감시기가 조용히 사라지는
+        것이 가장 나쁜 실패다."""
+        try:
+            self._tick()
+        except Exception as e:                # noqa: BLE001
+            self._tick_errors += 1
+            log.exception("tick 실패 (%d회 연속)", self._tick_errors)
+            msg = f"Vigil 내부 오류 {self._tick_errors}회 연속: {type(e).__name__}: {e}"
+            if self._tick_errors == 1:        # 연속 실패의 첫 번만 상태 로그에(매초 쌓이지 않게)
+                self.state_log.append(P1, msg, kind="internal")
+            if self.dashboard is not None:
+                try:
+                    self.dashboard.set_status(P1, msg)
+                    if self._tick_errors == 1:
+                        self.dashboard.log_line(msg)
+                except Exception:             # noqa: BLE001
+                    log.exception("오류 표시도 실패")
+        else:
+            if self._tick_errors:
+                log.info("tick 복구 (%d회 연속 실패 뒤)", self._tick_errors)
+                self.state_log.append(OK, f"Vigil 내부 오류 복구 ({self._tick_errors}회 뒤)",
+                                      kind="internal")
+            self._tick_errors = 0
+
+    def shutdown(self) -> None:
+        """종료 시 미저장 커서를 쓴다(저장 간격 때문에 마지막 몇 초가 메모리에만 있을 수 있다)."""
+        self.cursor.flush()
+
+    def _retire_stale_files(self, now: datetime) -> None:
+        stale = [p for p, t in self._files_seen.items()
+                 if (now - t).total_seconds() > self.retire_after_sec]
+        for p in stale:
+            for d in (self._files_seen, self._hk_status, self._hk_last_status,
+                      self._r_status, self._r_last_status, self._lamp_status,
+                      self._lamp_last_status, self._conc_status, self._conc_last_status,
+                      self.watcher._profile_cache):
+                d.pop(p, None)
+            log.info("파일 퇴역(%.0f분 새 행 없음): %s", self.retire_after_sec / 60, p)
+
+    def _tick(self) -> None:
         events = self.watcher.poll()
         now = datetime.now()
         self._log_ingest_state()
@@ -277,19 +335,20 @@ class VigilApp:
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
         self._last_arrival = latest_arrival(events, self._last_arrival)
+        self._retire_stale_files(now)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
         live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec)
 
+        # HK 는 매 행 판정이라 (퇴역 안 한) 파일별로, R·램프·농도는 교정 주기마다 한 번 나오는
+        # 판정이라 **채널별 최신값**으로 모은다 — 파일 기준이면 rollover 직후 새 파일에 아직
+        # 판정이 없어 진행 중인 R 경보가 종합에서 빠지거나, 지난 파일의 경보가 남는다.
         results = [("liveness", live_status, live_msg, live_metrics)]
         results += [(f"hk:{os.path.basename(p)}", s, m, mt)
                     for p, (s, m, mt) in self._hk_status.items()]
-        results += [(f"r:{os.path.basename(p)}", s, m, mt)
-                    for p, (s, m, mt) in self._r_status.items()]
-        results += [(f"conc:{os.path.basename(p)}", s, m, mt)
-                    for p, (s, m, mt) in self._conc_status.items()]
-        results += [(f"lamp:{os.path.basename(p)}", s, m, mt)
-                    for p, (s, m, mt) in self._lamp_status.items()]
+        for kind, by_channel in (("r", self._r_by_channel), ("conc", self._conc_by_channel),
+                                 ("lamp", self._lamp_by_channel)):
+            results += [(f"{kind}:{key[1]}", s, m, mt) for key, (s, m, mt) in by_channel.items()]
         overall_status, overall_msg = aggregate(results)
 
         if overall_status != self._last_status:
@@ -320,10 +379,10 @@ class VigilApp:
 
 
 def _default_state_dir() -> str:
-    """2026-09-30 Oculus → Vigil 개명. 측정 PC 에 옛 `oculus_state/` 가 있으면 그걸 계속 쓴다 —
-    새 폴더로 가면 커서가 초기화돼 raw 를 처음부터 다시 읽는다."""
-    new, old = os.path.join(_ROOT, "vigil_state"), os.path.join(_ROOT, "oculus_state")
-    return old if (os.path.isdir(old) and not os.path.isdir(new)) else new
+    """소스 실행은 `<repo>/vigil_state`(옛 `oculus_state` 만 있으면 그것), exe 는
+    `%LOCALAPPDATA%\\Vigil`(재배포해도 커서 유지, 옛 위치에서 복사) — vigil/runtime.py."""
+    from vigil.runtime import default_state_dir
+    return default_state_dir(_ROOT)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -331,8 +390,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--dir", required=True, help="감시할 raw .dat 폴더(재귀)")
     ap.add_argument("--profiles", default=DEFAULT_PROFILE_DIR,
                     help=f"인스트루먼트 프로파일 폴더 (기본 {DEFAULT_PROFILE_DIR})")
-    ap.add_argument("--state-dir", default=_default_state_dir(),
-                    help="커서·로그 저장 폴더 (기본 <repo>/vigil_state, 옛 oculus_state 가 있으면 그것)")
+    ap.add_argument("--state-dir", default=None,
+                    help="커서·로그 저장 폴더 (기본: 소스 실행은 <repo>/vigil_state, exe 는 %%LOCALAPPDATA%%\\Vigil)")
     ap.add_argument("--poll-sec", type=float, default=1.0, help="폴링 주기(초, 기본 1.0)")
     ap.add_argument("--max-mb-per-tick", type=float, default=DEFAULT_MAX_BYTES_PER_TICK / 2**20,
                     help="tick 당 읽는 raw 상한(MB, 기본 %(default).0f) — 밀린 분량은 나눠 따라잡는다")
@@ -353,14 +412,32 @@ def main(argv=None) -> int:
             pass
 
     args = build_arg_parser().parse_args(argv)
+    if args.state_dir is None:
+        args.state_dir = _default_state_dir()
     if not os.path.isdir(args.dir):
         print(f"감시 폴더 없음: {args.dir}", file=sys.stderr)
         return 1
 
-    from PyQt6.QtCore import QTimer
-    from PyQt6.QtWidgets import QApplication
+    from vigil import runtime
+    log_path = runtime.setup_logging(args.state_dir)
+    _crash_fh = runtime.install_crash_handlers(args.state_dir)   # noqa: F841 — 끝까지 열어 둔다
+    log.info("Vigil 시작 — dir=%s state=%s log=%s", args.dir, args.state_dir, log_path)
+    if runtime.lower_priority():
+        log.info("프로세스 우선순위: 보통 미만(LabVIEW 우선)")
+    runtime.disable_quickedit()
+
+    from PyQt6.QtCore import QLockFile, QTimer
+    from PyQt6.QtWidgets import QApplication, QMessageBox
 
     app = QApplication(sys.argv[:1])
+
+    # 한 PC 에 Vigil 두 개 금지 — 같은 cursors.json·status.jsonl 에 두 프로세스가 쓰고 CPU 도 두 배.
+    lock = QLockFile(os.path.join(args.state_dir, "vigil.lock"))
+    if not lock.tryLock(100):
+        log.error("이미 실행 중인 Vigil 이 있다 (%s) — 종료", args.state_dir)
+        QMessageBox.warning(None, "Vigil", "Vigil 이 이미 실행 중입니다.\n"
+                            f"(상태 폴더: {args.state_dir})")
+        return 2
 
     # 스플래시 먼저 — 로그 줄은 실제로 끝난 부팅 단계만(gui/splash.py).
     from gui.splash import VigilSplash, set_app_icon
@@ -405,10 +482,15 @@ def main(argv=None) -> int:
     timer = QTimer()
     timer.timeout.connect(core.tick)
     timer.start(int(args.poll_sec * 1000))
+    app.aboutToQuit.connect(core.shutdown)
 
+    win.log_line(f"log: {log_path}")
     win.show()
     splash.finish(win)
-    return app.exec()
+    rc = app.exec()
+    log.info("Vigil 종료 (rc=%s)", rc)
+    lock.unlock()
+    return rc
 
 
 if __name__ == "__main__":

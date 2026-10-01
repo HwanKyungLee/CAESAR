@@ -7,11 +7,14 @@ raw나 Augur output/은 절대 건드리지 않는다.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Optional
 
 from core.provenance import code_version
+
+log = logging.getLogger("vigil")
 
 
 class StateLog:
@@ -32,8 +35,12 @@ class StateLog:
         # lru_cache라 프로세스당 git 호출 1회.
         rec = {"ts": datetime.now().isoformat(timespec="seconds"),
                "status": status, "msg": msg, "code": code_version(), **fields}
-        with open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        line = json.dumps(rec, ensure_ascii=False, default=str) + "\n"
+        try:
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError as e:   # 디스크 풀·잠금 — 감시 루프를 죽이지 않고 파일 로그에라도 남긴다
+            log.warning("상태 로그 기록 실패(%s): %s", e, line.strip())
 
     def tail(self, n: int = 20) -> list:
         """마지막 n개 레코드(대시보드 초기 로그 패널 채우기용). 파일 없으면 빈 리스트."""

@@ -5,7 +5,7 @@ a = Analysis(
     ['vigil/run_vigil.py'],
     pathex=['.'],
     binaries=[],
-    datas=[('vigil/profiles/_schema.json', 'vigil/profiles'), ('vigil/profiles/caesar_cold.example.json', 'vigil/profiles'), ('vigil/profiles/caesar_hot.example.json', 'vigil/profiles'), ('tools/channel_map.json', 'tools')],
+    datas=[('vigil/profiles/_schema.json', 'vigil/profiles'), ('vigil/profiles/caesar_cold.example.json', 'vigil/profiles'), ('vigil/profiles/caesar_cold_6174.example.json', 'vigil/profiles'), ('vigil/profiles/caesar_hot.example.json', 'vigil/profiles'), ('tools/channel_map.json', 'tools')],
     hiddenimports=['tools.optimize_params'],
     hookspath=[],
     hooksconfig={},
