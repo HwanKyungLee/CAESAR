@@ -25,6 +25,8 @@ from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QPainter, QPainter
                          QPolygonF)
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 
+from gui.theme import AUGUR, VIGIL   # 색 토큰의 단일 출처
+
 # NO2(Vandaele 2002)·CHOCHO·H2O(벤치마크 hot_PNs 단면) + O4(Thalman & Volkamer 2013)의
 # 차등 광학두께 합, 421.8–478.3 nm, 220점, |max|=1. 장식용 사본이라 계산에 쓰지 말 것.
 _TAU = (
@@ -238,14 +240,14 @@ class AugurSplash(BootSplash):
     '확정 결과'라는 뜻이라, 스플래시 캡처 한 장이 존재하지 않는 측정값이 되면 안 된다(데이터
     무결성 헌장). 기체 이름은 확정 전엔 흐리고 확정되면 짙어진다."""
     NAME = "AUGUR"
-    COLS = ("#3B63B5", "#5B4FA6", "#7E4A86", "#4C6A7C", "#2F7A8C", "#6A5D9E")
+    COLS = AUGUR.components
 
     def __init__(self, version: str, subtitle: str = "", n_steps: int = 6, species=None):
         serif = _family("Spectral", "Georgia")
         self.THEME = dict(
-            bg="#F4F1EA", ink="#1A1D24", sub="#4A4E57", brand="#B4473A", track="#D8D3C7",
-            fill="#1A1D24", msg="#3B3F48", footer="#9A9A96",
-            log_ok="#1A1D24", log_skip="#9A9A96", log_fail="#B4473A",
+            bg=AUGUR.paper, ink=AUGUR.ink, sub=AUGUR.sub, brand=AUGUR.brand, track=AUGUR.rule,
+            fill=AUGUR.ink, msg=AUGUR.msg, footer=AUGUR.faint,
+            log_ok=AUGUR.ink, log_skip=AUGUR.faint, log_fail=AUGUR.brand,
             word_font=lambda: _font(serif, 30, 700, spacing_px=3.6),
             sub_font=lambda: _font(serif, 11.5, 400, italic=True),
             sub_strong_font=lambda: _font(serif, 11.5, 700))
@@ -337,14 +339,14 @@ class VigilSplash(BootSplash):
     주황·빨강)과 겹치지 않는다."""
     NAME = "VIGIL"
     EMB = ((30, 100), (70, 100), (78, 112), (86, 88), (96, 60), (106, 126), (114, 100), (150, 100))
-    MON = (("ingest", "#7FC3F0"), ("HK", "#8FA8F5"), ("R", "#A99BF0"), ("lamp", "#6FD0DA"), ("conc", "#B7C7DA"))
+    MON = tuple(zip(("ingest", "HK", "R", "lamp", "conc"), VIGIL.monitors))
 
     def __init__(self, version: str, subtitle: str = "", n_steps: int = 6):
         sans = _family("IBM Plex Sans", "Segoe UI")
         self.THEME = dict(
-            bg="#0B0F1A", ink="#DCE1EA", sub="#8A93A3", brand="#7FC3F0", track="#1C2333",
-            fill="#6E7686", msg="#B4BAC6", footer="#4A5264",
-            log_ok="#7FC3F0", log_skip="#6E7686", log_fail="#E5484D",
+            bg=VIGIL.night, ink=VIGIL.text, sub=VIGIL.sub, brand=VIGIL.lamp, track=VIGIL.rule,
+            fill=VIGIL.dim, msg=VIGIL.log, footer=VIGIL.footer,
+            log_ok=VIGIL.lamp, log_skip=VIGIL.dim, log_fail=VIGIL.fail,
             word_font=lambda: _font(sans, 28, 600, spacing_px=6.7),
             sub_font=lambda: _font(sans, 11),
             sub_strong_font=lambda: _font(sans, 11, 600))

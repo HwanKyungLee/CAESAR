@@ -461,6 +461,8 @@ def main(argv=None) -> int:
     from PyQt6.QtWidgets import QApplication, QMessageBox
 
     app = QApplication(sys.argv[:1])
+    from gui.theme import apply_vigil
+    apply_vigil(app)   # 밤·등불 팔레트를 어둡게 고정 + pyqtgraph 기본값(gui/theme.py)
 
     # 한 PC 에 Vigil 두 개 금지 — 같은 cursors.json·status.jsonl 에 두 프로세스가 쓰고 CPU 도 두 배.
     lock = QLockFile(os.path.join(args.state_dir, "vigil.lock"))

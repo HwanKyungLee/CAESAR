@@ -47,7 +47,10 @@ from core.__version__ import __version__
 if __name__ == '__main__':
     # Qt requires one QApplication instance per process before any widgets exist
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")  # Fusion style: clean, modern look on all platforms
+    # Fusion + 종이·잉크 팔레트를 **밝게 고정** — Windows 다크 모드에서 어두운 창에 흰 바탕
+    # 위젯이 섞여 흰 글씨가 묻히던 것(gui/theme.py).
+    from gui.theme import apply_augur
+    apply_augur(app)
 
     # ── Splash screen ────────────────────────────────────────────────────────
     # Show it FIRST, before any heavy import or window build. Every log line on it

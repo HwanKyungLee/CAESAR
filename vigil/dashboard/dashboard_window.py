@@ -17,30 +17,35 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from gui.theme import VIGIL, mono_family
 from vigil.alert_engine import OK, P0, P1, P2, SKIP
 
-pg.setConfigOption('background', 'w')
-pg.setConfigOption('foreground', 'k')
-
-_BADGE_STYLE = {
-    OK:   "background:#2E7D32; color:white;",
-    P2:   "background:#F9A825; color:black;",
-    P1:   "background:#E65100; color:white;",
-    P0:   "background:#C62828; color:white;",
-    SKIP: "background:#78909C; color:white;",
+# 밤·등불 테마(gui/theme.py). 등급은 **색 + 모양 + 글자** 셋으로 구분한다 — 색만으로는
+# 색각이상·흑백 캡처·멀리서 본 화면에서 갈린다. 평상시(OK) 배지는 조용한 밤 바탕에 등불색
+# 선 하나 — 브랜드 청색이 경보색처럼 보이면 안 되고, 경보일 때만 배지 전체가 색으로 찬다.
+_LEVEL = {   # status → (모양, 글자, 색)
+    OK:   ("●", "OK", VIGIL.ok),
+    P2:   ("▲", "P2", VIGIL.p2),
+    P1:   ("◆", "P1", VIGIL.p1),
+    P0:   ("■", "P0", VIGIL.p0),
+    SKIP: ("○", "대기", VIGIL.skip),
 }
-_BADGE_ICON = {OK: "🟢", P2: "🟡", P1: "🟠", P0: "🔴", SKIP: "⏳"}
-_CELL_COLOR = {OK: None, P2: QColor("#B36B00"), P1: QColor("#E65100"),
-              P0: QColor("red"), SKIP: None}
+_BADGE_BASE = " font-size:18px; font-weight:600; padding:12px 16px;"
+_BADGE_STYLE = {
+    OK:   f"background:{VIGIL.surface}; color:{VIGIL.text}; border-left:6px solid {VIGIL.lamp};",
+    P2:   f"background:{VIGIL.p2}; color:{VIGIL.night};",
+    P1:   f"background:{VIGIL.p1}; color:{VIGIL.night};",
+    P0:   f"background:{VIGIL.p0}; color:#FFFFFF;",
+    SKIP: f"background:{VIGIL.surface}; color:{VIGIL.dim}; border-left:6px solid {VIGIL.rule};",
+}
 
 _COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R", "Lamp", "Conc"]
 
-# 채널/가스/HK필드 커브에 순환 배정하는 정성 팔레트(gui/monitor_widget.py의 3채널 팔레트보다
-# 종류가 많아야 함 — 레퍼런스 가스 수가 FitSet마다 다르므로).
-_PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-           '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-_WARN_COLOR = '#F9A825'
-_ALARM_COLOR = '#C62828'
+# 채널/가스/HK필드 커브에 순환 배정하는 팔레트 — 등불·감시기 청색 계열만. 노랑·주황·빨강은
+# 임계선 전용이라 곡선에 쓰지 않는다(평범한 곡선이 경보처럼 보이던 것, 2026-10-01).
+_PALETTE = list(VIGIL.curves)
+_WARN_COLOR = VIGIL.p2
+_ALARM_COLOR = VIGIL.p0
 
 
 class DashboardWindow(QMainWindow):
@@ -60,12 +65,15 @@ class DashboardWindow(QMainWindow):
         root = QWidget()
         lay = QVBoxLayout(root)
 
-        self.badge = QLabel("⏳ 초기화 중…")
-        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + " font-size:20px; font-weight:bold; padding:12px;")
+        self._base_title = title
+        self.badge = QLabel(f"{_LEVEL[SKIP][0]}  초기화 중…")
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
         self.btn_run = QPushButton("■ Stop")
         self.btn_run.setMinimumWidth(110)
-        self.btn_run.setStyleSheet("font-size:15px; font-weight:bold; padding:10px;")
+        self.btn_run.setStyleSheet(
+            f"font-size:15px; font-weight:600; padding:10px; color:{VIGIL.text};"
+            f" background:{VIGIL.button}; border:1px solid {VIGIL.rule};")
         self.btn_run.setToolTip("감시 정지/재개 — 정지 중에도 raw 는 쌓이고, 재개하면 밀린 줄부터 이어 읽는다")
         self.btn_run.clicked.connect(self._toggle_run)
         top = QHBoxLayout()
@@ -80,25 +88,29 @@ class DashboardWindow(QMainWindow):
         self.p_conc.setLabel('left', 'Concentration (ppb)')
         self.p_conc.addLegend(offset=(10, 10))
         self.p_conc.showGrid(x=True, y=True, alpha=0.2)
+        self.p_conc.setTitle("농도 — ZA(I₀) 구간이 지나면 표시", color=VIGIL.dim, size="10pt")
         grid.addWidget(self.p_conc, 0, 0)
 
         self.p_r = pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')})
         self.p_r.setLabel('left', 'R')
         self.p_r.addLegend(offset=(10, 10))
         self.p_r.showGrid(x=True, y=True, alpha=0.2)
+        self.p_r.setTitle("R — ZA/He 교정이 끝나면 표시", color=VIGIL.dim, size="10pt")
         grid.addWidget(self.p_r, 0, 1)
 
         self.p_hk = pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom')})
         self.p_hk.setLabel('left', 'HK')
         self.p_hk.addLegend(offset=(10, 10))
         self.p_hk.showGrid(x=True, y=True, alpha=0.2)
+        self.p_hk.setTitle("HK — 첫 행 대기 중", color=VIGIL.dim, size="10pt")
         grid.addWidget(self.p_hk, 1, 0)
 
         self.table = QTableWidget(0, len(_COLUMNS))
         self.table.setHorizontalHeaderLabels(_COLUMNS)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for col in (3, 4, 5, 6):
-            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        # 상태 칸은 이제 '◆ P1' 처럼 짧다 — 내용 폭으로 두고 남는 폭은 파일명에.
+        for col in (1, 2, 3, 4, 5, 6):
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
@@ -106,7 +118,8 @@ class DashboardWindow(QMainWindow):
         self.log.setReadOnly(True)
         self.log.document().setMaximumBlockCount(2000)   # 몇 주 무인 운용에도 메모리가 안 자라게
         self.log.setMaximumHeight(160)
-        self.log.setStyleSheet("font-family:Consolas,monospace; font-size:11px;")
+        self.log.setStyleSheet(f"font-family:'{mono_family()}',monospace; font-size:11px;"
+                               f" color:{VIGIL.log};")
 
         right_panel = QWidget()
         right_lay = QVBoxLayout(right_panel)
@@ -140,8 +153,9 @@ class DashboardWindow(QMainWindow):
         self.btn_run.setText("■ Stop" if running else "▶ Start")
         if not running:
             # 정지 배지는 '경보'가 아니라 '사용자가 멈춤' — 경보색을 쓰지 않는다
-            self.badge.setText("⏸ 감시 정지됨 — Start 를 누르면 읽기 시작(밀린 줄부터)")
-            self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + " font-size:20px; font-weight:bold; padding:12px;")
+            self.badge.setText("⏸  감시 정지됨 — Start 를 누르면 읽기 시작(밀린 줄부터)")
+            self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
+            self.setWindowTitle(f"[정지] {self._base_title}")
 
     def _toggle_run(self) -> None:
         self.set_running(self._paused)
@@ -151,19 +165,22 @@ class DashboardWindow(QMainWindow):
         """종합 상태 배지 갱신(liveness + HK + R 등 전체 aggregate 결과). 정지 중엔 무시한다."""
         if self._paused:
             return
-        self.badge.setText(f"{_BADGE_ICON.get(status, '?')} {msg}")
-        self.badge.setStyleSheet(
-            _BADGE_STYLE.get(status, _BADGE_STYLE[SKIP])
-            + " font-size:20px; font-weight:bold; padding:12px;")
+        glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
+        self.badge.setText(f"{glyph}  {level}   {msg}")
+        self.badge.setStyleSheet(_BADGE_STYLE.get(status, _BADGE_STYLE[SKIP]) + _BADGE_BASE)
+        # 작업표시줄에서도 보이게: 경보면 창 제목 앞에 등급, P0 전이 순간엔 작업표시줄 깜빡임+삑
+        self.setWindowTitle(f"[{level}] {self._base_title}" if status in (P0, P1, P2) else self._base_title)
         if status == P0 and self._last_status != P0:
             QApplication.beep()   # P0로의 전이 순간에만 (매 tick 울리지 않게)
+            QApplication.alert(self)
         self._last_status = status
 
     def _status_item(self, status, msg) -> QTableWidgetItem:
-        item = QTableWidgetItem(f"{_BADGE_ICON.get(status, '⏳')} {msg or '—'}")
-        color = _CELL_COLOR.get(status)
-        if color is not None:
-            item.setForeground(color)
+        glyph, level, color = _LEVEL.get(status, _LEVEL[SKIP])
+        # 칸엔 등급만(좁은 칸에서 '◆ P…'로 잘리던 것) — 설명은 툴팁·아래 로그에.
+        item = QTableWidgetItem(f"{glyph} {level}")
+        if status in (P0, P1, P2, SKIP) or status is None:
+            item.setForeground(QColor(color))
         if msg:
             item.setToolTip(msg)          # 셀이 좁아 잘린 메시지를 마우스로 다 볼 수 있게
         return item
@@ -183,7 +200,7 @@ class DashboardWindow(QMainWindow):
             lag_str = f"{lag:.1f}" if lag is not None else "—"
             lag_item = QTableWidgetItem(lag_str)
             if lag is not None and lag > 10.0:
-                lag_item.setForeground(QColor("red"))
+                lag_item.setForeground(QColor(VIGIL.p0))
             self.table.setItem(i, 2, lag_item)
             self.table.setItem(i, 3, self._status_item(info.get("hk_status"), info.get("hk_msg")))
             self.table.setItem(i, 4, self._status_item(info.get("r_status"), info.get("r_msg")))
@@ -210,6 +227,7 @@ class DashboardWindow(QMainWindow):
                     pen = pg.mkPen(self._color_for(ck), width=2.5 if is_target else 1.0)
                     name = f"{label}:{gas}" + (" ★" if is_target else "")
                     item = self.p_conc.plot(pen=pen, name=name)
+                    self.p_conc.setTitle(None)
                     self._curve_items[ck] = item
                 ys = [gd.get(gas, float('nan')) for _t, gd in dq]
                 item.setData(xs, ys)
@@ -241,6 +259,7 @@ class DashboardWindow(QMainWindow):
             item = self._curve_items.get(ck)
             if item is None:
                 item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1.5), name=label)
+                self.p_r.setTitle(None)
                 self._curve_items[ck] = item
             item.setData(xs, ys)
 
@@ -269,6 +288,7 @@ class DashboardWindow(QMainWindow):
             item = self._curve_items.get(ck)
             if item is None:
                 item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1.5), name=name)
+                self.p_hk.setTitle(None)
                 self._curve_items[ck] = item
             item.setData(xs, ys)
 
