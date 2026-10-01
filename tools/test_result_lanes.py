@@ -52,14 +52,21 @@ _ROWS = [
 ]
 
 
+_STEM = "260904_CH1_PNs_r3f8a1"
+# alpha row_idx column values are NOT positions (real files: 0, 258, 310, …) — 2026-10-02 R3
+_ALPHA_IDS = (0, 258, 310, 400, 512)
+
+
 def _write_fit(d):
-    p = os.path.join(d, "260904_CH1_PNs_r3f8a1.dat")
+    p = os.path.join(d, _STEM + ".dat")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write(_HDR + _COLS)
-        for r in _ROWS:
+        for k, r in enumerate(_ROWS):
             # File Time Channel RMS Chi2 SNR Status Shift Squeeze <gases…>
+            # File = "<alpha> [NNNN]" as the worker writes it: NNNN = alpha data-row position
             fh.write("\t".join(str(v) for v in
-                               (r[0], r[1], 1, r[2], 1.05, 120.0, *r[3:])) + "\n")
+                               (f"{_STEM}_alpha_trace.dat [{k:04d}]", r[1], 1, r[2], 1.05, 120.0,
+                                *r[3:])) + "\n")
     return p
 
 
@@ -72,7 +79,7 @@ def _write_alpha(d, stem):
         fh.write("row_idx\tT_C\tP_mbar\t" + "\t".join(f"px{700+i}" for i in range(12)) + "\n")
         for i in range(len(_ROWS)):
             vals = "\t".join(f"{1e-7 * (i + 1) * (j + 1):.6e}" for j in range(12))
-            fh.write(f"{i}\t25.0\t1013.0\t{vals}\n")
+            fh.write(f"{_ALPHA_IDS[i]}\t25.0\t1013.0\t{vals}\n")
     return p
 
 
@@ -140,13 +147,19 @@ def test_lanes_and_click(w):
     title = w._pw_detail.plotItem.titleLabel.text
     assert "row 1" in title and "Unstable" in title, title
     assert "NO2 9.9" in title, title
-    assert len(w._pw_detail.plotItem.listDataItems()) == 1, "alpha 스펙트럼이 안 그려졌다"
+    items = w._pw_detail.plotItem.listDataItems()
+    assert len(items) == 1, "alpha 스펙트럼이 안 그려졌다"
+    # the File cell's position picks the scan — data row 1 (row_idx 258), not row_idx 1
+    assert abs(items[0].yData[0] - 2e-7) < 1e-12, items[0].yData[:3]
     assert not w._stack_host.isHidden(), "상세를 띄우느라 시계열이 사라지면 안 된다"
 
     # alpha 형제 파일이 없어도 수치 요약은 뜨고 죽지 않는다
     os.remove(os.path.join(d, "260904_CH1_PNs_r3f8a1_alpha_trace.dat"))
     w._show_scan_detail(2)
-    assert "row 2" in w._pw_detail.plotItem.titleLabel.text
+    title = w._pw_detail.plotItem.titleLabel.text
+    assert "row 2" in title and "not found" in title, title
+    assert not w._pw_detail.plotItem.listDataItems(), "drew a spectrum from the wrong file"
+    assert ResultViewerWidget._sibling_alpha(fit) is None, "the fit .dat is not its own alpha"
 
 
 def test_real_click_opens_detail(w):

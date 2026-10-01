@@ -1081,7 +1081,8 @@ class ResultViewerWidget(QWidget):
         except Exception:
             return
 
-        bits = [f"row {row_idx}"]
+        files = t.get("file")
+        bits = [f"row {row_idx}"] + ([str(files[j])] if files is not None and j < len(files) else [])
         st = (t.get("status") or [None] * (j + 1))[j]
         if st:
             bits.append(str(st))
@@ -1095,27 +1096,85 @@ class ResultViewerWidget(QWidget):
             if np.isfinite(y[j]):
                 bits.append(f"{g} {y[j]:.4g}")
 
-        alpha_path = self._sibling_alpha(self._path)
-        if not alpha_path:
-            # α가 없어도 수치 요약은 보여준다 — 클릭이 아무 반응 없는 것보다 낫다.
-            self._pw_detail.setTitle("  ·  ".join(bits)
-                                     + "   |   no sibling alpha_trace.dat -> no spectrum")
-            self._stats_lbl.setText(f"row {row_idx}: sibling alpha_trace.dat not found")
-            return
-        from gui.result_viewer_io import read_alpha_trace
-        wave, alpha = read_alpha_trace(alpha_path, want_id=row_idx)
+        alpha_path, wave, alpha, alpha_id, why = self._alpha_row(j)
         if alpha is None:
-            self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   row {row_idx} not in alpha_trace")
+            # α가 없어도 수치 요약은 보여준다 — 클릭이 아무 반응 없는 것보다 낫다.
+            self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   {why} -> no spectrum")
+            self._stats_lbl.setText(f"row {row_idx}: {why}")
             return
         xs = wave if (wave is not None and len(wave) == len(alpha)) else np.arange(len(alpha))
         self._pw_detail.plot(xs, alpha, pen=pg.mkPen(AUGUR.info, width=1.4),
-                             name=f"alpha (row {row_idx})")
+                             name=f"alpha (row_idx {alpha_id})")
         self._pw_detail.setLabel("left", "alpha (cm^-1)")
         self._pw_detail.setLabel(
             "bottom", "Wavelength (nm)" if (wave is not None and len(wave) == len(alpha))
             else "Pixel")
         self._pw_detail.setTitle("  ·  ".join(bits))
-        self._draw_residual(j, row_idx, alpha_path)
+        if why:            # spectrum found, but refit-by-row_idx would be ambiguous
+            self._pw_resid.setTitle(f"Residual unavailable: {why}")
+            return
+        self._draw_residual(j, alpha_id, alpha_path)
+
+    def _alpha_row(self, j):
+        """α spectrum behind fit row j → (alpha_path, wave, alpha, alpha row_idx value, why).
+        alpha is None when not found; `why` says what is missing (shown to the user).
+
+        GUI report: the File cell names the source file and the data-row *position* the
+        worker fit — the table's own row number is not an alpha row (2026-10-02 audit R2/R3).
+        alpha-fit table (row_idx column): row_idx is the alpha file's row_idx value."""
+        t = self._fit_cache
+        files = t.get("file")
+        if files is None:
+            rid = int(t["row_idx"][j])
+            path = self._sibling_alpha(self._path)
+            if not path:
+                return None, None, None, rid, "no sibling *_alpha_trace.dat"
+            from gui.result_viewer_io import read_alpha_trace
+            wave, alpha = read_alpha_trace(path, want_id=rid)
+            return path, wave, alpha, rid, ("" if alpha is not None
+                                            else f"row_idx {rid} not in {os.path.basename(path)}")
+        from gui.result_viewer_io import parse_file_cell
+        src = parse_file_cell(files[j] if j < len(files) else "")
+        if src is None:
+            return None, None, None, None, f"File cell {files[j]!r} names no source row"
+        name, pos = src
+        if "alpha_trace" not in name.lower():
+            return None, None, None, None, f"source {name} is raw, not an alpha_trace"
+        path = self._find_source(name)
+        if path is None:
+            return None, None, None, None, (f"{name} not found (looked next to the fit file, "
+                                            "3 parent folders, last data/alpha folders)")
+        from core.data_io import DataIO
+        try:
+            wave, alpha, _T, _P = DataIO.load_alpha_trace_row_full(path, pos)
+            rows = DataIO._alpha_file(path)[2]      # same data-row list the worker indexed
+        except Exception as e:                      # noqa: BLE001 — shown, not raised
+            return None, None, None, None, f"{name} row {pos}: {e}"
+        rid_s = rows[pos].split("\t", 1)[0]
+        try:
+            rid = int(float(rid_s))
+        except ValueError:
+            rid = None
+        ids = [r.split("\t", 1)[0] for r in rows]
+        why = ("" if rid is not None and ids.count(rid_s) == 1 else
+               f"row_idx {rid_s!r} not unique in {name} - refit looks rows up by row_idx")
+        return path, wave, alpha, rid, why
+
+    def _find_source(self, name):
+        """Locate a File-cell source by basename: fit folder, 3 parents, last data/alpha folders.
+        The fit file itself is never a candidate."""
+        from gui.dlg_dir import dlg_dir
+        me = os.path.abspath(self._path)
+        dirs, d = [], os.path.dirname(me)
+        for _ in range(4):
+            dirs.append(d)
+            d = os.path.dirname(d)
+        dirs += [dlg_dir("data"), dlg_dir("alpha_out")]
+        for d in dirs:
+            c = os.path.join(d, name) if d else ""
+            if c and os.path.isfile(c) and os.path.abspath(c) != me:
+                return c
+        return None
 
     def _draw_residual(self, j, row_idx, alpha_path):
         """그 행을 **그때 설정(.meta.json)** 으로 재핏해 잔차를 그린다.
@@ -1163,16 +1222,17 @@ class ResultViewerWidget(QWidget):
 
     @staticmethod
     def _sibling_alpha(fit_path):
-        """`*_fit.tsv` 옆의 대응 `*_alpha_trace.dat` 경로 추정."""
+        """`*_fit.tsv` 옆의 대응 `*_alpha_trace.dat` 경로 추정 (never the fit file itself —
+        the old `stem + ".dat"` candidate returned a `.dat` fit result as its own alpha)."""
         base = os.path.basename(fit_path)
         stem = base[:-8] if base.endswith("_fit.tsv") else os.path.splitext(base)[0]
         d = os.path.dirname(fit_path)
-        cands = [os.path.join(d, stem + "_alpha_trace.dat"),
-                 os.path.join(d, stem + ".dat")]
+        cands = [os.path.join(d, stem + "_alpha_trace.dat")]
         import glob
         cands += glob.glob(os.path.join(d, stem + "*alpha_trace.dat"))
+        me = os.path.abspath(fit_path)
         for c in cands:
-            if os.path.isfile(c):
+            if os.path.isfile(c) and os.path.abspath(c) != me:
                 return c
         return None
 

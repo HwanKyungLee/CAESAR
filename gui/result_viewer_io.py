@@ -76,6 +76,14 @@ def detect(path: str) -> str:
     return "array"
 
 
+def parse_file_cell(s):
+    """Fit-report File cell `"x_alpha_trace.dat [0016]"` → ("x_alpha_trace.dat", 16), else None.
+    The number is the data-row *position* in that source (worker: expand_to_scan_list)."""
+    import re
+    m = re.match(r"^(.*?)\s*\[(\d+)\]\s*$", str(s or ""))
+    return (m.group(1), int(m.group(2))) if m and m.group(1) else None
+
+
 def read_numeric(path, sep=None):
     return np.loadtxt(path, comments="#", delimiter=sep, ndmin=2)
 
@@ -349,6 +357,10 @@ def _load_fit_table_uncached(path):
                "errs": {g: (colf_r(idx[g + "_Error"]) if (g + "_Error") in idx else None)
                         for g in gases},
                "status": status, "channel": channel, "path": path,
+               # File cell "<source> [NNNN]" = source file + data-row position the worker fit
+               # (scan detail needs it; row_idx here is just the row number in this table).
+               "file": ([r[idx["File"]] if idx["File"] < len(r) else "" for r in rows]
+                        if "File" in idx else None),
                # B2: shift/squeeze 레인용. 전역 컬럼(Shift/Squeeze)이 있으면 그걸,
                # 없으면 첫 가스의 것으로 폴백(구 포맷). 없으면 None.
                "shift": (colf_r(idx["Shift"]) if "Shift" in idx else
