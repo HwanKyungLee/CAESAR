@@ -451,9 +451,6 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.chk_allow_neg.setChecked(True)
 
         self.ref_props = {}
-        btn_props = QPushButton("Properties")
-        btn_props.setStyleSheet("font-weight: bold;")
-        btn_props.clicked.connect(self.open_ref_properties)
 
         self.spin_rms_thresh = QDoubleSpinBox()
         self.spin_rms_thresh.setRange(1.0, 50.0)
@@ -551,7 +548,6 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         _pg.addWidget(_lbl("Step"), 0, 0); _pg.addWidget(self.spin_step_limit, 0, 1)
         _pg.addWidget(_lbl("Poly Deg"),  0, 2); _pg.addWidget(self.spin_poly_deg,  0, 3)
         _pg.addWidget(self.chk_allow_neg, 0, 4, 1, 2)
-        _pg.addWidget(btn_props,         0, 6, 1, 2)
         # r1: QC 핵심 + 정착 스캔 제외(⏱ Settling, N)
         _pg.addWidget(self.chk_qc,        1, 0, 1, 2)
         _pg.addWidget(_lbl("K"),     1, 2); _pg.addWidget(self.spin_qc_k,      1, 3)
@@ -570,14 +566,13 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # shift/squeeze link 정책은 피팅 결과를 좌우하는 1급 결정인데 지금껏
         # ⚙️ Properties 팝업 안에만 있었고 메인엔 위 한 줄 요약뿐이었다.
         # 논문 방식("NO2를 맞추고 나머지는 그 값에 link")이 화면에서 안 보였다.
-        # 팝업은 그대로 남는다 — 넓은 창 + Cancel 되돌리기가 필요한 경우가 있다.
-        self._btn_shsq_tbl = QPushButton("▼ Reference policy (Shift / Squeeze / T / bands)")
+        # The Properties button was dropped (2026-10-01): this table is the single editor.
+        self._btn_shsq_tbl = QPushButton("▶ Reference policy (Shift / Squeeze / T / bands)")
         self._btn_shsq_tbl.setFlat(True)
         self._btn_shsq_tbl.setStyleSheet(f"text-align:left; color:{AUGUR.info}; font-weight:bold;")
         self._btn_shsq_tbl.setToolTip(
-            "Per-gas fitting policy, always visible and editable here.\n"
-            "Edits apply immediately (no OK button) — use  Properties if you want\n"
-            "a wider view with Cancel.")
+            "Per-gas fitting policy, editable here (collapsed by default).\n"
+            "Edits apply immediately (no OK button).")
         self._btn_shsq_tbl.clicked.connect(self._toggle_shsq_table)
         lay_calib_main.addWidget(self._btn_shsq_tbl)
 
@@ -588,8 +583,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.tbl_shsq.changed.connect(self._on_shsq_table_changed)
         # 명시적 플래그 — isVisible()은 부모 탭이 숨으면 False라 토글이 어긋난다
         # (이 파일의 _adv_params_visible과 같은 방식).
-        self._shsq_table_visible = True
-        self.tbl_shsq.setVisible(True)
+        self._shsq_table_visible = False
+        self.tbl_shsq.setVisible(False)
         lay_calib_main.addWidget(self.tbl_shsq)
 
         # ── ADVANCED (접이, 기본 닫힘): 우리 데이터엔 보통 불필요한 것 ──

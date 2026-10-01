@@ -53,7 +53,7 @@ class ResultsQCMixin:
         return "Sh/Sq:  " + "  │  ".join(one(g) for g in gases)
 
     def _toggle_shsq_table(self):
-        show = not getattr(self, '_shsq_table_visible', True)
+        show = not getattr(self, '_shsq_table_visible', False)
         self._shsq_table_visible = show
         self.tbl_shsq.setVisible(show)
         self._btn_shsq_tbl.setText(
