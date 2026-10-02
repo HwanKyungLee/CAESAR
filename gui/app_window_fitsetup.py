@@ -562,6 +562,12 @@ class FitSetupMixin:
 
         After locking, the engine is ready to call get_basis_matrix() for fitting.
         """
+        # Keep the previously locked state: if rows exist but none of them loads (bad files),
+        # restore it instead of leaving an empty engine (UX audit 2026-10-02). The engine object
+        # is shared (monitor etc.), so restore its contents in place rather than swapping it.
+        import copy as _copy
+        _prev_state = _copy.deepcopy(self.engine.__dict__)
+        n_attempted = sum(1 for w in self.ref_widgets if w['n'].text() and w['fp'])
         self.engine.clear_engine()
         success_count = 0
         
@@ -629,11 +635,19 @@ class FitSetupMixin:
                     "font-weight: bold;")
             self._refresh_setup_status()
             self._refresh_shsq_summary()
+        elif n_attempted:
+            self.engine.__dict__.update(_prev_state)
+            msg = (f"None of the {n_attempted} reference(s) could be loaded — the previously locked "
+                   f"set ({', '.join(self.engine.gas_list) or 'none'}) is kept. See the console for the reasons.")
+            if silent:
+                self.status.setText(msg)
+            else:
+                QMessageBox.warning(self, "Lock failed", msg)
         else:
             if silent:
                 self.status.setText("no references to lock (channel switch)")
             else:
-                QMessageBox.warning(self, "Error", "No valid references found to lock, or an error occurred.")
+                QMessageBox.warning(self, "Error", "No references to lock — the engine is now empty.")
 
 
     # ---------------------------------------------------------
