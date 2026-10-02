@@ -54,7 +54,7 @@ class MinuteRecorder:
             with open(self._path, "ab") as fh:
                 fh.write(struct.pack(f"<d{len(row)}f", float(now_epoch), *row))
             return True
-        except OSError as e:       # 기록 실패가 감시를 멈추면 안 된다
+        except (OSError, ValueError) as e:       # 기록 실패가 감시를 멈추면 안 된다
             log.warning("minute record write failed: %s", e)
             return False
 
@@ -67,16 +67,35 @@ class MinuteRecorder:
             meta_path = path + ".json"
             if not os.path.exists(meta_path):
                 break
-            with open(meta_path, encoding="utf-8") as fh:
-                if json.load(fh).get("columns") == columns:
-                    break                   # 같은 열 구성이면 이어 쓴다(재시작)
+            try:
+                with open(meta_path, encoding="utf-8") as fh:
+                    if json.load(fh).get("columns") == columns:
+                        break               # 같은 열 구성이면 이어 쓴다(재시작)
+            except ValueError:              # 깨진 메타(쓰다 죽음) — 그 파일은 두고 다음 번호로
+                log.warning("minute record meta unreadable, starting a new file: %s", meta_path)
             n += 1
         if not os.path.exists(meta_path):
             meta = {"version": VERSION, "columns": columns, "interval_sec": self.interval,
                     "record": "float64 epoch_utc_s + float32 x len(columns), little-endian",
                     "status_codes": STATUS_CODE, "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-            with open(meta_path, "w", encoding="utf-8") as fh:
+            tmp = meta_path + ".tmp"        # 원자적 — 쓰다 죽어도 깨진 메타가 남지 않게
+            with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(meta, fh, ensure_ascii=False, indent=1)
+            os.replace(tmp, meta_path)
+        else:
+            # 이어 쓰기 전에 잘린 꼬리(정전으로 반쯤 쓴 레코드)를 레코드 경계로 자른다. 안 그러면
+            # 뒤에 붙는 레코드가 전부 어긋나 그날 나머지가 쓰레기로 읽힌다. 잘라내는 바이트는
+            # 원래도 read_records 가 버리는, 값이 될 수 없는 조각이다.
+            rec = 8 + 4 * len(columns)
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            if size % rec:
+                with open(path, "r+b") as fh:
+                    fh.truncate(size - size % rec)
+                log.warning("minute record had a torn last record (%d bytes) — trimmed before appending: %s",
+                            size % rec, path)
         self._path, self._columns = path, columns
 
 
