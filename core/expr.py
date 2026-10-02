@@ -40,10 +40,30 @@ FUNCS = {
 }
 CONSTS = {"nan": np.nan, "inf": np.inf, "pi": np.pi}
 
+def _truth(v):
+    """원소별 참/거짓 — **NaN 은 거짓**(eval_mask 규약과 같게). np.logical_and(nan, 1)은 True 라
+    `(Flag == "ok") & RMS` 가 RMS=NaN 행을 남기고 있었다."""
+    a = np.asarray(v)
+    if a.dtype.kind == "b":
+        return a
+    if a.dtype.kind in "USO":
+        raise ExprError("& | ~ need conditions, not text (compare it: Flag == \"ok\")")
+    a = a.astype(float)
+    return np.isfinite(a) & (a != 0)
+
+
+def _power(a, b):
+    """거듭제곱은 **실수로**. np.power 는 파이썬 int 를 int64 로 계산해 넘치면 조용히 틀린다
+    (10**20 → 7.77e18, 2**63 → 음수, 10**400 → 0) — `NO2 * 2.46 * 10**19` 단위 환산이 2.2배
+    틀렸다. 정수 ** 음수 정수는 ValueError 였다."""
+    return np.power(np.asarray(a, dtype=float), np.asarray(b, dtype=float))
+
+
 _BIN = {
     ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply,
-    ast.Div: np.divide, ast.Pow: np.power,
-    ast.BitAnd: np.logical_and, ast.BitOr: np.logical_or,
+    ast.Div: np.divide, ast.Pow: _power,
+    ast.BitAnd: lambda a, b: np.logical_and(_truth(a), _truth(b)),
+    ast.BitOr: lambda a, b: np.logical_or(_truth(a), _truth(b)),
 }
 _CMP = {
     ast.Lt: np.less, ast.LtE: np.less_equal, ast.Gt: np.greater,
@@ -103,7 +123,7 @@ def safe_eval(expr, variables):
             if isinstance(n.op, ast.UAdd):
                 return v
             if isinstance(n.op, ast.Invert):
-                return np.logical_not(v)
+                return np.logical_not(_truth(v))
             raise ExprError("Use ~ instead of 'not' (element-wise)")
         if isinstance(n, ast.Compare):
             left = ev(n.left)
@@ -143,7 +163,15 @@ def safe_eval(expr, variables):
         raise ExprError(f"Expression not allowed: {type(n).__name__}")
 
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        return ev(node)
+        try:
+            return ev(node)
+        except ExprError:
+            raise
+        except (TypeError, ValueError, ArithmeticError) as e:
+            # 데이터 의존 오류(숫자 열 == "글자", 글자 열에 mean(), 모양 불일치 …)도 **식의 오류**로
+            # 올린다 — 호출측(Plot Maker 필터·파생 열)은 ExprError 만 잡아 그 규칙만 ✗ 로 표시하는데,
+            # 다른 예외가 새면 데이터셋 전체가 'missing' 이 됐다.
+            raise ExprError(f"Cannot evaluate: {e}") from e
 
 
 def eval_column(expr, variables, n):
@@ -153,7 +181,10 @@ def eval_column(expr, variables, n):
     a = np.asarray(v)
     if a.dtype.kind in "USO":
         raise ExprError("Result is text, not numbers (compare it: Flag == \"ok\")")
-    a = a.astype(float)
+    try:
+        a = a.astype(float)
+    except (TypeError, ValueError) as e:
+        raise ExprError(f"Result is not numeric: {e}") from e
     if a.ndim == 0:
         return np.full(n, float(a))
     if a.shape != (n,):
