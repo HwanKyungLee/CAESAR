@@ -140,21 +140,27 @@ class ResultsQCMixin:
         self.table.setItem(row, c + 2, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
         self.table.setItem(row, c + 3, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
         self.table.setItem(row, c + 4, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
-        item_status = QTableWidgetItem(str(result_dict.get('Status', '')))
-        try:
-            status = result_dict.get('Status', '')
-            if status not in ("OK", "Recovered"):
-                item_status.setBackground(QColor(AUGUR.fail_bg)); item_status.setForeground(QColor(AUGUR.ink))
-            elif status == "Recovered":
-                item_status.setBackground(QColor(AUGUR.warn_bg)); item_status.setForeground(QColor(AUGUR.ink))
-        except Exception:
-            pass
-        self.table.setItem(row, c + 5, item_status)
+        self.table.setItem(row, c + 5, self._status_item(result_dict.get('Status', '')))
         for i, gas_name in enumerate(self.engine.gas_list):
             self.table.setItem(row, c + 6 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
         go = len(self.engine.gas_list)
         self.table.setItem(row, c + 6 + go,     QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
         self.table.setItem(row, c + 6 + go + 1, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
+
+    @staticmethod
+    def _status_item(status):
+        """Status cell coloured by its head label (text before ' · '), the
+        core.result_io.quality_label convention: notes such as 'OK · AT_BOUND' keep
+        the OK colour; only Recovered warns and every other head (Unstable, QC-…,
+        Settling, Error…) is a failure."""
+        st = str(status)
+        it = QTableWidgetItem(st)
+        head = st.split(' · ')[0]
+        if head == "Recovered":
+            it.setBackground(QColor(AUGUR.warn_bg)); it.setForeground(QColor(AUGUR.ink))
+        elif head != "OK":
+            it.setBackground(QColor(AUGUR.fail_bg)); it.setForeground(QColor(AUGUR.ink))
+        return it
 
     def _apply_row_to_table(self, result_dict, row_index):
         """Live per-row update (Step mode): cells + conc plot + scroll + progress bar."""
@@ -216,10 +222,11 @@ class ResultsQCMixin:
         if hasattr(self.monitor, 'rebuild_trend'):
             self.monitor.rebuild_trend(res)
         self.pbar.setValue(len(res))
-        if len(res) > n_show:
-            self.status.setText(
-                f"Fast complete: {len(res):,} scans fitted — table previews only {n_show:,} rows, "
-                f"see full results in the graph + autosave file (Result Viewer).")
+        # analysis_finished overwrites the status line right after this, so the note is
+        # kept and appended to the completion text + Done popup there.
+        self._table_cap_note = (
+            f"Table previews only {n_show:,} of {len(res):,} rows — full results are in "
+            f"the graph + autosave file (Result Viewer)." if len(res) > n_show else "")
 
     def _fast_finalize(self):
         """End of a Fast run: stop the feedback timer and render results once."""
@@ -231,6 +238,26 @@ class ResultsQCMixin:
         self._fast_mode_active = False
         if hasattr(self.monitor, 'flush_plots'):
             self.monitor.flush_plots()
+
+    def _on_analysis_status(self, ch, msg):
+        """A channel worker's status_msg: show it, and remember ERROR lines so the
+        completion does not report a failed run as a success."""
+        print(f"[Analysis CH{ch}] {msg}")
+        self.status.setText(f"[CH{ch}] {msg}")
+        if str(msg).startswith("ERROR"):
+            self._run_errors = getattr(self, '_run_errors', []) + [f"CH{ch}: {msg}"]
+
+    def _run_failures(self):
+        """Why this run is not a success: worker ERROR lines + channels that
+        returned no rows at all (every scan, even a skipped one, yields a row)."""
+        fails = list(getattr(self, '_run_errors', []))
+        got = {r.get('Channel', 1) for r in self.results}
+        for ch in sorted(getattr(self, '_alpha_groups', None) or {}):
+            if ch not in got and not any(f.startswith(f"CH{ch}:") for f in fails):
+                fails.append(f"CH{ch}: no results")
+        if not self.results and not fails:
+            fails.append("no results")
+        return fails
 
     def analysis_finished(self, stopped=False):
         """Re-enables UI once ALL channel workers have finished."""
@@ -272,11 +299,19 @@ class ResultsQCMixin:
         self._autosave_close()
         was_stopped = getattr(self, '_stop_requested', False)
         self._stop_requested = False
+        failures = [] if was_stopped else self._run_failures()
+        self._run_errors = []
+        cap_note = getattr(self, '_table_cap_note', "")
+        self._table_cap_note = ""
         if was_stopped:
             self.status.setText(f"Stopped — partial results ({len(self.results):,} rows)")
             self.status.setStyleSheet(f"color: {AUGUR.warn}; font-weight: bold;")
+        elif failures:
+            self.status.setText(f"{ch_label}Analysis FAILED — " + "; ".join(failures))
+            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
         else:
-            self.status.setText(f"{ch_label}Analysis Completed!")
+            self.status.setText(f"{ch_label}Analysis Completed!"
+                                + (f"  {cap_note}" if cap_note else ""))
             self.status.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
         # L3: 완료 시 자동 저장 (QC 적용 후, 정식 파일명 규칙)
         saved_msg = ""
@@ -289,21 +324,37 @@ class ResultsQCMixin:
                 saved_msg = f"\n Auto-save failed: {_e}"
 
         qc_msg = f"\nAuto QC excluded: {len(qc_changed)} rows (gas → NaN)" if qc_changed else ""
+        cap_msg = f"\n{cap_note}" if cap_note else ""
+        if failures:
+            QMessageBox.warning(
+                self, "Analysis failed",
+                f"{len(self.results):,} rows from {n_ch} channel(s) — not a complete run:\n  "
+                + "\n  ".join(failures)
+                + f"\n(see logs/session_*.log){qc_msg}{cap_msg}{saved_msg}")
+            return
         head = "Analyzed up to the stop point." if was_stopped else f"All files analyzed successfully ({n_ch} channel(s))."
-        QMessageBox.information(self, "Done", f"{head}{qc_msg}{saved_msg}")
+        QMessageBox.information(self, "Done", f"{head}{qc_msg}{cap_msg}{saved_msg}")
 
     def reapply_qc(self):
         """재핏 없이 라벨(Chi2) → Kalman Q/R → 자동 QC 순서로 후처리 재적용."""
         if not getattr(self, 'results', None):
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Reapply", "No analysis results. Run a fit first.")
             return
+
+        def _excluded():
+            return [str(r.get('Status', '')).startswith(('QC-', 'Settling')) for r in self.results]
+        was_excl = _excluded()
         self._reapply_quality_label()
         self._reapply_kalman()
         changed = self._apply_auto_qc()
         self._refresh_after_qc(changed)
-        from PyQt6.QtWidgets import QMessageBox
+        # `changed` mixes newly excluded rows with restored / relabelled ones — count
+        # each direction instead of calling all of them "Excluded".
+        now_excl = _excluded()
+        n_new = sum(1 for a, b in zip(was_excl, now_excl) if b and not a)
+        n_restored = sum(1 for a, b in zip(was_excl, now_excl) if a and not b)
         K = self.spin_qc_k.value() if hasattr(self, 'spin_qc_k') else 8.0
+        qc_on = hasattr(self, 'chk_qc') and self.chk_qc.isChecked() and K > 0
         kq = self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005
         kr = self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050
         rms_pct = self.spin_rms_thresh.value() if hasattr(self, 'spin_rms_thresh') else 10.0
@@ -313,9 +364,11 @@ class ResultsQCMixin:
         _n_settle = sum(1 for r in self.results if str(r.get('Status', '')) == 'Settling')
         QMessageBox.information(self, "Reapply",
                                 f"Re-judged OK/Unstable (Chi2), Kalman (Q={kq}, R={kr}), "
-                                f"QC (K={K:g}){_settle_str}.\n"
-                                f"Excluded: {len(changed)} / {len(self.results):,} rows"
-                                + (f"  (settling {_n_settle})" if _settle_on else ""))
+                                + (f"QC (K={K:g})" if qc_on else "QC off")
+                                + f"{_settle_str}.\n"
+                                f"Excluded: {sum(now_excl):,} / {len(self.results):,} rows"
+                                + (f"  (settling {_n_settle})" if _settle_on else "")
+                                + f"\nThis reapply: {n_new:,} newly excluded, {n_restored:,} restored")
 
     def _reapply_quality_label(self):
         """각 행의 OK/Unstable 을 Chi2 로 재판정 — 워커와 **같은 함수**를 쓴다
@@ -477,13 +530,7 @@ class ResultsQCMixin:
                 if i >= self.table.rowCount():
                     continue
                 r = self.results[i]
-                st = str(r.get('Status', ''))
-                it = QTableWidgetItem(st)
-                if st.startswith('QC-') or st not in ("OK", "Recovered"):
-                    it.setBackground(QColor(AUGUR.fail_bg)); it.setForeground(QColor(AUGUR.ink))
-                elif st == "Recovered":
-                    it.setBackground(QColor(AUGUR.warn_bg)); it.setForeground(QColor(AUGUR.ink))
-                self.table.setItem(i, c + 5, it)
+                self.table.setItem(i, c + 5, self._status_item(r.get('Status', '')))
                 for gi, gas in enumerate(self.engine.gas_list):
                     try:
                         txt = f"{float(r.get(gas, 0)):.2e}"
