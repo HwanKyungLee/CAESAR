@@ -212,7 +212,15 @@ class SaveExportMixin:
 
                 def _header_for(ch, sub):
                     cfg = _frozen_cfgs.get(int(ch)) or {}
-                    if cfg.get('fit_unit') == 'px':
+                    try:
+                        int(cfg.get('f_min')); int(cfg.get('f_max'))
+                        _cfg_range_ok = True
+                    except (TypeError, ValueError):
+                        _cfg_range_ok = False
+                    if not _cfg_range_ok:
+                        # Never write a made-up range into the reproducibility record (principle 4).
+                        rng = "UNREADABLE — the channel config has no pixel range (not 0-0)"
+                    elif cfg.get('fit_unit') == 'px':
                         rng = f"Pixel {cfg.get('f_min')}-{cfg.get('f_max')} (px window)"
                     else:
                         rng = (f"Pixel {cfg.get('f_min')}-{cfg.get('f_max')} "
