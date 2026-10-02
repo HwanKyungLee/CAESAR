@@ -102,6 +102,15 @@ def _parse_row(line: str) -> Optional[list]:
         return None
 
 
+def _first_line(path: str) -> Optional[bytes]:
+    """First line (up to 64 KB) — read-only; None if unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.readline(65536)
+    except OSError:
+        return None
+
+
 class Watcher:
     """raw 폴더를 폴링해 새 행을 RowEvent로 낸다. 파일당 커서는 IngestCursor에 위임.
 
@@ -133,6 +142,10 @@ class Watcher:
         # {path: [profile_id …]} — 열 수는 맞는데 파일명 날짜가 프로파일 date_range 밖이라 감시하지 않는
         # 파일. 진입점이 한 번씩 경고한다(감시하지 않는 상태는 보여야 한다 — 설계 §2).
         self.date_excluded: dict = {}
+        # {path: (unrouted rows, last column count)} — rows no profile accepts at all (unknown layout:
+        # analysis outputs, another instrument). Dropped once a row of the file routes (a header row
+        # is unrouted too). The entry point reports files past a few rows (not monitored — §2).
+        self.unknown_layout: dict = {}
         self.catching_up = False               # 직전 poll 이 상한에 닿았다 = 밀린 분량을 따라잡는 중
         self._files: dict = {}                 # {path: (size, mtime)} — 마지막 나열 결과
         self._paths: list = []                 # sorted(self._files) — 목록이 바뀔 때만 다시 정렬
@@ -262,10 +275,27 @@ class Watcher:
         if changed:
             self._paths = sorted(self._files)
 
+    def _dirs_changed(self) -> bool:
+        """No active file (empty folder, or DAQ stopped before this session saw anything grow): the
+        quick refresh had nothing to look at, so the first new file waited for the next full listing —
+        12–29 s (audit 2026-10-02). Instead stat the folders of the last listing (a new entry changes its
+        folder's mtime) and list again as soon as one changed.
+        # ponytail: one stat per folder per poll; only while nothing is active. If a huge idle tree has
+        # thousands of folders, stat just the root and the newest few."""
+        for d, mt in self._dir_mtime.items():
+            try:
+                if os.stat(d).st_mtime != mt:
+                    return True
+            except OSError:
+                return True                           # folder gone — re-list
+        return False
+
     def _refresh_files(self) -> bool:
         """True = 이번이 전체 나열."""
         now = time.monotonic()
-        if now >= self._next_full:
+        # (cheap trees only: on a tree whose listing is slow, a churning folder would re-list every poll)
+        if now >= self._next_full or (not self._active and self._interval <= self.rescan_sec
+                                      and self._dirs_changed()):
             self._full_scan(now)
             return True
         self._quick_refresh(now)
@@ -288,10 +318,13 @@ class Watcher:
         prof = self.profiles.route(filename=os.path.basename(path), n_columns=n_columns)
         if prof is not None:
             self._profile_cache[path] = prof
+            self.unknown_layout.pop(path, None)
         elif path not in self.date_excluded:
             ids = self.profiles.date_excluded(os.path.basename(path), n_columns)
             if ids:
                 self.date_excluded[path] = ids
+            else:
+                self.unknown_layout[path] = (self.unknown_layout.get(path, (0,))[0] + 1, n_columns)
         return prof
 
     def _skip_stale_backlog(self, paths: list) -> None:
@@ -380,20 +413,40 @@ class Watcher:
         **지우거나 건너뛰지 않는다**(무결성 헌장: 지우지 말고 flag). 어느 쪽이
         진짜인지는 코드가 알 수 없고, 과필터링이 부족한 필터링보다 위험하다.
         운용자가 사본 폴더를 치우거나 watch_dir 을 좁히면 경고가 사라진다.
-        폴링이 1초 주기라 **경고한 파일명은 기억해 두고 다시 찍지 않는다.**"""
+        폴링이 1초 주기라 **경고한 파일명은 기억해 두고 다시 찍지 않는다.**
+
+        A copy = same name, same size and same first line. Hot/ and cold/ trees name their hourly files
+        alike (2026-06-01-001.dat in both) — that is the normal setup, not a copy (audit 2026-10-02:
+        false warning). Sizes are compared first; only equal non-empty sizes open the files."""
         seen: dict = {}
         for p in paths:
             seen.setdefault(os.path.basename(p), []).append(p)
         shown = hidden = 0
         for name, group in seen.items():
-            if len(group) > 1 and name not in self._warned_dupes:
-                self._warned_dupes.add(name)
-                if shown < 20:                        # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
-                    shown += 1
-                    log.warning("same file name in %d places — the same scan is collected twice: %s | %s",
-                                len(group), name, " | ".join(group))
-                else:
-                    hidden += 1
+            if len(group) < 2 or name in self._warned_dupes:
+                continue
+            by_key: dict = {}
+            for p in group:
+                size = self._files[p][0]
+                if size:                              # two fresh empty files (rollover) are not copies
+                    by_key.setdefault(size, []).append(p)
+            copies = []
+            for same in by_key.values():
+                if len(same) > 1:
+                    heads: dict = {}
+                    for p in same:
+                        heads.setdefault(_first_line(p), []).append(p)
+                    copies += [g for k, g in heads.items() if k is not None and len(g) > 1]
+            if not copies:
+                continue
+            self._warned_dupes.add(name)
+            if shown < 20:                            # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
+                shown += 1
+                group = [p for g in copies for p in g]
+                log.warning("same file name in %d places — the same scan is collected twice: %s | %s",
+                            len(group), name, " | ".join(group))
+            else:
+                hidden += 1
         if hidden:
             log.warning("%d more duplicate file names (omitted) — narrow the watch folder to the raw folder", hidden)
 

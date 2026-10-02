@@ -56,6 +56,9 @@ ALARM_HISTORY_MAX = 500
 # liveness(전체 최신 행 기준)가 따로 잡으므로 여기서 빼도 숨겨지지 않는다.
 RETIRE_AFTER_SEC = 600.0
 CURSOR_SAVE_INTERVAL_SEC = 5.0
+# A file whose rows no profile accepts is reported once it has this many (its header row alone is
+# unrouted too, and the first data row may come a tick later).
+UNKNOWN_LAYOUT_MIN_ROWS = 3
 
 
 def _grace_sec_for(profiles: ProfileSet, routed_ids: set) -> float:
@@ -94,6 +97,8 @@ class VigilApp:
         self.retire_after_sec = retire_after_sec
         self.paused = False                # 대시보드 Stop — 정지 중엔 tick 이 아무것도 읽지 않는다
         self._tick_errors = 0              # 연속 tick 예외 수(성공하면 0)
+        self._dropped_rows = 0             # rows lost to those failures (cursor already past them)
+        self._tick_rows = (0, 0)           # (rows processed, rows polled) in the current tick
         self.dashboard = dashboard
         self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
         self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
@@ -124,8 +129,10 @@ class VigilApp:
         self._tick_errors = 0
         self._backlog_logged = False
         self._date_excluded_logged: set = set()
+        self._unknown_logged: set = set()
         self._was_catching_up = False
         self._last_arrival = None
+        self._waiting_since = datetime.now()   # liveness: no row since this -> P0 after a limit
         self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
         self._hk_trend_t: dict = {}        # {(profile_id, field_key): 마지막으로 그래프에 넣은 시각}
         self.alarms: list = []             # 경보 이력 [{start, end, source, level, msg}] — 최근 것이 끝
@@ -318,6 +325,18 @@ class VigilApp:
             self.state_log.append(P2, msg, kind="ingest", file=path, profiles=ids)
             if self.dashboard is not None:
                 self.dashboard.log_line(msg)
+        new = sorted(p for p, (n, _nc) in w.unknown_layout.items()
+                     if n >= UNKNOWN_LAYOUT_MIN_ROWS and p not in self._unknown_logged)
+        if new:
+            self._unknown_logged.update(new)
+            ncols = sorted({w.unknown_layout[p][1] for p in new})
+            names = ", ".join(os.path.basename(p) for p in new[:5]) + (" …" if len(new) > 5 else "")
+            msg = (f"NOT monitored: {len(new)} file(s) with an unknown layout "
+                   f"({', '.join(map(str, ncols))} columns — no profile matches): {names}")
+            log.warning(msg)
+            self.state_log.append(P2, msg, kind="ingest", files=new[:50], n_columns=ncols)
+            if self.dashboard is not None:
+                self.dashboard.log_line(msg)
         if not self._backlog_logged:
             self._backlog_logged = True
             n, nbytes = w.skipped_backlog
@@ -348,6 +367,7 @@ class VigilApp:
         if not self.paused:
             return
         self.paused = False
+        self._waiting_since = datetime.now()   # paused time is not "no raw arriving"
         self._note_control("Monitoring resumed (user Start) — reading from the backlog onward")
 
     def _note_control(self, msg: str) -> None:
@@ -362,12 +382,22 @@ class VigilApp:
         것이 가장 나쁜 실패다. 정지(pause) 중이거나 아직 폴더가 없으면 아무것도 하지 않는다."""
         if self.paused or self.watcher is None:
             return
+        self._tick_rows = (0, 0)
         try:
             self._tick()
         except Exception as e:                # noqa: BLE001
             self._tick_errors += 1
-            log.exception("tick failed (%d in a row)", self._tick_errors)
+            # The watcher's cursor is already past this tick's rows: the ones after the failing row are
+            # never re-read. Say how many (not re-reading them is deliberate — a row that always fails
+            # would wedge ingest).
+            done, total = self._tick_rows
+            dropped = total - done
+            self._dropped_rows += dropped
+            log.exception("tick failed (%d in a row) — %d of %d rows of this tick not monitored",
+                          self._tick_errors, dropped, total)
             msg = f"Vigil internal error, {self._tick_errors} in a row: {type(e).__name__}: {e}"
+            if dropped:
+                msg += f" — {self._dropped_rows} raw row(s) skipped by monitoring so far"
             if self._tick_errors == 1:        # 연속 실패의 첫 번만 상태 로그에(매초 쌓이지 않게)
                 self.state_log.append(P1, msg, kind="internal")
             if self.dashboard is not None:
@@ -379,10 +409,13 @@ class VigilApp:
                     log.exception("failed to report the error as well")
         else:
             if self._tick_errors:
-                log.info("tick recovered (after %d consecutive failures)", self._tick_errors)
-                self.state_log.append(OK, f"Vigil internal error recovered (after {self._tick_errors})",
-                                      kind="internal")
+                log.info("tick recovered (after %d consecutive failures, %d rows not monitored)",
+                         self._tick_errors, self._dropped_rows)
+                self.state_log.append(OK, f"Vigil internal error recovered (after {self._tick_errors}; "
+                                          f"{self._dropped_rows} raw row(s) were not monitored)",
+                                      kind="internal", dropped_rows=self._dropped_rows)
             self._tick_errors = 0
+            self._dropped_rows = 0
 
     def shutdown(self) -> None:
         """종료 시 미저장 커서를 쓴다(저장 간격 때문에 마지막 몇 초가 메모리에만 있을 수 있다)."""
@@ -474,7 +507,8 @@ class VigilApp:
         events = self.watcher.poll()
         now = datetime.now()
         self._log_ingest_state()
-        for ev in events:
+        for i, ev in enumerate(events):
+            self._tick_rows = (i, len(events))
             self._files_seen[ev.file] = now
             if not ev.profile_id:
                 continue
@@ -505,11 +539,17 @@ class VigilApp:
             self._observe_reflectance(prof, ev, now)
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
+        self._tick_rows = (len(events), len(events))
         self._last_arrival = latest_arrival(events, self._last_arrival)
         self._retire_stale_files(now)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
-        live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec)
+        live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec,
+                                                                   self._waiting_since, self.watch_dir)
+        if live_status == P0 and self._last_arrival is None:
+            n_unmon = len(self._unknown_logged) + len(self._date_excluded_logged)
+            if n_unmon:
+                live_msg += f" — {n_unmon} file(s) here have rows that no profile monitors (see the log)"
 
         # HK 는 매 행 판정이라 (퇴역 안 한) 파일별로, R·램프·농도는 교정 주기마다 한 번 나오는
         # 판정이라 **채널별 최신값**으로 모은다 — 파일 기준이면 rollover 직후 새 파일에 아직
