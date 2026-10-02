@@ -43,6 +43,7 @@ SCHEMA_PATH = os.path.join(DEFAULT_PROFILE_DIR, "_schema.json")
 SEVERITY_NONE = None
 SEVERITY_WARN = "warn"
 SEVERITY_ALARM = "alarm"
+HYSTERESIS_FRAC = 0.02   # default HK clear margin, fraction of the band (HKField.hysteresis)
 
 
 class ProfileError(ValueError):
@@ -309,6 +310,10 @@ class HKField:
     warn: Optional[tuple] = None   # (lo, hi)
     alarm: Optional[tuple] = None  # (lo, hi)
     phases: Optional[tuple] = None  # 밴드가 유효한 flag 역할들 (None=전 구간)
+    # Clear margin (physical units): once out of a band, the field stays at that severity until it
+    # is back inside by this much — a value sitting on a limit otherwise flips every scan and floods
+    # the alert history. None = HYSTERESIS_FRAC of the band (width, or |limit| for a one-sided band).
+    hysteresis: Optional[float] = None
 
     def value(self, row: Sequence[float], hk_start: int) -> float:
         return float(row[hk_start + self.rel]) * self.scale + self.offset
@@ -323,14 +328,35 @@ class HKField:
             return True
         return phase in self.phases
 
-    def evaluate(self, phys_value: float, phase: Optional[str] = None):
+    def _margin(self, band) -> float:
+        if self.hysteresis is not None:
+            return self.hysteresis
+        lo, hi = band
+        if lo is not None and hi is not None:
+            return HYSTERESIS_FRAC * (hi - lo)
+        return HYSTERESIS_FRAC * abs(lo if lo is not None else hi)
+
+    def _inside_by_margin(self, value: float, band) -> bool:
+        lo, hi = band
+        m = self._margin(band)
+        return ((lo is None or value >= lo + m) and (hi is None or value <= hi - m))
+
+    def evaluate(self, phys_value: float, phase: Optional[str] = None, prev=SEVERITY_NONE):
         """물리값의 경보 심각도. alarm 밴드 이탈=SEVERITY_ALARM, warn 이탈=SEVERITY_WARN,
-        아니면 None. 밴드가 없거나 이 구간에 해당하지 않으면 None(표시만)."""
+        아니면 None. 밴드가 없거나 이 구간에 해당하지 않으면 None(표시만).
+        `prev` = this field's previous severity: worsening is immediate, easing back needs the
+        value inside the band by the clear margin (hysteresis)."""
         if not self.applies_to(phase):
             return SEVERITY_NONE
         if self.alarm is not None and not _band_check(phys_value, self.alarm):
             return SEVERITY_ALARM
+        if (prev == SEVERITY_ALARM and self.alarm is not None
+                and not self._inside_by_margin(phys_value, self.alarm)):
+            return SEVERITY_ALARM
         if self.warn is not None and not _band_check(phys_value, self.warn):
+            return SEVERITY_WARN
+        if (prev in (SEVERITY_ALARM, SEVERITY_WARN) and self.warn is not None
+                and not self._inside_by_margin(phys_value, self.warn)):
             return SEVERITY_WARN
         return SEVERITY_NONE
 
@@ -344,7 +370,8 @@ class HKField:
                    scale=float(d.get("scale", 1.0)), offset=float(d.get("offset", 0.0)),
                    unit=d.get("unit"), label=d.get("label"),
                    nominal=(float(d["nominal"]) if "nominal" in d else None),
-                   warn=warn, alarm=alarm, phases=phases)
+                   warn=warn, alarm=alarm, phases=phases,
+                   hysteresis=(float(alert["hysteresis"]) if "hysteresis" in alert else None))
 
 
 @dataclass(frozen=True)
@@ -376,8 +403,9 @@ class HK:
             return raw * f.scale + f.offset
         return float("nan")
 
-    def read(self, row: Sequence[float], phase: Optional[str] = None) -> dict:
+    def read(self, row: Sequence[float], phase: Optional[str] = None, prev: Optional[dict] = None) -> dict:
         """{key: (물리값, 심각도)} 한 번에. 대시보드·경보 공통 입력.
+        `prev` = {key: previous severity} for hysteresis (HKField.evaluate); None = stateless.
 
         `phase`(= 그 행의 flag 역할)를 넘기면 구간 한정 밴드가 올바르게 적용된다.
         교정 구간에서 대기용 밴드가 오경보를 내지 않도록 **항상 넘기는 것을 권장**한다."""
@@ -392,7 +420,7 @@ class HK:
                 out[f.key] = (float("nan"), SEVERITY_NONE)   # 값 없음 — 0 °C 로 읽지 않는다
                 continue
             v = raw * f.scale + f.offset
-            out[f.key] = (v, f.evaluate(v, phase))
+            out[f.key] = (v, f.evaluate(v, phase, (prev or {}).get(f.key)))
         return out
 
     @classmethod

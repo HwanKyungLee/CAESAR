@@ -204,6 +204,11 @@
                 "properties": {
                   "warn": { "$ref": "#/$defs/band" },
                   "alarm": { "$ref": "#/$defs/band" },
+                  "hysteresis": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Clear margin in the field's physical unit: after leaving a band the alert holds until the value is back inside by this much. Default 2 % of the band width (|limit| for a one-sided band)."
+                  },
                   "phases": {
                     "type": "array",
                     "description": "이 밴드가 유효한 flag 역할 목록(예: [\"atmosphere\"]). 교정 중에는 장비가 의도적으로 off-nominal 상태가 되므로(2026-06 실측: He 주입 시 ANs 캐비티압 916→970 mbar) 대기 측정 구간에만 유효한 밴드를 여기에 한정한다. 생략하면 모든 구간에서 평가한다. 이걸 쓰면 밴드를 넓혀 민감도를 잃지 않고도 교정 중 오경보를 막을 수 있다.",

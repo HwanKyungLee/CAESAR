@@ -173,6 +173,7 @@ class VigilApp:
         self._last_arrival = None
         self._waiting_since = datetime.now()   # liveness: no row since this -> P0 after a limit
         self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
+        self._hk_latch: dict = {}          # {profile_id: {field_key: severity}} — HK band hysteresis
         self._hk_trend_t: dict = {}        # {(profile_id, field_key): 마지막으로 그래프에 넣은 시각}
         self.alarms: list = []             # 경보 이력 [{start, end, source, level, msg}] — 최근 것이 끝
         self._open_alarms: dict = {}       # {source: 위 dict} — 진행 중          # 전체 최신 관측 벽시계 시각
@@ -629,7 +630,8 @@ class VigilApp:
             if prof is None:
                 continue
             hk_status, hk_msg, hk_metrics = evaluate_hk(prof, ev.row, phase=ev.role,
-                                                        channels=self._active_channels(prof, ev))
+                                                        channels=self._active_channels(prof, ev),
+                                                        latch=self._hk_latch.setdefault(ev.profile_id, {}))
             self._hk_status[ev.file] = (hk_status, hk_msg, hk_metrics)
             if self._hk_last_status.get(ev.file) != hk_status:
                 self.state_log.append(hk_status, hk_msg, file=ev.file, **hk_metrics)
