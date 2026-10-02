@@ -25,8 +25,10 @@
 - `32bea96` 제로에어 LOO 알파(알파 생성이 `{campaign}/_zeroair/` 에 런마다 한 파일) +
   `tools/zero_air_floor.py`(shift·f 고정 핏 → σ·MDL·ΣANs). 7일 캐시로 정본 대비 수 % 이내.
 
-**남은 것(B)**: 스캔별 구조항 `<gas>_Struct` — `diagnostics/i0_interp_2026-09/production_budget.py`
-(LOO i0·rt·ef 섭동)를 제품 도구로. 실시간(Vigil)엔 못 넣는다(섭동을 돌려야 한다, 원고 §6.1).
+**B 완료 `f0ff1ed`**: 스캔별 구조항. 알파 생성이 `_zeroair/calib_knots_*.npz`(쓴 knot 그대로)를 남기고,
+`tools/structural_budget.py` 가 알파를 BBCEAS 식으로 역산해 i0·rt·ef·tri 섭동 → `structural_<label>.csv`,
+`--result` 로 결과 사본에 `<gas>_Struct` 열. 05-20 정본 대비 레코드 상관 i0·rt·tri ≥ 0.97(ANs ≥ 0.996).
+**새 알파부터** 가능하다(knot npz 가 있어야 한다) — 옛 알파는 재생성. 실시간(Vigil)엔 못 넣는다.
 
 ## 2026-10-02 (5) — 기본(구조) 프로파일 + 미션 패키지 (Augur → Vigil, USB)
 
