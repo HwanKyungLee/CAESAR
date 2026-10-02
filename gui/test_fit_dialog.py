@@ -592,6 +592,9 @@ class TestFitDialog(QDialog):
             self._lbl_status.setText(
                 f"only {n_files} file(s) available — recommendations may be unstable.")
         unit, lo, hi = self._app._current_fit_px_window()
+        # The dialog is modeless: remember which channel these recommendations belong to, so
+        # Apply cannot land on another channel tab (an ANs shift window applied to PNs, audit 2026-10-02).
+        self._rec_channel = self._app._active_channel
         self._clear_results()
         self._btn_apply.setEnabled(False)
         self._btn_apply.setText("Apply Recommendations")
@@ -731,6 +734,29 @@ class TestFitDialog(QDialog):
 
     def _on_apply(self):
         if not self._last_result or "error" in self._last_result:
+            return
+        rec_ch = getattr(self, '_rec_channel', None)
+        if rec_ch is not None and rec_ch != self._app._active_channel:
+            QMessageBox.warning(
+                self, "Test Fit",
+                f"These recommendations were computed for CH{rec_ch}, but CH{self._app._active_channel} "
+                f"is the active channel tab.\nSwitch back to CH{rec_ch} to apply them, or re-run the optimizer.")
+            return
+        r = self._last_result
+        changes = [f"Poly degree: {self._app.spin_poly_deg.value()} -> {r['proposed_poly_deg']}"]
+        if r.get("proposed_step_limit") is not None:
+            changes.append(f"Step limit: {self._app.spin_step_limit.value():g} -> {r['proposed_step_limit']:g}")
+        for gas, props in r["proposed_ref_props"].items():
+            old_p = self._app.ref_props.get(gas, {})
+            diff = [f"{k}: {old_p.get(k)} -> {v}" for k, v in props.items() if old_p.get(k) != v]
+            if diff:
+                changes.append(f"{gas}: " + ", ".join(diff))
+        ok = QMessageBox.question(
+            self, "Apply recommendations?",
+            f"Apply to CH{self._app._active_channel}:\n\n" + "\n".join(changes)
+            + "\n\nThis changes the channel's fit settings (not saved to the FitSet until you Save it).",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ok != QMessageBox.StandardButton.Yes:
             return
         self._app._apply_test_fit_recommendations(self._last_result)
         self._btn_apply.setText("Applied ")
