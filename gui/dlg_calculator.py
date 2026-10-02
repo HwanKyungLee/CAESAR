@@ -308,16 +308,30 @@ class CalculatorDialog(QDialog):
             return
         if not out.lower().endswith(".csv"):
             out += ".csv"
-        import datetime as _dt
         try:
-            with open(out, "w", encoding="utf-8") as f:
-                f.write(f"# Data Calculator result: {name} = {self._expr.text().strip()}\n")
-                f.write(f"# aligned to {self._ref.currentText()} time grid; "
-                        f"{int(np.isfinite(v).sum())}/{len(v)} finite\n")
-                f.write(f"time,{name}\n")
-                for ti, vi in zip(t, v):
-                    ts = _dt.datetime.fromtimestamp(ti).strftime("%Y-%m-%d %H:%M:%S")
-                    f.write(f"{ts},{vi:.8g}\n")
+            self._write_csv(out)
             QMessageBox.information(self, "Saved", f"Saved:\n{out}")
         except Exception as e:
             QMessageBox.critical(self, "Save failed", str(e))
+
+    def _write_csv(self, out):
+        """Write the last computed result with its provenance (principle 4): exporter code
+        version, what each variable is (file · column), the reference grid, the time clock."""
+        import datetime as _dt
+        from core.provenance import code_version
+        t, v, name = self._result
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(f"# Data Calculator result: {name} = {self._expr.text().strip()}\n")
+            f.write(f"# aligned to {self._ref.currentText()} time grid; "
+                    f"{int(np.isfinite(v).sum())}/{len(v)} finite\n")
+            f.write(f"# exporter code {code_version()} | generated {_dt.datetime.now():%Y-%m-%d %H:%M}\n")
+            for i, (_lbl, ds, col, _rm) in enumerate(self._var_rows):
+                if ds.currentData() and col.currentText():
+                    f.write(f"# {_VAR_LETTERS[i]} = {os.path.abspath(ds.currentData())} :: "
+                            f"{col.currentText()}\n")
+            f.write("# inputs read in full (Result Lab Hide QC / K / Range not applied); "
+                    "time = same clock as the input files, no timezone conversion\n")
+            f.write(f"time,{name}\n")
+            for ti, vi in zip(t, v):
+                ts = _dt.datetime.fromtimestamp(ti).strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"{ts},{vi:.8g}\n")

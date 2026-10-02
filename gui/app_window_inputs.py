@@ -178,7 +178,10 @@ class InputsAlphaMixin:
         if not configs:
             QMessageBox.warning(self, "Channel config failed",
                                 "Could not build per-channel wavecal/pixel range.\n"
-                                f"Hot (≥2ch) needs the {self._WV_CAL_BASE}\\roi1,roi2 Calib files.")
+                                "Hot (≥2ch) needs a wavecal on each channel tab, or the fallback "
+                                f"Calib files in {self._WV_CAL_BASE}\\"
+                                + ", ".join(f"{r} (CH{c})" for c, r in self._FALLBACK_CH_ROI.items()
+                                            if c <= n_ch) + ".")
             return False
         _sel = getattr(self, '_alpha_sel_channels', None)
         _want = _sel if _sel is not None else set(range(1, n_ch + 1))
@@ -187,7 +190,9 @@ class InputsAlphaMixin:
         if _missing:
             QMessageBox.warning(self, "Some channels lack wavecal",
                                 f"Only {sorted(got)} of the selected channels will be generated. Missing: {_missing}.\n"
-                                f"Missing channels lack wavecal (channel tab or {self._WV_CAL_BASE}\\roiN)), skipped.\n"
+                                "Missing channels lack wavecal (channel tab, or fallback "
+                                + ", ".join(f"{self._WV_CAL_BASE}\\{self._FALLBACK_CH_ROI.get(c, '?')} for CH{c}"
+                                            for c in _missing) + "), skipped.\n"
                                 "Continuing.")
 
         # 채널별 워커를 순차 실행(큐). Hot=2채널 → PNs, ANs 각각 생성.
@@ -200,6 +205,7 @@ class InputsAlphaMixin:
         self._alpha_rt_map     = dict(rt_map or {})   # {raw채널 -> R(t) npz 경로} 채널별
         self._alpha_dark       = getattr(self, 'dark_data', None)
         self._alpha_done_msgs  = []
+        self._alpha_failed     = []          # [(label, reason)] — any entry = failed run
         self._alpha_status_cb  = status_cb   # 팝업 진행표시(옵션)
         self._alpha_user_done_cb = done_cb   # 팝업 완료콜백(옵션)
         self._alpha_progress_cb = progress_cb  # 팝업 진행바(done, total) 콜백(옵션)
@@ -212,6 +218,11 @@ class InputsAlphaMixin:
 
     # wv_cal 자동탐색 베이스 (채널별 파장보정 — 레포 번들 reference_data/wv_cal)
     _WV_CAL_BASE = WV_CAL_DIR
+    # Fallback channel -> wv_cal/roiN folder, used only when a channel tab has no wavecal.
+    # The numbers are crossed on purpose: 2026 Yeosu ch1 (ANs) <-> roi2, ch2 (PNs) <-> roi1
+    # (README glossary "roi1 / roi2", CHANNEL_IDENTITY_YEOSU2026.md, tools/channel_map.json).
+    # Re-check for any other campaign/configuration; a tab wavecal always wins over this.
+    _FALLBACK_CH_ROI = {1: 'roi2', 2: 'roi1', 3: 'roi3'}
 
     def _channel_wl_path(self, ch):
         """채널 ch의 wavecal 파일 경로 — 채널 탭 config. 활성 채널은 현재 로드된 경로."""
@@ -231,7 +242,7 @@ class InputsAlphaMixin:
         if n_ch == 1:
             wl = getattr(self, 'wavelengths', None)
             return np.asarray(wl, dtype=float).flatten() if wl is not None else None
-        roi = {1: 'roi1', 2: 'roi2', 3: 'roi3'}.get(ch)
+        roi = self._FALLBACK_CH_ROI.get(ch)
         if roi:
             import glob
             d = os.path.join(self._WV_CAL_BASE, roi)
@@ -322,10 +333,21 @@ class InputsAlphaMixin:
     def _start_next_alpha_export(self):
         if not getattr(self, '_alpha_queue', None):
             done = getattr(self, '_alpha_done_msgs', [])
-            self.status.setText(f"Alpha export complete  {self._alpha_out_dir}")
+            failed = list(getattr(self, '_alpha_failed', []))
+            if failed:
+                self.status.setText("Alpha export FAILED for "
+                                    + ", ".join(lbl for lbl, _ in failed))
+            else:
+                self.status.setText(f"Alpha export complete  {self._alpha_out_dir}")
             cb = getattr(self, '_alpha_user_done_cb', None)
             if cb:   # Alpha Generator 팝업이 띄운 경우 콜백으로 알림(자체 메시지)
-                cb(self._alpha_out_dir, list(done))
+                cb(self._alpha_out_dir, list(done), failed)
+            elif failed:
+                QMessageBox.critical(
+                    self, "Alpha Export failed",
+                    "Failed channel(s):\n" + "\n".join(f"[{l}] {r}" for l, r in failed) +
+                    f"\n\n{len(done) - len(failed)} of {len(done)} channel(s) saved to:\n"
+                    f"{self._alpha_out_dir}")
             else:
                 QMessageBox.information(
                     self, "Alpha Export complete",
@@ -334,7 +356,8 @@ class InputsAlphaMixin:
                     "Filename: {source}_{channel}_alpha_trace.dat\n"
                     "Usable in Result Viewer / Analysis (RUN).")
             # close-the-loop: 생성한 폴더를 Pipeline Health에 자동 연결 → 점검 까먹지 않게.
-            self._alpha_qc_after_export(self._alpha_out_dir)
+            if len(failed) < len(done):      # at least one channel produced output
+                self._alpha_qc_after_export(self._alpha_out_dir)
             return
         cfg = self._alpha_queue.pop(0)
         self._alpha_status(f"Alpha [{cfg['label']}] computing (px {cfg['pixel_min']}~{cfg['pixel_max']})...")
@@ -418,6 +441,7 @@ class InputsAlphaMixin:
     def _on_alpha_channel_done(self, result, label):
         if str(result).startswith("ERROR"):
             self._alpha_done_msgs.append(f"  [{label}] failed: {result}")
+            self._alpha_failed.append((label, str(result)))
             self.status.setText(f"Alpha [{label}] failed")
         else:
             self._alpha_done_msgs.append(f"[{label}] ")
@@ -537,20 +561,38 @@ class InputsAlphaMixin:
             self.main_tabs.setCurrentWidget(self._tab_pages.get(self.setup_tab, self.setup_tab))   # switch to Setup tab
             
     def set_i0_path(self, filepath):
-        """Updates the I0 state, loads data, and updates UI."""
-        self.lbl_i0_path.setText(os.path.basename(filepath))
-        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
-        self.status.setText(f"I0 set to: {os.path.basename(filepath)}")
-        
-        # 🌟 Load I0 data and plot
+        """Updates the I0 state, loads data, and updates UI.
+
+        Only a 1D spectrum is accepted. A raw Mega-Matrix (or alpha trace) read by the 1D
+        loader yields column 0 of every row (timestamps) as "I0", so it is refused and the
+        previous I0 is kept."""
+        name = os.path.basename(filepath)
+        if DataIO.is_araon_mega_matrix(filepath) or DataIO._is_alpha_trace_format(filepath):
+            QMessageBox.warning(
+                self, "Not an I0 spectrum",
+                f"{name} is a multi-scan raw/alpha file, not a 1D I0 spectrum.\n"
+                "I0 not changed. Pick a single averaged zero-air spectrum file, or leave I0 "
+                "empty to use the ZA scans in the raw data during RUN.")
+            return
         try:
             # Load I0 file using the same method as the engine (most stable)
             _, intensity_raw = DataIO.load_measurement(filepath, pixel_min=0)
-            self.i0_data = intensity_raw
-            self.update_diagnostic_plot()
         except Exception as e:
             print(f"Error loading I0 file: {e}")
             QMessageBox.warning(self, "Load Error", "Failed to read I0 measurement file.")
+            return
+        wl = getattr(self, 'wavelengths', None)
+        if wl is not None and len(np.ravel(wl)) != len(intensity_raw):
+            QMessageBox.warning(
+                self, "I0 length mismatch",
+                f"{name} has {len(intensity_raw)} points but the wavelength calibration has "
+                f"{len(np.ravel(wl))} pixels.\nI0 not changed.")
+            return
+        self.i0_data = intensity_raw
+        self.lbl_i0_path.setText(name)
+        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
+        self.status.setText(f"I0 set to: {name}")
+        self.update_diagnostic_plot()
         self._refresh_setup_status()
 
     def update_diagnostic_plot(self):

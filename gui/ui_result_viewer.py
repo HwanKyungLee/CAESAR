@@ -535,12 +535,24 @@ class ResultViewerWidget(QWidget):
         self._current_kind = kind
         self._pw_top.clear()
         self._pw_bot.clear()
+        # New file (or type): drop what belonged to the previous one — stats line, plot titles,
+        # scan detail/residual (2026-10-02 audit R14). Same file redrawn (shift) keeps them.
+        if getattr(self, "_shown", None) != (self._path, kind):
+            self._shown = (self._path, kind)
+            self._stats_lbl.setText("")
+            self._pw_top.setTitle(None)
+            self._pw_bot.setTitle(None)
+            self._pw_detail.clear()
+            self._pw_detail.setTitle("Scan detail — click a point above")
+            self._pw_resid.clear()
+            self._pw_resid.setTitle("Residual - click a point above")
         # B2 스택은 fit 전용 — 다른 종류는 예전 2단 플롯으로 되돌린다.
         if kind == "fit":
             self._pw_top.hide(); self._pw_bot.hide()
         else:
             self._stack_host.hide()
             self._pw_detail.hide()
+            self._pw_resid.hide()
             for pw in self._lanes:
                 pw.hide()
             self._pw_top.show(); self._pw_bot.show()
@@ -556,13 +568,21 @@ class ResultViewerWidget(QWidget):
             }.get(kind, self._plot_array)
             handler(self._path)
             auto = "" if forced != "auto" else " (auto-detected)"
-            shift_tag = (f"time shift {self._time_shift_hours:+g}h (display only)"
+            shift_tag = (f"  ·  time shift {self._time_shift_hours:+g}h (display only)"
                         if self._time_shift_hours else "")
             self._lbl.setText(f"{os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
             self._lbl.setStyleSheet(f"color:{AUGUR.fail};" if self._time_shift_hours else f"color:{AUGUR.info};")
         except Exception as e:
             self._lbl.setText(f"Failed to display: {e}  (try selecting Type manually)")
             self._lbl.setStyleSheet(f"color:{AUGUR.fail};")
+            if kind == "fit":            # don't leave the previous file's lanes on screen
+                self._fit_cache = None
+                self._stack_host.hide(); self._pw_detail.hide(); self._pw_resid.hide()
+        # Range fields drive fit Export/Stats only — grey them out when they mean nothing here
+        has_t = (kind == "fit" and bool(self._fit_cache)
+                 and self._fit_cache.get("time") is not None)
+        for de in (self._dt_from, self._dt_to):
+            de.setEnabled(has_t)
         # 버전 목록은 핏 결과에만 의미가 있다(R 커브·α엔 meta가 없다).
         # 표시가 실패해도 목록은 갱신한다 — 어느 버전이 열려 있는지가 그때 더 궁금하다.
         try:
@@ -587,7 +607,7 @@ class ResultViewerWidget(QWidget):
     # ── R 트렌드 (.dat) → R/Leff 시계열 ────────────────────────────
     def _plot_r_trend(self, path):
         ts, rmean, rstd, leff = [], [], [], []
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
             for ln in f:
                 s = ln.rstrip("\n")
                 if not s.strip() or s.startswith("#") or s.lower().startswith("timestamp"):
@@ -690,7 +710,7 @@ class ResultViewerWidget(QWidget):
     def _plot_concentration(self, path):
         import pandas as pd
         sep = self._detect_sep(path) or r"\s+"
-        df = pd.read_csv(path, sep=sep, comment="#", engine="python")
+        df = pd.read_csv(path, sep=sep, comment="#", engine="python", encoding="utf-8-sig")
         # 첫 컬럼을 시간축으로 시도
         xcol = df.columns[0]
         x_dt = pd.to_datetime(df[xcol], errors="coerce")
@@ -769,8 +789,9 @@ class ResultViewerWidget(QWidget):
         self._gas_combo.blockSignals(False)
 
     def _on_gas_changed(self, _idx):
-        # fit 모드에서 가스 선택 바뀌면 현재 파일 다시 그림
-        if self._fit_cache and self._path:
+        # fit 모드에서 가스 선택 바뀌면 현재 파일 다시 그림. Only when the open file IS a fit —
+        # _fit_cache may belong to an earlier file (2026-10-02 audit R4: CSV/alpha re-plotted as fit).
+        if getattr(self, "_current_kind", None) == "fit" and self._fit_cache and self._path:
             self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
             self._plot_fit(self._path)
 
@@ -886,7 +907,9 @@ class ResultViewerWidget(QWidget):
         self._lane_hits = {}      # id(레인) → (x, y, x 정렬 순서) — 클릭 판정은 원본 전부로
         self._lane_thin = {}      # id(레인) → 큰 파일 화면 솎아내기 상태(줌하면 다시 고른다)
         # 화면 솎아내기 배율은 '지금 보이는 x 범위'로 정해진다(gui/pg_perf.py) — 큰 파일이면
-        # 그리기 전에 데이터 범위로 잡아둬야 첫 계산부터 맞는다. 다 그린 뒤 자동 범위로 되돌린다.
+        # 그리기 전에 데이터 범위로 잡아둬야 첫 계산부터 맞는다. That turns x auto-range off, so
+        # every other file turns it back on (lane 0; the rest follow via the x link) — otherwise
+        # all later files were drawn in the big file's stale x window (2026-10-02 audit R5).
         fin_x = x[np.isfinite(x)]
         pre_range = (len(x) > _BIG and fin_x.size > 1 and fin_x.max() > fin_x.min())
         for i, (kind, g) in enumerate(lanes_spec):
@@ -895,6 +918,8 @@ class ResultViewerWidget(QWidget):
                 # padding=None = 자동 범위와 같은 여백. x 자동 범위를 다시 켜지 않는다 — 켜면 연결된
                 # 레인들이 연쇄로 범위를 바꿔 마커를 수십 번 다시 만든다(실측 setData 23회). 'A'로 복귀.
                 pw.getViewBox().setXRange(float(fin_x.min()), float(fin_x.max()), padding=None)
+            elif i == 0:
+                pw.getViewBox().enableAutoRange(x=True)
             self._set_time_axis(pw, has_time)
             if i == n_lanes - 1:
                 pw.setLabel("bottom", xlabel)
@@ -964,6 +989,7 @@ class ResultViewerWidget(QWidget):
         self._pw_bot.hide()
         self._stack_host.show()
         self._pw_detail.show()
+        self._pw_resid.show()
 
         n_flag = {f: flags.count(f) for f in set(flags) if f != "ok"}
         flag_tag = ("  ·  " + " ".join(f"{k}:{v}" for k, v in sorted(n_flag.items()))
@@ -1019,9 +1045,11 @@ class ResultViewerWidget(QWidget):
 
     def _on_lane_click(self, pw, ev):
         """레인 클릭 → 화면상 8 px 안의 **실제 데이터 점** 중 가장 가까운 행을 아래 패널에.
-        표시 좌표(x는 시간 시프트가 이미 들어간 값) 그대로 비교하므로 시프트 보정이 필요 없다."""
+        표시 좌표(x는 시간 시프트가 이미 들어간 값) 그대로 비교하므로 시프트 보정이 필요 없다.
+        No `ev.isAccepted()` check: the flag ScatterPlotItem accepts every click on a point,
+        so that check made the panel unreachable (2026-10-02 audit R1)."""
         from PyQt6.QtCore import Qt as _Qt
-        if ev.button() != _Qt.MouseButton.LeftButton or ev.double() or ev.isAccepted():
+        if ev.button() != _Qt.MouseButton.LeftButton or ev.double():
             return
         hit = getattr(self, "_lane_hits", {}).get(id(pw))
         if hit is None or not self._fit_cache or self._path is None:
@@ -1079,7 +1107,8 @@ class ResultViewerWidget(QWidget):
         except Exception:
             return
 
-        bits = [f"row {row_idx}"]
+        files = t.get("file")
+        bits = [f"row {row_idx}"] + ([str(files[j])] if files is not None and j < len(files) else [])
         st = (t.get("status") or [None] * (j + 1))[j]
         if st:
             bits.append(str(st))
@@ -1093,27 +1122,85 @@ class ResultViewerWidget(QWidget):
             if np.isfinite(y[j]):
                 bits.append(f"{g} {y[j]:.4g}")
 
-        alpha_path = self._sibling_alpha(self._path)
-        if not alpha_path:
-            # α가 없어도 수치 요약은 보여준다 — 클릭이 아무 반응 없는 것보다 낫다.
-            self._pw_detail.setTitle("  ·  ".join(bits)
-                                     + "   |   no sibling alpha_trace.dat -> no spectrum")
-            self._stats_lbl.setText(f"row {row_idx}: sibling alpha_trace.dat not found")
-            return
-        from gui.result_viewer_io import read_alpha_trace
-        wave, alpha = read_alpha_trace(alpha_path, want_id=row_idx)
+        alpha_path, wave, alpha, alpha_id, why = self._alpha_row(j)
         if alpha is None:
-            self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   row {row_idx} not in alpha_trace")
+            # α가 없어도 수치 요약은 보여준다 — 클릭이 아무 반응 없는 것보다 낫다.
+            self._pw_detail.setTitle("  ·  ".join(bits) + f"   |   {why} -> no spectrum")
+            self._stats_lbl.setText(f"row {row_idx}: {why}")
             return
         xs = wave if (wave is not None and len(wave) == len(alpha)) else np.arange(len(alpha))
         self._pw_detail.plot(xs, alpha, pen=pg.mkPen(AUGUR.info, width=1.4),
-                             name=f"alpha (row {row_idx})")
+                             name=f"alpha (row_idx {alpha_id})")
         self._pw_detail.setLabel("left", "alpha (cm^-1)")
         self._pw_detail.setLabel(
             "bottom", "Wavelength (nm)" if (wave is not None and len(wave) == len(alpha))
             else "Pixel")
         self._pw_detail.setTitle("  ·  ".join(bits))
-        self._draw_residual(j, row_idx, alpha_path)
+        if why:            # spectrum found, but refit-by-row_idx would be ambiguous
+            self._pw_resid.setTitle(f"Residual unavailable: {why}")
+            return
+        self._draw_residual(j, alpha_id, alpha_path)
+
+    def _alpha_row(self, j):
+        """α spectrum behind fit row j → (alpha_path, wave, alpha, alpha row_idx value, why).
+        alpha is None when not found; `why` says what is missing (shown to the user).
+
+        GUI report: the File cell names the source file and the data-row *position* the
+        worker fit — the table's own row number is not an alpha row (2026-10-02 audit R2/R3).
+        alpha-fit table (row_idx column): row_idx is the alpha file's row_idx value."""
+        t = self._fit_cache
+        files = t.get("file")
+        if files is None:
+            rid = int(t["row_idx"][j])
+            path = self._sibling_alpha(self._path)
+            if not path:
+                return None, None, None, rid, "no sibling *_alpha_trace.dat"
+            from gui.result_viewer_io import read_alpha_trace
+            wave, alpha = read_alpha_trace(path, want_id=rid)
+            return path, wave, alpha, rid, ("" if alpha is not None
+                                            else f"row_idx {rid} not in {os.path.basename(path)}")
+        from gui.result_viewer_io import parse_file_cell
+        src = parse_file_cell(files[j] if j < len(files) else "")
+        if src is None:
+            return None, None, None, None, f"File cell {files[j]!r} names no source row"
+        name, pos = src
+        if "alpha_trace" not in name.lower():
+            return None, None, None, None, f"source {name} is raw, not an alpha_trace"
+        path = self._find_source(name)
+        if path is None:
+            return None, None, None, None, (f"{name} not found (looked next to the fit file, "
+                                            "3 parent folders, last data/alpha folders)")
+        from core.data_io import DataIO
+        try:
+            wave, alpha, _T, _P = DataIO.load_alpha_trace_row_full(path, pos)
+            rows = DataIO._alpha_file(path)[2]      # same data-row list the worker indexed
+        except Exception as e:                      # noqa: BLE001 — shown, not raised
+            return None, None, None, None, f"{name} row {pos}: {e}"
+        rid_s = rows[pos].split("\t", 1)[0]
+        try:
+            rid = int(float(rid_s))
+        except ValueError:
+            rid = None
+        ids = [r.split("\t", 1)[0] for r in rows]
+        why = ("" if rid is not None and ids.count(rid_s) == 1 else
+               f"row_idx {rid_s!r} not unique in {name} - refit looks rows up by row_idx")
+        return path, wave, alpha, rid, why
+
+    def _find_source(self, name):
+        """Locate a File-cell source by basename: fit folder, 3 parents, last data/alpha folders.
+        The fit file itself is never a candidate."""
+        from gui.dlg_dir import dlg_dir
+        me = os.path.abspath(self._path)
+        dirs, d = [], os.path.dirname(me)
+        for _ in range(4):
+            dirs.append(d)
+            d = os.path.dirname(d)
+        dirs += [dlg_dir("data"), dlg_dir("alpha_out")]
+        for d in dirs:
+            c = os.path.join(d, name) if d else ""
+            if c and os.path.isfile(c) and os.path.abspath(c) != me:
+                return c
+        return None
 
     def _draw_residual(self, j, row_idx, alpha_path):
         """그 행을 **그때 설정(.meta.json)** 으로 재핏해 잔차를 그린다.
@@ -1161,16 +1248,17 @@ class ResultViewerWidget(QWidget):
 
     @staticmethod
     def _sibling_alpha(fit_path):
-        """`*_fit.tsv` 옆의 대응 `*_alpha_trace.dat` 경로 추정."""
+        """`*_fit.tsv` 옆의 대응 `*_alpha_trace.dat` 경로 추정 (never the fit file itself —
+        the old `stem + ".dat"` candidate returned a `.dat` fit result as its own alpha)."""
         base = os.path.basename(fit_path)
         stem = base[:-8] if base.endswith("_fit.tsv") else os.path.splitext(base)[0]
         d = os.path.dirname(fit_path)
-        cands = [os.path.join(d, stem + "_alpha_trace.dat"),
-                 os.path.join(d, stem + ".dat")]
+        cands = [os.path.join(d, stem + "_alpha_trace.dat")]
         import glob
         cands += glob.glob(os.path.join(d, stem + "*alpha_trace.dat"))
+        me = os.path.abspath(fit_path)
         for c in cands:
-            if os.path.isfile(c):
+            if os.path.isfile(c) and os.path.abspath(c) != me:
                 return c
         return None
 
@@ -1323,12 +1411,17 @@ class ResultViewerWidget(QWidget):
                                      for p in paths])
 
     def _bake_qc_into_rows(self, colhdr, rows):
-        """현재 K>0이면 rows(텍스트 행)의 RMS 분포로 robust 임계를 잡아 초과 행의
-        가스 컬럼을 nan + Status=QC-Auto로 바꾼다. 반환: (rows, 제외수). K=0이면 그대로."""
+        """현재 K>0이면 사후 QC 초과 행의 가스 컬럼을 nan + Status=QC-Auto로 바꾼다.
+        반환: (rows, 바꾼 행 수). K=0이면 그대로.
+
+        The mask comes from `qc_hidden_mask` - the same function the screen uses - over
+        **all** rows passed in. Callers pass the whole file(s) *before* slicing to the range,
+        so the threshold population matches the screen (2026-10-02 audit R6: the old copy
+        recomputed thresholds on the sliced rows → 28 rows excluded vs 6 on screen)."""
         K = self._spin_qc_k.value() if hasattr(self, '_spin_qc_k') else 0.0
         if K <= 0 or not rows:
             return rows, 0
-        cols = colhdr.split('\t')
+        cols = colhdr.split('	')
         idx = {c: i for i, c in enumerate(cols)}
         if 'RMS' not in idx:
             return rows, 0
@@ -1340,37 +1433,55 @@ class ResultViewerWidget(QWidget):
                  or [c for c in cols if (c + '_Smooth') in idx]
                  or [c for c in cols if c in ('NO2', 'CHOCHO', 'H2O', 'O4', 'HONO', 'HCHO')])
         gidx = [idx[g] for g in gases] + [idx[g + '_Smooth'] for g in gases if (g + '_Smooth') in idx]
-        # 채널별 임계 (단일 진실원: core.result_io)
-        import numpy as _np
-        from core.result_io import robust_rms_thresholds
-        row_ch, row_rv = [], []
-        for _t, line in rows:
-            p = line.split('\t')
-            row_ch.append(p[ci] if (ci is not None and ci < len(p)) else '0')
-            try:
-                row_rv.append(float(p[ri]))
-            except Exception:
-                row_rv.append(_np.nan)
-        thr = robust_rms_thresholds(row_rv, row_ch, K=K, min_n=5)
-        out = []; nq = 0
-        for k, (t, line) in enumerate(rows):
-            p = line.split('\t')
-            ch = p[ci] if (ci is not None and ci < len(p)) else '0'
-            try:
-                rv = float(p[ri])
-            except Exception:
-                rv = float('nan')
-            if _np.isfinite(rv) and rv > thr.get(ch, _np.inf):
+        parts = [line.split('	') for _t, line in rows]
+        rv = np.array([float(p[ri]) if ri < len(p) and p[ri].strip() else np.nan
+                       for p in parts], dtype=float)
+        ch = ([p[ci] if ci < len(p) else '' for p in parts] if ci is not None else None)
+        mask = qc_hidden_mask(len(rows), rms=rv, channel=ch, K=K)
+        out = []
+        for (t, line), p, m in zip(rows, parts, mask):
+            if m:
                 for j in gidx:
                     if j < len(p):
                         p[j] = 'nan'
                 if si is not None and si < len(p):
                     p[si] = f'QC-Auto(K={K:g})'
-                nq += 1
-                out.append((t, '\t'.join(p)))
-            else:
-                out.append((t, line))
-        return out, nq
+                line = '	'.join(p)
+            out.append((t, line))
+        return out, int(mask.sum())
+
+    def _provenance_lines(self, paths, sliced=True):
+        """What the viewer did to produce an Export/Merge file (principle 4). The copied input
+        header (e.g. "Auto QC K=8", its Code Version) describes the input, not this file."""
+        K = self._spin_qc_k.value()
+        t0, t1 = self._region_times() if sliced else (None, None)
+        return ([f"viewer post-hoc QC K={K:g}"
+                 + (" (gas values of rows above the threshold set to nan, Status QC-Auto; "
+                    "supersedes any Auto QC K in the header above)" if K > 0 else " (off)"),
+                 f"viewer Hide QC {'ON' if self._chk_hide_qc.isChecked() else 'OFF'} "
+                 "(display only - rows and Status kept)",
+                 "range " + (f"{t0:%Y-%m-%d %H:%M:%S} ~ {t1:%Y-%m-%d %H:%M:%S}" if t0 else "all")
+                 + (" (file times)" if sliced else " (Merge ignores the range)"),
+                 f"display time shift {self._time_shift_hours:+g} h (NOT applied - times as in input)"]
+                + [f"input {os.path.abspath(p)}" for p in paths])
+
+    def _build_export(self, paths):
+        """Merge → post-hoc QC on the whole set (as on screen) → slice to the range.
+        Returns (comments, colhdr, rows, n_in, nq-in-range). ValueError if nothing to write."""
+        from core.result_io import merge_results, slice_rows
+        comments, colhdr, rows, _ndup = merge_results(paths)
+        n_in = len(rows)
+        rows, _ = self._bake_qc_into_rows(colhdr, rows)    # 사후 QC(K>0) — 전체 기준
+        t0, t1 = self._region_times()
+        rows = slice_rows(rows, t0, t1)
+        if not rows:
+            raise ValueError("No data in the selected range.")
+        K = self._spin_qc_k.value()
+        tag = f"QC-Auto(K={K:g})"
+        si = colhdr.split('	').index('Status') if 'Status' in colhdr.split('	') else None
+        nq = (sum(1 for _t, ln in rows if si is not None and (ln.split('	') + [''] * (si + 1))[si] == tag)
+              if K > 0 else 0)
+        return comments, colhdr, rows, n_in, nq
 
     def _export_region(self):
         """선택구간(없으면 전체)을 result_io로 잘라 새 파일로 저장.
@@ -1378,23 +1489,16 @@ class ResultViewerWidget(QWidget):
         if getattr(self, '_current_kind', None) == 'concentration':
             self._export_concentration_shifted()
             return
-        from core.result_io import merge_results, slice_rows, write_result, bucketed_out_name
+        from core.result_io import write_result, bucketed_out_name
         paths = self._selected_paths()
         if not paths:
             QMessageBox.information(self, "Export", "Open a result file first.")
             return
         try:
-            comments, colhdr, rows, _ndup = merge_results(paths)
+            comments, colhdr, rows, n_in, nq = self._build_export(paths)
         except ValueError as e:
             QMessageBox.warning(self, "Export", str(e))
             return
-        t0, t1 = self._region_times()
-        n_in = len(rows)
-        rows = slice_rows(rows, t0, t1)
-        if not rows:
-            QMessageBox.warning(self, "Export", "No data in the selected range.")
-            return
-        rows, nq = self._bake_qc_into_rows(colhdr, rows)   # 사후 QC(K>0) 반영
         # 자동 저장경로: 날짜/neg/QC 버킷(GUI save와 동일). neg·QC는 입력 # 헤더에서 상속,
         # 뷰어가 사후 QC 재적용(K>0)했으면 그 K로 QC 버킷 덮어씀.
         _kv = self._spin_qc_k.value()
@@ -1410,32 +1514,64 @@ class ResultViewerWidget(QWidget):
         if _d:
             os.makedirs(_d, exist_ok=True)
         write_result(out, comments, colhdr, rows,
-                     note=f"{len(paths)} file(s), {n_in}→{len(rows)} rows, QC-excluded {nq} (viewer export)")
+                     note=f"{len(paths)} file(s), {n_in}→{len(rows)} rows, QC-excluded {nq} (viewer export)",
+                     extra=self._provenance_lines(paths))
         qmsg = f" · QC excluded {nq}" if nq else ""
         self._stats_lbl.setText(
             f"Saved: {os.path.basename(out)}  ({len(rows)} rows{qmsg}, "
             f"{rows[0][0]:%m-%d %H:%M} ~ {rows[-1][0]:%m-%d %H:%M})")
+
+    @classmethod
+    def _shifted_concentration_df(cls, path, shift_h):
+        """Concentration CSV with **every** time column shifted by shift_h hours, or None if the
+        first column is not a time. A shifted column must not keep its timezone label
+        (2026-10-02 audit R10: UTC values went out under `time_KST`, and only the first time
+        column moved): KST −9 h → UTC, UTC +9 h → KST, anything else gets `_shift±Nh`."""
+        import pandas as pd
+        sep = cls._detect_sep(path) or r"\s+"
+        df = pd.read_csv(path, sep=sep, comment="#", engine="python", encoding="utf-8-sig")
+        times = {}
+        for c in df.columns:
+            if pd.api.types.is_numeric_dtype(df[c]):   # numbers would parse as epoch-ns "times"
+                continue
+            dt = pd.to_datetime(df[c], errors="coerce")
+            if dt.notna().mean() > 0.5:
+                times[c] = dt
+        if df.columns[0] not in times:
+            return None
+        out = df.copy()
+        if not shift_h:
+            return out
+        names = {}
+        for c, dt in times.items():
+            out[c] = (dt + pd.Timedelta(hours=shift_h)).dt.strftime("%Y-%m-%d %H:%M:%S")
+            s = str(c)
+            if shift_h == -9 and "KST" in s:
+                names[c] = s.replace("KST", "UTC")
+            elif shift_h == 9 and "UTC" in s:
+                names[c] = s.replace("UTC", "KST")
+            else:
+                names[c] = f"{s}_shift{shift_h:+g}h"
+        taken = set(map(str, out.columns))
+        for c, n in list(names.items()):       # never collide with an existing column name
+            if n in taken and n != str(c):
+                names[c] = f"{c}_shift{shift_h:+g}h"
+        return out.rename(columns=names)
 
     def _export_concentration_shifted(self):
         """Concentration 종류(계산기 CSV 등)는 fit용 merge_results/slice_rows 포맷과
         안 맞아 여기서 따로 처리 — 원본을 다시 읽어 time 컬럼에 현재 Time shift만
         반영해 그대로 새 CSV로 저장(구간선택 없이 전체, 시프트=0이면 사본).
         보정 사실은 파일 첫 줄에 남겨 무엇이 바뀌었는지 항상 드러낸다."""
-        import pandas as pd
         path = self._path
         if not path:
             QMessageBox.information(self, "Export", "Open a result file first.")
             return
-        sep = self._detect_sep(path) or r"\s+"
-        df = pd.read_csv(path, sep=sep, comment="#", engine="python")
-        xcol = df.columns[0]
-        x_dt = pd.to_datetime(df[xcol], errors="coerce")
-        if x_dt.notna().mean() <= 0.5:
+        shift_h = self._time_shift_hours
+        out_df = self._shifted_concentration_df(path, shift_h)
+        if out_df is None:
             QMessageBox.warning(self, "Export", "No time column found to shift/save.")
             return
-        shift_h = self._time_shift_hours
-        out_df = df.copy()
-        out_df[xcol] = (x_dt + pd.Timedelta(hours=shift_h)).dt.strftime("%Y-%m-%d %H:%M:%S")
         base, ext = os.path.splitext(path)
         tag = f"_shift{shift_h:+g}h" if shift_h else "_copy"
         suggest = f"{base}{tag}{ext or '.csv'}"
@@ -1447,7 +1583,10 @@ class ResultViewerWidget(QWidget):
         if _d:
             os.makedirs(_d, exist_ok=True)
         with open(out, "w", encoding="utf-8", newline="") as f:
-            f.write(f"# source: {os.path.basename(path)}\n")
+            from core.provenance import code_version
+            f.write(f"# source: {os.path.abspath(path)}\n")
+            f.write(f"# exporter code {code_version()} (Result Lab concentration export, "
+                    f"{datetime.now():%Y-%m-%d %H:%M})\n")
             if shift_h:
                 f.write(f"# time shifted by {shift_h:+g}h vs. source (Result Lab manual correction)\n")
             out_df.to_csv(f, index=False)
@@ -1484,14 +1623,16 @@ class ResultViewerWidget(QWidget):
         if _d:
             os.makedirs(_d, exist_ok=True)
         write_result(out, comments, colhdr, rows,
-                     note=f"merged {len(paths)} files, {ndup} dups removed, QC-excluded {nq} (viewer)")
+                     note=f"merged {len(paths)} files, {ndup} dups removed, QC-excluded {nq} (viewer)",
+                     extra=self._provenance_lines(paths, sliced=False))
         dmsg = (f" · {ndup} dups" if ndup else "") + (f" · QC {nq}" if nq else "")
         self._stats_lbl.setText(f"Merged: {os.path.basename(out)} ({len(rows)} rows{dmsg})")
 
     def _stats_arrays(self):
-        """현재 fit 캐시에서 (QC숨김·구간 반영) 선택마스크 반환."""
+        """현재 fit 캐시에서 (QC숨김·구간 반영) 선택마스크 반환. Only while a fit is open —
+        _fit_cache may hold an earlier file (2026-10-02 audit R8: CSV open, stats of old fit)."""
         t = self._fit_cache
-        if not t:
+        if not t or getattr(self, "_current_kind", None) != "fit":
             return None, None
         hide = self._qc_mask(t)
         sel = np.ones(len(t["row_idx"]), bool) & ~hide
@@ -1502,10 +1643,25 @@ class ResultViewerWidget(QWidget):
         return t, sel
 
     def _show_stats(self):
-        t, sel = self._stats_arrays()
-        if t is None:
+        lines = self._stats_lines()
+        if lines is None:
             QMessageBox.information(self, "Stats", "Open a fit result first.")
             return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Stats (ppb)")
+        dlg.resize(720, 380)
+        lay = QVBoxLayout(dlg)
+        ed = QPlainTextEdit("\n".join(lines))
+        ed.setReadOnly(True)
+        ed.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
+        lay.addWidget(ed)
+        dlg.show()
+
+    def _stats_lines(self):
+        """Stats table lines for the open fit result, or None when no fit is open."""
+        t, sel = self._stats_arrays()
+        if t is None:
+            return None
         t0, t1 = self._region_times()
         rng = (f"{t0:%Y-%m-%d %H:%M} ~ {t1:%Y-%m-%d %H:%M}" if t0 else "all")
         lines = [f"File: {os.path.basename(t['path'])}",
@@ -1523,8 +1679,9 @@ class ResultViewerWidget(QWidget):
                 continue
             tr = trend_per_hour(tt[sel], y[sel]) if tt is not None else None
             trs = f"  {tr[0]:>10.4g} {tr[1]:>8.2g}" if tr else ""
-            lines.append(f"{g:<10} {v.size:>6} {np.mean(v):>9.3f} {np.median(v):>9.3f} "
-                         f"{np.std(v):>8.3f} {np.min(v):>8.2f} {np.max(v):>8.2f}{trs}")
+            # %g, not %f: H2O sits near 1e-13 and printed as 0.000 everywhere (R8/R20)
+            lines.append(f"{g:<10} {v.size:>6} {np.mean(v):>9.3g} {np.median(v):>9.3g} "
+                         f"{np.std(v):>8.3g} {np.min(v):>8.3g} {np.max(v):>8.3g}{trs}")
         r = t["rms"][sel]
         r = r[np.isfinite(r)]
         if r.size:
@@ -1534,20 +1691,10 @@ class ResultViewerWidget(QWidget):
         lines.append("trend = straight-line slope over the range (ppb per hour). ± SE assumes "
                      "independent residuals —")
         lines.append("with autocorrelated data (most time series) the real uncertainty is larger.")
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Stats (ppb)")
-        dlg.resize(720, 380)
-        lay = QVBoxLayout(dlg)
-        ed = QPlainTextEdit("\n".join(lines))
-        ed.setReadOnly(True)
-        ed.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
-        lay.addWidget(ed)
-        dlg.show()
+        return lines
 
     def _export_png(self):
-        """현재 위/아래 그래프를 고해상도(폭 2400px) PNG 합본으로 저장."""
-        import pyqtgraph.exporters as pgex
-        from PyQt6.QtGui import QImage, QPainter
+        """현재 화면의 그래프를 고해상도(폭 2400px) PNG 합본으로 저장."""
         base = os.path.splitext(os.path.basename(self._path or 'plot'))[0]
         out, _ = QFileDialog.getSaveFileName(self, "Export high-res PNG",
                                              f"{base}.png", "PNG (*.png)")
@@ -1556,29 +1703,41 @@ class ResultViewerWidget(QWidget):
         if not out.lower().endswith('.png'):
             out += '.png'
         try:
-            imgs = []
-            for pw in (self._pw_top, self._pw_bot):
-                if not pw.isVisible() and pw is self._pw_bot:
-                    continue
-                ex = pgex.ImageExporter(pw.plotItem)
-                ex.parameters()['width'] = 2400
-                imgs.append(ex.export(toBytes=True))   # QImage
-            if not imgs:
-                return
-            if len(imgs) == 1:
-                imgs[0].save(out)
-            else:
-                wmax = max(im.width() for im in imgs)
-                htot = sum(im.height() for im in imgs)
-                combo = QImage(wmax, htot, QImage.Format.Format_ARGB32)
-                combo.fill(0xFFFFFFFF)
-                p = QPainter(combo)
-                y = 0
-                for im in imgs:
-                    p.drawImage(0, y, im)
-                    y += im.height()
-                p.end()
-                combo.save(out)
-            self._stats_lbl.setText(f"PNG saved: {os.path.basename(out)} (2400px)")
+            n = self._save_png(out)
         except Exception as e:
             QMessageBox.warning(self, "PNG export", f"Failed: {e}")
+            return
+        if not n:
+            QMessageBox.warning(self, "PNG export", "No plot is shown - nothing saved.")
+            return
+        self._stats_lbl.setText(f"PNG saved: {os.path.basename(out)} ({n} plot(s), 2400px)")
+
+    def _save_png(self, out):
+        """Stack the plots currently on screen into one 2400 px PNG. Returns how many plots.
+        A fit result lives in the lane stack - the old code exported the hidden `_pw_top`
+        (a blank 2400x37 strip) and still reported "saved" (2026-10-02 audit R7)."""
+        import pyqtgraph.exporters as pgex
+        from PyQt6.QtGui import QImage, QPainter
+        if getattr(self, '_current_kind', None) == "fit":
+            plots = [pw for pw in self._lanes if not pw.isHidden()]
+        else:
+            plots = [pw for pw in (self._pw_top, self._pw_bot) if not pw.isHidden()]
+        imgs = []
+        for pw in plots:
+            ex = pgex.ImageExporter(pw.plotItem)
+            ex.parameters()['width'] = 2400
+            imgs.append(ex.export(toBytes=True))   # QImage
+        if not imgs:
+            return 0
+        wmax = max(im.width() for im in imgs)
+        htot = sum(im.height() for im in imgs)
+        combo = QImage(wmax, htot, QImage.Format.Format_ARGB32)
+        combo.fill(0xFFFFFFFF)
+        p = QPainter(combo)
+        y = 0
+        for im in imgs:
+            p.drawImage(0, y, im)
+            y += im.height()
+        p.end()
+        combo.save(out)
+        return len(imgs)

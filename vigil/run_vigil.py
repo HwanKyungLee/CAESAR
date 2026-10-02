@@ -124,6 +124,7 @@ class VigilApp:
         """폴더별 상태 — 처음 만들 때와 폴더를 바꿀 때."""
         self._tick_errors = 0
         self._backlog_logged = False
+        self._date_excluded_logged: set = set()
         self._was_catching_up = False
         self._last_arrival = None
         self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
@@ -275,7 +276,12 @@ class VigilApp:
             spectrum = ch.slice(ev.row)
             temp_c = _hk_value(prof, ev.row, ch.concentration.cavity_temp_hk)
             press_mbar = _hk_value(prof, ev.row, ch.concentration.cavity_pressure_hk)
-            result = cm.observe(ev.role, spectrum, temp_c, press_mbar)
+            # (1-R)/d from the same channel's RMonitor (it ran first in this tick, so this
+            # row's calibration is already in). No reflectance config -> None -> SKIP.
+            rm = self._r_monitors.get(key)
+            omr_d = rm.omr_d if rm is not None else None
+            rl = ch.reflectance.rl_factor if ch.reflectance is not None else 1.0
+            result = cm.observe(ev.role, spectrum, temp_c, press_mbar, omr_d=omr_d, rl=rl)
             if result is not None:
                 status, msg, metrics = result
                 self._conc_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)
@@ -302,6 +308,17 @@ class VigilApp:
     def _log_ingest_state(self) -> None:
         """백로그 건너뜀(시작 1회)과 따라잡기 시작/끝을 로그에 남긴다 — 조용히 버리지 않는다."""
         w = self.watcher
+        for path, ids in list(w.date_excluded.items()):
+            if path in self._date_excluded_logged:
+                continue
+            self._date_excluded_logged.add(path)
+            msg = (f"NOT monitored: {os.path.basename(path)} has the column count of {', '.join(ids)}, "
+                   f"but its file date is outside that profile's date_range (different fibre/channel "
+                   f"layout) — add a profile for this layout")
+            log.warning(msg)
+            self.state_log.append(P2, msg, kind="ingest", file=path, profiles=ids)
+            if self.dashboard is not None:
+                self.dashboard.log_line(msg)
         if not self._backlog_logged:
             self._backlog_logged = True
             n, nbytes = w.skipped_backlog

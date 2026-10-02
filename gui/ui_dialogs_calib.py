@@ -218,17 +218,17 @@ class WavelengthCalibrationDialog(QDialog):
         right_layout.addWidget(btn_del)
         
         # 3. Fitting Button
-        btn_fit = QPushButton("3. Fit & Check R²")
+        btn_fit = QPushButton("3. Fit && Check R²")
         btn_fit.clicked.connect(self.fit_calibration)
         right_layout.addWidget(btn_fit)
         
-        btn_save_fwhm = QPushButton("Save FWHM & Sigma Records")
+        btn_save_fwhm = QPushButton("Save FWHM && Sigma Records")
         btn_save_fwhm.setStyleSheet(f"background-color: {AUGUR.info}; color: white; font-weight: bold;")
         btn_save_fwhm.clicked.connect(self.save_fwhm_data)
         right_layout.addWidget(btn_save_fwhm)
 
         # 4. Save & Apply Button
-        btn_apply = QPushButton("4. Save & Apply to Main")
+        btn_apply = QPushButton("4. Save && Apply to Main")
         btn_apply.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold; height: 40px;")
         btn_apply.clicked.connect(self.save_and_apply)
         right_layout.addWidget(btn_apply)
@@ -802,8 +802,9 @@ class WavelengthCalibrationDialog(QDialog):
                     np.savetxt(save_path, self.wavelengths, fmt='%.6f', header=header_msg, encoding='utf-8')
 
                 # 5. Transmit signal to Main App
+                self.saved_path = save_path   # main window loads it through its single wavecal loader
                 self.calibration_finished.emit(self.wavelengths)
-                
+
                 # 6. Completion Message & Close
                 QMessageBox.information(
                     self, "Success", 

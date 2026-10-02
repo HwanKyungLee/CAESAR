@@ -12,6 +12,10 @@ pyqtgraph 0.14의 `PlotItem.addItem`은 붙이는 아이템에 **자기(그래�
 - `peak` = 구간마다 최솟값·최댓값을 남긴다 → 스파이크가 화면에서 사라지지 않는다.
 - 확대하면 배율이 1로 돌아와 모든 점이 다시 보인다. Publish(matplotlib)·Export·통계는 원본 그대로.
 - `clipToView`는 쓰지 않는다 — pyqtgraph 0.14에서 PlotWidget에 붙이면 AttributeError(autoRangeEnabled).
+- **NaN 은 넘기지 않는다**(2026-10-02). `peak`는 구간마다 `max/min(axis=1)`이라 구간에 NaN 이 하나만
+  있어도 그 구간 전체가 NaN → 안 그려진다(26만 점·NaN 1 %에서 화면 점의 50 %가 사라지고 스파이크도
+  함께 사라짐). QC 숨김·필터·핏 실패가 모두 NaN 을 만든다. 그래서 큰 시리즈는 유한한 점만 넘기고,
+  NaN 이 있던 자리는 `connect` 배열로 **끊어서** 빈 구간이 선으로 이어지지 않게 한다 — `set_data()`.
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ def add_fast_curve(target, x, y, **style):
         item = pg.PlotDataItem(**style)
         target.addItem(item)
         make_fast(item, force=True)
-        item.setData(x, y)
+        set_data(item, x, y)
     else:
         item = pg.PlotDataItem(x, y, **style)
         target.addItem(item)
@@ -91,4 +95,38 @@ def make_fast(item, n=None, force=False):
         n = 0 if xd is None else len(xd)
     if force or n > BIG:
         item.setDownsampling(auto=True, method="peak")
+        xd, yd = item.getOriginalDataset() if hasattr(item, "getOriginalDataset") else (None, None)
+        if xd is not None and yd is not None and len(xd) > 0:
+            set_data(item, xd, yd)                 # 이미 NaN 째 들어간 데이터 — 걸러서 다시
+    return item
+
+
+def finite_gapped(x, y):
+    """(x, y, connect) — 유한한 점만 남기고, 원래 사이에 빠진 점(NaN)이 있던 곳은 connect=False 로
+    끊는다(pyqtgraph: connect[i] = 점 i 와 i+1 을 잇는가). 빈 구간이 선으로 메워지지 않는다."""
+    import numpy as np
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    idx = np.flatnonzero(np.isfinite(x) & np.isfinite(y))
+    connect = np.ones(idx.size, dtype=bool)
+    if idx.size > 1:
+        connect[:-1] = np.diff(idx) == 1
+    return x[idx], y[idx], connect
+
+
+def set_data(item, x, y):
+    """큰 시리즈(>BIG)에 데이터를 넣는다 — NaN 은 빼고 그 자리는 끊는다(모듈 설명: peak 가 NaN 구간을
+    통째로 지운다). 작은 시리즈는 그대로(NaN 이면 pyqtgraph 가 알아서 끊는다)."""
+    import numpy as np
+    n = 0 if x is None else len(x)
+    if n > BIG:
+        yy = np.asarray(y, float)
+        xx = np.asarray(x, float)
+        if not (np.isfinite(yy).all() and np.isfinite(xx).all()):
+            xf, yf, c = finite_gapped(xx, yy)
+            item.setData(xf, yf, connect=c)
+            return item
+        item.setData(xx, yy, connect="all")
+        return item
+    item.setData(x, y)
     return item

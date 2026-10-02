@@ -33,7 +33,9 @@ import threading
 
 import numpy as np
 
-SCHEMA = 2
+# 3: 2026-10-02 — 키를 파싱 전 stamp 로(store 참고). 그 전 캐시는 측정 중 파일의 짧은 파싱이
+#    다 자란 파일 키로 들어 있을 수 있어 통째로 버린다(한 번 다시 파싱).
+SCHEMA = 3
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_DIR = os.path.join(_ROOT, 'cache', 'alpha_pass1')
@@ -83,11 +85,18 @@ def parser_fingerprint() -> str:
     return _FINGERPRINT
 
 
-def cache_key(fp: str, channel, pixel_min, pixel_max) -> str:
-    """무효화 키 → sha1 hex. raw가 바뀌거나(크기/mtime) 파서 코드·프로파일이 바뀌면 다른 키.
-    분석 세팅(퍼지·flag·평균·dark …)은 캐시 뒤에서 계산되므로 키에 없다. 파일이 없으면 OSError."""
+def file_stamp(fp: str) -> tuple:
+    """(크기, mtime_ns). 파일이 없으면 OSError. **파싱 전에** 잡아 store(stamp=)에 넘긴다."""
     st = os.stat(fp)
-    parts = [os.path.abspath(fp).lower(), str(st.st_size), str(st.st_mtime_ns),
+    return (st.st_size, st.st_mtime_ns)
+
+
+def cache_key(fp: str, channel, pixel_min, pixel_max, stamp=None) -> str:
+    """무효화 키 → sha1 hex. raw가 바뀌거나(크기/mtime) 파서 코드·프로파일이 바뀌면 다른 키.
+    분석 세팅(퍼지·flag·평균·dark …)은 캐시 뒤에서 계산되므로 키에 없다. 파일이 없으면 OSError.
+    stamp=None 이면 지금 stat 한다(조회용). 저장은 반드시 파싱 전 stamp 로 — store() 참고."""
+    size, mtime_ns = file_stamp(fp) if stamp is None else stamp
+    parts = [os.path.abspath(fp).lower(), str(size), str(mtime_ns),
              str(int(channel)), str(int(pixel_min)), str(int(pixel_max)),
              f"s{SCHEMA}", parser_fingerprint()]
     return hashlib.sha1('|'.join(parts).encode('utf-8')).hexdigest()
@@ -176,14 +185,22 @@ def lookup(fp, channel, pixel_min, pixel_max):
     return flags, Ts, Ps, np.ascontiguousarray(specs[:, lo:hi]), secs
 
 
-def store(fp, channel, pixel_min, pixel_max, flags, Ts, Ps, specs, secs) -> None:
-    """정확한 범위 키로 저장(전체 폭이면 잘라 쓰기 안전 여부도 같이)."""
+def store(fp, channel, pixel_min, pixel_max, flags, Ts, Ps, specs, secs, *, stamp) -> bool:
+    """정확한 범위 키로 저장(전체 폭이면 잘라 쓰기 안전 여부도 같이) → 저장했으면 True.
+
+    stamp = **파싱을 시작하기 전에** 잡은 file_stamp(fp). 키는 그 stamp 로 만들고, 지금 파일이
+    그때와 다르면(측정 중이라 LabVIEW 가 행을 붙이는 오늘 파일) 저장하지 않는다. 예전에는 키를
+    파싱 **뒤에** 읽어서, 짧은 옛 내용의 파싱 결과가 다 자란 파일의 키로 저장됐고 — 그 뒤 모든
+    런이 그 캐시에 적중해 붙은 행을 말없이 빠뜨렸다(다시 파싱하지 않으니 저절로 낫지도 않는다)."""
     try:
-        key = cache_key(fp, channel, pixel_min, pixel_max)
+        if file_stamp(fp) != tuple(stamp):
+            return False                                   # 파싱 중에 파일이 바뀜 — 저장 금지
+        key = cache_key(fp, channel, pixel_min, pixel_max, stamp=stamp)
     except OSError:
-        return
+        return False
     save(key, flags, Ts, Ps, specs, secs,
          sliceable=_is_sliceable(pixel_min, pixel_max, flags, specs))
+    return True
 
 
 def save(key: str, flags, Ts, Ps, specs, secs, sliceable=False) -> None:
@@ -221,9 +238,13 @@ def extract_cached(task):
         hit = lookup(path, channel, pixel_min, pixel_max)
         if hit is not None:
             return (path, *hit)
+    try:
+        stamp = file_stamp(path)                           # 파싱 전에 — store() 참고
+    except OSError:
+        stamp = None
     out = extract_raw_file_for_parallel(task)
-    if enabled():
-        store(path, channel, pixel_min, pixel_max, *out[1:])
+    if enabled() and stamp is not None:
+        store(path, channel, pixel_min, pixel_max, *out[1:], stamp=stamp)
     return out
 
 

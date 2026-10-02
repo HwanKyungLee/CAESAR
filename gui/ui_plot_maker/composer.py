@@ -48,6 +48,25 @@ def _parse_ratios(text, n):
     return vals if len(vals) == n and all(v > 0 for v in vals) else None
 
 
+
+def _missing_datasets(cfg, shelf):
+    """Dataset names referenced by a panel's mode config ('ds:col' strings, also as dict keys)
+    that are not on the shelf."""
+    out = set()
+
+    def walk(v):
+        if isinstance(v, str):
+            if ":" in v and v.split(":", 1)[0] and v.split(":", 1)[0] not in shelf:
+                out.add(v.split(":", 1)[0])
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                walk(k); walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+    walk(cfg or {})
+    return out
+
 class Composer:
     def __init__(self, host):
         self.host = host
@@ -227,6 +246,17 @@ class Composer:
             h.time_shift_hours = p.get("time_shift_hours", 0.0)
             h._set_axes_widgets({**(p.get("axes") or {}), **look}, block=True)
             m, w, _bl = self._mode_instance(p)
+            missing = sorted(_missing_datasets(p.get("mode_cfg"), h.shelf))
+            if missing:
+                # The panel's data is gone — say so on the panel and in the status line
+                # instead of publishing silent empty axes.
+                ax.text(0.5, 0.5, "missing: " + ", ".join(missing), transform=ax.transAxes,
+                        ha="center", va="center", color="#b00", fontsize=9)
+                warns = getattr(h, "_publish_warnings", None)
+                if warns is not None:
+                    idx = next((i for i, q in enumerate(self.panels) if q is p), 0)
+                    warns.append(f"panel ({LETTERS[idx % 26]}) missing dataset(s): "
+                                 + ", ".join(missing))
             before = set(fig.axes)
             m.render_mpl(fig, ax)
             # ax가 아직 살아 있나: 분할 시계열은 ax를 지우고 칸을 쪼갠다. inset 축은 fig.axes가
@@ -309,13 +339,17 @@ class Composer:
             a.yaxis.set_minor_formatter(NullFormatter())
 
     def _share_x(self, drawn):
-        """같은 열(1칸 폭)의 단일 축 패널끼리 x 범위를 합쳐 공유하고, 맨 아래만 x 눈금·라벨."""
+        """같은 열(1칸 폭)의 단일 축 패널끼리 x 범위를 합쳐 공유하고, 맨 아래만 x 눈금·라벨.
+        **x 가 같은 종류인 패널끼리만**(모드·x 스케일·눈금 형식이 같을 때) — 시계열 위에 Scatter(ppb)
+        패널이 같은 열에 있으면 둘의 x 범위를 합쳐 한쪽을 뭉개고 위 패널의 x 눈금을 지웠다(2026-10-02)."""
         cols = {}
         for i, axes in drawn.items():
             p = self.panels[i]
             if "cell" not in p or len(axes) != 1 or p["cell"][3] != 1:
                 continue
-            cols.setdefault(p["cell"][1], []).append((p["cell"][0], axes[0]))
+            a = axes[0]
+            kind = (p.get("mode"), a.get_xscale(), type(a.xaxis.get_major_formatter()).__name__)
+            cols.setdefault((p["cell"][1], kind), []).append((p["cell"][0], a))
         for group in cols.values():
             if len(group) < 2:
                 continue

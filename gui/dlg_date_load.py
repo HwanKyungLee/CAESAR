@@ -214,13 +214,16 @@ class DateLoadDialog(QDialog):
             cfg_disp = f"{cfg} · " if cfg else ""
             it = QListWidgetItem(
                 f"{cfg_disp}{stem}   [{neg}/{qc}]   {days[0]}~{days[-1]} · {len(days)}d"
-                f"{datetime.fromtimestamp(last):%m-%d %H:%M}")
+                f" · saved {datetime.fromtimestamp(last):%m-%d %H:%M}")
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Unchecked)
             it.setData(Qt.ItemDataRole.UserRole, key)
             self._list.addItem(it)
+        # The merge is a real file written INTO the chosen tree — say where before Load (R10).
         self._lbl.setText(f"{len(self._tree)} series · {len(all_days)} day(s) available"
-                          "  — checked series are trimmed to the date range and merged automatically.")
+                          "  — checked series are trimmed to the date range and merged automatically.\n"
+                          f"Multi-day merges are written to {os.path.join(base, '_derived')}"
+                          " (daily files untouched; nothing is written until you press Load).")
 
     def _toggle_all(self, on):
         st = Qt.CheckState.Checked if on else Qt.CheckState.Unchecked

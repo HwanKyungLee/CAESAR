@@ -161,7 +161,7 @@ class MonitorWidget(QWidget):
             p.setClipToView(True)
             p.setDownsampling(auto=True, mode="peak")   # 큰 런에서 전 점 마커 → 화면 솎아내기(gui/pg_perf.py)
             p.showGrid(x=True, y=True)
-            p.setLabel('bottom', 'Time')
+            p.setLabel('bottom', 'Time (UTC)')
             p.addLegend(offset=(10, 10))
 
         # Channel colour palette  CH1=blue  CH2=orange  CH3=green
@@ -171,6 +171,7 @@ class MonitorWidget(QWidget):
         # _trend_data[ch][metric]   → list
         self._trend_curves = {}
         self._trend_data   = {}
+        self._last_trend_draw = {}     # ch → monotonic time of last redraw (throttle)
         for ch, col in _CH_COLORS.items():
             pen = pg.mkPen(col, width=1.5)
             lbl = f"CH{ch}"
@@ -355,7 +356,10 @@ class MonitorWidget(QWidget):
         update_spectrum이 채널 불일치로 그냥 return해서 Components/Fit View 두 탭이
         **아무 말 없이 백지**가 됐다(Trend/Conc는 채널 필터가 없어 정상으로 보였다).
         선택할 수 없는 채널을 없애 그 상태 자체를 만들 수 없게 한다.
+
+        Called once per RUN, so it also drops the previous run's scans (R9).
         """
+        self.reset_spectra()
         chans = sorted({int(c) for c in channels}) or [1]
         cur = [self.cb_fit_channel.itemData(i) for i in range(self.cb_fit_channel.count())]
         if cur == chans:
@@ -369,22 +373,34 @@ class MonitorWidget(QWidget):
         self._view_channel = chans[0]
         self.cb_fit_channel.setEnabled(len(chans) > 1)
 
+    def reset_spectra(self):
+        """Forget the last scans and blank Components / Fit View, so a new RUN never
+        shows the previous run's spectrum under the new run's results."""
+        self._latest_by_channel = {}
+        self.latest_fit_data = None
+        for c in (self.curve_meas, self.curve_fit, self.curve_resid):
+            c.setData([], [])
+        self.p_meas.setTitle(None)
+        self.glw_comp.clear()
+        self.curve_items = {}
+        self.plot_items = {}
+
     def _on_view_channel_changed(self, idx):
         """채널 콤보 변경 → 새로 선택된 채널의 마지막 스캔을 즉시 다시 렌더."""
         _ch = self.cb_fit_channel.itemData(idx)
         self._view_channel = int(_ch) if _ch is not None else idx + 1
         data = self._latest_by_channel.get(self._view_channel)
         if data:
-            self.update_spectrum(*data)
+            self.update_spectrum(*data)     # 7-tuple: carries the scan's own engine
 
     def _on_tab_changed(self, idx):
         """탭 전환 시 마지막 스캔으로 한 번 그린다 — 안 보이는 탭은 갱신을 건너뛰므로."""
         if not self.latest_fit_data:
             return
         if idx == 0:
-            self.update_components(*self.latest_fit_data[:5])
+            self.update_components(*self.latest_fit_data[:5], engine=self.latest_fit_data[6])
         elif idx == 1:
-            self._draw_fit_view(*self.latest_fit_data)
+            self._draw_fit_view(*self.latest_fit_data[:6])
 
     def _draw_fit_view(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
         x_plot, x_label = self.get_x_axis(pixel_idx)
@@ -395,25 +411,37 @@ class MonitorWidget(QWidget):
         self.curve_fit.setData(x_plot, intensity_fit)
         self.curve_resid.setData(x_plot, intensity_raw - intensity_fit)
 
-    def update_spectrum(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
+    def update_spectrum(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title,
+                        engine=None):
+        # The engine that produced this scan draws its gas components. Live scans come
+        # from a channel worker's plot_update signal → that worker's own engine (the
+        # active-tab engine gave other channels' Components wrong curves, up to 18.8 %).
+        # A direct call (replay, which swaps self.engine) has no sender → self.engine.
+        if engine is None and isinstance(self.sender(), QThread):   # fit workers are QThreads
+            engine = getattr(self.sender(), 'engine', None)
+        if engine is None:
+            engine = self.engine
         # 채널 필터: 어느 채널 스캔이든 최신본은 보관하되, 선택 채널만 화면에 렌더
         ch = int(fit_params.get('channel', 1)) if isinstance(fit_params, dict) else 1
-        self._latest_by_channel[ch] = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
+        data = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title, engine)
+        self._latest_by_channel[ch] = data
         if ch != getattr(self, '_view_channel', 1):
             return
-        self.latest_fit_data = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
+        self.latest_fit_data = data
 
         # 안 보이는 탭은 그리지 않는다. Components는 원래 그랬고 Fit View는 Trend/Conc를
         # 보고 있어도 매 스캔 setData를 돌리고 있었다(순수 낭비). 탭을 다시 열면
         # _on_tab_changed가 마지막 스캔으로 채운다.
         _tab = self.tabs.currentIndex()
         if _tab == 0:
-            self.update_components(pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params)
+            self.update_components(pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params,
+                                   engine=engine)
         elif _tab == 1:
             self._draw_fit_view(pixel_idx, intensity_raw, intensity_fit,
                                 intensity_poly, fit_params, title)
 
-    def update_components(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params):
+    def update_components(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params,
+                          engine=None):
         """
         Refreshes the per-gas component view using an anti-flicker technique.
 
@@ -427,7 +455,8 @@ class MonitorWidget(QWidget):
 
         The layout is rebuilt from scratch only when the number of gases changes.
         """
-        gas_list = self.engine.gas_list
+        engine = engine if engine is not None else self.engine
+        gas_list = engine.gas_list
         if not gas_list: return
 
         # 1. Create plot frames only when the gas SET changes (개수뿐 아니라 이름까지).
@@ -466,7 +495,7 @@ class MonitorWidget(QWidget):
         for i, name in enumerate(gas_list):
             if f"{name}_data" not in self.curve_items:
                 continue   # 곡선 미생성(가스셋 전환 직후 등) — 다음 갱신에서 재구성
-            gas_fit = self.engine.get_individual_gas_contribution(pixel_idx, fit_params['shifts'], fit_params['squeezes'], fit_params['gas_coeffs'], i)
+            gas_fit = engine.get_individual_gas_contribution(pixel_idx, fit_params['shifts'], fit_params['squeezes'], fit_params['gas_coeffs'], i)
             self.curve_items[f"{name}_data"].setData(x_plot, residual + gas_fit)
             self.curve_items[f"{name}_fit"].setData(x_plot, gas_fit)
             
@@ -516,10 +545,11 @@ class MonitorWidget(QWidget):
         # (which re-uploads the whole array) per scan is O(n²) and freezes the GUI.
         # Append every point but only redraw every ~150ms; flush_plots() forces a
         # final draw at the end. (Harmless in Step mode — scans are slower than 150ms.)
+        # Per channel: a shared timestamp let one channel's scans starve another's redraw.
         import time as _t
-        if (_t.monotonic() - getattr(self, '_last_trend_draw', 0.0)) < 0.15:
+        if (_t.monotonic() - self._last_trend_draw.get(ch, 0.0)) < 0.15:
             return
-        self._last_trend_draw = _t.monotonic()
+        self._last_trend_draw[ch] = _t.monotonic()
         self._redraw_trend(ch)
 
     def _redraw_trend(self, ch):
@@ -530,12 +560,11 @@ class MonitorWidget(QWidget):
         rms_arr = np.array(td['rms'])
         rms_arr[rms_arr <= 0] = 1e-9
         tc['rms'].setData(td['x'], rms_arr)
-        if self.p_sh.getViewBox().autoRangeEnabled():
-            self.p_sh.enableAutoRange(axis='x', enable=True)
-        if self.p_sq.getViewBox().autoRangeEnabled():
-            self.p_sq.enableAutoRange(axis='x', enable=True)
-        if self.p_rms.getViewBox().autoRangeEnabled():
-            self.p_rms.enableAutoRange(axis='x', enable=True)
+        # autoRangeEnabled() is a [x, y] list — always truthy, so test x alone or a
+        # user's x zoom is reset on the next redraw during a live run.
+        for p in (self.p_sh, self.p_sq, self.p_rms):
+            if p.getViewBox().autoRangeEnabled()[0]:
+                p.enableAutoRange(axis='x', enable=True)
 
     def flush_plots(self):
         """Force a final redraw of trend + concentration curves (call when a run
@@ -627,7 +656,8 @@ class MonitorWidget(QWidget):
             p = pg.PlotItem(axisItems={'bottom': ax})
             p.setTitle(f"{gas}  concentration")
             p.setLabel('left', f"{gas} (ppb)")
-            p.setLabel('bottom', 'Time')
+            # Fit output 'Time' is UTC; _conc_time_x + DateAxisItem round-trip it unchanged.
+            p.setLabel('bottom', 'Time (UTC)')
             p.showGrid(x=True, y=True)
             p.setClipToView(True)
             # 캠페인 규모(수십만 점)에서 모든 점에 마커를 그리던 것 — 화면 peak 솎아내기(gui/pg_perf.py).
@@ -697,7 +727,7 @@ class MonitorWidget(QWidget):
                 if d['x']:
                     self._conc_curves[gas][cch].setData(d['x'], d['y'])
             p = self._conc_plots[gas]
-            if p.getViewBox().autoRangeEnabled():
+            if p.getViewBox().autoRangeEnabled()[0]:     # [x, y] list — x only
                 p.enableAutoRange(axis='x', enable=True)
 
     def rebuild_trend(self, results):
@@ -835,11 +865,30 @@ class MonitorWidget(QWidget):
                 continue
             ch, k = hit
             tx = self._trend_data[ch]['x'][k]
-            d = self._conc_data[self._conc_gases[0]].get(ch)
-            if d and d['r']:
-                j = min(range(len(d['x'])), key=lambda i: abs(d['x'][i] - tx))
-                self.conc_point_clicked.emit(d['r'][j])
+            r = self._conc_result_at(ch, tx)
+            if r is not None:
+                self.conc_point_clicked.emit(r)
+            else:
+                # 같은 시각의 핏이 없다 = 건너뛴(Skip) 스캔(Fast 추세엔 RMS=0 점으로 그려진다).
+                # 예전엔 '시각이 가장 가까운' 이웃 스캔을 말없이 재생했다(2026-10-02 리뷰).
+                from PyQt6.QtGui import QCursor
+                from PyQt6.QtWidgets import QToolTip
+                QToolTip.showText(QCursor.pos(), "No fit at this point (skipped scan) — nothing to replay")
             return
+
+    def _conc_result_at(self, ch, tx):
+        """채널 ch 에서 시각이 tx 와 **같은** 핏 결과 — 그 채널에 실제로 있는 기체 아무거나에서 찾는다
+        (첫 기체가 이 채널에 없으면 클릭이 말없이 무시되던 것). 없으면 None. x 는 추세·농도 모두
+        _conc_time_x 로 만든 같은 값(epoch 초, 실패 시 행 번호)이라 1 ms 여유로 비교한다."""
+        for gas in self._conc_gases:
+            d = self._conc_data.get(gas, {}).get(ch)
+            if not d or not d['r']:
+                continue
+            xs = d['x']
+            j = min(range(len(xs)), key=lambda i: abs(xs[i] - tx))
+            if abs(xs[j] - tx) <= 1e-3:
+                return d['r'][j]
+        return None
 
     def _export_conc_png(self):
         """현재 농도 그래프(보이는 레이아웃)를 PNG로 저장."""

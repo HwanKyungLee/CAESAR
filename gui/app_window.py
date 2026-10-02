@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel,
                              QTableWidget, QProgressBar, QGroupBox, QLineEdit,
                              QScrollArea, QComboBox, QSplitter, QTabWidget, QTabBar,
-                             QDoubleSpinBox, QSpinBox, QCheckBox)
+                             QDoubleSpinBox, QSpinBox, QCheckBox, QApplication)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QShortcut, QKeySequence
 
@@ -746,6 +746,12 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         left_layout.addWidget(self.status)
         left_layout.addWidget(self.pbar)
         left_layout.addWidget(self.table)
+        # Inputs that define a run. They are disabled while workers run so the "settings frozen
+        # for this run" status is actually true (QC/K edits used to leak into the running run).
+        self._run_lock_widgets = [self._ed_campaign, self._channel_tabbar, _btn_addc, _btn_delc,
+                                  self._ed_ch_datalabel, self.spin_time_shift, self.spin_gas_temp,
+                                  _btn_scn_load, _btn_scn_save, grp_ref, grp_set,
+                                  self._params_container, btn_load]
         # 왼쪽 패널을 스크롤로 감싸 기능이 늘어나도 화면(세로)을 넘지 않게 한다.
         # 내용이 화면보다 길면 패널 안에 세로 스크롤바가 생기고 창 크기는 안 커진다.
         _left_scroll = QScrollArea()
@@ -883,8 +889,27 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
     def _setup_shortcuts(self):
         """Register keyboard shortcuts for common operations."""
         QShortcut(QKeySequence("F5"),      self).activated.connect(self.start_analysis)
-        QShortcut(QKeySequence("Escape"),  self).activated.connect(self.stop_analysis)
-        QShortcut(QKeySequence("Ctrl+S"),  self).activated.connect(self.save)
+        # Esc is the "close this popup" key — it used to stop an overnight run with no question.
+        QShortcut(QKeySequence("Escape"),  self).activated.connect(self._confirm_stop_analysis)
+        sc_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        sc_save.activated.connect(self.save)
+        # Plot Maker registers its own Ctrl+S (save config); with both active Qt fires neither
+        # (ambiguous). Resolve here by focus: inside Plot Maker -> its save, else results save.
+        # Qt hands an ambiguous press to the clashing shortcuts in turn, so wire all of them.
+        clash = [sc_save]
+        pm = getattr(self, 'plot_maker', None)
+        if pm is not None:
+            clash += [s for s in pm.findChildren(QShortcut) if s.key() == QKeySequence("Ctrl+S")]
+        for s in clash:
+            s.activatedAmbiguously.connect(self._dispatch_ctrl_s)
+
+    def _dispatch_ctrl_s(self):
+        pm = getattr(self, 'plot_maker', None)
+        fw = QApplication.focusWidget()
+        if pm is not None and fw is not None and (fw is pm or pm.isAncestorOf(fw)):
+            pm._save_cfg()
+        else:
+            self.save()
 
     # =========================================================
     # Tab 0: Daily Run

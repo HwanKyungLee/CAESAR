@@ -184,45 +184,111 @@ class SaveExportMixin:
                 except Exception as _ce:
                     collin_line = f"n/a ({_ce})"
 
-                header_lines = [
-                    "# ==========================================================",
-                    "# Augur Analysis Report",
-                    f"# Generated: {current_time}",
-                    f"# Code Version: {_codever()}",
-                    f"# Data Period: {span_str}",
-                    (f"# Fit Range: Pixel {f_min_px}-{f_max_px} ({wl_str})"
-                     if _range_ok else
-                     "# Fit Range: UNREADABLE — could not read the fit-range input in the UI (0-0 is not a real value)"),
-                    f"# Polynomial Degree: {poly_deg}",
-                    f"# Tikhonov Lambda: {lam_val:g}",
-                    f"# Robust Fitting (IRLS): {robust_status}",
-                    f"# Etalon Term (sin/cos fringe): {etalon_status}",
-                    f"# Allow Negative Gas (±Neg): {allow_neg}",
-                    f"# Auto QC: {qc_str}",
-                    f"# Step Limit: {step_val} px",
-                    f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (low-signal retry trigger; "
-                    f"OK/Unstable label = Chi2 <= {_MISFIT_CHI2})",
-                    f"# Kalman Filter: Q={kalman_q:.4f}, R={kalman_r:.3f}  (concentration columns = raw fit; _Smooth = Kalman-filtered)",
-                    f"# Dark Current Subtraction: {dark_loaded}  (scale={dark_scale_val:.4f})",
-                    f"# Detector Offset Subtraction: {offset_loaded}  (scale={offset_scale_val:.4f})",
-                    f"# Stray Light Correction: {'ON' if stray_light_val > 0 else 'OFF'}  (epsilon={stray_light_val:.4f})",
-                    f"# Temporal I0 Interpolation: {temporal_i0}",
-                    f"# Purge Gas RL Factor: {self.spin_rl_factor.value():.4f}  (1.0 = no correction; CAESAR CH1=0.9330 CH2=0.9950 CH3=0.9968)",
-                    f"# Measurement Flags: Ambient={self.txt_flag_amb.text().strip()}, ZA={self.txt_flag_za.text().strip()}, He={self.txt_flag_he.text().strip()}",
-                    f"# Reference Constraints: {sh_str}, {sq_str}",
-                    f"# Etalon-Gas Collinearity (diagnostic only, fit unchanged): {collin_line}",
-                    "# ==========================================================\n"
-                ]
+                # ── Header: built **per channel from the config frozen at RUN** ──
+                # It used to read the live widgets, so every channel file carried the settings of
+                # whatever tab was active at save time (CH2 file: "Poly3 444-471nm" on line 1,
+                # "Polynomial Degree: 4 / 429.5-462 nm" below) and edits made after RUN leaked in
+                # (UX audit 2026-10-02 §6). QC is post-processing, so its save-time value is right.
+                _frozen_cfgs = ((getattr(self, '_run_frozen', None) or {}).get('configs')
+                                or self._channel_configs)
+                _alpha_in = any(DataIO._is_alpha_trace_format(self._entry_filepath(e))
+                                for fl in (getattr(self, '_alpha_groups', None) or {}).values()
+                                for e in fl[:1])
+                _NA_ALPHA = "n/a — alpha input (applied when the alpha was generated; see the alpha header)"
 
-                header_txt = "\n".join(header_lines)
+                def _constraint(rp, first_gas, prefix):
+                    curr, seen = first_gas, set()
+                    while curr and curr not in seen:
+                        seen.add(curr)
+                        props = rp.get(curr, {})
+                        mode = props.get(f"{prefix}_mode", "Limit")
+                        val = str(props.get(f"{prefix}_val", "")).strip()
+                        if mode == "Free":
+                            return "Free"
+                        if mode != "Link":
+                            return val.replace(" ", "")
+                        curr = val
+                    return "Unknown"
+
+                def _header_for(ch, sub):
+                    cfg = _frozen_cfgs.get(int(ch)) or {}
+                    try:
+                        int(cfg.get('f_min')); int(cfg.get('f_max'))
+                        _cfg_range_ok = True
+                    except (TypeError, ValueError):
+                        _cfg_range_ok = False
+                    if not _cfg_range_ok:
+                        # Never write a made-up range into the reproducibility record (principle 4).
+                        rng = "UNREADABLE — the channel config has no pixel range (not 0-0)"
+                    elif cfg.get('fit_unit') == 'px':
+                        rng = f"Pixel {cfg.get('f_min')}-{cfg.get('f_max')} (px window)"
+                    else:
+                        rng = (f"Pixel {cfg.get('f_min')}-{cfg.get('f_max')} "
+                               f"({float(cfg.get('fit_start_nm', 0)):.1f}-{float(cfg.get('fit_end_nm', 0)):.1f}nm)")
+                    rp = cfg.get('ref_props', {}) or {}
+                    g0 = next((r.get('name') for r in cfg.get('refs', []) if r.get('name')), None)
+                    sh = f"Sh[{_constraint(rp, g0, 'sh')}]" if g0 else "Sh[None]"
+                    sq = f"Sq[{_constraint(rp, g0, 'sq')}]" if g0 else "Sq[None]"
+                    try:
+                        _ts = pd.to_datetime(sub['Time'], errors='coerce').dropna()
+                        period = (f"{_ts.min():%Y-%m-%d %H:%M} ~ {_ts.max():%Y-%m-%d %H:%M}"
+                                  if len(_ts) else span_str)
+                    except Exception:
+                        period = span_str
+                    has_smooth = any(str(c).endswith('_Smooth') for c in sub.columns)
+                    kq, kr = cfg.get('kalman_q', kalman_q), cfg.get('kalman_r', kalman_r)
+                    neg = "ON" if cfg.get('allow_negative_gas', allow_neg_on) else "OFF"
+                    if _alpha_in:
+                        phys = [f"# Dark Current Subtraction: {_NA_ALPHA}",
+                                f"# Detector Offset Subtraction: {_NA_ALPHA}",
+                                f"# Stray Light Correction: {_NA_ALPHA}",
+                                f"# Temporal I0 Interpolation: {_NA_ALPHA}",
+                                f"# Purge Gas RL Factor: {_NA_ALPHA}",
+                                f"# Measurement Flags: {_NA_ALPHA}"]
+                    else:
+                        phys = [f"# Dark Current Subtraction: {dark_loaded}  (scale={dark_scale_val:.4f})",
+                                f"# Detector Offset Subtraction: {offset_loaded}  (scale={offset_scale_val:.4f})",
+                                f"# Stray Light Correction: {'ON' if stray_light_val > 0 else 'OFF'}  (epsilon={stray_light_val:.4f})",
+                                f"# Temporal I0 Interpolation: {temporal_i0}",
+                                f"# Purge Gas RL Factor: {float(cfg.get('rl_factor', 1.0)):.4f}  (1.0 = no correction)",
+                                f"# Cavity Length d: {float(cfg.get('cavity_d', self.spin_d_len.value())):.2f} cm",
+                                f"# Measurement Flags: Ambient={self.txt_flag_amb.text().strip()}, "
+                                f"ZA={self.txt_flag_za.text().strip()}, He={self.txt_flag_he.text().strip()}"]
+                    lines = [
+                        "# ==========================================================",
+                        "# Augur Analysis Report",
+                        f"# Generated: {current_time}",
+                        f"# Code Version: {_codever()}",
+                        f"# Channel: CH{int(ch)} ({(cfg.get('data_label') or '').strip() or '-'})"
+                        "  — settings frozen at RUN",
+                        f"# Data Period: {period}",
+                        f"# Fit Range: {rng}",
+                        f"# Polynomial Degree: {cfg.get('poly_deg')}",
+                        f"# Tikhonov Lambda: {float(cfg.get('tikhonov_lambda', 0.0) or 0.0):g}",
+                        f"# Robust Fitting (IRLS): {'ON' if cfg.get('use_robust') else 'OFF'}",
+                        f"# Etalon Term (sin/cos fringe): {'ON' if cfg.get('use_etalon', True) else 'OFF'}",
+                        f"# Allow Negative Gas (±Neg): {neg}",
+                        f"# Auto QC: {qc_str}",
+                        f"# Step Limit: {cfg.get('step_limit', step_val)} px",
+                        f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (low-signal retry trigger; "
+                        f"OK/Unstable label = Chi2 <= {_MISFIT_CHI2})",
+                        (f"# Kalman Filter: Q={float(kq):.4f}, R={float(kr):.3f}  (concentration columns = raw fit; _Smooth = Kalman-filtered)"
+                         if has_smooth else
+                         "# Kalman Filter: not applied in this file (no _Smooth columns; Fast mode)"),
+                        *phys,
+                        f"# Reference Constraints: {sh}, {sq}",
+                        f"# Etalon-Gas Collinearity (diagnostic only, fit unchanged): {collin_line}",
+                        "# ==========================================================\n",
+                    ]
+                    return "\n".join(lines)
                 is_csv = path.endswith('.csv')
                 ext = '.csv' if is_csv else '.dat'
 
-                def _write_df(_df, _path, _ch_hdr=""):
+                def _write_df(_df, _path, _ch_hdr="", _ch=None):
                     with open(_path, 'w', encoding='utf-8') as f:
                         if _ch_hdr:
                             f.write(_ch_hdr + "\n")
-                        f.write(header_txt)
+                        f.write(_header_for(self._active_channel if _ch is None else _ch, _df))
                         if is_csv:
                             _df.to_csv(f, index=False, lineterminator='\n')
                         else:
@@ -297,7 +363,7 @@ class SaveExportMixin:
                         if archive_existing(fpath, arch_base):
                             n_archived += 1
                             archive_existing(run_meta.meta_path_for(fpath), arch_base)
-                        _write_df(ssub, fpath, _ch_header(ch) if multi else "")
+                        _write_df(ssub, fpath, _ch_header(ch) if multi else "", ch)
                         if meta:
                             run_meta.write_meta(fpath, meta)   # `.dat` 포맷 불변 — 옆에 쓴다
                             runids.append(meta['runid'])
@@ -410,7 +476,11 @@ class SaveExportMixin:
         try:
             ch = int(params.get('channel', _res.get('Channel', 1)))
             if hasattr(self.monitor, 'cb_fit_channel'):
-                self.monitor.cb_fit_channel.setCurrentIndex(max(0, min(ch - 1, self.monitor.cb_fit_channel.count() - 1)))
+                # The combo only lists channels with data (e.g. [CH2, CH3]); index ch-1 picked
+                # CH3 for a CH2 replay and the plot was skipped. Select by the stored channel.
+                _i = self.monitor.cb_fit_channel.findData(ch)
+                if _i >= 0:
+                    self.monitor.cb_fit_channel.setCurrentIndex(_i)
         except Exception:
             pass
 

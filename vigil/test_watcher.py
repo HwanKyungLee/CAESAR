@@ -217,8 +217,12 @@ def test_stale_backlog_skip():
         check("최근 파일만 읽음(3행)", len(ev) == 3 and all(e.file == recent for e in ev),
               f"{[(os.path.basename(e.file)) for e in ev]}")
         check("건너뛴 백로그 기록", w.skipped_backlog == (1, os.path.getsize(old)), f"{w.skipped_backlog}")
-        check("건너뛴 파일 커서 = 파일 끝(재시작해도 유지)",
-              IngestCursor(os.path.join(d, "cursors.json")).get(old) == os.path.getsize(old))
+        check("건너뛴 파일 커서 = 파일 끝", cur.get(old) == os.path.getsize(old))
+        # 재시작해도 유지 — 디스크에 쓰지 않고(2026-10-02, cursors.json 20 MB 사고) 같은 규칙이 다시 건너뛴다
+        cur.flush()
+        w_re = Watcher(d, ProfileSet.load_default(), IngestCursor(os.path.join(d, "cursors.json")))
+        check("재시작해도 건너뛴 파일을 다시 읽지 않음",
+              all(e.file != old for e in w_re.poll()))
         _write_rows(old, 2, t0=datetime(2026, 5, 25, 13, 0, 0))
         check("건너뛴 파일에 새로 붙은 행은 읽음", len(w.poll()) == 2)
 

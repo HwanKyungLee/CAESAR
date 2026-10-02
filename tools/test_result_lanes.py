@@ -52,14 +52,21 @@ _ROWS = [
 ]
 
 
+_STEM = "260904_CH1_PNs_r3f8a1"
+# alpha row_idx column values are NOT positions (real files: 0, 258, 310, …) — 2026-10-02 R3
+_ALPHA_IDS = (0, 258, 310, 400, 512)
+
+
 def _write_fit(d):
-    p = os.path.join(d, "260904_CH1_PNs_r3f8a1.dat")
+    p = os.path.join(d, _STEM + ".dat")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write(_HDR + _COLS)
-        for r in _ROWS:
+        for k, r in enumerate(_ROWS):
             # File Time Channel RMS Chi2 SNR Status Shift Squeeze <gases…>
+            # File = "<alpha> [NNNN]" as the worker writes it: NNNN = alpha data-row position
             fh.write("\t".join(str(v) for v in
-                               (r[0], r[1], 1, r[2], 1.05, 120.0, *r[3:])) + "\n")
+                               (f"{_STEM}_alpha_trace.dat [{k:04d}]", r[1], 1, r[2], 1.05, 120.0,
+                                *r[3:])) + "\n")
     return p
 
 
@@ -72,7 +79,7 @@ def _write_alpha(d, stem):
         fh.write("row_idx\tT_C\tP_mbar\t" + "\t".join(f"px{700+i}" for i in range(12)) + "\n")
         for i in range(len(_ROWS)):
             vals = "\t".join(f"{1e-7 * (i + 1) * (j + 1):.6e}" for j in range(12))
-            fh.write(f"{i}\t25.0\t1013.0\t{vals}\n")
+            fh.write(f"{_ALPHA_IDS[i]}\t25.0\t1013.0\t{vals}\n")
     return p
 
 
@@ -140,13 +147,44 @@ def test_lanes_and_click(w):
     title = w._pw_detail.plotItem.titleLabel.text
     assert "row 1" in title and "Unstable" in title, title
     assert "NO2 9.9" in title, title
-    assert len(w._pw_detail.plotItem.listDataItems()) == 1, "alpha 스펙트럼이 안 그려졌다"
+    items = w._pw_detail.plotItem.listDataItems()
+    assert len(items) == 1, "alpha 스펙트럼이 안 그려졌다"
+    # the File cell's position picks the scan — data row 1 (row_idx 258), not row_idx 1
+    assert abs(items[0].yData[0] - 2e-7) < 1e-12, items[0].yData[:3]
     assert not w._stack_host.isHidden(), "상세를 띄우느라 시계열이 사라지면 안 된다"
 
     # alpha 형제 파일이 없어도 수치 요약은 뜨고 죽지 않는다
     os.remove(os.path.join(d, "260904_CH1_PNs_r3f8a1_alpha_trace.dat"))
     w._show_scan_detail(2)
-    assert "row 2" in w._pw_detail.plotItem.titleLabel.text
+    title = w._pw_detail.plotItem.titleLabel.text
+    assert "row 2" in title and "not found" in title, title
+    assert not w._pw_detail.plotItem.listDataItems(), "drew a spectrum from the wrong file"
+    assert ResultViewerWidget._sibling_alpha(fit) is None, "the fit .dat is not its own alpha"
+
+
+def test_real_click_opens_detail(w):
+    """A real mouse click on a plotted point must open Scan detail (2026-10-02 R1: the flag
+    ScatterPlotItem accepted the click and `_on_lane_click` returned on `ev.isAccepted()`,
+    so the panel never opened — the test above calls `_show_scan_detail` directly)."""
+    from PyQt6.QtCore import QPointF, Qt as _Qt
+    from PyQt6.QtTest import QTest
+    d = tempfile.mkdtemp()
+    fit = _write_fit(d)
+    _write_alpha(d, "260904_CH1_PNs_r3f8a1")
+    w.resize(1200, 900); w.show()
+    w._path = fit
+    w._reload()
+    QApplication.processEvents()
+    w._pw_detail.setTitle("untouched")
+    lane = w._lanes[0]
+    t = w._fit_cache
+    j = 1                                   # Unstable row — not hidden by Hide QC
+    sp = lane.getViewBox().mapViewToScene(QPointF(float(t["time"][j]), float(t["gases"]["NO2"][j])))
+    vp = lane.mapFromScene(sp)
+    QTest.mouseClick(lane.viewport(), _Qt.MouseButton.LeftButton, pos=vp)
+    QApplication.processEvents()
+    title = w._pw_detail.plotItem.titleLabel.text
+    assert "row 1" in title and "Unstable" in title, title
 
 
 def test_big_file_thinning_keeps_flag_share(w):
@@ -186,6 +224,17 @@ def test_big_file_thinning_keeps_flag_share(w):
     assert got == j, (got, j)
     w._chk_hide_qc.setChecked(True)
 
+    # the next (small) file must get x auto-range back — 2026-10-02 R5: after a >20k-row file
+    # every later file was drawn inside the stale x window of the big one
+    w._path = _write_fit(tempfile.mkdtemp())
+    w._reload()
+    QApplication.processEvents()
+    vb = w._lanes[0].getViewBox()
+    assert vb.autoRangeEnabled()[0], "x auto-range left off after a big file"
+    (x0, x1), _ = vb.viewRange()
+    tt = w._fit_cache["time"]
+    assert x0 <= tt.min() and x1 >= tt.max() and (x1 - x0) < 3600, (x0, x1, tt.min(), tt.max())
+
 
 def test_residual_refuses_without_meta(w):
     """레거시 결과(= `.meta.json` 없음)는 잔차를 **그리지 않고 사유를 적는다**.
@@ -221,6 +270,190 @@ def test_non_fit_restores_old_plots(w):
     assert w._stack_host.isHidden(), "fit이 아닌데 스택이 남아있다"
 
 
+def _write_conc_csv(d, bom=False):
+    p = os.path.join(d, "conc_KST.csv")
+    with open(p, "w", encoding="utf-8-sig" if bom else "utf-8", newline="") as fh:
+        fh.write("# NIER submission\n")
+        fh.write("time_KST,time_UTC,NO2,n_used\n")
+        for i in range(5):
+            fh.write(f"2026-09-04 19:0{i}:00,2026-09-04 10:0{i}:00,{1.0 + i},10\n")
+    return p
+
+
+def test_view_toggles_leave_non_fit_alone(w):
+    """2026-10-02 R4: Hide QC / K / Gas / Err after opening a CSV re-plotted it as a fit
+    (ValueError on CSV, 2,048 'gas' lanes on an alpha trace)."""
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._reload()
+    w._path = _write_conc_csv(d)
+    w._reload()
+    assert w._current_kind == "concentration", w._current_kind
+    errs, old_hook = [], sys.excepthook
+    sys.excepthook = lambda *a: errs.append(a[1])      # Qt slot exceptions land here
+    try:
+        w._chk_hide_qc.toggle()
+        w._spin_qc_k.setValue(3.0)
+        w._chk_err.toggle()
+    finally:
+        sys.excepthook = old_hook
+    assert not errs, f"view toggle re-plotted the CSV as a fit: {errs[0]!r}"
+    assert not w._pw_top.isHidden() and w._stack_host.isHidden(), "CSV was re-plotted as a fit"
+    w._chk_hide_qc.toggle(); w._spin_qc_k.setValue(0.0); w._chk_err.toggle()
+
+
+def test_png_of_fit_is_the_lanes(w):
+    """2026-10-02 R7: PNG of a fit result saved the hidden `_pw_top` (blank 2400x37)."""
+    from PyQt6.QtGui import QImage
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._reload()
+    out = os.path.join(d, "x.png")
+    n = w._save_png(out)
+    assert n == 4, n                           # 2 gas lanes + shift/squeeze + RMS
+    im = QImage(out)
+    assert im.width() == 2400 and im.height() > 400, (im.width(), im.height())
+
+
+def test_stats_follow_open_file(w):
+    """2026-10-02 R8: Σ Stats showed the previous fit while a CSV was open; H2O-scale values
+    (~1e-13) printed as 0.000."""
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._reload()
+    w._fit_cache["gases"]["CHOCHO"] = w._fit_cache["gases"]["CHOCHO"] * 1e-13
+    line = next(s for s in w._stats_lines() if s.startswith("CHOCHO"))
+    assert "0.000" not in line and "e-1" in line, line
+    w._path = _write_conc_csv(d)
+    w._reload()
+    assert w._stats_lines() is None, "stats of the previous fit file while a CSV is open"
+
+
+def test_bom_csv_opens(w):
+    """2026-10-02 R11: the NIER KST CSV starts with a UTF-8 BOM, so '\\ufeff# …' was not a
+    comment and became the header → "No numeric concentration columns"."""
+    from gui.result_viewer_io import detect
+    p = _write_conc_csv(tempfile.mkdtemp(), bom=True)
+    assert detect(p) == "concentration", detect(p)
+    w._path = p
+    w._reload()
+    assert "Failed" not in w._lbl.text(), w._lbl.text()
+    assert "NO2" in [it.name() for it in w._pw_top.plotItem.listDataItems()]
+
+
+def _write_fit_rms(d, rms):
+    """Fit report with one RMS per minute (NO2 = 1) — for post-hoc QC population tests."""
+    from datetime import datetime, timedelta
+    p = os.path.join(d, "260904_CH1_PNs_qc.dat")
+    t0 = datetime(2026, 9, 4, 10, 0)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(_HDR + _COLS)
+        for k, r in enumerate(rms):
+            fh.write("\t".join(str(v) for v in (
+                f"a_alpha_trace.dat [{k:04d}]", f"{t0 + timedelta(minutes=k):%Y-%m-%d %H:%M:%S}",
+                1, r, 1.05, 120.0, "OK", 0.0, 1.0, 1.0, 0.06, 0.09, 0.02)) + "\n")
+    return p
+
+
+def test_export_qc_matches_screen(w):
+    """2026-10-02 R6: Export recomputed the K threshold on the *sliced* rows; the screen uses
+    the whole file. A range export must exclude exactly the rows hidden on screen."""
+    rms = [1e-3] * 20 + [2e-3 * (1 + 0.02 * (k % 5)) for k in range(20)]
+    rms[30], rms[35] = 2.3e-3, 1e-2     # whole-file K=3 hides only row 35; slice-only also 30
+    w._path = _write_fit_rms(tempfile.mkdtemp(), rms)
+    w._list.clear()
+    w._reload()
+    w._spin_qc_k.setValue(3.0)
+    t = w._fit_cache
+    w._set_range_edits(t["time"][20], t["time"][39])
+    screen = w._qc_mask(t)[20:40]
+    _c, colhdr, rows, _n, nq = w._build_export([w._path])
+    si = colhdr.split("\t").index("Status")
+    got = [ln.split("\t")[si].startswith("QC-Auto") for _t, ln in rows]
+    w._spin_qc_k.setValue(0.0)
+    assert len(rows) == 20 and int(screen.sum()) == 1, (len(rows), screen)
+    assert got == list(screen) and nq == int(screen.sum()), (got, list(screen), nq)
+
+
+def test_outputs_carry_provenance(w):
+    """2026-10-02 R9: Export/Merge/Calculator files had no exporter git hash, K, range or
+    input paths, and a K=3 re-QC kept the input's "Auto QC K=8" header as the only K."""
+    from core.provenance import code_version
+    from core.result_io import write_result
+    from gui.dlg_calculator import CalculatorDialog
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._list.clear()
+    w._reload()
+    w._spin_qc_k.setValue(3.0)
+    c, colhdr, rows, _n, _nq = w._build_export([w._path])
+    out = os.path.join(d, "exp.dat")
+    write_result(out, c, colhdr, rows, extra=w._provenance_lines([w._path]))
+    w._spin_qc_k.setValue(0.0)
+    head = open(out, encoding="utf-8").read().split(colhdr)[0]
+    for want in (f"exporter code {code_version()}", "post-hoc QC K=3", "Hide QC",
+                 "range all", "time shift +0 h", f"input {os.path.abspath(w._path)}"):
+        assert want in head, (want, head)
+
+    dlg = CalculatorDialog(w, datasets=[w._path])
+    _lbl, ds, col, _rm = dlg._var_rows[0]
+    ds.setCurrentIndex(ds.findData(w._path))
+    col.setCurrentText("NO2")
+    dlg._expr.setText("A*2")
+    dlg._compute()
+    assert dlg._result is not None, dlg._msg.text()
+    out = os.path.join(d, "calc.csv")
+    dlg._write_csv(out)
+    head = open(out, encoding="utf-8").read()
+    assert f"exporter code {code_version()}" in head, head
+    assert f"# A = {os.path.abspath(w._path)} :: NO2" in head, head
+
+
+def test_shifted_concentration_relabels_time(w):
+    """2026-10-02 R10: a −9 h export kept UTC values under `time_KST`; only the first time
+    column moved."""
+    p = _write_conc_csv(tempfile.mkdtemp())
+    df = ResultViewerWidget._shifted_concentration_df(p, -9.0)
+    assert "time_KST" not in df.columns, list(df.columns)
+    # time_KST −9 h = UTC, but time_UTC already exists → explicit shift suffix, both moved
+    assert list(df.columns[:2]) == ["time_KST_shift-9h", "time_UTC_shift-9h"], list(df.columns)
+    assert df.iloc[0, 0] == "2026-09-04 10:00:00" and df.iloc[0, 1] == "2026-09-04 01:00:00"
+    assert list(df["NO2"]) == [1.0, 2.0, 3.0, 4.0, 5.0]
+    import pandas as pd
+    one = pd.read_csv(p, comment="#")[["time_KST", "NO2"]]
+    q = os.path.join(os.path.dirname(p), "one.csv")
+    one.to_csv(q, index=False)
+    df = ResultViewerWidget._shifted_concentration_df(q, -9.0)
+    assert list(df.columns) == ["time_UTC", "NO2"], list(df.columns)
+    assert list(ResultViewerWidget._shifted_concentration_df(q, 0).columns) == ["time_KST", "NO2"]
+
+
+def test_file_switch_resets_state(w):
+    """2026-10-02 R14: after switching file the stats line, plot titles, range fields and the
+    scan-detail panel still showed the previous file."""
+    d = tempfile.mkdtemp()
+    _write_alpha(d, _STEM)
+    w._path = _write_fit(d)
+    w._reload()
+    w._show_scan_detail(1)
+    assert w._stats_lbl.text() and w._dt_from.isEnabled()
+    w._path = _write_conc_csv(d)
+    w._reload()
+    assert w._stats_lbl.text() == "", w._stats_lbl.text()
+    assert w._pw_detail.plotItem.titleLabel.text.startswith("Scan detail"), "stale detail"
+    assert not w._pw_detail.plotItem.listDataItems()
+    assert not w._dt_from.isEnabled(), "range fields look live for a CSV"
+    assert w._pw_resid.isHidden()
+    # a fit that fails to load must not leave the previous fit's lanes on screen
+    w._path = _write_fit(d)
+    w._reload()
+    bad = os.path.join(d, "bad_fit.tsv")
+    open(bad, "w", encoding="utf-8").write("nothing here\n")
+    w._path = bad
+    w._reload()
+    assert "Failed" in w._lbl.text() and w._stack_host.isHidden(), w._lbl.text()
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -228,9 +461,18 @@ def main() -> int:
     for fn, args in ((test_loader_exposes_shift_squeeze, ()),
                      (test_flag_classification, ()),
                      (test_lanes_and_click, (w,)),
+                     (test_real_click_opens_detail, (w,)),
                      (test_big_file_thinning_keeps_flag_share, (w,)),
                      (test_residual_refuses_without_meta, (w,)),
-                     (test_non_fit_restores_old_plots, (w,))):
+                     (test_non_fit_restores_old_plots, (w,)),
+                     (test_view_toggles_leave_non_fit_alone, (w,)),
+                     (test_png_of_fit_is_the_lanes, (w,)),
+                     (test_stats_follow_open_file, (w,)),
+                     (test_bom_csv_opens, (w,)),
+                     (test_export_qc_matches_screen, (w,)),
+                     (test_outputs_carry_provenance, (w,)),
+                     (test_shifted_concentration_relabels_time, (w,)),
+                     (test_file_switch_resets_state, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

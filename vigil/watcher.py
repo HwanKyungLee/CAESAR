@@ -130,6 +130,9 @@ class Watcher:
         self._started = False
         self._truncated = False
         self.skipped_backlog: tuple = (0, 0)   # (파일 수, 바이트) — 시작 시 건너뛴 백로그
+        # {path: [profile_id …]} — 열 수는 맞는데 파일명 날짜가 프로파일 date_range 밖이라 감시하지 않는
+        # 파일. 진입점이 한 번씩 경고한다(감시하지 않는 상태는 보여야 한다 — 설계 §2).
+        self.date_excluded: dict = {}
         self.catching_up = False               # 직전 poll 이 상한에 닿았다 = 밀린 분량을 따라잡는 중
         self._files: dict = {}                 # {path: (size, mtime)} — 마지막 나열 결과
         self._paths: list = []                 # sorted(self._files) — 목록이 바뀔 때만 다시 정렬
@@ -278,10 +281,17 @@ class Watcher:
         # 섞이면 '연속 N행 실패 시 캐시' 같은 걸 넣을 것."""
         cached = self._profile_cache.get(path)
         if cached is not None:
-            return cached
+            # 파일 중간의 짧은(잘린·깨진) 행 — 캐시된 프로파일로 넘기면 HK 평가가 IndexError 를 내
+            # 그 tick 의 행(~80개)이 통째로 버려졌다(2026-10-02 리뷰). 그 행만 미배정으로.
+            # raw_parser 의 `len(toks) < ncols` 가드와 같은 뜻.
+            return cached if cached.match.col_compatible(n_columns) else None
         prof = self.profiles.route(filename=os.path.basename(path), n_columns=n_columns)
         if prof is not None:
             self._profile_cache[path] = prof
+        elif path not in self.date_excluded:
+            ids = self.profiles.date_excluded(os.path.basename(path), n_columns)
+            if ids:
+                self.date_excluded[path] = ids
         return prof
 
     def _skip_stale_backlog(self, paths: list) -> None:
@@ -289,16 +299,25 @@ class Watcher:
         if self.backlog_age_sec is None:
             return
         cutoff = time.time() - self.backlog_age_sec
-        n = nbytes = 0
+        n = nbytes = n_shrunk = 0
         for path in paths:
-            if self.cursor.has(path) or path not in self._files:
+            if path not in self._files:
                 continue
             size, mtime = self._files[path]          # 나열 결과 — 파일마다 stat 하지 않는다
-            if mtime < cutoff:
-                self.cursor.set(path, size, mtime=mtime, save=False)
-                n += 1
-                nbytes += size
-        if n:
+            if mtime >= cutoff:
+                continue
+            if self.cursor.has(path):
+                # 다 읽은 오래된 파일 — 재시작해도 이 규칙이 같은 값(파일 끝)을 다시 만든다.
+                # 옛 버전이 써 둔 백로그 항목도 여기서 디스크에서 빠진다(cursors.json 축소).
+                if self.cursor.get(path) == size:
+                    self.cursor.mark_ephemeral(path)
+                    n_shrunk += 1
+                continue
+            # 디스크에는 안 쓴다 — 13.6만 파일 폴더에서 cursors.json 이 20 MB·저장 1.26 s 가 됐다
+            self.cursor.set(path, size, mtime=mtime, save=False, persist=False)
+            n += 1
+            nbytes += size
+        if n or n_shrunk:
             self.cursor.save()
         self.skipped_backlog = (n, nbytes)
 

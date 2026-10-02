@@ -286,8 +286,13 @@ def archive_existing(path: str, base: str) -> str | None:
     return dst
 
 
-def write_result(out: str, comments, colhdr, rows, note: str = ''):
-    """주석헤더 + 이력주석 + 컬럼헤더 + 행 저장."""
+def write_result(out: str, comments, colhdr, rows, note: str = '', extra=()):
+    """주석헤더 + 이력주석 + 컬럼헤더 + 행 저장.
+
+    The history line always carries the *exporter's* code version (the copied header above
+    names the code that made the input, not this file — principle 4). `extra`: more
+    provenance lines, written as `# [result_io] <line>`."""
+    from core.provenance import code_version
     with open(out, 'w', encoding='utf-8') as fh:
         for c in comments:
             fh.write(c + '\n')
@@ -295,9 +300,12 @@ def write_result(out: str, comments, colhdr, rows, note: str = ''):
         if rows:
             info += f" | range {rows[0][0]:%Y-%m-%d %H:%M} ~ {rows[-1][0]:%Y-%m-%d %H:%M}"
         info += f" | generated {datetime.now():%Y-%m-%d %H:%M}"
+        info += f" | exporter code {code_version()}"
         if note:
             info += f" | {note}"
         fh.write(info + '\n')
+        for x in extra:
+            fh.write(f"# [result_io] {x}\n")
         fh.write(colhdr + '\n')
         for _, line in rows:
             fh.write(line + '\n')

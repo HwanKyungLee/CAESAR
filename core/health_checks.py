@@ -144,8 +144,13 @@ def overall(results):
     n_fail = sum(1 for _n, s, *_ in results if s == FAIL)
     n_warn = sum(1 for _n, s, *_ in results if s == WARN)
     n_pass = sum(1 for _n, s, *_ in results if s == PASS)
+    n_skip = sum(1 for _n, s, *_ in results if s == SKIP)
+    skipped = f" · {n_skip} not checked" if n_skip else ""
     if n_fail:
-        return FAIL, f"do not fit — {n_fail} failed (fix the cause) · {n_warn} warnings · {n_pass} passed"
-    if n_warn:
-        return WARN, f"OK to proceed (with care) — {n_warn} warnings · {n_pass} passed"
+        return FAIL, f"do not fit — {n_fail} failed (fix the cause) · {n_warn} warnings · {n_pass} passed{skipped}"
+    if not n_pass and not n_warn:
+        return SKIP, f"nothing checked — {n_skip} not checked (load the inputs first)"
+    # A skipped check is not a pass: "ready to fit" only when everything was actually checked.
+    if n_warn or n_skip:
+        return WARN, f"OK to proceed (with care) — {n_warn} warnings · {n_pass} passed{skipped}"
     return PASS, f"ready to fit — all {n_pass} passed"

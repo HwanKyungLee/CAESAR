@@ -312,12 +312,18 @@ class DataLoadMixin:
             n = DataIO.detect_channels(first)
             self._detected_channels = n
             ch_names = {1: "CH1", 2: "CH1+CH2", 3: "CH1+CH2+CH3"}
-            ch_labels = {
-                1: "1 channel  (Cold / single-cavity)",
-                2: "2 channels  (Hot:  CH1 PNs 180°C  +  CH2 ANs 300°C)",
-                3: "3 channels  (CH1 + CH2 + CH3)",
-            }
-            label = ch_labels.get(n, f"{n}CH")
+            if not DataIO.is_araon_mega_matrix(first):
+                # α / 1-D input: the cell is named in the α header, not by the column count.
+                lab = self._alpha_head_label(first)
+                label = f"α input  ({lab})" if lab else "1-D input"
+            else:
+                # Cell identity comes from the registered campaign layout (raw_parser), never
+                # from a hard-coded string — it changed between campaigns and was once wrong here.
+                from core.raw_parser import block_label, SPEC_PRIMARY, SPEC_SECONDARY
+                blocks = [block_label(first, SPEC_PRIMARY[0], "CH1")]
+                if n >= 2:
+                    blocks.append(block_label(first, SPEC_SECONDARY[0], "CH2"))
+                label = f"{n} channel(s)  ({'  +  '.join(blocks)})"
             self.lbl_channel_info.setText(label)
             # (채널별 설정은 좌측 채널 탭으로 — 여기선 감지 정보만 표시)
             colours = {1: AUGUR.info, 2: AUGUR.special, 3: AUGUR.ok}

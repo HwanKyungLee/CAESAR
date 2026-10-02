@@ -17,9 +17,10 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 5. 설정 저장/불러오기 : .pmcfg.json 라운드트립에서 mode_cfg 보존되나
 6. 색 결정론      : TimeSeries/Diurnal의 _resolve_specs()가 같은 입력→같은 색
 7. 시리즈 리스트 id무결성 : id조회·드래그순서·삭제
-8. Undo          : 데이터셋·시리즈 제거 복원
+8. Undo          : 데이터셋·시리즈 제거 복원 · 데이터셋 undo가 그걸 쓰던 시리즈까지(R7)
 9. 창 상태 기억   : QSettings 스플리터·탭·테마 저장→복원 왕복(2026-06 UX개편 회귀가드)
-10. Batch Publish : 종별 일괄저장 후 원래 시리즈목록/콤보선택 상태 복원되나
+10. Batch Publish : 종별 일괄저장 후 원래 시리즈목록/콤보선택 상태 복원되나 ·
+    같은 종·다른 데이터셋 파일명이 겹쳐 덮어쓰지 않나(R2, 2026-10-02)
 11. X축 DateAxisItem 재생성 방지 : 같은 시간축 상태로 연달아 render해도 축
     객체가 교체 안 되나(2026-07-03 실GUI 발견 — 교체되면 pg가 눈금 캐시를
     못 넘겨받아 초기뷰 X라벨이 "00.050" 식으로 깨짐)
@@ -96,6 +97,18 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 43. R축(twinx)·컬러바 눈금은 오른쪽에만 — 왼쪽 숫자 옆에 겹쳐 찍히던 버그의 가드 (2026-10-01)
 44. 콘솔 : df()=보이는 그대로·push 시각 왕복·입력 기록 부착 · 예외 격리·여러 줄 · 설정 저장은
     기록만 · **설정을 열 때 기록을 자동 실행하지 않나**(센티넬 파일) · rerun()으로만 재생성 (D3, 2026-10-01)
+45. 주석 시각 : 연도 생략 값이 서기 1년·UTC가 아니라 데이터 연도·로컬로 · 깨진 주석은
+    Publish를 죽이지 않고 건너뛰며 이름이 남나 (R1, 2026-10-02)
+46. Export CSV : 시간축 다른 열을 core.align으로 — 끝값 외삽·결손 직선 메움 없이 빈 칸,
+    '#' 헤더에 시프트·리샘플 기록, Plot Maker가 다시 읽나 (R3, 2026-10-02)
+47. 시간축 시계 : fit .meta.json time_shift_h·time_KST 열로 데이터셋 시계를 알고 x 라벨에
+    (UTC)/(KST) · Night를 UTC 시계에 칠하면 경고 (R4, 2026-10-02)
+48. Split 축 범위 : Y-left 범위·log는 좌축 시리즈 패널 전부, Y-right는 우축 시리즈 패널에만
+    (전엔 axes[0] / axes[1:] 가정이라 Y-right가 둘째 패널에 걸렸다, R5, 2026-10-02)
+49. Theme 선 굵기 : 테마 굵기는 기본(직전 테마) 굵기 시리즈에만, 사용자 지정은 보존 (R6, 2026-10-02)
+50. 조판 빈 패널 : 데이터셋이 지워진 패널은 'missing: …' + Publish 경고 (R8, 2026-10-02)
+51. Publish 폴더 : 대화상자를 열거나 취소해도 결과 트리에 figures/를 만들지 않나 (R9, 2026-10-02)
+52. Diurnal 시프트 : 전역/데이터셋 시프트가 있으면 Hour shift를 무시(회색)해 +9h 이중 적용 금지 (R11, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -322,16 +335,21 @@ def c_series_list_identity():
 @check("Undo: 데이터셋·시리즈 제거 복원")
 def c_undo():
     w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:CHOCHO", "R", None, None])   # 데이터셋을 쓰던 시리즈(R7)
+    ts._refresh_list()
     w._tree.topLevelItem(0).setSelected(True)
     w._remove_data()
-    if w.shelf:
+    if w.shelf or ts._series:
         return "FAIL", "데이터셋 제거가 안 됨(테스트 전제 실패)"
     w.undo_last()
     if "fixture" not in w.shelf:
         return "FAIL", "데이터셋 undo 복원 실패"
+    if [s[0] for s in ts._series] != ["fixture:CHOCHO"]:
+        return "FAIL", f"데이터셋 undo가 그걸 쓰던 시리즈를 복원 안 함: {ts._series} (R7)"
+    ts._series.clear()
 
-    ts = next(m for m in w._modes if m.key == "timeseries")
-    ts.options_widget()
     ts._series.append(["fixture:NO2", "L", None, None])
     ts._refresh_list()
     ts._list.item(0).setSelected(True)
@@ -384,6 +402,10 @@ def c_batch_publish():
         ts.options_widget()
         ts._series.append(["fixture:NO2", "L", None, None])
         ts._series.append(["fixture:CHOCHO", "R", "#00FF00", None])
+        # 같은 종·다른 데이터셋(CH1/CH2 NO2) — 예전엔 둘 다 timeseries_NO2.png라 덮어썼다(R2)
+        ds2 = _fixture_dataset("fixture2", seed=3)
+        w.shelf[ds2.name] = ds2; w._refresh_tree(); w._notify_modes()
+        ts._series.append(["fixture2:NO2", "L", None, None])
         ts._refresh_list()
         orig_series_obj = ts._series
 
@@ -392,8 +414,8 @@ def c_batch_publish():
             QMessageBox.information = staticmethod(lambda *a, **k: None)   # 모달 차단 방지
             w._batch_publish()
             pngs = sorted(os.path.basename(p) for p in glob.glob(os.path.join(tmp, "*.png")))
-            if len(pngs) != 2:
-                return "FAIL", f"TimeSeries 배치 파일 개수 이상: {pngs}"
+            if len(pngs) != 3:
+                return "FAIL", f"TimeSeries 배치 파일 개수 이상(같은 종 덮어쓰기?): {pngs}"
             if ts._series is not orig_series_obj:
                 return "FAIL", "배치 후 원래 시리즈 리스트 객체로 복원 안 됨"
 
@@ -406,7 +428,7 @@ def c_batch_publish():
             w._batch_publish()
             if dm._c.currentIndex() != -1:
                 return "FAIL", f"diurnal 콤보 복원 실패(index={dm._c.currentIndex()})"
-        return "PASS", "TimeSeries 2파일 + Diurnal 콤보(-1) 복원 확인"
+        return "PASS", "TimeSeries 3파일(같은 종·다른 데이터셋 구분) + Diurnal 콤보(-1) 복원 확인"
     finally:
         QFileDialog.getExistingDirectory, QMessageBox.information = orig_dlg, orig_msg
 
@@ -1926,6 +1948,21 @@ def c_composer():
     if not 1.6 < hr < 2.4:
         return "FAIL", f"높이 비율 2:1 아님 ({hr:.2f})"
 
+    # x 공유는 x 가 같은 종류끼리만 — 같은 열의 Scatter(ppb) 패널을 시계열과 묶지 않는다(2026-10-02)
+    keys2 = [m.key for m in w2._modes]
+    sc2 = w2._modes[keys2.index("scatter")]
+    w2._mode_combo.setCurrentIndex(keys2.index("scatter"))
+    sc2._cx.setCurrentText("fixture:NO2"); sc2._cy.setCurrentText("fixture:CHOCHO")
+    i_sc = c2.add_current()
+    c2.set_position(i_sc, cell=[2, 0, 1, 1])
+    fig = w2._build_publish_fig(); fig.canvas.draw()
+    ax_sc = min(fig.axes, key=lambda a: a.get_position().y0)
+    ts_axes = sorted([a for a in fig.axes if a is not ax_sc], key=lambda a: -a.get_position().y1)[:2]
+    if ax_sc.get_xlim() == ts_axes[1].get_xlim():
+        return "FAIL", "Scatter 패널 x 범위가 시계열과 합쳐짐(다른 종류의 x 를 공유)"
+    if not any(t.get_visible() and t.get_text() for t in ts_axes[1].get_xticklabels()):
+        return "FAIL", "Scatter 위의 시계열 패널 x 눈금이 지워짐"
+
     # 설정 왕복
     cfg = json.loads(json.dumps(w.config_dict(), default=str))
     w3 = _widget_with_fixture()
@@ -2028,6 +2065,242 @@ def c_console():
         return "FAIL", f"rerun()이 데이터셋을 못 되살림: {w2._console_dlg.out.toPlainText()[-300:]}"
     return "PASS", ("df 보이는 그대로·push 시각 왕복·기록 부착 · 예외 격리·여러 줄 · 설정 저장=기록만 · "
                     "열 때 자동 실행 안 함(센티넬) · rerun으로만 재생성")
+
+
+# ── 45. 주석 시각 파서 = _parse_x · 깨진 주석은 건너뛰고 지목 (R1, 2026-10-02) ──
+@check("주석 시각: 'MM-DD HH:MM'=데이터 연도·로컬 · 깨진 주석이 Publish를 안 죽이고 지목됨")
+def c_annot_time_parse():
+    import datetime as _dt
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None])
+    ts.render()                                        # _time_axis=True
+    yr = _dt.datetime.fromtimestamp(float(w.shelf["fixture"].time[0])).year
+    want = _dt.datetime(yr, 5, 20, 12, 0).timestamp()
+    for txt in ("05-20 12:00", f"{yr}-05-20 12:00"):
+        got = w._parse_annot_x(txt)
+        if got != want:
+            return "FAIL", f"{txt!r} → {got} (기대 {want}: 데이터 연도·로컬 시각)"
+    w._annots = [{"kind": "vline", "x1": -6.2e10, "label": "bad", "color": "#d32f2f"},
+                 {"kind": "vline", "x1": float(np.median(w.shelf["fixture"].time)),
+                  "label": "good", "color": "#d32f2f"}]
+    fig = w._build_publish_fig()
+    if fig is None:
+        return "FAIL", "깨진 주석 하나로 Publish 실패"
+    import io
+    fig.savefig(io.BytesIO(), format="png")
+    if len(w._publish_warnings) != 1 or "bad" not in w._publish_warnings[0]:
+        return "FAIL", f"건너뛴 주석 지목 안 됨: {w._publish_warnings}"
+    texts = {t.get_text().strip() for a in fig.axes for t in a.texts}
+    if "good" not in texts:
+        return "FAIL", f"정상 주석까지 사라짐: {texts}"
+    return "PASS", "연도 생략·포함 모두 로컬 같은 시각 · 깨진 주석만 건너뛰고 이름 남김"
+
+
+# ── 46. Export CSV: 다른 시간축은 core.align — 외삽·결손 메움 금지 + 헤더 기록 (R3) ──
+@check("Export CSV: 다른 시간축 외삽·결손 메움 없음 · '#' 헤더에 시프트·리샘플 · 다시 읽힘")
+def c_csv_no_fabrication():
+    import tempfile
+    from PyQt6.QtWidgets import QFileDialog
+    from gui.ui_plot_maker.data import load_dataset
+    w = _widget_with_fixture()
+    a = w.shelf["fixture"]
+    # 뒤 절반만 겹치고, 가운데 2시간 결손이 있는 두 번째 데이터셋
+    t2 = np.concatenate([a.time[250:350], a.time[-30:] + 600.0])
+    b = Dataset("fx2", "<fixture:fx2>", t2, {"NO2": np.arange(len(t2), dtype=float)})
+    w.shelf["fx2"] = b; w._refresh_tree(); w._notify_modes()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series += [["fixture:NO2", "L", None, None], ["fx2:NO2", "L", None, None]]
+    headers, rows = ts.csv_table()
+    col = [r[2] for r in rows]
+    if any(col[i] for i in range(0, 250)):
+        return "FAIL", "앞쪽 범위 밖 행에 값이 채워짐(끝값 외삽)"
+    if any(col[i] for i in range(360, 460)):
+        return "FAIL", "결손 구간을 직선으로 메움"
+    if not all(col[i] for i in range(250, 350)):
+        return "FAIL", "겹치는 구간 값이 비었음"
+    orig = QFileDialog.getSaveFileName
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "x.csv")
+            QFileDialog.getSaveFileName = staticmethod(lambda *a_, **k: (out, ""))
+            w._export_csv()
+            txt = open(out, encoding="utf-8").read()
+            if not txt.startswith("# Augur Plot Maker export") or "resample" not in txt or "time shift" not in txt:
+                return "FAIL", f"CSV 헤더 기록 없음: {txt[:120]!r}"
+            ds = load_dataset(out)
+            if ds.time is None or len(ds.time) != len(rows):
+                return "FAIL", "'#' 헤더가 붙은 CSV를 Plot Maker가 다시 못 읽음"
+    finally:
+        QFileDialog.getSaveFileName = orig
+    return "PASS", "범위 밖·결손은 빈 칸 · 겹친 구간만 값 · 헤더에 시프트/리샘플 · 재로드 정상"
+
+
+# ── 47. 시간축 시계(tz) 표기 + UTC 위 Night 경고 (R4, 2026-10-02) ─────────────
+@check("시간축 시계: fit meta→UTC 표기 · +9h면 KST · time_KST 열 인식 · UTC 위 Night 경고")
+def c_time_basis_night():
+    import tempfile, json
+    from gui.ui_plot_maker.data import load_dataset
+    from core.run_meta import meta_path_for
+    with tempfile.TemporaryDirectory() as tmp:
+        fp = os.path.join(tmp, "rep.dat")
+        _write_report_fixture(fp)
+        if load_dataset(fp).tz_h is not None:
+            return "FAIL", "meta 없는 fit 파일인데 시계를 추측함"
+        with open(meta_path_for(fp), "w", encoding="utf-8") as f:
+            json.dump({"time_shift_h": 0}, f)
+        ds = load_dataset(fp)
+        if ds.tz_h != 0.0:
+            return "FAIL", f"meta time_shift_h=0인데 tz_h={ds.tz_h}"
+        cp = os.path.join(tmp, "sig.csv")
+        with open(cp, "w", encoding="utf-8") as f:
+            f.write("time_KST,SigmaANs\n2026-05-20 00:00,1\n2026-05-20 00:05,2\n")
+        cs = load_dataset(cp)
+        if cs.time is None or cs.tz_h != 9.0:
+            return "FAIL", f"time_KST 열: time={cs.time is not None} tz_h={cs.tz_h}"
+    w = PlotMakerWidget()
+    w.shelf[ds.name] = ds; w._refresh_tree(); w._notify_modes()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([f"{ds.name}:NO2", "L", None, None])
+    ts._chk_night.setChecked(True)
+    ts.render()
+    xl = w.p1.getAxis("bottom").labelText
+    if "UTC" not in xl:
+        return "FAIL", f"화면 x 라벨에 UTC 없음: {xl!r}"
+    if "Night is shaded on a UTC clock" not in w._status.text():
+        return "FAIL", f"UTC 위 Night 경고 없음: {w._status.text()!r}"
+    fig = w._build_publish_fig()
+    if "UTC" not in fig.axes[0].get_xlabel():
+        return "FAIL", f"Publish x 라벨에 UTC 없음: {fig.axes[0].get_xlabel()!r}"
+    w._shift_spin.setValue(9.0); w._on_transform_changed()
+    ts.render()
+    if "KST" not in w.p1.getAxis("bottom").labelText or "UTC clock" in w._status.text():
+        return "FAIL", f"+9h 뒤: {w.p1.getAxis('bottom').labelText!r} / {w._status.text()!r}"
+    return "PASS", "meta 없으면 모름 · UTC/KST 라벨(화면·Publish) · time_KST 인식 · 시프트 0+Night 경고, +9h면 해제"
+
+
+# ── 48. Split 패널: Y-left/Y-right 범위·log가 자기 축 시리즈 패널에 (R5, 2026-10-02) ──
+@check("Split: Y-left 범위·log는 좌축 시리즈 패널 전부, Y-right는 우축 시리즈 패널에만")
+def c_split_axis_ranges():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series += [["fixture:NO2", "L", None, None], ["fixture:CHOCHO", "R", None, None],
+                   ["fixture:NO2", "L", "#000000", None]]
+    ts._chk_split.setChecked(True)
+    w._ax_ymin.setText("1"); w._ax_ymax.setText("10")
+    w._ax_rmin.setText("0"); w._ax_rmax.setText("1")
+    w._chk_logy.setChecked(True)
+    fig = w._build_publish_fig()
+    ax = [a for a in fig.axes if hasattr(a, "_pm_axis")]
+    if len(ax) != 3:
+        return "FAIL", f"분할 패널 {len(ax)}개 (3 기대)"
+    got = [(a._pm_axis, tuple(round(v, 3) for v in a.get_ylim()), a.get_yscale()) for a in ax]
+    want = [("L", (1.0, 10.0), "log"), ("R", (0.0, 1.0), "linear"), ("L", (1.0, 10.0), "log")]
+    if got != want:
+        return "FAIL", f"패널별 (축, ylim, scale) {got} ≠ {want}"
+    return "PASS", "좌축 패널 2개 = Y-left+log · 우축 패널 = Y-right"
+
+
+# ── 49. Theme이 사용자가 정한 선 굵기를 보존 (R6, 2026-10-02) ───────────────
+@check("Theme: 기본 굵기 시리즈는 테마를 따르고, 사용자가 정한 굵기는 보존")
+def c_theme_keeps_user_width():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series += [["fixture:NO2", "L", None, None], ["fixture:CHOCHO", "L", None, None]]
+    ts._styles.setdefault("fixture:CHOCHO", {})["width"] = 5
+    w._apply_theme("Paper")
+    a = ts._styles.get("fixture:NO2", {}).get("width"); b = ts._styles["fixture:CHOCHO"]["width"]
+    if (a, b) != (1, 5):
+        return "FAIL", f"Paper 뒤 (기본, 사용자) 굵기 = {(a, b)} (1, 5 기대)"
+    w._apply_theme("PPT")
+    a = ts._styles["fixture:NO2"]["width"]; b = ts._styles["fixture:CHOCHO"]["width"]
+    if (a, b) != (3, 5):
+        return "FAIL", f"PPT 뒤 (기본, 사용자) 굵기 = {(a, b)} (3, 5 기대)"
+    return "PASS", "테마 굵기는 기본 시리즈에만 · 사용자 5 보존"
+
+
+# ── 50. 조판: 데이터셋이 사라진 패널은 'missing: …' + 경고 (R8, 2026-10-02) ──────
+@check("Composer: 데이터셋이 지워진 패널은 빈 축 대신 'missing: …' + Publish 경고")
+def c_composer_missing_dataset():
+    w = _widget_with_fixture()
+    ds2 = _fixture_dataset("fx2", seed=5)
+    w.shelf["fx2"] = ds2; w._refresh_tree(); w._notify_modes()
+    keys = [m.key for m in w._modes]
+    ts = w._modes[keys.index("timeseries")]
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None]); ts._refresh_list()
+    w._mode_combo.setCurrentIndex(keys.index("timeseries"))
+    comp = w.composer
+    comp.add_current()                                            # (a) fixture
+    ts._series[:] = [["fx2:NO2", "L", None, None]]; ts._refresh_list()
+    comp.add_current()                                            # (b) fx2
+    fig = w._build_publish_fig()
+    if w._publish_warnings:
+        return "FAIL", f"재료가 다 있는데 경고: {w._publish_warnings}"
+    w.shelf.pop("fx2"); w._refresh_tree(); w._notify_modes()
+    fig = w._build_publish_fig()
+    texts = [t.get_text() for a in fig.axes for t in a.texts]
+    if "missing: fx2" not in texts:
+        return "FAIL", f"빈 패널에 missing 표시 없음: {texts}"
+    if not any("(b)" in m and "fx2" in m for m in w._publish_warnings):
+        return "FAIL", f"Publish 경고에 패널·데이터셋 없음: {w._publish_warnings}"
+    return "PASS", "지워진 데이터셋 패널 = 'missing: fx2' 표시 + '(b) missing dataset(s): fx2' 경고"
+
+
+# ── 51. Publish 대화상자는 폴더를 만들지 않는다 — 취소해도 흔적 없음 (R9, 2026-10-02) ──
+@check("Publish: 대화상자를 열기만/취소해도 결과 트리에 figures 폴더를 만들지 않음")
+def c_publish_no_makedirs_before_confirm():
+    import tempfile
+    import gui.dlg_dir as _dd
+    from PyQt6.QtWidgets import QFileDialog
+    w = _widget_with_fixture()
+    orig_dd, orig_dlg = _dd.dlg_dir, QFileDialog.getSaveFileName
+    seen = {}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            _dd.dlg_dir = lambda key, *a, **k: tmp if not a else None
+            def fake(parent, title, start, *a, **k):
+                seen["start"] = start
+                return "", ""
+            QFileDialog.getSaveFileName = staticmethod(fake)
+            w._export_publish()
+            made = [os.path.join(r, d) for r, ds, _ in os.walk(tmp) for d in ds]
+            if made:
+                return "FAIL", f"취소했는데 폴더 생성: {made}"
+            if not os.path.isdir(os.path.dirname(seen.get("start", ""))):
+                return "FAIL", f"대화상자 시작 폴더가 없는 폴더: {seen.get('start')}"
+    finally:
+        _dd.dlg_dir, QFileDialog.getSaveFileName = orig_dd, orig_dlg
+    return "PASS", "대화상자 시작 = 있는 가장 가까운 폴더 · 취소 시 생성 0"
+
+
+# ── 52. Diurnal Hour shift + 전역 Time shift 이중 적용 금지 (R11, 2026-10-02) ──────
+@check("Diurnal: 전역 시프트가 걸려 있으면 Hour shift는 무시(회색) — +9h 두 번 금지")
+def c_diurnal_single_shift():
+    w = _widget_with_fixture()
+    keys = [m.key for m in w._modes]
+    w._mode_combo.setCurrentIndex(keys.index("diurnal"))
+    dm = w._mode
+    dm._c.setCurrentText("fixture:NO2")
+
+    def counts(spin, glob):
+        dm._shift.setValue(spin)
+        w._shift_spin.setValue(float(glob)); w._on_transform_changed()
+        return list(dm._stats()[5])
+    ref = counts(0, 9)
+    if counts(9, 0) != ref:
+        return "FAIL", "Hour shift 단독 +9가 전역 +9와 다름(전제 실패)"
+    both = counts(9, 9)
+    if both != ref:
+        return "FAIL", "Hour shift와 전역 시프트가 합산됨(+18h)"
+    if dm._shift.isEnabled():
+        return "FAIL", "무시되는 Hour shift가 활성으로 보임"
+    counts(9, 0)
+    if not dm._shift.isEnabled():
+        return "FAIL", "전역 시프트 0인데 Hour shift가 꺼져 있음"
+    return "PASS", "전역 +9 + Hour +9 = +9 (Hour 회색) · 전역 0이면 Hour 그대로"
 
 
 def main():

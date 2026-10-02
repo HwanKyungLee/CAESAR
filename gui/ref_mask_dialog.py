@@ -102,8 +102,9 @@ class MaskDialog(QDialog):
         layout_manual.setContentsMargins(20, 0, 0, 0) # Indentation effect
         layout_manual.addWidget(QLabel("Pixel Range:"))
         
-        self.txt_range = QLineEdit("441-450")
-        self.txt_range.setPlaceholderText("min-max")
+        # No default: "441-450" looked like nm but is detector pixels and kept only 9 px (audit 2026-10-02).
+        self.txt_range = QLineEdit("")
+        self.txt_range.setPlaceholderText("detector pixels min-max, e.g. 600-1270")
         layout_manual.addWidget(self.txt_range)
         layout_opt.addLayout(layout_manual)
         

@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 # RayleighPhysics / KalmanTracker → core/physics.py 에서 공유
-from core.physics import RayleighPhysics, KalmanTracker, air_number_density
+from core.physics import (RayleighPhysics, KalmanTracker, air_number_density,
+                          bbceas_alpha, omr_d_from_ratio)
 
 # 품질 라벨·문턱은 QC 단일 출처에 있다(CLAUDE.md §3). 결과뷰어의 사후 재판정
 # (`app_window_results._reapply_quality_label`)도 같은 함수를 부른다.
@@ -198,13 +199,17 @@ class AnalysisWorker(QThread):
     def _alpha_fit_slice(self, wave_nm):
         """알파 행을 핏범위로 슬라이스할 인덱스(slice) 또는 None(전체).
         fit_unit=='px': [pixel_min:pixel_max] 픽셀구간(박사님 시나리오 775-1550 등 재현).
-        fit_unit=='nm': fit_lo_nm~fit_hi_nm 안의 파장만. 둘 다 None/full이면 전체 핏(기존 동작)."""
+        fit_unit=='nm': fit_lo_nm~fit_hi_nm 안의 파장만. 둘 다 None/full이면 전체 핏(기존 동작).
+        A requested window with < 2 pixels raises — it used to fall back to the full range
+        silently (window outside the wavecal → whole-alpha fit reported as success)."""
         unit = getattr(self, 'fit_unit', 'nm')
         n = len(wave_nm)
         if unit == 'px':
             a = max(0, int(self.pixel_min))
             b = min(n, int(self.pixel_max)) if self.pixel_max else n
-            if b - a >= 2 and (a > 0 or b < n):
+            if b - a < 2:
+                raise ValueError(f"fit window px {self.pixel_min}-{self.pixel_max} has no usable pixels")
+            if a > 0 or b < n:
                 return slice(a, b)
             return None
         lo = getattr(self, 'fit_lo_nm', None)
@@ -219,7 +224,8 @@ class AnalysisWorker(QThread):
         idx = np.where((w >= lo) & (w <= hi))[0]
         if len(idx) >= 2:
             return slice(int(idx[0]), int(idx[-1]) + 1)
-        return None
+        raise ValueError(f"fit window {lo:g}-{hi:g} nm is outside this alpha's wavelength axis "
+                         f"({float(np.nanmin(w)):.1f}-{float(np.nanmax(w)):.1f} nm)")
 
     # ==========================================
     # VarPro 핏 — core.doas_fit.DoasFitter 로 위임(단일 구현 공유)
@@ -831,8 +837,8 @@ class AnalysisWorker(QThread):
                             # `omr + RL·alpha_ref` 로 교정(= RL·[(1-R)/d + alpha_ref]).
                             alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_za_last, self.p_za_last, 'zero_air')
                             alpha_ray_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.temperature, self.pressure, 'zero_air')
-                            optical_depth = ((self.one_minus_r_over_d + self.rl_factor * alpha_ref) * ((I_0 - I_meas) / I_meas)
-                                            - (alpha_ray_sample - alpha_ref))
+                            optical_depth = bbceas_alpha(I_meas, I_0, self.one_minus_r_over_d,
+                                                         alpha_ref, alpha_ray_sample, self.rl_factor)
                             fit_sign = 1.0
 
                             # Save alpha spectrum as intermediate product (per박사님 request)
@@ -1103,7 +1109,10 @@ class AnalysisWorker(QThread):
                 # SNR: signal / noise, both in the same (scaled) units.
                 n_pts = len(pixel_idx)
                 n_gases = len(self.engine.gas_list)
-                n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
+                # etalon=sin+cos 2열 — **켰을 때만**. OFF 면 core.doas_fit 이 그 열을 안 넣는데 여기선
+                # 늘 +2 해서 DOF 가 2 작고 Chi2 가 n/(n−2) 배 부풀었다(2026-10-02 리뷰). ON 은 바이트 동일.
+                n_params = (len(theta0) + n_gases + (poly_order + 1)
+                            + (2 if fixed_e_f is not None else 0))
                 dof = max(n_pts - n_params, 1)
                 # Neumann estimator σ on the fitted signal (optical_depth units for both modes)
                 signal_for_stats = intensity_raw if is_linear_mode else optical_depth
@@ -1441,7 +1450,7 @@ class AnalysisWorker(QThread):
 
         # rl_factor: ZA/He가 채우는 유효 공동 길이 비율 (퍼지 보정)
         with np.errstate(divide='ignore', invalid='ignore'):
-            omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
+            omr_d = omr_d_from_ratio(ratio, alpha_ray_za, alpha_ray_he, self.rl_factor)
 
         # Replace non-finite values by interpolating from valid neighbours.
         # If ALL pixels are invalid (e.g. ratio≈1 when He/ZA signals are indistinct),
@@ -1925,8 +1934,7 @@ def _pass2_process_file(fp, entries, ctx):
 
             omr = _pass2_omr_d_at(gmean, rep_sec, ctx['rt_omr_pchip'], ctx['rt_omr_const'],
                                   ctx['omr_pchip'], ctx['omr_axis_is_sec'], ctx['best_omr_d'])
-            alpha = ((omr + ctx['rl_factor'] * alpha_ref) * ((i0_s - i_am_s) / i_am_s)
-                     - (alpha_sample - alpha_ref))
+            alpha = bbceas_alpha(i_am_s, i0_s, omr, alpha_ref, alpha_sample, ctx['rl_factor'])
             rows.append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
 
         if not rows:
@@ -1955,6 +1963,34 @@ def _pass2_entry(task):
     """풀 워커에서 파일 하나 처리. task=(fp, entries)."""
     fp, entries = task
     return _pass2_process_file(fp, entries, _PASS2_CTX)
+
+
+def block_average(gidx_list, sec_list, spec_list, t_list, p_list, gap=10):
+    """Average each contiguous ZA/He injection (global idx gap <= `gap`) into one spectrum.
+
+    Returns (block_gidx, block_sec, block_spec, block_T, block_P, n_settle_dropped).
+    Empty input (e.g. hot raw with no flag-510 He blocks) returns empty lists and 0 —
+    the caller always unpacks six values (regression from f700cb1).
+    """
+    if not gidx_list:
+        return [], [], [], [], [], 0
+    g = np.array(gidx_list, dtype=float)
+    order = np.argsort(g)
+    g = g[order]
+    SEC = np.array(sec_list, dtype=float)[order]
+    S = np.array(spec_list, dtype=float)[order]
+    T = np.array(t_list, dtype=float)[order]
+    P = np.array(p_list, dtype=float)[order]
+    splits = np.where(np.diff(g) > gap)[0] + 1
+    # 블록마다 선두 과도구간을 잘라낸다. 정착된 블록은 k=0 이라 무변경.
+    sb = np.split(S, splits)
+    ks = [settle_start(b) for b in sb]
+    bg   = [float(np.mean(b[k:]))     for b, k in zip(np.split(g, splits), ks)]
+    bsec = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(SEC, splits), ks)]
+    bs   = [np.nanmean(b[k:], axis=0) for b, k in zip(sb, ks)]
+    bt   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(T, splits), ks)]
+    bp   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(P, splits), ks)]
+    return bg, bsec, bs, bt, bp, int(sum(ks))
 
 
 class AlphaExportWorker(QThread):
@@ -2067,10 +2103,16 @@ class AlphaExportWorker(QThread):
         self.is_running = False
 
     def run(self):
+        self._cleanup_spool = None   # set by _run_inner once the spool exists
         try:
             self._run_inner()
         except Exception as e:
             self.finished.emit(f"ERROR: {e}")
+        finally:
+            # Covers the exception path too (a failed run used to leave a ~58 MB+ spool
+            # in %TEMP% every time). Idempotent, so paths that already cleaned up are fine.
+            if self._cleanup_spool is not None:
+                self._cleanup_spool()
 
     def _run_inner(self):
         os.makedirs(self.output_dir, exist_ok=True)
@@ -2121,7 +2163,8 @@ class AlphaExportWorker(QThread):
         import glob as _glob
         import tempfile as _tf
         # 지난 런이 흘린 스풀 회수 — 이 파일은 파일당 수십 GB 로 자란다(핫 1314파일
-        # = 38 GB). `_cleanup_spool()` 은 정상·중단·예외 경로를 다 덮지만 **프로세스가
+        # = 38 GB). `_cleanup_spool()` runs on the normal/abort paths here and on the
+        # exception path from run()'s finally, but **프로세스가
         # 죽으면(GUI 강제종료·크래시) 못 돈다**. 실제로 2026-09-19 에 %TEMP% 에서 죽은
         # 스풀 138 GB 가 발견됐다. 지금 쓰는 스풀을 만들기 직전에 옛것을 치운다 —
         # 다른 인스턴스가 쓰는 중이면 Windows 가 삭제를 거부하므로 자연히 건너뛴다.
@@ -2149,6 +2192,7 @@ class AlphaExportWorker(QThread):
                 os.remove(_amb_spool_path)
             except OSError:
                 pass
+        self._cleanup_spool = _cleanup_spool
 
         # Per-file calibration header info
         calib_info_per_file = {}   # fp → string describing first good R-cal in file
@@ -2303,6 +2347,12 @@ class AlphaExportWorker(QThread):
                 _hits = {fp for fp in _files
                          if _ac.available(fp, self.channel, self.pixel_min, self.pixel_max)}
             _miss = [fp for fp in _files if fp not in _hits]
+
+            def _stamp(fp):
+                try:
+                    return _ac.file_stamp(fp)
+                except OSError:
+                    return None
             n_cache_hit = n_cache_saved = 0
             # ── 콜드 HDD 대책: 디스크를 읽는 주체를 프리페치 스레드 **하나**로 모은다 ──
             # 실측(diagnostics/parallel_scaling_2026-09/measure_prefetch.py, 핫 raw 8파일):
@@ -2356,7 +2406,8 @@ class AlphaExportWorker(QThread):
                         if _ti >= len(_tasks):
                             return
                         _pf_ready()
-                        _futs.append((_miss[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+                        _st = _stamp(_miss[_ti])          # 파싱 **전** stamp — 캐시 키(alpha_cache.store)
+                        _futs.append((_miss[_ti], _st, _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
 
                     while _ti < len(_tasks) and len(_futs) < _win:
                         _submit_next()
@@ -2371,16 +2422,18 @@ class AlphaExportWorker(QThread):
                         elif _fp in _hits:
                             # 손상·키 불일치·잘라 쓰기 불안전 — 그 자리에서 다시 파싱(드묾)·저장.
                             try:
+                                _st = _stamp(_fp)
                                 _, _flags, _Ts, _Ps, _specs, _secs = _xtr(
                                     (_fp, self.pixel_min, self.pixel_max, self.channel))
-                                _ac.store(_fp, self.channel, self.pixel_min, self.pixel_max,
-                                          _flags, _Ts, _Ps, _specs, _secs)
-                                n_cache_saved += 1
+                                if _st is not None and _ac.store(
+                                        _fp, self.channel, self.pixel_min, self.pixel_max,
+                                        _flags, _Ts, _Ps, _specs, _secs, stamp=_st):
+                                    n_cache_saved += 1
                             except Exception as e:
                                 self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
                                 _flags = None
                         else:
-                            _qfp, _fut = _futs.popleft()
+                            _qfp, _st, _fut = _futs.popleft()
                             assert _qfp == _fp, (_qfp, _fp)   # 미스는 파일 순서대로 제출·소비된다
                             try:
                                 _, _flags, _Ts, _Ps, _specs, _secs = _fut.result()
@@ -2388,9 +2441,10 @@ class AlphaExportWorker(QThread):
                                 self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
                                 _flags = None
                             _submit_next()
-                            if _flags is not None and _use_cache:
-                                _ac.store(_fp, self.channel, self.pixel_min, self.pixel_max,
-                                          _flags, _Ts, _Ps, _specs, _secs)
+                            if (_flags is not None and _use_cache and _st is not None
+                                    and _ac.store(_fp, self.channel, self.pixel_min,
+                                                  self.pixel_max, _flags, _Ts, _Ps, _specs,
+                                                  _secs, stamp=_st)):
                                 n_cache_saved += 1
                         if _flags is None:
                             for _ri in _rpf[_fp]:
@@ -2478,31 +2532,10 @@ class AlphaExportWorker(QThread):
         # gap=10 은 '같은 물리적 주입(injection)'을 스캔 카운트 연속성으로 묶는
         # 그룹핑 기준이라 그대로 인덱스 축을 쓴다(주입 블록 자체는 항상 연속 스캔이라
         # 인덱스=시간 순서 모두 성립) — 아래서 바뀌는 건 '블록끼리의' 위치(x축)뿐이다.
-        def _block_average(gidx_list, sec_list, spec_list, t_list, p_list, gap=10):
-            if not gidx_list:
-                return [], [], [], [], []
-            g = np.array(gidx_list, dtype=float)
-            order = np.argsort(g)
-            g = g[order]
-            SEC = np.array(sec_list, dtype=float)[order]
-            S = np.array(spec_list, dtype=float)[order]
-            T = np.array(t_list, dtype=float)[order]
-            P = np.array(p_list, dtype=float)[order]
-            splits = np.where(np.diff(g) > gap)[0] + 1
-            # 블록마다 선두 과도구간을 잘라낸다. 정착된 블록은 k=0 이라 무변경.
-            sb = np.split(S, splits)
-            ks = [settle_start(b) for b in sb]
-            bg   = [float(np.mean(b[k:]))     for b, k in zip(np.split(g, splits), ks)]
-            bsec = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(SEC, splits), ks)]
-            bs   = [np.nanmean(b[k:], axis=0) for b, k in zip(sb, ks)]
-            bt   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(T, splits), ks)]
-            bp   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(P, splits), ks)]
-            return bg, bsec, bs, bt, bp, int(sum(ks))
-
         n_za_raw, n_he_raw = len(za_gidx), len(he_gidx)
-        za_gidx, za_sec, za_spectra, za_t_list, za_p_list, n_za_drop = _block_average(
+        za_gidx, za_sec, za_spectra, za_t_list, za_p_list, n_za_drop = block_average(
             za_gidx, za_sec, za_spectra, za_t_list, za_p_list)
-        he_gidx, he_sec, he_spectra, he_t_list, he_p_list, n_he_drop = _block_average(
+        he_gidx, he_sec, he_spectra, he_t_list, he_p_list, n_he_drop = block_average(
             he_gidx, he_sec, he_spectra, he_t_list, he_p_list)
         self.status_msg.emit(
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")
@@ -2587,7 +2620,7 @@ class AlphaExportWorker(QThread):
                     alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_za_b, p_za_b, 'zero_air')
                     ratio = i_za_b / i_he_s
                     with np.errstate(divide='ignore', invalid='ignore'):
-                        omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
+                        omr_d = omr_d_from_ratio(ratio, alpha_ray_za, alpha_ray_he, self.rl_factor)
                     valid = np.isfinite(omr_d) & (omr_d > 0)
                     if (valid.mean() >= self.r_cal_valid_min
                             and np.nanmean(omr_d[valid]) < self.r_cal_omr_max):
@@ -3010,8 +3043,8 @@ class AlphaExportWorker(QThread):
                     alpha_ref    = _alpha_za(t_i0, p_i0)
                     alpha_sample = _alpha_za(t_am, p_am)
                     # RL은 괄호 전체를 곱한다(omr=RL·(1-R)/d → omr + RL·alpha_ref = RL·[(1-R)/d+α_ZA]).
-                    alpha = ((_omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)) + self.rl_factor * alpha_ref)
-                             * ((i0_s - i_am_s) / i_am_s) - (alpha_sample - alpha_ref))
+                    alpha = bbceas_alpha(i_am_s, i0_s, _omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)),
+                                         alpha_ref, alpha_sample, self.rl_factor)
                     n_written += 1
                 else:
                     alpha = np.full(len(wave_nm), np.nan)   # 빈 bin

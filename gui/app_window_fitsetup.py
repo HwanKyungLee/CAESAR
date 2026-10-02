@@ -60,16 +60,20 @@ class FitSetupMixin:
         def on_calib_done(data):
             print(f"📡 Signal Received: {len(data)} wavelength points transferred.")
 
-            # 1. Store wavelength data in main memory
-            self.wavelengths = data 
-            if hasattr(self, 'engine'):
-                self.engine.wavelengths = data
-                print("✅ [Engine Sync] Wavelength data synced.")
-
-            # 2. Instantly apply to graphs if the method exists
-            if hasattr(self, 'apply_new_wavelength'):
-                self.apply_new_wavelength(data)
-                print("🚀 [Automation] X-axis automatically updated to nm.")
+            # 1-2. Apply through the single wavecal loader using the file just saved. Setting only
+            # self.wavelengths/engine.wavelengths left engine._wave_axis, loaded_wl_path and the
+            # channel's wl_path on the OLD wavecal, so alpha generation, R and FitSet saves kept
+            # using it while the popup said "applied instantly" (UX audit 2026-10-02).
+            saved = getattr(dialog, 'saved_path', None)
+            if saved and os.path.exists(saved):
+                self.load_wavelength_cal(auto_path=saved)
+                self._mark_refs_dirty()   # references were resampled on the old axis — re-Lock
+            else:
+                self.wavelengths = data
+                if hasattr(self, 'engine'):
+                    self.engine.wavelengths = data
+                if hasattr(self, 'apply_new_wavelength'):
+                    self.apply_new_wavelength(data)
 
             # 3. Store the lamp spectrum used during calibration for the generator
             if hasattr(dialog, 'spectrum') and dialog.spectrum is not None:
@@ -506,19 +510,44 @@ class FitSetupMixin:
             data = dlg.get_data()
             name = data['name']
             
+            _MEM = ("\n\nNote: the mask lives in memory only — it is not saved in the FitSet or the result "
+                    "header, and it is lost on Lock or a channel-tab switch.")
+            try:
+                fit_lo, fit_hi = sorted((int(self.txt_min.text()), int(self.txt_max.text())))
+            except Exception:
+                fit_lo, fit_hi = 0, len(self.engine.raw_references.get(name, [])) - 1
             if data['mode'] == 'manual':
                 try:
                     mn, mx = map(int, data['range'].split('-'))
-                    if self.engine.apply_manual_mask(name, mn, mx):
-                        QMessageBox.information(self, "Success", f"Manual masking applied to {name}.")
-                        self.refresh_viewer() 
                 except Exception:
-                    QMessageBox.warning(self, "Error", "Invalid range format. (e.g., 400-500)")
+                    QMessageBox.warning(self, "Error", "Invalid range format — detector pixels min-max, e.g. 600-1270.")
+                    return
+                if mn >= mx:
+                    QMessageBox.warning(self, "Error", f"Empty or reversed range {mn}-{mx} would zero the whole "
+                                        f"{name} reference. Give min < max (detector pixels).")
+                    return
+                keep = max(0, min(mx, fit_hi + 1) - max(mn, fit_lo))
+                if keep < 10:
+                    ok = QMessageBox.question(
+                        self, "Mask leaves almost nothing",
+                        f"Only {keep} px of {name} would remain inside the fit window (px {fit_lo}-{fit_hi}).\n"
+                        "The fit for this gas will be meaningless. Apply anyway?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    if ok != QMessageBox.StandardButton.Yes:
+                        return
+                if self.engine.apply_manual_mask(name, mn, mx):
+                    QMessageBox.information(self, "Mask applied",
+                                            f"{name}: kept px {mn}-{mx} ({keep} px inside the fit window).{_MEM}")
+                    self.refresh_viewer()
             else:
                 thresh = data['threshold']
                 if self.engine.apply_auto_mask(name, thresh):
-                    QMessageBox.information(self, "Success", f"Signals below {thresh}% were removed from {name}.")
-                    self.refresh_viewer() 
+                    ref = np.asarray(self.engine.raw_references.get(name, []))
+                    keep = int(np.count_nonzero(ref[fit_lo:fit_hi + 1]))
+                    QMessageBox.information(self, "Mask applied",
+                                            f"Signals below {thresh}% of the peak were zeroed in {name} "
+                                            f"({keep} non-zero px left inside the fit window).{_MEM}")
+                    self.refresh_viewer()
                 else:
                     QMessageBox.warning(self, "Error", "Auto-masking failed.")
 
@@ -537,6 +566,12 @@ class FitSetupMixin:
 
         After locking, the engine is ready to call get_basis_matrix() for fitting.
         """
+        # Keep the previously locked state: if rows exist but none of them loads (bad files),
+        # restore it instead of leaving an empty engine (UX audit 2026-10-02). The engine object
+        # is shared (monitor etc.), so restore its contents in place rather than swapping it.
+        import copy as _copy
+        _prev_state = _copy.deepcopy(self.engine.__dict__)
+        n_attempted = sum(1 for w in self.ref_widgets if w['n'].text() and w['fp'])
         self.engine.clear_engine()
         success_count = 0
         
@@ -604,11 +639,19 @@ class FitSetupMixin:
                     "font-weight: bold;")
             self._refresh_setup_status()
             self._refresh_shsq_summary()
+        elif n_attempted:
+            self.engine.__dict__.update(_prev_state)
+            msg = (f"None of the {n_attempted} reference(s) could be loaded — the previously locked "
+                   f"set ({', '.join(self.engine.gas_list) or 'none'}) is kept. See the console for the reasons.")
+            if silent:
+                self.status.setText(msg)
+            else:
+                QMessageBox.warning(self, "Lock failed", msg)
         else:
             if silent:
                 self.status.setText("no references to lock (channel switch)")
             else:
-                QMessageBox.warning(self, "Error", "No valid references found to lock, or an error occurred.")
+                QMessageBox.warning(self, "Error", "No references to lock — the engine is now empty.")
 
 
     # ---------------------------------------------------------

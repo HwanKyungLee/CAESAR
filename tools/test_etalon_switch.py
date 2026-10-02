@@ -181,6 +181,7 @@ def test_plumbing_worker():
     old = (W.DataIO.parse_alpha_row_time, W.DataIO.load_alpha_trace_row_full)
     W.DataIO.parse_alpha_row_time = staticmethod(lambda *a: None)
     W.DataIO.load_alpha_trace_row_full = staticmethod(lambda *a: (wave, y.copy(), 25.0, 1013.0))
+    dof = {}
     try:
         for enabled in (False, True):
             p0 = [0.0, 1.0] + [0.1] * len(eng.gas_list) + [0.0] * (POLY_ORDER + 1)
@@ -200,6 +201,9 @@ def test_plumbing_worker():
             check(f"{tag}: detect 호출 {'1' if enabled else '0'}회", len(calls) == (1 if enabled else 0),
                   f"{len(calls)}")
             check(f"{tag}: 반환 주파수", (ef is None) if not enabled else (ef is not None and ef > 0), str(ef))
+            dof[enabled] = res[0][1].get("DOF")
+        # 결과 파일의 DOF 열(Chi2 분모)도 코어처럼 OFF = ON + 2 — 워커가 늘 +2 하던 것(2026-10-02)
+        check("워커 DOF: OFF = ON + 2", dof[False] == dof[True] + 2, f"ON {dof[True]} OFF {dof[False]}")
         check("병렬 자식 cfg 에 실린다", w._chunk_cfg().get("use_etalon") is True)
     finally:
         W.DataIO.parse_alpha_row_time, W.DataIO.load_alpha_trace_row_full = (

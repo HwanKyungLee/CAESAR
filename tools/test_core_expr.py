@@ -78,6 +78,29 @@ def main():
         raise AssertionError("length mismatch should be rejected")
 
     assert names_in('col("odd name") + B * 2 + nan + mean(A)') == {"odd name", "B", "A"}
+
+    # 5. (2026-10-02 리뷰) 거듭제곱은 실수로 — int64 넘침이 조용히 틀린 값을 내던 것
+    one = {"X": np.ones(2)}
+    assert np.allclose(eval_column("X * 10**20", one, 2), 1e20), eval_column("X * 10**20", one, 2)
+    assert np.allclose(eval_column("X * 2.46 * 10**19", one, 2), 2.46e19)
+    assert eval_column("2**63", one, 2)[0] == 2.0 ** 63
+    assert np.isinf(eval_column("10**400", one, 2)).all()
+    assert eval_column("2 ** -1", one, 2)[0] == 0.5
+
+    # 6. & | ~ 에서 NaN 은 거짓(eval_mask 규약과 같게)
+    w = {"R": np.array([np.nan, 1.0, 0.0]), "F": np.array(["ok", "ok", "ok"])}
+    assert eval_mask('(F == "ok") & R', w, 3).tolist() == [False, True, False]
+    assert eval_mask("R | (R > 5)", w, 3).tolist() == [False, True, False]
+    assert eval_mask("~R", w, 3).tolist() == [True, False, True]
+
+    # 7. 데이터 의존 오류도 ExprError — 호출측은 ExprError 만 잡는다(필터 규칙 하나만 ✗)
+    for bad in ('A == "a"', "mean(Flag)", 'Flag + 1', "Flag & 1"):
+        try:
+            eval_mask(bad, v, 4)
+        except ExprError:
+            pass
+        except Exception as e:      # noqa: BLE001
+            raise AssertionError(f"{bad!r} raised {type(e).__name__}, not ExprError: {e}")
     print("test_core_expr: all OK")
     return 0
 

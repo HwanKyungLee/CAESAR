@@ -141,7 +141,8 @@ def main():
         _, fl, Ts, Ps, sp, sc = real((files[0], 0, 2048, 1))
         fl = fl.copy()
         fl[3] = dio.RAW_LOAD_FAIL
-        alpha_cache.store(files[0], 1, 0, 2048, fl, Ts, Ps, sp, sc)
+        alpha_cache.store(files[0], 1, 0, 2048, fl, Ts, Ps, sp, sc,
+                          stamp=alpha_cache.file_stamp(files[0]))
         for k in (alpha_cache.cache_key(files[0], 1, 700, 1700),):
             p = os.path.join(alpha_cache.cache_dir(), k[:2], k + '.npz')
             if os.path.exists(p):

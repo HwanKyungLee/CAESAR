@@ -31,6 +31,33 @@ class AnalysisRunMixin:
     # §11 분석 실행 / 워커 / autosave / closeEvent
     # ══════════════════════════════════════════════════════════════════════
     def start_analysis(self):
+        """RUN entry (button and F5). Refuses re-entry while workers run — a second RUN used to
+        replace `_workers` and orphan the first set (still fitting after STOP, progress "70 / 14").
+        Any early return of the body leaves no stale running flag behind."""
+        if any(w.isRunning() for w in (getattr(self, '_workers', None) or [])):
+            self.status.setText("Analysis already running — press STOP first")
+            return
+        try:
+            self._start_analysis_body()
+        finally:
+            if not any(w.isRunning() for w in (getattr(self, '_workers', None) or [])):
+                self._analysis_running = False
+                self._set_run_inputs_locked(False)
+
+    def _set_run_inputs_locked(self, locked):
+        """Enable/disable everything that defines a run (see `_run_lock_widgets`)."""
+        ws = list(getattr(self, '_run_lock_widgets', []))
+        ws += [getattr(self, n, None) for n in ('_adv_params_container', 'spin_d_len', 'spin_rl_factor')]
+        for w in ws:
+            if w is not None:
+                w.setEnabled(not locked)
+
+    def _unlock_inputs_if_done(self):
+        # Connected after analysis_finished, which re-enables RUN only when every channel is done.
+        if self.b_run.isEnabled():
+            self._set_run_inputs_locked(False)
+
+    def _start_analysis_body(self):
         """
         Validates settings, builds the initial parameter vector p0, and starts
         the AnalysisWorker background thread.
@@ -352,6 +379,26 @@ class AnalysisRunMixin:
                 step_ch = step_limit_val
                 kq_ch = self.spin_kalman_q.value(); kr_ch = self.spin_kalman_r.value()
 
+            if not list(getattr(eng_ch, 'gas_list', []) or []):
+                # Used to fit with no references at all and report success (UX audit 2026-10-02).
+                QMessageBox.warning(
+                    self, "No references",
+                    f"CH{ch} has data but no locked references — nothing to fit.\n"
+                    "Add references to this channel tab (or remove its data) and Lock.")
+                self.b_run.setEnabled(True)
+                return
+            if pmax - pmin < 2:
+                # A window outside the wavelength calibration collapses to px 0-0; the worker used
+                # to treat that as "no slice" and silently fit the whole alpha range (UX audit
+                # 2026-10-02: DOF 658 -> 2036, NO2 3.24 -> 1.85 ppb, reported as success).
+                rng = (f"{fnm_lo_ch:g}-{fnm_hi_ch:g} nm" if funit_ch != 'px' else "")
+                QMessageBox.warning(
+                    self, "Fit range outside wavelength calibration",
+                    f"CH{ch}: fit range {rng} maps to px {pmin}-{pmax} — no usable pixels.\n"
+                    "Check the fit range against this channel's wavelength calibration.")
+                self.b_run.setEnabled(True)
+                return
+
             w = AnalysisWorker(
                 eng_ch, files_for_ch, pmin, pmax,
                 p0_ch, (lo_ch, hi_ch), interval, delay_ms,
@@ -412,10 +459,9 @@ class AnalysisRunMixin:
             w.plot_update.connect(self.monitor.update_spectrum)
             w.trend_update.connect(self.monitor.update_trend)
             # 실패를 상태바에 — AlphaExportWorker와 같은 규약(app_window_inputs 참고).
-            w.status_msg.connect(
-                lambda m, _ch=ch: (print(f"[Analysis CH{_ch}] {m}"),
-                                   self.status.setText(f"[CH{_ch}] {m}")))
+            w.status_msg.connect(lambda m, _ch=ch: self._on_analysis_status(_ch, m))
             w.finished.connect(self.analysis_finished)
+            w.finished.connect(self._unlock_inputs_if_done)
             w.r_curve_update.connect(self._on_r_curve_update)
             w.scan_count_ready.connect(lambda n, ch=ch: self._on_scan_count_ready(n, ch))
 
@@ -481,6 +527,7 @@ class AnalysisRunMixin:
         # Lock UI controls to prevent interference
         self.b_run.setEnabled(False)
         self.b_stop.setEnabled(True)
+        self._set_run_inputs_locked(True)
         self.status.setText("Analysis in progress...")
 
         # Switch to the Analysis Monitor automatically
@@ -532,6 +579,17 @@ class AnalysisRunMixin:
             # Single-channel Step: pre-allocate rows for O(1) update_table writes
             self.table.setRowCount(total_scans)
             self.status.setText(f"{total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
+
+    def _confirm_stop_analysis(self):
+        """Esc: ask before stopping a running analysis (STOP button stays one click)."""
+        if not any(w.isRunning() for w in (getattr(self, '_workers', None) or [])):
+            return
+        ok = QMessageBox.question(self, "Stop analysis?",
+                                  "Stop the running analysis? Results so far are kept.",
+                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                  QMessageBox.StandardButton.No)
+        if ok == QMessageBox.StandardButton.Yes:
+            self.stop_analysis()
 
     def stop_analysis(self):
         """Safely stops all worker threads and re-enables UI controls."""
@@ -631,7 +689,7 @@ class AnalysisRunMixin:
             from core.provenance import code_version as _cv
             meta = run_meta.build_meta(
                 cfg, channel=ch,
-                qc=self._qc_state(),
+                qc=self._qc_state(cfg),
                 # 채널별 동결값 우선. 옛 런(전역 dict 하나)도 읽히게 dict-of-channel 이
                 # 아니면 그대로 쓴다 — 없으면 지금 cfg 로 만든다.
                 calibration=(_frozen_cal.get(ch) if isinstance(_frozen_cal, dict)

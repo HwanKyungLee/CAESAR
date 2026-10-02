@@ -1,10 +1,13 @@
 """vigil/monitors/conc_monitor.py 단위테스트.
 
-실데이터 재구성: `Output/alpha/60s/cold`의 실제(이미 검증된) alpha 배열을
-`spectrum = I0 * exp(-alpha)`로 raw 광량 도메인으로 역변환해서 넣는다 —
-그러면 ConcMonitor 내부의 `-log(spectrum/I0)`가 그 alpha를 정확히 복원하고,
-이 세션 내내 검증해 온 진짜 FitSet(cold)로 실제 core.param_optimizer.fit_scan이
-돈다(합성 물리 아님, 진짜 파이프라인 배관만 새 코드).
+Real alpha from `Output/alpha/60s/cold` is turned back into intensities with the exact
+inverse of core.physics.bbceas_alpha (_spectrum_for_alpha) and fitted with the real FitSet.
+
+Until 2026-10-02 this file used `spectrum = I0*exp(-alpha)`, which the monitor's old
+`-log(I/I0)` undid exactly -- a circular test that could never see that the monitor fed
+optical density as alpha [cm^-1] (concentrations L_eff ~1e6 too high, 32/32 PASS).
+The inverse now needs (1-R)/d, so a unit error breaks it; plus test_real_raw_end_to_end
+replays a real raw file through RMonitor -> ConcMonitor (SKIP if the raw is not local).
 
 커버:
   1) I0 버퍼링(za_inject 윈도우 완결) + throttle
@@ -12,6 +15,8 @@
   3) 경보 판정(_classify) — OK/물리불가(P1)/rms낮음(P1)/스파이크(P2)/평탄선(P2)
   4) 연속 실패 → P0 격상
   5) pick_fitset_channel — wl_dir 매칭
+  6) no R -> SKIP (no OD fallback)
+  7) real raw end to end -- concentration in the physical range
 
 사용: python vigil/monitors/test_conc_monitor.py → 전부 PASS면 exit 0
 """
@@ -32,11 +37,26 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from vigil.alert_engine import OK, P0, P1, P2
+import dataclasses
+
+from core.physics import RayleighPhysics
+from vigil.alert_engine import OK, P0, P1, P2, SKIP
 from vigil.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
 from vigil.profile import ConcentrationConfig
 from tools import optimize_params as OP
 from tools.residual_compare import load_alpha
+
+# (1-R)/d [cm^-1] of a real cold R (R=0.999949, L_eff ~10 km).
+OMR_D_COLD = 9.79e-7
+RL_COLD = 0.933
+
+
+def _spectrum_for_alpha(alpha, i0, omr_d, t_c, p_mbar, wave, rl=RL_COLD):
+    """Exact inverse of bbceas_alpha with equal ZA/sample T/P:
+    I = I0 / (1 + alpha / (omr_d + rl*alpha_ZA))."""
+    a_za = RayleighPhysics.get_alpha_rayleigh(wave, t_c, p_mbar, "zero_air")
+    return np.asarray(i0, float) / (1.0 + np.asarray(alpha, float) / (omr_d + rl * a_za))
+
 
 _n_pass = 0
 _n_fail = 0
@@ -117,14 +137,16 @@ def test_i0_buffer_and_fit_and_throttle():
         return
     wave, alpha_real, T, P = real
     i0 = np.full_like(wave, 40000.0)
-    spectrum = i0 * np.exp(-alpha_real)   # -log(spectrum/i0) == alpha_real로 복원됨
+    omr_d = np.full_like(wave, OMR_D_COLD)
+    spectrum = _spectrum_for_alpha(alpha_real, i0, omr_d, T, P, wave)
+    kw = dict(omr_d=omr_d, rl=RL_COLD)
 
     cm = _make_monitor(throttle_sec=0.0)
-    r_za = cm.observe("za_inject", i0, T, P)
+    r_za = cm.observe("za_inject", i0, T, P, **kw)
     check("za_inject 중엔 결과 없음", r_za is None)
     check("I0 아직 없음(za 윈도우 안 끝남)", cm._i0 is None)
 
-    r0 = cm.observe("sampling", spectrum, T, P)
+    r0 = cm.observe("sampling", spectrum, T, P, **kw)
     check("za 윈도우 종료 후 I0 채워짐", cm._i0 is not None)
     check("첫 sampling 행에서 핏 실행됨", r0 is not None)
     status, msg, metrics = r0
@@ -136,8 +158,12 @@ def test_i0_buffer_and_fit_and_throttle():
     check("두번째부턴 Center 모드로 좁힘", rp2["NO2"]["sh_mode"] == "Center", rp2["NO2"])
 
     # throttle=0이라 즉시 재핏 가능 — 되는지만 확인(느려도 됨, 값 검증은 위에서 끝)
-    r1 = cm.observe("sampling", spectrum, T, P)
+    r1 = cm.observe("sampling", spectrum, T, P, **kw)
     check("throttle=0이면 바로 재핏", r1 is not None)
+
+    # The same spectrum read as OD (old bug) is L_eff times larger than alpha.
+    ratio = float(np.nanmedian(np.abs(-np.log(spectrum / i0))) / np.nanmedian(np.abs(alpha_real)))
+    check("OD/alpha ratio is L_eff scale (1e5..1e7)", 1e5 < ratio < 1e7, f"ratio={ratio:.3e}")
 
 
 def test_throttle_blocks_immediate_refit():
@@ -148,13 +174,37 @@ def test_throttle_blocks_immediate_refit():
         return
     wave, alpha_real, T, P = real
     i0 = np.full_like(wave, 40000.0)
-    spectrum = i0 * np.exp(-alpha_real)
+    omr_d = np.full_like(wave, OMR_D_COLD)
+    spectrum = _spectrum_for_alpha(alpha_real, i0, omr_d, T, P, wave)
+    kw = dict(omr_d=omr_d, rl=RL_COLD)
     cm = _make_monitor(throttle_sec=9999.0)
-    cm.observe("za_inject", i0, T, P)
-    r0 = cm.observe("sampling", spectrum, T, P)
+    cm.observe("za_inject", i0, T, P, **kw)
+    r0 = cm.observe("sampling", spectrum, T, P, **kw)
     check("첫 핏은 즉시 실행", r0 is not None)
-    r1 = cm.observe("sampling", spectrum, T, P)
+    r1 = cm.observe("sampling", spectrum, T, P, **kw)
     check("throttle 안 지났으면 None", r1 is None)
+
+
+def test_no_r_yields_skip_not_garbage():
+    print("[6] no R -> SKIP (no OD fallback)")
+    cm = _make_monitor(throttle_sec=0.0)
+    i0 = np.full(2048, 40000.0)
+    spectrum = i0 * 0.98
+    cm.observe("za_inject", i0, 25.0, 1013.25)
+    r = cm.observe("sampling", spectrum, 25.0, 1013.25)          # no omr_d
+    check("no omr_d -> SKIP", r is not None and r[0] == SKIP, f"got {r}")
+    check("no omr_d -> no concentration value", r is not None and "conc_ppb" not in r[2], f"got {r}")
+
+    cm2 = _make_monitor(throttle_sec=0.0)
+    cm2.observe("za_inject", i0, 25.0, 1013.25)
+    r2 = cm2.observe("sampling", spectrum, 25.0, 1013.25, omr_d=np.full(512, OMR_D_COLD))
+    check("omr_d axis mismatch -> failure", r2 is not None and r2[0] in (P1, P0), f"got {r2}")
+
+    cm3 = _make_monitor(throttle_sec=0.0)
+    cm3.observe("za_inject", i0, 25.0, 1013.25)
+    r3 = cm3.observe("sampling", spectrum, 25.0, 1013.25, omr_d=np.full(2048, np.nan))
+    check("omr_d NaN in fit window (outside R ROI) -> failure, not a value",
+          r3 is not None and r3[0] in (P1, P0) and "conc_ppb" not in r3[2], f"got {r3}")
 
 
 def test_classify():
@@ -210,15 +260,93 @@ def test_classify():
 def test_fail_streak_to_p0():
     print("[4] 연속 실패 → P0")
     cm = _make_monitor(throttle_sec=0.0)
-    bad_i0 = np.zeros(2048)          # 0으로 나누기 → alpha가 전부 inf/NaN
+    bad_i0 = np.zeros(2048)          # I0 <= 0 -> NaN alpha in the window
     bad_spec = np.full(2048, 1.0)
-    r_za = cm.observe("za_inject", bad_i0, 25.0, 1013.25)
-    r1 = cm.observe("sampling", bad_spec, 25.0, 1013.25)
+    kw = dict(omr_d=np.full(2048, OMR_D_COLD), rl=RL_COLD)
+    r_za = cm.observe("za_inject", bad_i0, 25.0, 1013.25, **kw)
+    r1 = cm.observe("sampling", bad_spec, 25.0, 1013.25, **kw)
     check("1회 실패 → P1", r1[0] == P1, f"got {r1[0]}: {r1[1]}")
-    r2 = cm.observe("sampling", bad_spec, 25.0, 1013.25)
+    r2 = cm.observe("sampling", bad_spec, 25.0, 1013.25, **kw)
     check("2회 연속 실패 → 아직 P1", r2[0] == P1, f"got {r2[0]}: {r2[1]}")
-    r3 = cm.observe("sampling", bad_spec, 25.0, 1013.25)
+    r3 = cm.observe("sampling", bad_spec, 25.0, 1013.25, **kw)
     check("3회 연속 실패 → P0", r3[0] == P0, f"got {r3[0]}: {r3[1]}")
+
+
+# Hot 05-20-003 opens with a He (510) then ZA (500) block in its first 190 rows.
+RAW_CANDIDATES = (
+    r"C:\GHL\2026 yeosu\RAW\hot\05\2026-05-20-003.dat",
+    r"E:\Yeosu_2026\CAESAR_Hot\2026-05\2026-05-20-003.dat",
+)
+
+
+def test_real_raw_end_to_end():
+    """[7] Real raw -> RMonitor -> ConcMonitor, same order as VigilApp._tick (R first).
+    No synthesis or inversion: instrument counts go straight in. The test that was missing
+    when the OD bug shipped."""
+    print("[7] real raw end to end (raw -> R -> alpha -> concentration)")
+    raw = next((p for p in RAW_CANDIDATES if os.path.isfile(p)), None)
+    if raw is None:
+        print("  SKIP  raw not local")
+        return
+    from vigil.monitors.r_monitor import RMonitor
+    from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
+
+    rows = []
+    with open(raw, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            toks = line.rstrip("\n").split("\t")
+            if len(toks) < 100:
+                continue
+            try:
+                rows.append([float(t) for t in toks])
+            except ValueError:
+                continue
+            if len(rows) >= 400:
+                break
+    prof = ProfileSet.load(DEFAULT_PROFILE_DIR).route(raw, len(rows[-1]))
+    if prof is None:
+        print(f"  SKIP  no profile for ncols={len(rows[-1])}")
+        return
+    for ch in prof.signal_channels():
+        if ch.concentration is None or ch.reflectance is None:
+            continue
+        cc, rc = ch.concentration, ch.reflectance
+        try:
+            scen = json.load(open(cc.fitset_path, encoding="utf-8"))
+            cfg = dataclasses.replace(cc, throttle_sec=0.0)
+            cm = ConcMonitor(pick_fitset_channel(scen, cc.wl_dir), cfg)
+            wave = OP.load_wavecal(rc.wavecal_path)
+        except Exception as e:                       # noqa: BLE001
+            print(f"  SKIP  {ch.id}: FitSet/wavecal not local ({type(e).__name__}: {e})")
+            continue
+        rm = RMonitor(wave_nm=wave, cavity_len_cm=rc.cavity_len_cm, rl_factor=rc.rl_factor,
+                      roi_nm=rc.roi_nm)
+
+        def hk(row, key):
+            f = prof.hk.field(key)
+            return f.value(row, prof.hk.start_col) if f is not None else float("nan")
+
+        concs, conc_without_r = [], 0
+        for row in rows:
+            role = prof.flag_role(int(row[prof.header.state_flag_col]))
+            spec = ch.slice(row)
+            rm.observe(role, spec, hk(row, rc.cavity_temp_hk), hk(row, rc.cavity_pressure_hk))
+            had_r = rm.omr_d is not None
+            out = cm.observe(role, spec, hk(row, cc.cavity_temp_hk), hk(row, cc.cavity_pressure_hk),
+                             omr_d=rm.omr_d, rl=rc.rl_factor)
+            if out is not None and "conc_ppb" in out[2]:
+                concs.append(out[2]["conc_ppb"])
+                conc_without_r += 0 if had_r else 1
+            if len(concs) >= 8:
+                break
+        check(f"{ch.label}: R computed from the raw ZA/He blocks", rm.omr_d is not None)
+        check(f"{ch.label}: never a concentration without R", conc_without_r == 0, f"{conc_without_r}")
+        check(f"{ch.label}: concentrations produced", bool(concs))
+        if concs:
+            med = float(np.median(concs))
+            print(f"  ({ch.label}: {len(concs)} scans, NO2 median {med:.2f} ppb)")
+            # OD bug gave 1e6 ppb here.
+            check(f"{ch.label}: NO2 median in 0..200 ppb", 0.0 <= med <= 200.0, f"{med:.4g}")
 
 
 def main():
@@ -228,7 +356,8 @@ def main():
         return 0
     for t in (test_pick_fitset_channel, test_gas_policy_source_and_legacy_migration,
               test_i0_buffer_and_fit_and_throttle,
-              test_throttle_blocks_immediate_refit, test_classify, test_fail_streak_to_p0):
+              test_throttle_blocks_immediate_refit, test_classify, test_fail_streak_to_p0,
+              test_no_r_yields_skip_not_garbage, test_real_raw_end_to_end):
         t()
     print(f"\nconc_monitor tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
