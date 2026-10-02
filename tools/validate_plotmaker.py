@@ -105,6 +105,7 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     (UTC)/(KST) · Night를 UTC 시계에 칠하면 경고 (R4, 2026-10-02)
 48. Split 축 범위 : Y-left 범위·log는 좌축 시리즈 패널 전부, Y-right는 우축 시리즈 패널에만
     (전엔 axes[0] / axes[1:] 가정이라 Y-right가 둘째 패널에 걸렸다, R5, 2026-10-02)
+49. Theme 선 굵기 : 테마 굵기는 기본(직전 테마) 굵기 시리즈에만, 사용자 지정은 보존 (R6, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2177,6 +2178,25 @@ def c_split_axis_ranges():
     if got != want:
         return "FAIL", f"패널별 (축, ylim, scale) {got} ≠ {want}"
     return "PASS", "좌축 패널 2개 = Y-left+log · 우축 패널 = Y-right"
+
+
+# ── 49. Theme이 사용자가 정한 선 굵기를 보존 (R6, 2026-10-02) ───────────────
+@check("Theme: 기본 굵기 시리즈는 테마를 따르고, 사용자가 정한 굵기는 보존")
+def c_theme_keeps_user_width():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series += [["fixture:NO2", "L", None, None], ["fixture:CHOCHO", "L", None, None]]
+    ts._styles.setdefault("fixture:CHOCHO", {})["width"] = 5
+    w._apply_theme("Paper")
+    a = ts._styles.get("fixture:NO2", {}).get("width"); b = ts._styles["fixture:CHOCHO"]["width"]
+    if (a, b) != (1, 5):
+        return "FAIL", f"Paper 뒤 (기본, 사용자) 굵기 = {(a, b)} (1, 5 기대)"
+    w._apply_theme("PPT")
+    a = ts._styles["fixture:NO2"]["width"]; b = ts._styles["fixture:CHOCHO"]["width"]
+    if (a, b) != (3, 5):
+        return "FAIL", f"PPT 뒤 (기본, 사용자) 굵기 = {(a, b)} (3, 5 기대)"
+    return "PASS", "테마 굵기는 기본 시리즈에만 · 사용자 5 보존"
 
 
 def main():

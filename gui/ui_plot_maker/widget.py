@@ -2503,12 +2503,18 @@ class PlotMakerWidget(QWidget):
             self._chk_grid.blockSignals(True)
             self._chk_grid.setChecked(bool(th["grid"]))
             self._chk_grid.blockSignals(False)
-        # 시계열 시리즈 기본 선두께를 테마에 맞춤(개별 지정은 보존)
+        # Series line width follows the theme only where it still has the previous theme's
+        # (or the default) width — a width the user picked is kept. It used to be overwritten
+        # (5 → 1) despite this comment saying otherwise.
+        # ponytail: a user width equal to the previous theme's width is indistinguishable and follows.
+        prev = getattr(self, "_theme_line", 2)
         ts = next((m for m in self._modes if m.key == "timeseries"), None)
         if ts is not None:
             for lab in [s[0] for s in getattr(ts, "_series", [])]:
                 st = ts._styles.setdefault(lab, {})
-                st["width"] = int(th["line"])
+                if int(st.get("width", 2)) == prev:
+                    st["width"] = int(th["line"])
+        self._theme_line = int(th["line"])
         # 저널 프리셋의 추가 항목(일반 테마엔 없다 — 색·크기는 안 건드린다)
         extra = []
         if "tick" in th:
