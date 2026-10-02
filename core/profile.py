@@ -620,9 +620,14 @@ def validate_profile_dict(d: dict, schema: Optional[dict] = None) -> None:
         except jsonschema.ValidationError as e:  # type: ignore[attr-defined]
             raise ProfileError(f"Schema validation failed: {e.message} (at {list(e.path)})") from e
         return
-    # 폴백: 최소 필수 키 구조 검사
-    required = ["profile_id", "profile_version", "match", "header", "flags",
-                "channels", "hk", "cadence"]
+    # 폴백: 최소 필수 키 구조 검사 — _schema.json 의 if/else 와 같은 규칙. 미션(`base` 가 있음)은
+    # 구조를 바탕 기본 프로파일에서 받으므로 channels 만 필수. 예전엔 미션에도 기본의 키를 요구해
+    # jsonschema 가 없는 PC(.venv·DAQ PC)에서 Vigil 이 프로파일 로드 단계에서 죽었다.
+    if "base" in d:
+        required = ["profile_id", "profile_version", "base", "channels"]
+    else:
+        required = ["profile_id", "profile_version", "match", "header", "flags",
+                    "channels", "hk", "cadence"]
     missing = [k for k in required if k not in d]
     if missing:
         raise ProfileError(f"Missing required keys: {missing}")
