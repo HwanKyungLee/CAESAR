@@ -262,10 +262,27 @@ class Watcher:
         if changed:
             self._paths = sorted(self._files)
 
+    def _dirs_changed(self) -> bool:
+        """No active file (empty folder, or DAQ stopped before this session saw anything grow): the
+        quick refresh had nothing to look at, so the first new file waited for the next full listing —
+        12–29 s (audit 2026-10-02). Instead stat the folders of the last listing (a new entry changes its
+        folder's mtime) and list again as soon as one changed.
+        # ponytail: one stat per folder per poll; only while nothing is active. If a huge idle tree has
+        # thousands of folders, stat just the root and the newest few."""
+        for d, mt in self._dir_mtime.items():
+            try:
+                if os.stat(d).st_mtime != mt:
+                    return True
+            except OSError:
+                return True                           # folder gone — re-list
+        return False
+
     def _refresh_files(self) -> bool:
         """True = 이번이 전체 나열."""
         now = time.monotonic()
-        if now >= self._next_full:
+        # (cheap trees only: on a tree whose listing is slow, a churning folder would re-list every poll)
+        if now >= self._next_full or (not self._active and self._interval <= self.rescan_sec
+                                      and self._dirs_changed()):
             self._full_scan(now)
             return True
         self._quick_refresh(now)

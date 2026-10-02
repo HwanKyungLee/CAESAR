@@ -3,6 +3,7 @@
   1) liveness counts only rows routed to a profile — a growing analysis .dat must not mask a raw stop
   2) "no rows seen yet" is SKIP only for a while after start / folder change / Start, then P0
   3) aggregate never says "normal — all OK" while sources were not evaluated
+  5) empty watch folder: the first file is seen on the next poll, not at the next full listing
 """
 import os
 import shutil
@@ -120,6 +121,30 @@ def test_aggregate_not_evaluated():
     check("P1 message also counts not evaluated", s == "P1" and "not evaluated 1" in m, (s, m))
 
 
+def test_empty_folder_first_file(d):
+    print("[5] empty folder -> first file on the next poll")
+    import time
+    from vigil.ingest_cursor import IngestCursor
+    from vigil.profile import ProfileSet
+    from vigil.watcher import Watcher
+    raw = os.path.join(d, "raw5")
+    os.makedirs(raw)
+    w = Watcher(raw, ProfileSet.load_default(), IngestCursor(os.path.join(d, "c5.json")), rescan_sec=3600)
+    w.poll()
+    nxt = w._next_full
+    w.poll()
+    check("nothing changed: no extra full listing", w._next_full == nxt)
+    time.sleep(0.05)                                      # coarse folder mtime clocks
+    os.makedirs(os.path.join(raw, "2026-06"))
+    f = os.path.join(raw, "2026-06", "2026-06-20-001 Hot.dat")
+    _append(f, [_row(13_000_000 + k) for k in range(2)])
+    ev = []
+    for _ in range(2):                                    # (a new subfolder may need one more listing)
+        ev += w.poll()
+    check("rows of the first file seen within 2 polls (full listing is 3600 s away)",
+          len(ev) == 2 and all(e.profile_id for e in ev), len(ev))
+
+
 def main():
     from PyQt6.QtCore import QCoreApplication
     _app_qt = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])  # noqa: F841
@@ -128,6 +153,7 @@ def main():
         test_liveness_routed_only(d)
         test_no_rows_escalates(d)
         test_aggregate_not_evaluated()
+        test_empty_folder_first_file(d)
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print(f"\nVF1 ingest tests: {_n_pass} PASS · {_n_fail} FAIL")
