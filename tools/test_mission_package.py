@@ -90,7 +90,7 @@ def main():
         check("1) 미션: fitset_path·wavecal 상대, fitset_channel 키, R roi = FitSet 핏 창",
               c1["concentration"]["fitset_path"] == "fitset.json" and c1["concentration"]["fitset_channel"] == "2"
               and c1["reflectance"]["wavecal_path"] == "wavecal/roi2/Calib.txt"
-              and c1["reflectance"]["roi_nm"] == [430.0, 462.0], c1)
+              and c1["reflectance"]["roi_nm"] == [430.0 - MP.ROI_PAD_NM, 462.0 + MP.ROI_PAD_NM], c1)
         # 2026-10-02 first real export: the mission defaulted ±Neg to False while the FitSet had True,
         # and ConcMonitor refused to start ("allow_negative_gas disagrees with FitSet").
         check("1) 미션 ±Neg = 그 채널 FitSet 값(ch1←FitSet 2 True, ch2←FitSet 1 False)",

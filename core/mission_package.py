@@ -32,6 +32,7 @@ FORMAT = "caesar-mission-package"
 VERSION = 1
 MANIFEST = "manifest.json"
 FITSET = "fitset.json"
+ROI_PAD_NM = 0.1                # R ROI margin beyond the FitSet's rounded fit-window labels
 
 
 def missions_root(profile_dir: str | None = None) -> str:
@@ -233,7 +234,11 @@ def build_package(out_dir: str, fitset_path: str, missions: list, *, name: str,
                 refl = {"cavity_len_cm": float(fch.get("cavity_d", 51.8)),
                         "rl_factor": float(fch.get("rl_factor", 0.933))}
                 if fch.get("fit_start_nm") is not None and fch.get("fit_end_nm") is not None:
-                    refl["roi_nm"] = [float(fch["fit_start_nm"]), float(fch["fit_end_nm"])]
+                    # fit_*_nm are 0.1 nm-rounded labels; the real fit window is in px and can sit a
+                    # pixel outside them -> ConcMonitor "fit-window px outside the R ROI" (2026-10-02).
+                    # The pad does not change R (R is fitted per px; the ROI only masks).
+                    refl["roi_nm"] = [round(float(fch["fit_start_nm"]) - ROI_PAD_NM, 3),
+                                      round(float(fch["fit_end_nm"]) + ROI_PAD_NM, 3)]
                 refl.update(c["reflectance"])
                 refl["wavecal_path"] = fch.get("wl_path")
                 oc["reflectance"] = refl
