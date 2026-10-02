@@ -1,6 +1,10 @@
 """Vigil dashboard / operator fixes (VF2, 2026-10-02) — no data needed, Qt offscreen.
 
   1) UI strings use only glyphs that render (★ and ⏸ showed as □)
+  2) freshness says "paused" while paused   3) time-zone labels (headers, log, status.jsonl ts)
+  4) .vrec one file per local day           5) trends skip redraw when unchanged, cheap pens
+  6) HK % of band / one field               7) P0 re-alert   8) badge cause + action
+  9) close confirm                          10) lifecycle lines   11) minimum width at 1366x768 @150 %
 """
 import ast
 import os
@@ -210,7 +214,7 @@ def test_badge_cause():
     win.set_results(results)
     win.set_status(*aggregate(results))
     txt = win.badge.text()
-    check("P0: cause + action", txt.startswith("■  P0  Measurement stopped — measurement stopped? — last row 49s ago")
+    check("P0: cause + action", txt.startswith("■  P0  Measurement stopped — last row 49s ago")
           and "Check LabVIEW acquisition" in txt and "+2 more" in txt, txt)
     win.set_results([r for r in results if r[1] != P0] + [("liveness", OK, "ok", {})])
     win.set_status(P1, "P1 ×2 — quality at risk (P2 0)")

@@ -83,7 +83,7 @@ _BADGE_MSG_MAX = 110
 # While P0 persists, flash the taskbar again this often — one flash is lost if nobody was looking.
 REALERT_SEC = 300.0
 
-_HK_ALL_LABEL = "HK — % of warn band"
+_HK_ALL_LABEL = "HK (% of warn band)"
 
 
 def _band_pct(v, band):
@@ -506,7 +506,11 @@ class DashboardWindow(QMainWindow):
             return f"{glyph}  {level}   {msg}", msg
         source, _s, full, _mt = worst[0]
         cause, action = _CAUSES.get(source.split(":")[0], (source, "See the Alarms tab."))
-        detail = full if len(full) <= _BADGE_MSG_MAX else full[:_BADGE_MSG_MAX - 1] + "…"
+        detail = full
+        if detail.lower().startswith(cause.lower()):      # "Measurement stopped — measurement stopped? — …"
+            detail = detail[len(cause):].lstrip("?:— ")
+        if len(detail) > _BADGE_MSG_MAX:
+            detail = detail[:_BADGE_MSG_MAX - 1] + "…"
         more = sum(1 for r in results if r[1] in (P0, P1, P2)) - 1
         text = f"{glyph}  {level}  {cause} — {detail}\n{action}"
         return text + (f"   (+{more} more in Alarms)" if more > 0 else ""), f"{full}\n\n{msg}"
