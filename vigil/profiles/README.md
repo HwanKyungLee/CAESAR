@@ -73,39 +73,51 @@ Augur 는 블록 이름 ch1/ch2 + 옛 슬롯 규칙 T/P, Vigil 은 **HK·블록 
   `file_rollover_sec`(현 3600),
   `liveness_grace_sec`(이 시간 넘게 새 행 없으면 측정 정지 → **P0**).
 
-## 채널을 추가하거나 배치가 바뀌었을 때
+## 채널을 추가하거나 배치가 바뀌었을 때 — 미션 패키지 (권장)
 
-**코드는 고치지 않는다 — JSON 만.** 예: 콜드의 어두운 블록 4101 에 광섬유를 연결해 2채널이 됐다.
+**코드는 고치지 않는다.** Augur Setup 탭 **"Vigil…"** 버튼 → *Export mission for Vigil*:
 
-1. 옛 미션(`caesar_cold.example.json`)에 끝 날짜를 붙인다: `"match": {"date_range": ["2026-01-01", "2026-09-30"]}`.
-2. 새 **미션** 파일(새 `profile_id`, `"base": "caesar_cold_base"`, 새 배치 시작일부터의 `date_range`)을 만든다.
-3. 새 블록(`"id": "ch2"`)을 `"role": "signal"` 로 두고 `label`, `cavity`(그 셀의 압력·온도 센서), 필요하면
-   `concentration`(FitSet·wl_dir)·`reflectance`(wavecal·roi)를 채운다. 그 셀의 센서가 HK 지도에
-   없으면 **기본** 프로파일의 `hk.fields` 에 추가한다(구조는 기본의 일).
-4. **채널 정체는 LED 스펙트럼으로 판정**한다(블록 번호·기억으로 정하지 말 것 — 2026-09 오판,
-   `CHANNEL_IDENTITY_YEOSU2026.md`).
-5. `python tools/test_raw_layout.py`, `python vigil/test_profile.py` — 스키마·날짜 겹침·키 참조 검사.
+1. FitSet(저장된 것)과 미션 이름·**시작 날짜**를 정한다. 같은 열 수의 옛 미션과 날짜가 겹치면 설치가
+   거부된다 — 옛 미션의 끝 날짜를 먼저 정할 것.
+2. FitSet 채널마다 **raw 구성(hot 6181 / cold 6179 …)·블록(ch1 = 2053, ch2 = 4101, ch0 = 5)·셀 이름·
+   압력 센서·기체온도 센서**를 고른다(같은 블록의 기존 미션 값이 기본으로 채워진다). FitSet 의
+   `data_label` 은 쓰지 않는다 — 뒤바뀐 이력이 있다.
+3. **Check with raw…** — 그 구성의 raw 파일 하나로 블록마다 밝기·LED 봉우리·"핏 창이 반치 구간 안인가"를
+   보여 주고 스펙트럼을 그린다. **셀 정체는 LED 모양으로 판정**(블록 번호·기억 금지 — 2026-09 오판).
+4. **Export…** → 폴더 하나(아래). 기본으로 이 PC 의 Augur 에도 설치된다(`vigil/profiles/missions/` —
+   git 으로 커밋하면 다른 분석 PC 도 받는다).
+5. 그 폴더를 USB 로 측정 PC 에 옮기고 Vigil 대시보드 **"Load mission…"** → 검사(파일·해시·날짜 겹침) 후
+   Vigil 상태 폴더의 `missions/` 에 설치되고, 그 날짜의 파일에서 농도·R 이 켜진다.
 
-그러면 Augur 는 그 날짜 이후 파일에서 블록 4101 을 그 채널로 읽고(채널 2), 그 채널 센서로 T/P 를
-고르며, Vigil 은 그 채널의 농도·R·램프 감시기를 따로 만든다. 날짜가 어느 프로파일에도 안 드는
-같은 열 수 파일은 Augur 에선 구조적 이름(ch1/ch2)+옛 슬롯 규칙, Vigil 에선 "NOT monitored" P2.
+```
+<미션>/manifest.json          형식·만든 때·Augur 판·원본 FitSet·파일별 sha1·출처 문자열
+       fitset.json            FitSet 사본 — 경로는 이 폴더 기준 상대(어디에 두든 열린다)
+       wavecal/<wl_dir>/…  refs/<채널 키>/…   사본(원본은 읽기만)
+       base_*.json            바탕 기본 프로파일 사본 — PC 마다 같은 구조로 합쳐진다
+       mission_<base>.json    셀 이름·센서·FitSet 채널 키(fitset_channel)·date_range
+```
+
+손으로 JSON 을 쓸 수도 있다(이 폴더에 `"base": "caesar_cold_base"` 미션 파일) — 그때도 날짜 겹침·없는
+블록·구조 변경은 로드 단계에서 막힌다(`python tools/test_raw_layout.py`, `python vigil/test_profile.py`).
+
+그러면 Augur 는 그 날짜 이후 파일에서 그 블록을 그 채널로 읽고 그 채널 센서로 T/P 를 고르며, Vigil 은
+채널마다 농도·R·램프 감시기를 따로 만든다. 미션이 없는 날짜는 기본 프로파일(구조)로 읽힌다.
 
 ## 측정 PC 배포 (인터넷 없음 — USB)
 
 측정 PC 는 git 을 쓸 수 없다고 보고 설계했다.
 
-- **옮기는 단위는 프로그램 폴더 전체**(이 폴더 `vigil/profiles/` 포함). Augur 와 Vigil 이 같은
-  폴더의 같은 JSON 을 읽으므로 따로 설정할 것이 없다. FitSet·wavecal·레퍼런스는 Augur `Output`
-  폴더 쪽이라 같이 옮기고, Vigil 대시보드에서 그 폴더를 **Augur 데이터 폴더**로 지정한다
-  (`tools/bundle_vigil_deps.py` 가 필요한 것만 모아 준다).
-- **프로파일만 바뀌었으면** 그 JSON 을 모든 PC 의 `vigil/profiles/` 에 덮어 쓰고 Augur·Vigil 을
-  다시 켠다(import·시작 때 한 번 읽는다).
+- **프로그램**(Augur/Vigil 폴더)은 한 번 USB 로 옮긴다 — 기본 프로파일이 안에 있어 미션 없이도 Vigil 이
+  HK·밝기·유입을 감시한다.
+- **미션**은 위의 미션 패키지 폴더만 옮긴다(FitSet·레퍼런스·wavecal 이 다 들어 있다 — 경로 문제 없음).
+  예전 `tools/bundle_vigil_deps.py`(대상 PC 절대경로로 다시 쓰기)와 Vigil 의 'Augur data…' 경로 찾기는
+  미션 패키지 이전 방식이다.
 - **어느 PC 가 어느 정의를 쓰는지는 해시로 대조한다.** 프로파일마다
-  `파일@판#내용해시8` 문자열(예 `caesar_hot.example.json@1.3.0#af04dbf2`)이 남는다:
-  - Vigil — 시작할 때 `status.jsonl` 에 `profiles loaded: …`(kind=profiles)
+  `파일@판#내용해시8[+바탕@판#해시8]` 문자열이 남는다:
+  - Vigil — 시작·미션 불러올 때 `status.jsonl` 에 `profiles loaded: …` / `Mission loaded: …`
   - Augur — 알파 헤더 `# raw_layout: … profile=…`, raw 입력 결과의 meta `raw_layout.profile`
-  같은 문자열이면 같은 정의다(줄바꿈 CRLF/LF 차이는 해시에서 무시). 내용을 바꾸면
-  `profile_version` 도 올릴 것 — 해시는 바뀐 걸 알려 줄 뿐 무엇이 바뀌었는지는 판 번호와 기록이 말한다.
+  - 패키지 — `manifest.json` 의 `provenance`
+  같은 문자열이면 같은 정의다(줄바꿈 CRLF/LF 차이는 해시에서 무시).
 
 ## HK 열 근거 (옛 core/raw_parser 내장 표에서 옮김, 2026-10-02)
 

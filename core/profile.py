@@ -171,6 +171,9 @@ class ConcentrationConfig:
     wl_dir: str
     allow_negative_gas: bool
     target: str = "NO2"
+    # FitSet 채널 키("1"…) — 미션 패키지가 적는다. 있으면 wl_dir 대신 이 키로 채널을 고른다
+    # (사람이 내보낼 때 확정한 연결이라 wavecal 폴더 이름 추측보다 확실하다).
+    fitset_channel: Optional[str] = None
     cavity_temp_hk: Optional[str] = None
     cavity_pressure_hk: Optional[str] = None
     throttle_sec: float = 10.0
@@ -197,6 +200,7 @@ class ConcentrationConfig:
             wl_dir=d["wl_dir"],
             allow_negative_gas=d["allow_negative_gas"],
             target=d.get("target", "NO2"),
+            fitset_channel=(str(d["fitset_channel"]) if d.get("fitset_channel") is not None else None),
             cavity_temp_hk=d.get("cavity_temp_hk"),
             cavity_pressure_hk=d.get("cavity_pressure_hk"),
             throttle_sec=float(d.get("throttle_sec", 10.0)),
@@ -685,7 +689,10 @@ def _find_base(profile_dir: str, base_id: str, schema, validate: bool):
 
 
 def _build(path, d, sha, bases: dict) -> Profile:
-    """기본이면 그대로, 미션이면 바탕과 합쳐서 Profile."""
+    """기본이면 그대로, 미션이면 바탕과 합쳐서 Profile. 파일 안의 상대경로(FitSet·wavecal)는 그 파일
+    폴더 기준으로 푼다 — 미션 패키지는 USB 어디에 두든 열려야 한다."""
+    from core.mission_package import absolutize_profile_dict
+    d = absolutize_profile_dict(d, os.path.dirname(os.path.abspath(path)))
     bid = d.get("base")
     if not bid:
         return Profile.from_dict(d, source_path=path, source_sha=sha)
@@ -718,15 +725,18 @@ def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,
                   validate: bool = True, extra_paths: Sequence[str] = ()) -> list:
     """폴더의 모든 프로파일(기본 + 미션) 로드. '_'로 시작하는 파일(_schema.json 등)은 건너뛴다.
     extra_paths = 폴더 밖의 미션 파일(미션 패키지) — 바탕은 이 폴더의 기본 프로파일에서 찾는다."""
+    from core.mission_package import installed_mission_files, missions_root
     schema = _load_schema() if validate else None
     raw = []
-    paths = [p for p in sorted(glob.glob(os.path.join(profile_dir, "*.json")))
-             if not os.path.basename(p).startswith("_")] + list(extra_paths)
-    for path in paths:
-        d, sha = _read_profile_json(path, validate, schema)
-        raw.append((path, d, sha))
+    for path in sorted(glob.glob(os.path.join(profile_dir, "*.json"))):
+        if not os.path.basename(path).startswith("_"):
+            d, sha = _read_profile_json(path, validate, schema)
+            raw.append((path, d, sha))
     bases = {d["profile_id"]: (p, d, s) for p, d, s in raw if not d.get("base")}
     profiles = [_build(p, d, s, bases) for p, d, s in raw]
+    # 설치된 미션 패키지(<profile_dir>/missions/<이름>/) + 호출측이 준 것 — 바탕은 패키지 안 사본이 먼저
+    for path in [*installed_mission_files(missions_root(profile_dir)), *extra_paths]:
+        profiles.append(load_profile(path, validate=validate, schema=schema, base_dirs=(profile_dir,)))
     # 중복 profile_id 방지 — by_id/route가 조용히 첫 번째만 쓰는 footgun 차단
     # (열수 중복은 정당할 수 있어 막지 않는다: filename_glob로 구분 가능)
     seen: dict = {}

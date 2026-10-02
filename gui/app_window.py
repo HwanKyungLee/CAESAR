@@ -205,6 +205,16 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         _btn_scn_save.setToolTip("Save fit scenario (all channels)")
         _btn_scn_save.clicked.connect(self.save_scenario)
         _chtab_bar.addWidget(_btn_scn_save)
+        _btn_vigil = QPushButton("Vigil…")
+        _btn_vigil.setToolTip("Export a mission package for Vigil: this FitSet + references + wavelength calibrations,\n"
+                              "with which raw block is which cell and which sensors it uses — one self-contained\n"
+                              "folder to copy to the measurement PC (USB). Save the FitSet first.")
+
+        def _open_vigil_export():
+            from gui.dlg_mission_export import open_mission_export
+            open_mission_export(self)
+        _btn_vigil.clicked.connect(_open_vigil_export)
+        _chtab_bar.addWidget(_btn_vigil)
         left_layout.addLayout(_chtab_bar)
 
         # --- 1. Reference Management Section ---

@@ -80,15 +80,13 @@ class VigilApp:
                  backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC, retire_after_sec: float = RETIRE_AFTER_SEC,
                  cursor_save_interval_sec: float = CURSOR_SAVE_INTERVAL_SEC):
         """watch_dir 은 None 이어도 된다 — 대시보드의 폴더 버튼으로 나중에 정한다(set_watch_dir)."""
-        self.profiles = ProfileSet.load(profile_dir)
+        self.profile_dir = profile_dir
+        # 이 PC 에 불러온 미션 패키지 — 상태 폴더 아래(프로그램 폴더는 쓰기 금지일 수 있다)
+        self.missions_dir = os.path.join(state_dir, "missions")
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
-        # 어느 채널 정의로 감시하나 — 측정 PC 는 USB 로 받아 git 으로 확인할 수 없으니 파일·판·내용
-        # 해시를 남긴다(Augur 알파 헤더 raw_layout 의 profile= 와 같은 문자열 — 둘을 대조하면 된다).
-        _profs = [p.provenance for p in self.profiles.profiles]
-        log.info("profiles: %s", ", ".join(_profs))
-        self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
-                              kind="profiles", profiles=_profs)
+        self.profiles = None
+        self._load_profiles()
         self._watcher_kw = dict(max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
                                 cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec
@@ -106,6 +104,43 @@ class VigilApp:
         self._reset_state()
         if watch_dir:
             self.set_watch_dir(watch_dir)
+
+    def _load_profiles(self) -> None:
+        """기본 + 프로그램 폴더의 미션 + 이 PC 에 불러온 미션 패키지. 어느 채널 정의로 감시하나 — 측정 PC 는
+        USB 로 받아 git 으로 확인할 수 없으니 파일·판·내용 해시를 남긴다(Augur 알파 헤더 raw_layout 의
+        profile= 와 같은 문자열 — 둘을 대조하면 된다)."""
+        from core.mission_package import installed_mission_files
+        from core.profile import load_profiles
+        self.profiles = ProfileSet(load_profiles(self.profile_dir,
+                                                 extra_paths=installed_mission_files(self.missions_dir)))
+        _profs = [p.provenance for p in self.profiles.profiles]
+        log.info("profiles: %s", ", ".join(_profs))
+        self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
+                              kind="profiles", profiles=_profs)
+
+    def load_mission(self, pkg_dir: str) -> list:
+        """미션 패키지(Augur 'Export mission for Vigil')를 검사·설치하고 프로파일을 다시 읽는다 → 새로 들어온
+        미션 출처 문자열들. 검사 실패(파일 누락·내용 변경)·날짜 겹침이면 ValueError — 아무것도 안 바꾼다."""
+        from core.mission_package import install_package, overlap_problems, read_manifest
+        man = read_manifest(pkg_dir)
+        probs = overlap_problems(pkg_dir, self.profile_dir, self.missions_dir)
+        if probs:
+            raise ValueError("; ".join(probs))
+        dst = install_package(pkg_dir, self.missions_dir)
+        self._load_profiles()
+        if self.watcher is not None:
+            self.watcher.profiles = self.profiles
+            self.watcher._profile_cache.clear()
+            self.watcher.date_excluded.clear()
+            self._reset_state()
+        got = [p.provenance for p in self.profiles.profiles
+               if p.source_path and os.path.dirname(os.path.abspath(p.source_path)) == os.path.abspath(dst)]
+        msg = f"Mission loaded: {man['name']} → {', '.join(got)}"
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="mission", mission=man["name"], profiles=got)
+        if self.dashboard is not None:
+            self.dashboard.log_line(msg)
+        return got
 
     def set_watch_dir(self, watch_dir: str) -> None:
         """감시 폴더를 정하거나 바꾼다(대시보드 폴더 버튼). 커서는 파일 절대경로 키라 그대로 이어지고,
@@ -180,10 +215,13 @@ class VigilApp:
         if scen is None:
             if not os.path.exists(fp):
                 raise FileNotFoundError(f"FitSet not found: {cfg.fitset_path} — set the Augur data folder")
-            scen = json.load(open(fp, encoding="utf-8"))
+            from core.mission_package import absolutize_fitset
+            # 미션 패키지의 FitSet 은 패키지 상대경로 — 그 FitSet 폴더 기준으로 푼다
+            scen = absolutize_fitset(json.load(open(fp, encoding="utf-8")), os.path.dirname(os.path.abspath(fp)))
             self._fitset_cache[fp] = scen
         from vigil.monitors.conc_monitor import pick_fitset_channel
-        return rebase_fitset_channel(pick_fitset_channel(scen, cfg.wl_dir), self.data_root)
+        return rebase_fitset_channel(pick_fitset_channel(scen, cfg.wl_dir, getattr(cfg, "fitset_channel", None)),
+                                     self.data_root)
 
     def _observe_reflectance(self, prof, ev, now) -> None:
         """이 행의 프로파일에 reflectance 설정이 있는 signal 채널마다 RMonitor.observe.
@@ -782,6 +820,23 @@ def main(argv=None) -> int:
         core.set_data_root(path)
         win.set_data_root(path)
     win.data_root_requested.connect(lambda: (lambda p: p and _on_data_root(p))(pick_data_root(win, qs)))
+
+    def _on_mission():
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        d = QFileDialog.getExistingDirectory(win, "Load mission package (folder from Augur 'Export mission for Vigil')",
+                                             qs.value("mission_dir", "", type=str))
+        if not d:
+            return
+        qs.setValue("mission_dir", d)
+        try:
+            got = core.load_mission(d)
+        except Exception as e:                    # noqa: BLE001 — 사람에게 보여 주고 아무것도 안 바꾼다
+            QMessageBox.warning(win, "Mission not loaded", f"{type(e).__name__}: {e}")
+            return
+        win.reset_views()
+        QMessageBox.information(win, "Mission loaded",
+                                "Concentration and R are on for files in the mission's dates:\n\n" + "\n".join(got))
+    win.mission_requested.connect(_on_mission)
 
     if not args.autostart or not args.dir:
         # 기본은 정지 상태로 켠다 — 폴더를 고르고(또는 확인하고) 사람이 Start 를 누를 때 읽기 시작.

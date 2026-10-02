@@ -116,6 +116,7 @@
             "required": ["fitset_path", "wl_dir", "allow_negative_gas"],
             "properties": {
               "fitset_path": { "type": "string", "description": "Augur FitSet json 경로 (레퍼런스·핏레인지(px)·poly·ref_props·step_limit 전부 여기서 옴)." },
+              "fitset_channel": { "type": "string", "description": "FitSet 채널 키(\"1\"…) — 미션 패키지가 적는다. 있으면 wl_dir 대신 이 키로 채널을 고른다." },
               "wl_dir": { "type": "string", "description": "FitSet 안 이 채널을 찾을 wavecal 폴더명(roi1/roi2/cold 등). data_label은 안 씀 — 뒤바뀐 사례 있음(fit_optimizer_handoff.md §14-D)." },
               "allow_negative_gas": { "type": "boolean", "description": "가스 계수 음수 허용 정책. Augur 분석 정책과 같게 명시한다." },
               "target": { "type": "string", "default": "NO2", "description": "농도를 낼 타깃 기체." },

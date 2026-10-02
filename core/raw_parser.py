@@ -453,7 +453,7 @@ def hk_col(ncols, key, path=None):
 
 
 def load_campaign_layout(path: str, *, kind=None, replace=False,
-                         validate=False, verbose=True) -> CampaignLayout:
+                         validate=False, verbose=True, source=None) -> CampaignLayout:
     """**캠페인 프로파일 JSON**(`vigil/profiles/*.json`)에서 raw 레이아웃을 등록.
 
     캠페인별 컬럼 지도는 그 파일이 갖고 있다(`match.n_columns`·`date_range`, `channels[].columns`·
@@ -525,7 +525,7 @@ def load_campaign_layout(path: str, *, kind=None, replace=False,
     return register_campaign_layout(
         ncols, kind or prof.kind or str(prof.profile_id or "campaign"), channels, hk_map,
         campaign=str(prof.campaign or (prof.profile_id if prof.is_mission else "")),
-        source=os.path.basename(path),
+        source=source or os.path.basename(path),
         replace=replace, date_range=prof.match.date_range, cavity=cavity,
         profile=prof.provenance, is_mission=prof.is_mission)
 
@@ -549,12 +549,18 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
             return []
     known = {lay.source for lays in CAMPAIGN_LAYOUTS.values() for lay in lays}
     out = []
-    for path in sorted(_glob.glob(os.path.join(profile_dir, "*.json"))):
-        name = os.path.basename(path)
-        if name.startswith("_") or name in known:
+    try:                                         # 설치된 미션 패키지(<profile_dir>/missions/<이름>/)
+        from core.mission_package import installed_mission_files, missions_root
+        pkg = installed_mission_files(missions_root(profile_dir))
+    except Exception:                            # noqa: BLE001
+        pkg = []
+    for path in sorted(_glob.glob(os.path.join(profile_dir, "*.json"))) + pkg:
+        # 이름 = 프로파일 폴더 기준 상대경로(패키지마다 mission_*.json 이름이 같다)
+        name = os.path.relpath(path, profile_dir).replace("\\", "/")
+        if os.path.basename(path).startswith("_") or name in known:
             continue                             # _schema.json 등 메타 파일 · 이미 등록
         try:
-            out.append(load_campaign_layout(path, verbose=verbose))
+            out.append(load_campaign_layout(path, verbose=verbose, source=name))
             if verbose:
                 print(f"[raw_parser] Registered campaign layout: {name} "
                       f"(ncols={out[-1].ncols}, channels={list(out[-1].channels)})")
@@ -906,8 +912,8 @@ def block_channel_name(path: str, block_start: int):
     except OSError:
         return None
     lay, in_range = layout_for(fl.ncols, path)
-    if lay is None or not in_range:
-        return None
+    if lay is None or not in_range or not lay.is_mission:
+        return None              # 기본(구조) 프로파일의 ch1/ch2 는 셀 이름이 아니다 — 블록 번호만
     return lay.channel_at(block_start)
 
 
