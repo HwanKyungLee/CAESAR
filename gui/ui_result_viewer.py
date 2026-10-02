@@ -251,6 +251,8 @@ class ResultViewerWidget(QWidget):
         self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._list.itemClicked.connect(self._on_list_item)
         self._list.itemDoubleClicked.connect(self._on_list_double)
+        from gui.empty_hint import attach
+        attach(self._list, "Open a result file, a folder or a date range\n(File / Folder / Dates above).")
 
         # 좌측 아래: 같은 날·같은 채널의 **버전들**(B3). 파라미터를 바꿔 여러 번 돌리는 게
         # 실제 작업 방식인데 지금껏 파일명으로만 구분했다 — 그런데 파일명이 설정을 다
@@ -287,6 +289,8 @@ class ResultViewerWidget(QWidget):
             pw.addLegend(offset=(10, 10))
         psplit.addWidget(self._pw_top)
         psplit.addWidget(self._pw_bot)
+        attach(self._pw_top, "Time series of the opened results show here. Click a point to see "
+                             "that scan's spectrum and residual below.")
 
         # ── B2: 핏 결과 전용 세로 스택 (종별 레인 + shift/squeeze + RMS) ──
         # 기존 6개 핸들러(r_trend·r_curve·alpha·reference·concentration·array)는

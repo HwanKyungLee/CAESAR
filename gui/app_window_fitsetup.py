@@ -448,9 +448,17 @@ class FitSetupMixin:
         txt_name = QLineEdit()
         txt_name.setFixedWidth(int(80 * self._s))
         lbl_path = QLabel("...")
+        # Long file names pushed the row wider than the list (sideways scroll, one row visible).
+        # Let the name give way; the full path is in the tooltip.
+        from PyQt6.QtWidgets import QSizePolicy as _SP
+        lbl_path.setSizePolicy(_SP.Policy.Ignored, _SP.Policy.Preferred)
+        lbl_path.setMinimumWidth(int(60 * self._s))
 
-        btn_select = QPushButton("S")
+        btn_select = QPushButton("…")
+        btn_select.setToolTip("Choose the reference file")
+        btn_select.setFixedWidth(int(30 * self._s))
         btn_delete = QPushButton("X")
+        btn_delete.setToolTip("Remove this reference")
         btn_delete.setFixedWidth(int(30 * self._s))
         
         def select_file_wrapper():
@@ -458,6 +466,7 @@ class FitSetupMixin:
             self._dlg_dir('refs', f)
             if f:
                 lbl_path.setText(os.path.basename(f))
+                lbl_path.setToolTip(f)
                 txt_name.setText(self.guess_gas_name(f))
                 spin_mult.setValue(self.get_auto_scale_exponent(f))
                 for item in self.ref_widgets:
@@ -470,7 +479,7 @@ class FitSetupMixin:
         
         layout_row.addWidget(spin_mult)
         layout_row.addWidget(txt_name)
-        layout_row.addWidget(lbl_path)
+        layout_row.addWidget(lbl_path, 1)
         layout_row.addWidget(btn_select)
         layout_row.addWidget(btn_delete)
         
@@ -478,6 +487,7 @@ class FitSetupMixin:
             txt_name.setText(name)
         if path: 
             lbl_path.setText(os.path.basename(path))
+            lbl_path.setToolTip(path)
             
         ref_entry = {'w': widget_row, 'n': txt_name, 'p': lbl_path, 'fp': path, 'mult': spin_mult, 'btn': btn_select}
         self.ref_widgets.append(ref_entry)
@@ -492,6 +502,8 @@ class FitSetupMixin:
         if hasattr(self, '_btn_lock_ref'):
             self._btn_lock_ref.setStyleSheet(
                 f"font-weight: bold; padding: 5px; background-color: {AUGUR.fail_bg}; color: {AUGUR.fail};")
+        if hasattr(self, '_refresh_step_marks'):
+            self._refresh_step_marks()
 
     def del_ref(self, widget):
         """Removes a reference row from the UI."""

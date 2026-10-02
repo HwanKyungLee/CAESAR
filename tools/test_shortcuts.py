@@ -35,7 +35,7 @@ def main():
     QMessageBox.warning = staticmethod(lambda *a, **k: hits.append("main") if "No analysis results" in str(a) else None)
     win.plot_maker._save_cfg = lambda *a, **k: hits.append("pm")
 
-    win.main_tabs.setCurrentWidget(win.plot_maker); win.plot_maker.setFocus()
+    win.main_tabs.setCurrentWidget(win._tab_pages[win.plot_maker]); win.plot_maker.setFocus()
     for _ in range(5): app.processEvents()
     QTest.keyClick(app.focusWidget() or win, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
     app.processEvents()

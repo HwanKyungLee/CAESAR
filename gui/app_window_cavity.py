@@ -57,14 +57,14 @@ class CavityTabMixin:
 
         btn_calib_tool = QPushButton("Wavelength Calibration Tool")
         btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
+        btn_calib_tool.setToolTip("Fit a pixel → nm calibration from a Hg lamp spectrum")
 
         btn_ref_gen = QPushButton("Reference Generator")
         btn_ref_gen.clicked.connect(self.open_reference_generator)
-        btn_ref_gen.setStyleSheet("font-weight: bold;")
+        btn_ref_gen.setToolTip("Build cross-section references convolved to this instrument's ILS")
 
         btn_r_trend = QPushButton("R Calibrator")
         btn_r_trend.clicked.connect(self.open_r_trend_monitor)
-        btn_r_trend.setStyleSheet("font-weight: bold;")
         btn_r_trend.setToolTip(
             "Per-channel reflectance calibration (R Calibrator).\n"
             "Auto-loads left-panel channel settings → computes/saves R time-series per channel.\n"
@@ -90,7 +90,6 @@ class CavityTabMixin:
         # 분석(좌측)은 알파를 넣고 RUN해 피팅. 알파 생성만 여기 Setup에서 창으로.
         btn_alpha_gen = QPushButton("Alpha Generator")
         btn_alpha_gen.clicked.connect(self.open_alpha_generator)
-        btn_alpha_gen.setStyleSheet(f"font-weight: bold; padding: 8px; border: 1px solid {AUGUR.info};")
         btn_alpha_gen.setToolTip(
             "Takes raw measurement files in a popup and generates α spectra (*_alpha_trace.dat).\n"
             "wavecal/fit-range/cavity/flags use this main window's settings.")
@@ -98,7 +97,6 @@ class CavityTabMixin:
         # Test Fit — RUN 전에 세팅을 검증: 탭1(자동 파라미터 최적화 추천+Apply) +
         # 탭2(첫 알파 스캔 1개 즉석 핏 미리보기, 기존 동작 그대로).
         btn_test_fit = QPushButton("Test Fit")
-        btn_test_fit.setStyleSheet(f"font-weight: bold; padding: 6px; border: 1px solid {AUGUR.ok};")
         btn_test_fit.setToolTip(
             "Optimize tab: auto-recommend poly/shift/squeeze/step_limit from a 12-scan\n"
             "sample (worker thread, human must click Apply).\n"
@@ -128,6 +126,7 @@ class CavityTabMixin:
         _vig_hdr.addStretch(1)
         control_layout.addLayout(_vig_hdr)
         grp_vigil = QGroupBox()
+        grp_vigil.setStyleSheet("QGroupBox { margin-top: 0px; }")   # title is the icon row above
         lay_vigil = QVBoxLayout()
         btn_vigil = QPushButton("Export Mission…")
         btn_vigil.setToolTip(
@@ -441,7 +440,8 @@ class CavityTabMixin:
         # 넉넉해 상단 행 클리핑 위험 없음.
         _left_container = QWidget()
         _left_container.setLayout(control_layout)
-        _left_container.setMaximumWidth(int(520 * self._s))   # 초기 폴백; 아래서 접힘폭으로 정밀화
+        self._setup_left_max_w = int(520 * self._s)
+        _left_container.setMaximumWidth(self._setup_left_max_w)   # 초기 폴백; 아래서 접힘폭으로 정밀화
         main_layout.addWidget(_left_container, stretch=1)
         self._setup_left_container = _left_container
         # 접이식 섹션은 시작 시 모두 숨김 → 이 시점 레이아웃이 곧 '접힘 자연폭'.
@@ -451,7 +451,9 @@ class CavityTabMixin:
         def _cap_left_to_collapsed():
             w = _left_container.sizeHint().width()
             if w > 0:
-                _left_container.setMaximumWidth(w)
+                self._setup_left_max_w = w
+                if self._setup_main_layout.direction() == self._setup_main_layout.Direction.LeftToRight:
+                    _left_container.setMaximumWidth(w)
         _QTimer.singleShot(0, _cap_left_to_collapsed)
 
         # --- Right Panel: Diagnostic Viewer ---
@@ -468,6 +470,9 @@ class CavityTabMixin:
         lay_spectral.setContentsMargins(0, 0, 0, 0)
 
         self.plot_diagnostic = pg.PlotWidget(title="I0 & R(λ) spectrum")
+        from gui.empty_hint import attach
+        attach(self.plot_diagnostic, "I₀ and R(λ) show here once an I₀ or R file is loaded "
+                                     "(Manual Override below) or the R Calibrator has run.")
         self.plot_diagnostic.showGrid(x=True, y=True, alpha=0.3)
         self.plot_diagnostic.setLabel('left', 'Intensity (I0)', color='k')
         self.plot_diagnostic.setLabel('bottom', 'Pixel / Wavelength')
@@ -500,6 +505,8 @@ class CavityTabMixin:
         self._setup_r_trend_pw = pg.PlotWidget()
         self._setup_r_trend_pw.setAxisItems({'bottom': _ts_ax_r})
         self._setup_r_trend_pw.setLabel('left', 'R (%)')
+        from gui.empty_hint import attach
+        attach(self._setup_r_trend_pw, "R over time — computed by the R Calibrator (Tools).")
         self._setup_r_trend_pw.showGrid(x=True, y=True, alpha=0.3)
         self._setup_r_trend_pw.setTitle("R time-series (shown after running R Trend Monitor)")
 
@@ -507,6 +514,7 @@ class CavityTabMixin:
         self._setup_leff_pw = pg.PlotWidget()
         self._setup_leff_pw.setAxisItems({'bottom': _ts_ax_l})
         self._setup_leff_pw.setLabel('left', 'Leff (km)')
+        attach(self._setup_leff_pw, "Effective path length over time — from the same R Calibrator run.")
         self._setup_leff_pw.showGrid(x=True, y=True, alpha=0.3)
         self._setup_leff_pw.setTitle("Leff time-series")
 
@@ -551,6 +559,7 @@ class CavityTabMixin:
         _btn_aqc_rnpz.clicked.connect(self._pipeline_qc_pick_r_npz)
         self.lbl_aqc_rnpz = QLabel("(none)")
         self.lbl_aqc_rnpz.setStyleSheet(f"color:{AUGUR.muted};")
+        self.lbl_aqc_rnpz.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._aqc_r_npz = None
         self._btn_aqc_run = QPushButton("Run Pipeline Check")
         self._btn_aqc_run.setStyleSheet("font-weight:bold;")
@@ -573,11 +582,15 @@ class CavityTabMixin:
         _aqc_ctl.addWidget(self.lbl_aqc_dir, stretch=1)
         _aqc_ctl.addWidget(_btn_aqc_rnpz)
         _aqc_ctl.addWidget(self.lbl_aqc_rnpz)
-        _aqc_ctl.addWidget(self.chk_aqc_auto)
-        _aqc_ctl.addWidget(self._btn_aqc_fitwin)
-        _aqc_ctl.addWidget(self._btn_aqc_full)
         _aqc_ctl.addWidget(self._btn_aqc_run)
         lay_aqc.addLayout(_aqc_ctl)
+        # second row — one row of eight controls set the whole Setup page's minimum width
+        _aqc_ctl2 = QHBoxLayout()
+        _aqc_ctl2.addWidget(self.chk_aqc_auto)
+        _aqc_ctl2.addStretch(1)
+        _aqc_ctl2.addWidget(self._btn_aqc_fitwin)
+        _aqc_ctl2.addWidget(self._btn_aqc_full)
+        lay_aqc.addLayout(_aqc_ctl2)
 
         self.lbl_aqc_readout = QLabel(
             "Pipeline health: pick an α folder (optional) and Run Pipeline Check — "
@@ -593,6 +606,8 @@ class CavityTabMixin:
         self._aqc_pw = pg.PlotWidget()
         self._aqc_pw.showGrid(x=True, y=True, alpha=0.3)
         self._aqc_pw.setLabel('left', 'α (cm⁻¹)')
+        from gui.empty_hint import attach
+        attach(self._aqc_pw, "Choose an α folder, then Run Pipeline Check — mean α per channel shows here.")
         self._aqc_pw.setLabel('bottom', 'Wavelength (nm)')
         self._aqc_pw.setTitle("mean α + min/max envelope")
         self._aqc_pw.addLegend(offset=(10, 10))
@@ -695,6 +710,8 @@ class CavityTabMixin:
         viewer_layout.addWidget(grp_viewer)
 
         main_layout.addLayout(viewer_layout, stretch=2)
+        self._setup_main_layout = main_layout
+        self._setup_grp_viewer = grp_viewer
 
     # ── FWHM Best-Match (Setup tab Tab 2) ──────────────────────────────
     def _fwhm_pick_sweep_folder(self):

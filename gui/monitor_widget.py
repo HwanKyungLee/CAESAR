@@ -104,7 +104,10 @@ class MonitorWidget(QWidget):
         layout.addLayout(self._create_reset_toolbar(target_glw=self.glw_comp))
         layout.addWidget(self.glw_comp)
         
-        self.tabs.addTab(self.tab_comp, "Components (Fast)")
+        # Tab names used to say "(Fast)" although Fast mode draws nothing here while it runs.
+        self.tabs.addTab(self.tab_comp, "Components")
+        from gui.empty_hint import attach
+        attach(self.glw_comp, "Per-scan fit — live during a Step run.\nAfter any run, click a row in the results table or a point on Conc to replay that scan here.")
 
     # =========================================================
     # [Tab 2] Fit View
@@ -132,7 +135,9 @@ class MonitorWidget(QWidget):
         self.p_resid.addItem(pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('k', style=Qt.PenStyle.DashLine)))
         
         layout.addWidget(self.glw_spec)
-        self.tabs.addTab(self.tab_spec, "Fit View (Fast)")
+        self.tabs.addTab(self.tab_spec, "Fit View")
+        from gui.empty_hint import attach
+        attach(self.glw_spec, "Per-scan fit — live during a Step run.\nAfter any run, click a row in the results table or a point on Conc to replay that scan here.")
 
     # =========================================================
     # [Tab 3] Trend (full dataset with free zoom/scroll)
@@ -193,7 +198,10 @@ class MonitorWidget(QWidget):
         
         self.glw_trend.scene().sigMouseClicked.connect(self._on_trend_scene_click)
         layout.addWidget(self.glw_trend)
-        self.tabs.addTab(self.tab_trend, "Trend (Fast)")
+        self.tabs.addTab(self.tab_trend, "Trend")
+        from gui.empty_hint import attach
+        attach(self.glw_trend, "Shift, squeeze and RMS per scan — fill in during a Step run, "
+                               "or all at once when a Fast run finishes.")
 
     # =========================================================
     # [Tab 4] Viewer
@@ -631,6 +639,9 @@ class MonitorWidget(QWidget):
         self._conc_data   = {}
         self._conc_gases  = []
         self.tabs.addTab(self.tab_conc, "Conc")
+        from gui.empty_hint import attach
+        attach(self.glw_conc, "Concentrations per scan — fill in during a Step run, or all at once "
+                              "when a Fast run finishes. Click a point to replay its fit.")
 
     @staticmethod
     def _conc_time_x(result_dict, row_index):

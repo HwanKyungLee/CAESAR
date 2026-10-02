@@ -243,7 +243,9 @@ class PlotMakerWidget(QWidget):
         b_rm = QPushButton("Remove"); b_rm.setToolTip("Remove selected dataset")
         b_rm.clicked.connect(self._remove_data)
         drow.addWidget(b_add2); drow.addWidget(b_date2); drow.addWidget(b_rm); dv.addLayout(drow)
-        dv.addWidget(QLabel("Data shelf — select columns, then add them in the Style tab"))
+        _shelf_lbl = QLabel("Data shelf — select columns, then add them in the Style tab")
+        _shelf_lbl.setWordWrap(True)
+        dv.addWidget(_shelf_lbl)
         self._tree_search = QLineEdit()
         self._tree_search.setPlaceholderText("Search datasets/columns")
         self._tree_search.setClearButtonEnabled(True)
@@ -579,6 +581,12 @@ class PlotMakerWidget(QWidget):
         xv.addStretch(1)
         self._tabs.addTab(_scroll(tab_exp), "Export")
         self._tabs.addTab(_scroll(self.composer.widget()), "Layout")
+        # The panel is as wide as its widest tab needs: with horizontal scrolling off, a fixed
+        # 310 px clipped buttons and spin boxes at a 9 pt font (Remove, Smooth — UX 2026-10-03).
+        _need = max(self._tabs.widget(i).widget().minimumSizeHint().width()
+                    for i in range(self._tabs.count()))
+        self._tabs.setMinimumWidth(max(310, _need + self._tabs.style().pixelMetric(
+            self._tabs.style().PixelMetric.PM_ScrollBarExtent) + 12))
 
         split.addWidget(self._tabs)
 
@@ -590,6 +598,9 @@ class PlotMakerWidget(QWidget):
         self.pw.setBackground("w")
         self.pw.showGrid(x=True, y=True, alpha=0.3)
         self.p1 = self.pw.plotItem
+        from gui.empty_hint import attach
+        attach(self.pw, "Start with Add data or By date (top left).\nTick columns in the Data shelf, "
+                        "then add them as series in the Style tab.")
         # pg auto-SI-prefix 끔 — 켜져 있으면 축 범위가 작을 때(예: 0~0.6 ppb)
         # 값을 ×1000해 200/400/600으로 표시하고 "(×0.001)"을 붙임. matplotlib
         # Publish는 원시값 그대로라 화면-출력이 어긋난다(2026-07-07 실GUI 발견).

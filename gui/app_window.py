@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QTableWidget, QProgressBar, QGroupBox, QLineEdit,
                              QScrollArea, QComboBox, QSplitter, QTabWidget, QTabBar,
                              QDoubleSpinBox, QSpinBox, QCheckBox, QApplication)
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, QObject, QEvent
 from PyQt6.QtGui import QShortcut, QKeySequence
 
 from core.engine import UniversalEngine
@@ -143,6 +143,15 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             lambda: self._qsettings.setValue(
                 "campaign", self._ed_campaign.text().strip()))
         _camp_bar.addWidget(self._ed_campaign, 1)
+        # L4: 시나리오(전 채널 핏세팅) 로드/저장 — 분석의 출발점이라 왼쪽 상단 상주
+        _btn_scn_load = QPushButton("Load FitSet…")
+        _btn_scn_load.setToolTip("Load a fit scenario (FitSet json) — all channel tabs at once")
+        _btn_scn_load.clicked.connect(self.load_scenario)
+        _camp_bar.addWidget(_btn_scn_load)
+        _btn_scn_save = QPushButton("Save FitSet…")
+        _btn_scn_save.setToolTip("Save every channel tab's settings as one FitSet json")
+        _btn_scn_save.clicked.connect(self.save_scenario)
+        _camp_bar.addWidget(_btn_scn_save)
         left_layout.addLayout(_camp_bar)
 
         _chtab_bar = QHBoxLayout()
@@ -159,15 +168,18 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         _btn_delc.setToolTip("Delete current channel")
         _btn_delc.clicked.connect(self._del_channel_tab)
         _chtab_bar.addWidget(_btn_addc); _chtab_bar.addWidget(_btn_delc)
-        _chtab_bar.addWidget(QLabel("Label:"))
+        left_layout.addLayout(_chtab_bar)
+        # per-channel identity row: label · time shift · gas T
+        _chid_bar = QHBoxLayout()
+        _chid_bar.addWidget(QLabel("Label:"))
         self._ed_ch_datalabel = QLineEdit()
         self._ed_ch_datalabel.setFixedWidth(int(80 * self._s))
         self._ed_ch_datalabel.setPlaceholderText("auto")
         self._ed_ch_datalabel.setToolTip(
             "Default: auto-distributed by alpha header channel number (# channel=N) → leave empty (campaign-independent).\n"
             "Override label for special cases only: maps alpha matching filename/header label/'ch{N}' to this channel.")
-        _chtab_bar.addWidget(self._ed_ch_datalabel)
-        _chtab_bar.addWidget(QLabel("Time shift:"))
+        _chid_bar.addWidget(self._ed_ch_datalabel)
+        _chid_bar.addWidget(QLabel("Time shift:"))
         self.spin_time_shift = QDoubleSpinBox()
         self.spin_time_shift.setRange(-24.0, 24.0)
         self.spin_time_shift.setDecimals(1)
@@ -180,42 +192,36 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             "Pure time shift — no timezone labels. 0 = leave times exactly as recorded.\n"
             "e.g. instrument logged local time but you want UTC output → enter the negative of\n"
             "your UTC offset (Korea local = UTC+9 → enter −9). Half-hours (e.g. −9.5) allowed.")
-        _chtab_bar.addWidget(self.spin_time_shift)
-        _chtab_bar.addWidget(QLabel("Gas T:"))
+        _chid_bar.addWidget(self.spin_time_shift)
+        _chid_bar.addWidget(QLabel("Gas T:"))
         self.spin_gas_temp = QDoubleSpinBox()
         self.spin_gas_temp.setRange(0.0, 600.0)
-        self.spin_gas_temp.setDecimals(0)
+        self.spin_gas_temp.setDecimals(1)   # tooltip example 31.5 °C was not enterable with 0
         self.spin_gas_temp.setValue(0.0)
-        self.spin_gas_temp.setFixedWidth(int(60 * self._s))
+        self.spin_gas_temp.setSuffix(" °C")
+        self.spin_gas_temp.setFixedWidth(int(76 * self._s))
         self.spin_gas_temp.setToolTip(
             "Actual gas temperature of this channel (°C) — for ppb density (n_air). 0 = auto (recommended).\n"
             "auto: reads per-channel measured cell gas temperature from HK on raw fit (tempcell, CH1≈34/CH2≈31.5°C)\n"
             "(confirmed 2026-06-10: tempcell = gas temperature through the cell. 75°C is the cell-heater setpoint, unused).\n"
             "Note: Hot alpha files generated before this fix may have 75°C baked into the T_C column\n"
             "→ when fitting those, enter the measured value here manually or regenerate the alpha.")
-        _chtab_bar.addWidget(self.spin_gas_temp)
-        # L4: 시나리오(전 채널 핏세팅) 로드/저장 — 분석의 출발점이라 왼쪽 상단 상주
-        _btn_scn_load = QPushButton("Load")
-        _btn_scn_load.setFixedWidth(int(30 * self._s))
-        _btn_scn_load.setToolTip("Load fit scenario (all channels)")
-        _btn_scn_load.clicked.connect(self.load_scenario)
-        _chtab_bar.addWidget(_btn_scn_load)
-        _btn_scn_save = QPushButton("Save")
-        _btn_scn_save.setFixedWidth(int(30 * self._s))
-        _btn_scn_save.setToolTip("Save fit scenario (all channels)")
-        _btn_scn_save.clicked.connect(self.save_scenario)
-        _chtab_bar.addWidget(_btn_scn_save)
-        left_layout.addLayout(_chtab_bar)
+        _chid_bar.addWidget(self.spin_gas_temp)
+        _chid_bar.addStretch(1)
+        left_layout.addLayout(_chid_bar)
 
         # --- 1. Reference Management Section ---
-        grp_ref = QGroupBox("References")
-        grp_ref.setMinimumHeight(int(110 * self._s))   # 내부 스크롤 있음 — 과대 고정높이가 화면을 밀어내던 것 축소
+        grp_ref = QGroupBox("1 · References")
+        self._grp_ref = grp_ref
+        # No fixed minimum on the group: an explicit minimum overrides the layout's own, so on a short
+        # screen the box shrank below its content and the reference rows were drawn under the
+        # Batch/Add/Mask buttons (audit 2026-10-02 s1). The list itself keeps room for two rows.
         lay_ref = QVBoxLayout()
 
         # Reference List Scroll Area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setMinimumHeight(int(70 * self._s))
+        self.scroll.setMinimumHeight(int(112 * self._s))   # three reference rows (the usual set)
         self.ref_in = QWidget()
         self.ref_lay = QVBoxLayout()
         self.ref_in.setLayout(self.ref_lay)
@@ -224,13 +230,16 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         
         # Load and Mask Buttons
         layout_load = QHBoxLayout()
-        btn_batch = QPushButton("Batch")
+        btn_batch = QPushButton("Batch…")
+        btn_batch.setToolTip("Add several reference files at once (name guessed from the file name)")
         btn_batch.clicked.connect(self.batch_load_refs)
         btn_add = QPushButton("Add")
+        btn_add.setToolTip("Add one empty reference row")
         btn_add.clicked.connect(self.add_ref_row)
         btn_mask = QPushButton("Mask")
         btn_mask.clicked.connect(self.open_mask_dialog)
-        btn_mask.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;") 
+        btn_mask.setToolTip("Zero a reference outside a pixel range or below a % of its peak "
+                            "(saved with the reference in the FitSet)")
         
         layout_load.addWidget(btn_batch)
         layout_load.addWidget(btn_add)
@@ -240,7 +249,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # Lock References Button (L5: dirty면 빨강으로 강조)
         btn_lock = QPushButton("Lock References (Commit)")
         btn_lock.clicked.connect(self.lock_ref)
-        btn_lock.setStyleSheet("font-weight: bold; padding: 5px;")
+        btn_lock.setStyleSheet("font-weight: bold;")
+        btn_lock.setToolTip("Load the listed files into the fit engine. Turns red when the list changed "
+                            "since the last Lock.")
         self._btn_lock_ref = btn_lock
         self._refs_dirty = False
         lay_ref.addWidget(btn_lock)
@@ -298,12 +309,14 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         left_layout.addWidget(grp_ref)
         
         # --- 2. Fit Range & Calibration Section ---
-        grp_set = QGroupBox("Fit Range")
+        grp_set = QGroupBox("2 · Wavelength && fit range")
+        self._grp_set = grp_set
         lay_set = QVBoxLayout()
         
         # Pixel-based Selection
         layout_px = QHBoxLayout()
-        btn_load_wl = QPushButton("Load X-axis")
+        btn_load_wl = QPushButton("Load wavecal…")
+        btn_load_wl.setToolTip("Load this channel's wavelength calibration (pixel → nm)")
         btn_load_wl.clicked.connect(self.load_wavelength_cal)
         layout_px.addWidget(btn_load_wl)
 
@@ -394,7 +407,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         
         # --- Parameters Section (Collapsible) ---
         self._params_visible = True
-        self._btn_toggle_params = QPushButton("▼  Parameters")
+        self._btn_toggle_params = QPushButton("▼  3 · Parameters")
         self._btn_toggle_params.setStyleSheet(
             "text-align: left; font-weight: bold; "
             f"border: 1px solid {AUGUR.rule}; padding: 4px 8px;")
@@ -404,7 +417,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         lay_params_outer = QVBoxLayout(self._params_container)
         lay_params_outer.setContentsMargins(0, 0, 0, 0)
 
-        grp_calib = QGroupBox("Parameters")
+        grp_calib = QGroupBox()   # title lives on the collapse button above (was shown twice)
+        grp_calib.setStyleSheet("QGroupBox { margin-top: 0px; }")
         lay_calib_main = QVBoxLayout()
 
         # 4열 그리드(라벨+필드 쌍) — 한 줄에 위젯을 길게 늘어놓아 가로폭이
@@ -631,11 +645,12 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             self._params_visible = not self._params_visible
             self._params_container.setVisible(self._params_visible)
             self._btn_toggle_params.setText(
-                "▼  Parameters" if self._params_visible else "▶  Parameters (hidden)")
+                "▼  3 · Parameters" if self._params_visible else "▶  3 · Parameters (hidden)")
         self._btn_toggle_params.clicked.connect(_toggle_params)
 
         # --- 3. Analysis Control Section ---
-        grp_ctl = QGroupBox("Analysis (RUN)")
+        grp_ctl = QGroupBox("4 · Data && run")
+        self._grp_ctl = grp_ctl
         lay_ctl = QVBoxLayout()
         
         # 한 줄: Load + RUN/STOP/Save (세로 공간 절약)
@@ -648,20 +663,29 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.b_stop = QPushButton("STOP")
         self.b_stop.clicked.connect(self.stop_analysis)
         self.b_stop.setEnabled(False)
+        from gui.theme import set_role
+        set_role(self.b_run, "primary")
+        set_role(self.b_stop, "danger")
+        btn_load.setToolTip("Choose alpha or raw files for this channel tab")
+        self.b_run.setToolTip("Fit the loaded files of every channel tab with data (F5)")
+        self.b_stop.setToolTip("Stop the running fit (Esc) — results so far are kept")
+
         self.b_save = QPushButton("Save")
         self.b_save.clicked.connect(self.save)
+        self.b_save.setToolTip("Save results per channel and day, with a header and .meta.json (Ctrl+S)")
         layout_row1.addWidget(self.b_run)
         layout_row1.addWidget(self.b_stop)
         layout_row1.addWidget(self.b_save)
 
         layout_perf = QHBoxLayout()
-        layout_perf.addWidget(QLabel("Update/N:"))
+        layout_perf2 = QHBoxLayout()
+        _lbl_update = QLabel("Update/N:")
         self.spin_update = QSpinBox()
         self.spin_update.setRange(1, 1000)
         self.spin_update.setValue(10)
         self.spin_update.setMaximumWidth(int(60 * self._s))
-        self.spin_update.setToolTip("Refresh plots every N scans")
-        layout_perf.addWidget(self.spin_update)
+        self.spin_update.setToolTip("Step mode: refresh the live plots every N scans\n"
+                                    "(Fast mode draws once, when the run finishes)")
 
         # Fitting mode: Fast (parallel) merges the old Normal+Turbo; Step replaces Observe.
         layout_perf.addWidget(QLabel("Mode:"))
@@ -687,15 +711,21 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.spin_step_delay.setToolTip(
             "Step mode only: delay per scan, so you can watch each fit.\n"
             "0 = no delay (runs at fit speed ~2.5ms/scan; plots are capped at 20fps anyway).")
-        self.spin_step_delay.setEnabled(self.cb_display_mode.currentText().startswith("Step"))
-        self.cb_display_mode.currentTextChanged.connect(
-            lambda t: self.spin_step_delay.setEnabled(t.startswith("Step")))
+        def _mode_widgets(t):
+            step = t.startswith("Step")
+            self.spin_step_delay.setEnabled(step)
+            self.spin_update.setEnabled(step)   # Fast ignores Update/N (interval=-1)
+        _mode_widgets(self.cb_display_mode.currentText())
+        self.cb_display_mode.currentTextChanged.connect(_mode_widgets)
         layout_perf.addWidget(self.spin_step_delay)
+        layout_perf.addWidget(_lbl_update)
+        layout_perf.addWidget(self.spin_update)
+        layout_perf.addStretch(1)
 
         # 병렬 프로세스 수 — 알파 Pass1/2·Fast 핏·R(t) 파싱이 모두 이 값을 본다
         # (core.parallel 단일 출처, 환경변수로 전달). 예전엔 호출부마다 '코어 절반'이
         # 하드코딩돼 있었고, 이 스핀이 그 자리를 대신한다. 기본 = 전 논리코어.
-        layout_perf.addWidget(QLabel("CPU:"))
+        layout_perf2.addWidget(QLabel("CPU:"))
         _cpu_max = os.cpu_count() or 4
         self.spin_cores = QSpinBox()
         self.spin_cores.setRange(1, _cpu_max)
@@ -714,21 +744,22 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.spin_cores.valueChanged.connect(
             lambda n: (set_max_workers(n),
                        self._qsettings.setValue("cpu_workers", n)))
-        layout_perf.addWidget(self.spin_cores)
+        layout_perf2.addWidget(self.spin_cores)
 
-        layout_perf.addSpacing(8)
+        layout_perf2.addSpacing(8)
         self.chk_auto_save = QCheckBox("Auto-save")
         self.chk_auto_save.setToolTip(
             "Checked: when analysis finishes (after QC), auto-save with the existing filename rule without asking.\n"
             "Location = last Save folder (else Output\\fitting). Recommended for overnight runs.\n"
             "(autosave TSV is separate, for crash recovery — this is the formal result save)")
         self.chk_auto_save.setChecked(True)
-        layout_perf.addWidget(self.chk_auto_save)
-        layout_perf.addStretch(1)
+        layout_perf2.addWidget(self.chk_auto_save)
+        layout_perf2.addStretch(1)
 
         # (RUN 중 α 저장 옵션 제거 — α 생성은 Alpha Generator 팝업이 전담)
         lay_ctl.addLayout(layout_row1)
         lay_ctl.addLayout(layout_perf)
+        lay_ctl.addLayout(layout_perf2)
         grp_ctl.setLayout(lay_ctl)
         left_layout.addWidget(grp_ctl)
         
@@ -746,6 +777,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         left_layout.addWidget(self.status)
         left_layout.addWidget(self.pbar)
         left_layout.addWidget(self.table)
+        from gui.empty_hint import attach as _hint
+        _hint(self.table, "Results appear here after RUN.\nClick a row to replay that scan's fit.")
         # Inputs that define a run. They are disabled while workers run so the "settings frozen
         # for this run" status is actually true (QC/K edits used to leak into the running run).
         self._run_lock_widgets = [self._ed_campaign, self._channel_tabbar, _btn_addc, _btn_delc,
@@ -799,6 +832,17 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.setup_tab = QWidget()
         self.setup_cavity_tab()
         self.main_tabs.addTab(_tab_scroll(self.setup_tab), "Setup")
+        # Narrow window (e.g. 1366×768 at 150 %): controls and Cavity Diagnostics side by side
+        # need ~870 px, so the page scrolled sideways. Below that, stack them and scroll down.
+        _setup_page = self._tab_pages[self.setup_tab]
+
+        class _StackWhenNarrow(QObject):
+            def eventFilter(_s, obj, ev):
+                if ev.type() == QEvent.Type.Resize:
+                    self._setup_reflow(obj.width())
+                return False
+        self._setup_reflow_filter = _StackWhenNarrow(_setup_page)
+        _setup_page.installEventFilter(self._setup_reflow_filter)
 
         # Tab 2: Analysis Monitor
         self.monitor = MonitorWidget(self.engine)
@@ -815,14 +859,17 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # Plot Maker는 스크롤 영역으로 감싸지 않는다 — 플롯이 남는 공간을 채우는
         # 위젯이라, 스크롤로 감싸면 툴바가 여러 줄일 때 전체가 세로 스크롤돼 불편.
         # 직접 붙이면 툴바(상단 고정)+플롯(stretch)으로 스크롤 없이 한 화면에 들어온다.
-        self.main_tabs.addTab(self.plot_maker, "Plot Maker")
-        self._tab_pages[self.plot_maker] = self.plot_maker
+        # In a scroll page like the other tabs — unwrapped, its ~500 px minimum plus the left
+        # panel's made the main window wider than a 1366×768 @150 % screen.
+        self.main_tabs.addTab(_tab_scroll(self.plot_maker), "Plot Maker")
         # 결과뷰어 → Plot Maker 브리지: 선택 파일을 보던 상태(규칙)째 선반에 싣고 탭 전환
         self.result_viewer.send_to_plotmaker.connect(
             lambda specs: (self.plot_maker.add_specs(specs),
                            self.main_tabs.setCurrentWidget(self._tab_pages[self.plot_maker])))
         # 결과뷰어·Plot Maker 탭에서는 왼쪽 분석패널을 접어 그래프가 전체 폭을 쓰게 한다.
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, self._refresh_setup_status)   # glyphs + step marks on the first screen
 
         right_layout.addWidget(self.main_tabs)
         
@@ -841,6 +888,20 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self._splitter_inited = False
 
         self._setup_shortcuts()
+
+    _SETUP_STACK_BELOW = 880   # px of Setup page width below which the two columns stack
+
+    def _setup_reflow(self, width):
+        from PyQt6.QtWidgets import QBoxLayout
+        lay = getattr(self, '_setup_main_layout', None)
+        if lay is None:
+            return
+        stack = width < int(self._SETUP_STACK_BELOW * self._s)
+        want = QBoxLayout.Direction.TopToBottom if stack else QBoxLayout.Direction.LeftToRight
+        if lay.direction() != want:
+            lay.setDirection(want)
+            self._setup_grp_viewer.setMinimumHeight(int(420 * self._s) if stack else 0)
+            self._setup_left_container.setMaximumWidth(16777215 if stack else self._setup_left_max_w)
 
     def showEvent(self, ev):
         super().showEvent(ev)
@@ -973,14 +1034,13 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         """Update all checklist labels in the Daily Run tab."""
         if not hasattr(self, 'lbl_st_wl'):
             return  # tab not built yet
+        _st = self._set_status_line
 
         # Wavelength calibration
         wl_ok = hasattr(self, 'wavelengths') and self.wavelengths is not None
         if wl_ok:
             wl = np.asarray(self.wavelengths).flatten()
-            self.lbl_st_wl.setText(
-                f"Wavelength: {wl.min():.2f}–{wl.max():.2f} nm  ({len(wl)} px)")
-            self.lbl_st_wl.setStyleSheet(f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;")
+            _st(self.lbl_st_wl, "ok", f"Wavelength: {wl.min():.2f}–{wl.max():.2f} nm  ({len(wl)} px)")
             # Auto-correct txt_max if it still holds the default 2047 and wl is shorter
             try:
                 n = len(wl)
@@ -989,13 +1049,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             except ValueError:
                 pass
         else:
-            self.lbl_st_wl.setText("Wavelength calibration: not loaded")
-            self.lbl_st_wl.setStyleSheet(f"color: {AUGUR.fail}; padding: 2px 6px; font-size: 11px;")
+            _st(self.lbl_st_wl, "fail", "Wavelength calibration: not loaded")
 
         # 입력 종류 판별 — 알파면 I0/R가 이미 반영돼 있어 '해당 없음(✅)'으로 표시.
-        _green = f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;"
-        _amber = f"color: {AUGUR.warn}; padding: 2px 6px; font-size: 11px;"
-        _gray = f"color: {AUGUR.muted}; padding: 2px 6px; font-size: 11px;"
         _is_alpha = False
         try:
             _f0 = self._entry_filepath(self.file_list[0]) if getattr(self, 'file_list', None) else None
@@ -1006,15 +1062,11 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # I₀
         i0_ok = hasattr(self, 'i0_data') and self.i0_data is not None
         if i0_ok:
-            self.lbl_st_i0.setText(
-                f"I₀: loaded ({len(self.i0_data)} px,  mean={self.i0_data.mean():.1f})")
-            self.lbl_st_i0.setStyleSheet(_green)
+            _st(self.lbl_st_i0, "ok", f"I₀: loaded ({len(self.i0_data)} px,  mean={self.i0_data.mean():.1f})")
         elif _is_alpha:
-            self.lbl_st_i0.setText("I₀: N/A  (already applied in alpha)")
-            self.lbl_st_i0.setStyleSheet(_gray)
+            _st(self.lbl_st_i0, "na", "I₀: N/A  (already applied in alpha)")
         else:
-            self.lbl_st_i0.setText("I₀: auto from ZA scans during run")
-            self.lbl_st_i0.setStyleSheet(_amber)
+            _st(self.lbl_st_i0, "warn", "I₀: auto from ZA scans during run")
 
         # R-curve
         r_ok = hasattr(self, 'r_data') and self.r_data is not None
@@ -1024,28 +1076,21 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             if len(r_fin) > 0:
                 r_med = float(np.median(r_fin))
                 leff  = self.spin_d_len.value() / (1.0 - r_med)
-                self.lbl_st_r.setText(
-                    f"R: {r_med*100:.4f}%  Leff ≈ {leff:.0f} cm")
+                _st(self.lbl_st_r, "ok", f"R: {r_med*100:.4f}%  Leff ≈ {leff:.0f} cm")
             else:
-                self.lbl_st_r.setText("R: loaded (no finite values in pixel range)")
-            self.lbl_st_r.setStyleSheet(_green)
+                _st(self.lbl_st_r, "warn", "R: loaded (no finite values in pixel range)")
             self._update_daily_r_chart()
         elif _is_alpha:
-            self.lbl_st_r.setText("R: N/A  (already applied in alpha)")
-            self.lbl_st_r.setStyleSheet(_gray)
+            _st(self.lbl_st_r, "na", "R: N/A  (already applied in alpha)")
         else:
-            self.lbl_st_r.setText("R-Curve: auto from He scans during run")
-            self.lbl_st_r.setStyleSheet(f"color: {AUGUR.warn}; padding: 2px 6px; font-size: 11px;")
+            _st(self.lbl_st_r, "warn", "R-Curve: auto from He scans during run")
 
         # References locked
         refs_ok = hasattr(self, 'engine') and len(self.engine.gas_list) > 0
         if refs_ok:
-            self.lbl_st_refs.setText(
-                f"References locked: {', '.join(self.engine.gas_list)}")
-            self.lbl_st_refs.setStyleSheet(f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;")
+            _st(self.lbl_st_refs, "ok", f"References locked: {', '.join(self.engine.gas_list)}")
         else:
-            self.lbl_st_refs.setText("References: not locked  (lock before RUN)")
-            self.lbl_st_refs.setStyleSheet(f"color: {AUGUR.fail}; padding: 2px 6px; font-size: 11px;")
+            _st(self.lbl_st_refs, "fail", "References: not locked  (lock before RUN)")
 
         # Fit range
         try:
@@ -1056,17 +1101,35 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 wl = np.asarray(self.wavelengths).flatten()
                 lo = wl[fmin] if fmin < len(wl) else 0
                 hi = wl[min(fmax, len(wl)-1)]
-                self.lbl_st_range.setText(
+                _st(self.lbl_st_range, "ok" if rng > 0 else "fail",
                     f"Fit range: px {fmin}–{fmax}  ({lo:.1f}–{hi:.1f} nm,  {rng} px)")
             else:
-                self.lbl_st_range.setText(
-                    f"Fit range: px {fmin}–{fmax}  ({rng} px)")
-            self.lbl_st_range.setStyleSheet(f"color: {AUGUR.ok}; padding: 2px 6px; font-size: 11px;")
+                # without a wavecal the range is only pixels — not "done" (audit: was green when empty)
+                _st(self.lbl_st_range, "warn", f"Fit range: px {fmin}–{fmax}  ({rng} px, no wavecal → nm unknown)")
         except ValueError:
-            self.lbl_st_range.setText("Fit range: invalid pixel values")
-            self.lbl_st_range.setStyleSheet(f"color: {AUGUR.fail}; padding: 2px 6px; font-size: 11px;")
+            _st(self.lbl_st_range, "fail", "Fit range: invalid pixel values")
 
         self._render_day_audit()   # 캐시된 감사 결과는 Refresh로 지워지지 않는다
+        self._refresh_step_marks()
+
+    _STATUS_GLYPH = {"ok": "✓", "warn": "!", "fail": "✗", "na": "–"}
+
+    def _set_status_line(self, lbl, level, text):
+        """One Setup Status line: glyph + colour from the same level (colour alone is not enough)."""
+        col = {"ok": AUGUR.ok, "warn": AUGUR.warn, "fail": AUGUR.fail}.get(level, AUGUR.muted)
+        lbl.setText(f"{self._STATUS_GLYPH.get(level, '·')}  {text}")
+        lbl.setStyleSheet(f"color: {col}; padding: 2px 6px; font-size: 11px;")
+
+    def _refresh_step_marks(self):
+        """Left panel section titles carry ✓ once their step is done, so the next step is obvious."""
+        if not hasattr(self, '_grp_ref'):
+            return
+        refs = bool(getattr(self.engine, 'gas_list', None)) and not getattr(self, '_refs_dirty', False)
+        wl = getattr(self, 'wavelengths', None) is not None
+        n = len(getattr(self, 'file_list', None) or [])
+        self._grp_ref.setTitle("1 · References" + ("  ✓" if refs else ""))
+        self._grp_set.setTitle("2 · Wavelength && fit range" + ("  ✓" if wl else ""))
+        self._grp_ctl.setTitle("4 · Data && run" + (f"  — {n} file(s) loaded" if n else ""))
 
     # ── 측정일 감사 (D1) ───────────────────────────────────────────────
     _AUDIT_STYLE = {
