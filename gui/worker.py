@@ -1957,6 +1957,34 @@ def _pass2_entry(task):
     return _pass2_process_file(fp, entries, _PASS2_CTX)
 
 
+def block_average(gidx_list, sec_list, spec_list, t_list, p_list, gap=10):
+    """Average each contiguous ZA/He injection (global idx gap <= `gap`) into one spectrum.
+
+    Returns (block_gidx, block_sec, block_spec, block_T, block_P, n_settle_dropped).
+    Empty input (e.g. hot raw with no flag-510 He blocks) returns empty lists and 0 —
+    the caller always unpacks six values (regression from f700cb1).
+    """
+    if not gidx_list:
+        return [], [], [], [], [], 0
+    g = np.array(gidx_list, dtype=float)
+    order = np.argsort(g)
+    g = g[order]
+    SEC = np.array(sec_list, dtype=float)[order]
+    S = np.array(spec_list, dtype=float)[order]
+    T = np.array(t_list, dtype=float)[order]
+    P = np.array(p_list, dtype=float)[order]
+    splits = np.where(np.diff(g) > gap)[0] + 1
+    # 블록마다 선두 과도구간을 잘라낸다. 정착된 블록은 k=0 이라 무변경.
+    sb = np.split(S, splits)
+    ks = [settle_start(b) for b in sb]
+    bg   = [float(np.mean(b[k:]))     for b, k in zip(np.split(g, splits), ks)]
+    bsec = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(SEC, splits), ks)]
+    bs   = [np.nanmean(b[k:], axis=0) for b, k in zip(sb, ks)]
+    bt   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(T, splits), ks)]
+    bp   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(P, splits), ks)]
+    return bg, bsec, bs, bt, bp, int(sum(ks))
+
+
 class AlphaExportWorker(QThread):
     """
     Alpha-only export: He/ZA 캘리브레이션 → ambient 행마다 alpha(cm-1) 계산 → 파일 저장.
@@ -2067,10 +2095,16 @@ class AlphaExportWorker(QThread):
         self.is_running = False
 
     def run(self):
+        self._cleanup_spool = None   # set by _run_inner once the spool exists
         try:
             self._run_inner()
         except Exception as e:
             self.finished.emit(f"ERROR: {e}")
+        finally:
+            # Covers the exception path too (a failed run used to leave a ~58 MB+ spool
+            # in %TEMP% every time). Idempotent, so paths that already cleaned up are fine.
+            if self._cleanup_spool is not None:
+                self._cleanup_spool()
 
     def _run_inner(self):
         os.makedirs(self.output_dir, exist_ok=True)
@@ -2121,7 +2155,8 @@ class AlphaExportWorker(QThread):
         import glob as _glob
         import tempfile as _tf
         # 지난 런이 흘린 스풀 회수 — 이 파일은 파일당 수십 GB 로 자란다(핫 1314파일
-        # = 38 GB). `_cleanup_spool()` 은 정상·중단·예외 경로를 다 덮지만 **프로세스가
+        # = 38 GB). `_cleanup_spool()` runs on the normal/abort paths here and on the
+        # exception path from run()'s finally, but **프로세스가
         # 죽으면(GUI 강제종료·크래시) 못 돈다**. 실제로 2026-09-19 에 %TEMP% 에서 죽은
         # 스풀 138 GB 가 발견됐다. 지금 쓰는 스풀을 만들기 직전에 옛것을 치운다 —
         # 다른 인스턴스가 쓰는 중이면 Windows 가 삭제를 거부하므로 자연히 건너뛴다.
@@ -2149,6 +2184,7 @@ class AlphaExportWorker(QThread):
                 os.remove(_amb_spool_path)
             except OSError:
                 pass
+        self._cleanup_spool = _cleanup_spool
 
         # Per-file calibration header info
         calib_info_per_file = {}   # fp → string describing first good R-cal in file
@@ -2478,31 +2514,10 @@ class AlphaExportWorker(QThread):
         # gap=10 은 '같은 물리적 주입(injection)'을 스캔 카운트 연속성으로 묶는
         # 그룹핑 기준이라 그대로 인덱스 축을 쓴다(주입 블록 자체는 항상 연속 스캔이라
         # 인덱스=시간 순서 모두 성립) — 아래서 바뀌는 건 '블록끼리의' 위치(x축)뿐이다.
-        def _block_average(gidx_list, sec_list, spec_list, t_list, p_list, gap=10):
-            if not gidx_list:
-                return [], [], [], [], []
-            g = np.array(gidx_list, dtype=float)
-            order = np.argsort(g)
-            g = g[order]
-            SEC = np.array(sec_list, dtype=float)[order]
-            S = np.array(spec_list, dtype=float)[order]
-            T = np.array(t_list, dtype=float)[order]
-            P = np.array(p_list, dtype=float)[order]
-            splits = np.where(np.diff(g) > gap)[0] + 1
-            # 블록마다 선두 과도구간을 잘라낸다. 정착된 블록은 k=0 이라 무변경.
-            sb = np.split(S, splits)
-            ks = [settle_start(b) for b in sb]
-            bg   = [float(np.mean(b[k:]))     for b, k in zip(np.split(g, splits), ks)]
-            bsec = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(SEC, splits), ks)]
-            bs   = [np.nanmean(b[k:], axis=0) for b, k in zip(sb, ks)]
-            bt   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(T, splits), ks)]
-            bp   = [float(np.nanmean(b[k:]))  for b, k in zip(np.split(P, splits), ks)]
-            return bg, bsec, bs, bt, bp, int(sum(ks))
-
         n_za_raw, n_he_raw = len(za_gidx), len(he_gidx)
-        za_gidx, za_sec, za_spectra, za_t_list, za_p_list, n_za_drop = _block_average(
+        za_gidx, za_sec, za_spectra, za_t_list, za_p_list, n_za_drop = block_average(
             za_gidx, za_sec, za_spectra, za_t_list, za_p_list)
-        he_gidx, he_sec, he_spectra, he_t_list, he_p_list, n_he_drop = _block_average(
+        he_gidx, he_sec, he_spectra, he_t_list, he_p_list, n_he_drop = block_average(
             he_gidx, he_sec, he_spectra, he_t_list, he_p_list)
         self.status_msg.emit(
             f"[I0] ZA {n_za_raw} scans→{len(za_gidx)} blocks, He {n_he_raw} scans→{len(he_gidx)} blocks averaged")

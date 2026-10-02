@@ -23,6 +23,7 @@ clock, tz 변환 없음). 채널별로 같은 raw 파일을 쓰므로 cold(UTC)/
 import os
 import sys
 import json
+import shutil
 from dataclasses import dataclass, asdict, field
 import numpy as np
 
@@ -192,10 +193,17 @@ def save_rt(path, knot_sec, omr_d, wave_nm, label="", config: RTConfig = None,
     pf_json  = json.dumps(sorted(processed_files) if processed_files else [])
     mb = np.asarray(sorted(set(float(b) for b in (manual_breaks_sec or []))),
                     dtype=np.float64)
-    np.savez_compressed(path, label=str(label), config=cfg_json,
-                        processed_files_json=pf_json,
-                        knot_sec=knot_sec, omr_d=omr_d, wave_nm=wave_nm,
-                        manual_breaks_sec=mb)
+    # Atomic write: a save interrupted mid-way (e.g. R Calibrator closed -> terminate())
+    # must never leave a truncated npz in place. The previous version is kept as .bak.
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:          # file object: savez would append ".npz" to a name
+        np.savez_compressed(fh, label=str(label), config=cfg_json,
+                            processed_files_json=pf_json,
+                            knot_sec=knot_sec, omr_d=omr_d, wave_nm=wave_nm,
+                            manual_breaks_sec=mb)
+    if os.path.exists(path):
+        shutil.copy2(path, path + ".bak")
+    os.replace(tmp, path)
 
 
 def load_rt(path):
@@ -496,7 +504,7 @@ def append_rt(npz_path, raw_dir, wave_nm, config: RTConfig, file_list=None,
             done_set = set(ex.get("processed_files", []))
             ex_label = ex.get("label") or ex_label
         except Exception as e:
-            print(f"  [append_rt] failed to load existing npz -> creating new: {e}")
+            raise RuntimeError(_unreadable_npz_msg(npz_path, e)) from e
 
     all_files   = _RT._resolve_files(raw_dir, file_list)
     new_files   = [f for f in all_files if os.path.basename(f) not in done_set]
@@ -514,6 +522,14 @@ def append_rt(npz_path, raw_dir, wave_nm, config: RTConfig, file_list=None,
     n_new, _ = _merge_knots_into_npz(
         npz_path, new_ks, new_od, wave_nm, config, new_basenames, ex_label=ex_label)
     return n_new, new_basenames
+
+
+def _unreadable_npz_msg(npz_path, e):
+    # Starting "fresh" here used to replace every accumulated knot with this run's
+    # knots only (667 -> 1 reproduced on a truncated R_cold copy). Refuse instead.
+    return (f"Could not read the existing R(t) npz ({os.path.basename(npz_path)}): "
+            f"{type(e).__name__}: {e} — not overwriting; skipping this channel. "
+            f"Restore it from {os.path.basename(npz_path)}.bak or move it away, then run again")
 
 
 def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
@@ -539,7 +555,7 @@ def _merge_knots_into_npz(npz_path, new_ks, new_od, wave_nm, config,
             ex_breaks = list(np.asarray(ex.get("manual_breaks_sec", []), dtype=float))
             label    = ex.get("label") or label
         except Exception as e:
-            print(f"  [merge] failed to load existing npz -> creating new: {e}")
+            raise RuntimeError(_unreadable_npz_msg(npz_path, e)) from e
 
     all_processed = sorted(done_set | set(new_basenames or []))
     new_ks = np.asarray(new_ks, dtype=np.float64)
