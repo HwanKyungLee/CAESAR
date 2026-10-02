@@ -38,8 +38,11 @@ def check_liveness(last_arrival: Optional[datetime], now: Optional[datetime] = N
 
 def latest_arrival(events: Sequence, prior: Optional[datetime]) -> Optional[datetime]:
     """이번 poll의 RowEvent들 + 이전 최신시각 → 갱신된 최신 관측시각.
-    events가 비었으면 prior 그대로(새 행이 없었다는 뜻)."""
-    if not events:
+    Only rows routed to a profile count: analysis .dat files growing in the watch folder, header-only
+    files and unknown layouts used to keep liveness OK for as long as they grew, masking a real stop
+    (audit 2026-10-02: raw stopped, P0 came 80 s later). No routed row -> prior unchanged."""
+    times = [ev.arrival_time for ev in events if ev.profile_id]
+    if not times:
         return prior
-    newest = max(ev.arrival_time for ev in events)
+    newest = max(times)
     return newest if prior is None else max(prior, newest)

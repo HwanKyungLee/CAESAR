@@ -159,10 +159,11 @@ def test_liveness():
     check("gap_sec metric", abs(m["gap_sec"] - 15.0) < 1e-6, f"got {m.get('gap_sec')}")
 
     class _Ev:
-        def __init__(self, t): self.arrival_time = t
+        def __init__(self, t, pid="p"): self.arrival_time, self.profile_id = t, pid
     check("빈 events면 prior 유지", latest_arrival([], now) == now)
     later = now + timedelta(seconds=3)
     check("events 있으면 최신값", latest_arrival([_Ev(later)], now) == later)
+    check("unrouted rows do not count", latest_arrival([_Ev(later, None)], now) == now)
 
 
 def _write_rows(path, n, flag=1, t0=None):
