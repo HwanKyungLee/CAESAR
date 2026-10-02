@@ -420,7 +420,12 @@ class DashboardWindow(QMainWindow):
 
     def update_alarms(self, alarms: list) -> None:
         """경보 이력 — 최근 것이 위, 진행 중(End 없음)은 등급색. 바뀐 게 없으면 다시 그리지 않는다."""
-        sig = (len(alarms), tuple((a["level"], a["end"] is None, a["msg"]) for a in alarms[-50:]))
+        # 서명은 '진행 중인 것 전부' + 맨 끝 항목 — 예전엔 최근 50건만 봐서 그보다 오래된 경보가 닫혀도
+        # 'ongoing'·열린 개수가 안 바뀌었고, 500건 상한에 닿으면 len 도 멈췄다(2026-10-02 리뷰).
+        last = alarms[-1] if alarms else None
+        sig = (len(alarms),
+               (last["start"], last["source"], last["level"], last["end"]) if last else None,
+               tuple((a["start"], a["source"], a["level"], a["msg"]) for a in alarms if a["end"] is None))
         if sig == self._alarm_sig:
             return
         self._alarm_sig = sig

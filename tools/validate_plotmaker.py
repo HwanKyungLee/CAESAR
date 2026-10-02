@@ -1948,6 +1948,21 @@ def c_composer():
     if not 1.6 < hr < 2.4:
         return "FAIL", f"높이 비율 2:1 아님 ({hr:.2f})"
 
+    # x 공유는 x 가 같은 종류끼리만 — 같은 열의 Scatter(ppb) 패널을 시계열과 묶지 않는다(2026-10-02)
+    keys2 = [m.key for m in w2._modes]
+    sc2 = w2._modes[keys2.index("scatter")]
+    w2._mode_combo.setCurrentIndex(keys2.index("scatter"))
+    sc2._cx.setCurrentText("fixture:NO2"); sc2._cy.setCurrentText("fixture:CHOCHO")
+    i_sc = c2.add_current()
+    c2.set_position(i_sc, cell=[2, 0, 1, 1])
+    fig = w2._build_publish_fig(); fig.canvas.draw()
+    ax_sc = min(fig.axes, key=lambda a: a.get_position().y0)
+    ts_axes = sorted([a for a in fig.axes if a is not ax_sc], key=lambda a: -a.get_position().y1)[:2]
+    if ax_sc.get_xlim() == ts_axes[1].get_xlim():
+        return "FAIL", "Scatter 패널 x 범위가 시계열과 합쳐짐(다른 종류의 x 를 공유)"
+    if not any(t.get_visible() and t.get_text() for t in ts_axes[1].get_xticklabels()):
+        return "FAIL", "Scatter 위의 시계열 패널 x 눈금이 지워짐"
+
     # 설정 왕복
     cfg = json.loads(json.dumps(w.config_dict(), default=str))
     w3 = _widget_with_fixture()

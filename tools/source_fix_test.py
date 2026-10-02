@@ -7,7 +7,7 @@ campaign-wide 단일 레퍼런스는 드리프트 때문에 실패함이 이미 
 import sys, os, json, glob
 import numpy as np
 
-from core.physics import air_number_density   # ppb 환산 단일 출처
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처
 from scipy.interpolate import interp1d
 from scipy.optimize import lsq_linear
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,8 +60,8 @@ for name in ["Cold", "Hot-PNs", "Hot-ANs"]:
             n_air=air_number_density(T, P)
             c0,r0,a0=fit(eng,vp,A[i],poly)
             c1,r1,a1=fit(eng,vp,A[i]-R0,poly)
-            raw_rms.append(r0); raw_ac.append(a0); raw_no2.append(c0*mu/sc/n_air*1e9)
-            cor_rms.append(r1); cor_ac.append(a1); cor_no2.append(c1*mu/sc/n_air*1e9)
+            raw_rms.append(r0); raw_ac.append(a0); raw_no2.append(coeff_to_ppb(c0, mu, sc, n_air))
+            cor_rms.append(r1); cor_ac.append(a1); cor_no2.append(coeff_to_ppb(c1, mu, sc, n_air))
     print(f"[{name:8s}] days={use_days}")
     print(f"   raw      : rms {np.mean(raw_rms):.2e}  autocorr {np.mean(raw_ac):4.2f}  NO2 {np.mean(raw_no2):6.1f}+-{np.std(raw_no2):5.1f}")
     print(f"   day-local: rms {np.mean(cor_rms):.2e}  autocorr {np.mean(cor_ac):4.2f}  dNO2 std {np.std(cor_no2):5.1f}  (autocorr->0 = 구조제거)")

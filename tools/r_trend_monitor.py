@@ -1058,8 +1058,10 @@ def main():
 
     # ── Hot primary 블록 (컬럼 2053-4100) ──────────────────────────
     print(f"\n{bar}\n  {label_a} channel  fit window: {CH_FIT_WINDOW_NM['hot_blk2053']} nm\n{bar}")
+    # col_press 는 scan_directory 가 받기만 하고 안 쓴다(T/P 는 data_io 가 채널 정체로 고른다).
+    # 그래도 채널 정체대로 둔다 — block 2053 = ANs ↔ P_ANs, 4101 = PNs ↔ P_PNs(CHANNEL_IDENTITY).
     results_hot_a = scan_directory(HOT_DIR, wave_nm_hot_a, HOT_FILES,
-                                   col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
+                                   col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
                                    ts_tz=HOT_TS_TZ,
                                    spec_start=SPEC_START_DEFAULT, spec_end=SPEC_END_DEFAULT,
                                    fit_window_nm=CH_FIT_WINDOW_NM["hot_blk2053"]) \
@@ -1068,7 +1070,7 @@ def main():
     # ── Hot secondary 블록 (컬럼 4101-6148) ────────────────────────
     print(f"\n{bar}\n  {label_b} channel  fit window: {CH_FIT_WINDOW_NM['hot_blk4101']} nm\n{bar}")
     results_hot_b = scan_directory(HOT_DIR, wave_nm_hot_b, HOT_FILES,
-                                   col_press=COL_PRESS_HOT_ANS, col_temp=COL_TEMP_HOT,
+                                   col_press=COL_PRESS_HOT_PNS, col_temp=COL_TEMP_HOT,
                                    ts_tz=HOT_ANS_TS_TZ,
                                    spec_start=SPEC_START_ANS, spec_end=SPEC_END_ANS,
                                    fit_window_nm=CH_FIT_WINDOW_NM["hot_blk4101"]) \

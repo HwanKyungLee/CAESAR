@@ -119,7 +119,48 @@ def test_conc_click_with_downsampling_hits_the_spike():
                                    got[-1]['File'], res[spike]['File'])
 
 
+def test_trend_click_skip_and_per_channel_gas():
+    """(2026-10-02 리뷰) 추세 클릭은 그 채널·그 시각의 **같은** 스캔만 재생한다.
+    1) Skip 스캔(Fast 추세엔 RMS 점으로 그려지지만 농도 결과가 없음)을 누르면 이웃을 재생하지 않는다.
+    2) 첫 기체가 그 채널에 없어도(채널마다 레퍼런스가 다름) 그 채널의 다른 기체로 찾아 재생한다."""
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QPointF
+    from gui.monitor_widget import MonitorWidget
+    from core.engine import UniversalEngine
+
+    app = QApplication.instance() or QApplication([])
+    m = MonitorWidget(UniversalEngine())
+    m.resize(1200, 900); m.show()
+    m.setup_conc_plots(["NO2", "H2O"])
+    res = []
+    for i in range(20):
+        r = {'File': f"b.dat [{i:04d}]", 'Channel': 2, 'Time': f"2026-05-20 01:{i:02d}:00",
+             'H2O': 1e6 + i, 'Shift': 0.1 * (i % 5), 'Squeeze': 1.0, 'RMS': 1e-4 * (1 + i % 3)}
+        if i == 6:                                   # 건너뛴 스캔 — 기체 값 없음
+            r = {'File': r['File'], 'Channel': 2, 'Time': r['Time'], 'Status': 'Skip: test',
+                 'Shift': 0.0, 'Squeeze': 1.0, 'RMS': 0.0}
+        res.append(r)
+    got = []
+    m.conc_point_clicked.connect(got.append)
+    m.rebuild_conc(res)
+    m.rebuild_trend(res)
+    m.flush_plots()
+    m.tabs.setCurrentWidget(m.tab_trend)
+    _settle(app, m)
+    td = m._trend_data[2]
+
+    def click_sh(k):
+        got.clear()
+        sp = m.p_sh.getViewBox().mapViewToScene(QPointF(td['x'][k], td['sh'][k]))
+        m._on_trend_scene_click(_Ev(sp))
+        return got[-1] if got else None
+
+    assert click_sh(9) is res[9], "CH2 에 NO2 가 없어도 H2O 로 찾아 재생해야 한다"
+    assert click_sh(6) is None, "Skip 스캔 점은 이웃 스캔을 재생하면 안 된다"
+
+
 if __name__ == "__main__":
     test_click_near_point_returns_its_result()
     test_conc_click_with_downsampling_hits_the_spike()
+    test_trend_click_skip_and_per_channel_gas()
     print("ok")

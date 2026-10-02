@@ -339,13 +339,17 @@ class Composer:
             a.yaxis.set_minor_formatter(NullFormatter())
 
     def _share_x(self, drawn):
-        """같은 열(1칸 폭)의 단일 축 패널끼리 x 범위를 합쳐 공유하고, 맨 아래만 x 눈금·라벨."""
+        """같은 열(1칸 폭)의 단일 축 패널끼리 x 범위를 합쳐 공유하고, 맨 아래만 x 눈금·라벨.
+        **x 가 같은 종류인 패널끼리만**(모드·x 스케일·눈금 형식이 같을 때) — 시계열 위에 Scatter(ppb)
+        패널이 같은 열에 있으면 둘의 x 범위를 합쳐 한쪽을 뭉개고 위 패널의 x 눈금을 지웠다(2026-10-02)."""
         cols = {}
         for i, axes in drawn.items():
             p = self.panels[i]
             if "cell" not in p or len(axes) != 1 or p["cell"][3] != 1:
                 continue
-            cols.setdefault(p["cell"][1], []).append((p["cell"][0], axes[0]))
+            a = axes[0]
+            kind = (p.get("mode"), a.get_xscale(), type(a.xaxis.get_major_formatter()).__name__)
+            cols.setdefault((p["cell"][1], kind), []).append((p["cell"][0], a))
         for group in cols.values():
             if len(group) < 2:
                 continue

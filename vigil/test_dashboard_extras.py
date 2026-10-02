@@ -131,6 +131,17 @@ def test_dashboard():
                        {"start": now, "end": now, "source": "lamp", "level": P1, "msg": "x"}])
     check("경보표 최근 것이 위", win.alarm_table.rowCount() == 2 and win.alarm_table.item(0, 3).text() == "lamp")
     check("진행 중 개수 탭", win.tabs.tabText(1) == "Alarms (1)", win.tabs.tabText(1))
+    # (2026-10-02) 최근 50건보다 오래된 경보가 닫혀도 표·개수가 갱신된다
+    many = [{"start": now - timedelta(seconds=1000), "end": None, "source": "old", "level": P2, "msg": "o"}]
+    many += [{"start": now - timedelta(seconds=900 - k), "end": now, "source": f"s{k}", "level": P2, "msg": "x"}
+             for k in range(60)]
+    win.update_alarms(many)
+    check("오래된 진행 중 경보 표시", win.tabs.tabText(1) == "Alarms (1)", win.tabs.tabText(1))
+    many[0]["end"] = now                                   # 같은 리스트·같은 길이에서 맨 앞 경보만 닫힘
+    win.update_alarms(many)
+    check("50건보다 오래된 경보가 닫히면 갱신", win.tabs.tabText(1) == "Alarms", win.tabs.tabText(1))
+    win.update_alarms([{"start": now, "end": None, "source": "hk", "level": P2, "msg": "warm"},
+                       {"start": now, "end": now, "source": "lamp", "level": P1, "msg": "x"}])
     win.set_freshness(now - timedelta(seconds=30), now, 10)
     check("신선도: 30 s, 한도 넘음 표시", "30 s ago" in win.fresh.text() and "UTC" in win.fresh.text())
     ax = win.p_hk.getAxis('bottom')
