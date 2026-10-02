@@ -38,10 +38,27 @@ def test_glyphs():
     check("only known-good glyphs in UI strings", used <= dw.UI_GLYPHS, "".join(sorted(used - dw.UI_GLYPHS)))
 
 
+def test_paused_freshness():
+    print("[2] freshness while paused")
+    from datetime import datetime, timedelta
+    from vigil.dashboard.dashboard_window import DashboardWindow
+    win = DashboardWindow(title="t", tz="UTC")
+    win.set_watch_dir("C:/raw")
+    now = datetime.now()
+    win.set_freshness(now - timedelta(seconds=7), now, 10)
+    check("running: age shown", "7 s ago" in win.fresh.text(), win.fresh.text())
+    win.set_running(False)
+    check("paused: no frozen age", "paused" in win.fresh.text() and "ago" not in win.fresh.text(), win.fresh.text())
+    win.set_running(True)
+    win.set_freshness(now - timedelta(seconds=3), now, 10)
+    check("resumed: age again", "3 s ago" in win.fresh.text(), win.fresh.text())
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
     test_glyphs()
+    test_paused_freshness()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 

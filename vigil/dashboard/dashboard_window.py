@@ -338,6 +338,9 @@ class DashboardWindow(QMainWindow):
         """버튼·배지만 맞춘다(시그널 없음)."""
         self._paused = not running
         self.btn_run.setText("■ Stop" if running else "▶ Start")
+        if not running:
+            # tick stops while paused, so the age would freeze at e.g. "7 s ago" and look healthy.
+            self.fresh.setText("paused\nnot reading"); self._fresh_style(None)
         if not running and not self._watch_dir:
             self.badge.setText("○  Choose the raw folder to monitor — 'Choose folder…' at the right")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
