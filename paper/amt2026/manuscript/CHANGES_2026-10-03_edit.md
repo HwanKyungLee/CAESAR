@@ -13,7 +13,7 @@ Baseline: state after the 2026-09-30 round. Full diff: `CHANGES_2026-10-03_edit.
     stores `_zeroair/calib_knots_*.npz`);
   - context flag: termination state, distance to the nearest zero-air and reflectivity knot, bracketing interval, in-range
     flag, reference identity — `f155d2e` (`I0_/R_dt_s`, `_gap_h`, `_edge`);
-  - still not exported (stated as "the remaining fields of Table 9"): side of the nearest knot, number of adjacent blocks
+  - still not exported (stated as "the remaining fields of Table~\ref{tab:context_fields}"): side of the nearest knot, number of adjacent blocks
     rejected by the gates, build time and time convention of each reference.
 - **Claim "on one day of the budget window this reproduces the zero-air and reflectivity terms record by record"** — evidence:
   2026-05-20 hot, alphas regenerated with the new code and the clock-fixed R, 830 records time-matched to
