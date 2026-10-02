@@ -110,8 +110,9 @@ Augur 는 블록 이름 ch1/ch2 + 옛 슬롯 규칙 T/P, Vigil 은 **HK·블록 
 - **프로그램**(Augur/Vigil 폴더)은 한 번 USB 로 옮긴다 — 기본 프로파일이 안에 있어 미션 없이도 Vigil 이
   HK·밝기·유입을 감시한다.
 - **미션**은 위의 미션 패키지 폴더만 옮긴다(FitSet·레퍼런스·wavecal 이 다 들어 있다 — 경로 문제 없음).
-  예전 `tools/bundle_vigil_deps.py`(대상 PC 절대경로로 다시 쓰기)와 Vigil 의 'Augur data…' 경로 찾기는
-  미션 패키지 이전 방식이다.
+  예전 `tools/bundle_vigil_deps.py`(대상 PC 절대경로로 다시 쓰기)는 미션 패키지로 대체돼 지웠다.
+  Vigil 의 'Augur data…'(다른 PC 의 Augur Output 아래에서 경로 찾기)는 **절대경로를 가진 옛 미션**
+  (저장소의 여수 미션 등)용으로 남겨 둔다 — 새 미션은 패키지로 옮기면 필요 없다.
 - **어느 PC 가 어느 정의를 쓰는지는 해시로 대조한다.** 프로파일마다
   `파일@판#내용해시8[+바탕@판#해시8]` 문자열이 남는다:
   - Vigil — 시작·미션 불러올 때 `status.jsonl` 에 `profiles loaded: …` / `Mission loaded: …`
