@@ -639,7 +639,7 @@ class VigilApp:
         sev_status = {None: OK, "warn": P2, "alarm": P1}
         for mkey, (val, sev, _t) in sorted(self._hk_latest.items()):
             meta = self._trend_meta.get(mkey, {})
-            unit = meta.get("unit") or ""
+            unit = (meta.get("unit") or "").replace("degC", "°C")   # profiles spell it ASCII
             ok = isinstance(val, float) and val == val
             cards.append({"key": ("hk", mkey), "title": meta.get("label", mkey[1]),
                           "value": f"{val:.1f} {unit}".strip() if ok else "missing",

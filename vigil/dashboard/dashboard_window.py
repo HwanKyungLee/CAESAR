@@ -155,19 +155,26 @@ class _ElidedLabel(QLabel):
 class _Card(QFrame):
     """현재 값 카드 — 제목 · 큰 값 · 보조 줄. 왼쪽 띠 색이 등급."""
 
-    def __init__(self, mono: str):
+    def __init__(self, mono: str, compact: bool = False):
         super().__init__()
-        self.setMinimumWidth(150)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 6, 10, 6)
-        lay.setSpacing(1)
+        self._mono = mono
+        self._lay = QVBoxLayout(self)
+        self._lay.setSpacing(1)
         self.t = QLabel(); self.v = QLabel(); self.s = QLabel()
         self.t.setStyleSheet(f"color:{VIGIL.sub}; font-size:11px;")
-        self.v.setStyleSheet(f"color:{VIGIL.text}; font-size:18px; font-weight:600; font-family:'{mono}';")
         self.s.setStyleSheet(f"color:{VIGIL.dim}; font-size:10px;")
         for w in (self.t, self.v, self.s):
-            lay.addWidget(w)
+            self._lay.addWidget(w)
         self._status = None
+        self.set_compact(compact)
+
+    def set_compact(self, on: bool) -> None:
+        """Short screens (1366×768 @150 % = 512 px tall): two rows of full cards left the graphs
+        ~90 px — smaller value, tighter margins, narrower card."""
+        self.setMinimumWidth(118 if on else 150)
+        self._lay.setContentsMargins(*((8, 3, 8, 3) if on else (10, 6, 10, 6)))
+        self.v.setStyleSheet(f"color:{VIGIL.text}; font-size:{14 if on else 18}px; font-weight:600; "
+                             f"font-family:'{self._mono}';")
 
     def set(self, title, value, sub, status, tip=""):
         self.t.setText(title); self.v.setText(value); self.s.setText(sub); self.setToolTip(tip)
@@ -201,6 +208,7 @@ class DashboardWindow(QMainWindow):
         self._color_idx = 0
         self._color_of: dict = {}
         self._cards: dict = {}
+        self._compact_cards = False
         self._row_of: dict = {}           # 파일 표: path → 행 번호(바뀐 칸만 갱신)
         self._tz = tz if tz in TZ_CHOICES else "KST"
         self._mono = mono_family()
@@ -327,6 +335,11 @@ class DashboardWindow(QMainWindow):
         self.log.document().setMaximumBlockCount(2000)
         self.log.setStyleSheet(f"font-family:'{self._mono}',monospace; font-size:11px; color:{VIGIL.log};")
 
+        from gui.empty_hint import attach
+        attach(self.table, "Raw files show here once a folder is being watched\n"
+                           "(one row per file: last row, lag and each monitor's state).", color=VIGIL.sub)
+        attach(self.alarm_table, "No alarms so far. Every P0/P1/P2 lands here with its start and end.",
+               color=VIGIL.sub)
         self.tabs = QTabWidget()
         self.tabs.addTab(self.table, "Files")
         self.tabs.addTab(self.alarm_table, "Alarms")
@@ -341,6 +354,16 @@ class DashboardWindow(QMainWindow):
         self.setCentralWidget(root)
 
     # ── 공통 ─────────────────────────────────────────────────────────────
+    COMPACT_BELOW_H = 700   # window height (logical px) under which value cards go compact
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        compact = self.height() < self.COMPACT_BELOW_H
+        if compact != self._compact_cards:
+            self._compact_cards = compact
+            for c in self._cards.values():
+                c.set_compact(compact)
+
     def _make_plot(self, ylabel, kind):
         pw = pg.PlotWidget(axisItems={'bottom': pg.DateAxisItem(orientation='bottom',
                                                                 utcOffset=self._utc_offset())})
@@ -351,6 +374,10 @@ class DashboardWindow(QMainWindow):
         pw.showGrid(x=True, y=True, alpha=0.2)
         pw.setTitle(_PLACEHOLDER[kind], color=VIGIL.dim, size="10pt")
         pw.setMouseEnabled(x=True, y=False)
+        # Before the first point the date axis spanned epoch 0–1 s ("00.250" ticks): show the last hour.
+        import time as _time
+        _now = _time.time()
+        pw.setXRange(_now - 3600, _now, padding=0)
         return pw
 
     def _utc_offset(self) -> int:
@@ -554,7 +581,7 @@ class DashboardWindow(QMainWindow):
         for c in cards:
             w = self._cards.get(c["key"])
             if w is None:
-                w = _Card(self._mono)
+                w = _Card(self._mono, compact=self._compact_cards)
                 self._cards[c["key"]] = w
                 self._cards_flow.addWidget(w)
             w.set(c["title"], c["value"], c.get("sub", ""), c.get("status"), c.get("tip", ""))
