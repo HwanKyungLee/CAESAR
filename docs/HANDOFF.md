@@ -12,6 +12,26 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-02 (5) — 기본(구조) 프로파일 + 미션 패키지 (Augur → Vigil, USB)
+
+**왜**: 측정 PC 는 인터넷이 없고(USB), FitSet 은 만든 PC 의 절대경로를 쓰며 "어느 블록이 어느 셀인가"를
+모른다. 그리고 미션(정체)이 없는 날짜의 raw 는 Vigil 이 아예 감시를 안 했다("NOT monitored").
+
+- `d73befe` **두 층**: `vigil/profiles/base_*.json`(열 수마다 구조 — 블록 ch0/ch1/ch2, HK·flag·주기, 정체 없음)
+  + 미션(`"base": …`, 블록 이름·cavity·FitSet·R·date_range). 여수 3개(caesar_*.example.json)는 미션이 됐고
+  id 그대로. 미션이 없는 날짜 → 기본: Augur 는 ch1/ch2 + 옛 슬롯 규칙(값 동일), Vigil 은 HK·**빛이 들어오는
+  블록만** 램프·포화·유입(농도·R 만 빠짐, P2 "No mission"). HK 결측 0/65535 → NaN(0 °C 아님), 경보는
+  밴드 있는 필드·채널 1순위 캐비티 센서만.
+- `f8c672e` **미션 패키지**(`core/mission_package.py`): Augur Setup **"Vigil…"**(`gui/dlg_mission_export.py`) —
+  FitSet 채널마다 raw 구성·블록·셀 이름·센서를 사람이 정하고 **Check with raw…**(블록 스펙트럼, lit/DARK,
+  '핏 창이 LED 반치 안 ✓/✗'), Export → 자기완결 폴더(FitSet·refs·wavecal 사본, 경로 상대, manifest sha1·
+  출처) + 이 PC Augur 에 설치(`vigil/profiles/missions/` — **커밋하면 분석 PC 끼리 공유**). Vigil 대시보드
+  **"Load mission…"** → 검사·날짜 겹침 확인 후 상태 폴더 `missions/` 에 설치.
+- 3단계: `tools/bundle_vigil_deps.py` 삭제(패키지가 대체). Vigil 'Augur data…' 는 절대경로 옛 미션(여수)용으로 남김.
+
+**출력 불변**: 기준선 7파일 데이터 경로(flag·T·P·스펙트럼) 동일. 표기만: 날짜 밖 핫 kind `hot(no mission)`.
+**다음 배치가 바뀌면**: 그 배치 raw 하나 + FitSet 으로 "Vigil…" — 그게 이전에 미뤄 둔 '프로파일 초안 도구'다.
+
 ## 2026-10-02 (4) — 리뷰 수정 + 채널 정의 단일화 (프로파일 JSON = 유일한 정본)
 
 **리뷰(b88cfe3..dcfb50b) 수정은 main 에 들어갔다**(fix/integration 병합, `b82cd6a`) — 측정 중 raw 캐시

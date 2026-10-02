@@ -33,7 +33,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional, Sequence
 
 # 프로파일 JSON은 아직 `vigil/profiles/`에 산다 — PyInstaller spec(`Vigil.spec`)과
-# `tools/bundle_vigil_deps.py`가 그 경로를 참조하므로 파일은 그대로 두고 로더만 옮겼다.
+# (예전 tools/bundle_vigil_deps.py 도 이 경로를 참조했다 — 미션 패키지(core/mission_package.py)로 대체돼 삭제.)
 # ponytail: 나중에 저장소 루트 `profiles/`로 올리려면 그 둘도 같이 고칠 것.
 DEFAULT_PROFILE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vigil", "profiles")

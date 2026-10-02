@@ -31,7 +31,7 @@ class StateLog:
     def append(self, status: str, msg: str, **fields) -> None:
         # 매 줄에 코드 해시를 박는다 — Augur 확정분석과 사후 대조할 때 "이 숫자가 어느
         # 코드에서 나왔나"가 줄 단위로 확정돼야 한다(현장 PC의 Vigil이 랩 Augur보다
-        # 뒤처질 수 있다: tools/bundle_vigil_deps.py USB 배포). code_version()은
+        # 뒤처질 수 있다: USB 배포). code_version()은
         # lru_cache라 프로세스당 git 호출 1회.
         # ts carries the UTC offset (2026-10-02) — a bare local time is ambiguous next to UTC raw/vrec times.
         rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
