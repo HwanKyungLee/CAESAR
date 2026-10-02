@@ -220,7 +220,7 @@ class ReferenceGeneratorDialog(QDialog):
         self.btn_generate.setMinimumHeight(int(50 * self._s))
         right_layout.addWidget(self.btn_generate)
         
-        self.btn_save = QPushButton("Save & Auto-Register to Main")
+        self.btn_save = QPushButton("Save && Auto-Register to Main")
         self.btn_save.clicked.connect(self.save_reference)
         self.btn_save.setEnabled(False)
         self.btn_save.setMinimumHeight(int(40 * self._s))

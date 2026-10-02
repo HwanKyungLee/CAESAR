@@ -198,13 +198,17 @@ class AnalysisWorker(QThread):
     def _alpha_fit_slice(self, wave_nm):
         """알파 행을 핏범위로 슬라이스할 인덱스(slice) 또는 None(전체).
         fit_unit=='px': [pixel_min:pixel_max] 픽셀구간(박사님 시나리오 775-1550 등 재현).
-        fit_unit=='nm': fit_lo_nm~fit_hi_nm 안의 파장만. 둘 다 None/full이면 전체 핏(기존 동작)."""
+        fit_unit=='nm': fit_lo_nm~fit_hi_nm 안의 파장만. 둘 다 None/full이면 전체 핏(기존 동작).
+        A requested window with < 2 pixels raises — it used to fall back to the full range
+        silently (window outside the wavecal → whole-alpha fit reported as success)."""
         unit = getattr(self, 'fit_unit', 'nm')
         n = len(wave_nm)
         if unit == 'px':
             a = max(0, int(self.pixel_min))
             b = min(n, int(self.pixel_max)) if self.pixel_max else n
-            if b - a >= 2 and (a > 0 or b < n):
+            if b - a < 2:
+                raise ValueError(f"fit window px {self.pixel_min}-{self.pixel_max} has no usable pixels")
+            if a > 0 or b < n:
                 return slice(a, b)
             return None
         lo = getattr(self, 'fit_lo_nm', None)
@@ -219,7 +223,8 @@ class AnalysisWorker(QThread):
         idx = np.where((w >= lo) & (w <= hi))[0]
         if len(idx) >= 2:
             return slice(int(idx[0]), int(idx[-1]) + 1)
-        return None
+        raise ValueError(f"fit window {lo:g}-{hi:g} nm is outside this alpha's wavelength axis "
+                         f"({float(np.nanmin(w)):.1f}-{float(np.nanmax(w)):.1f} nm)")
 
     # ==========================================
     # VarPro 핏 — core.doas_fit.DoasFitter 로 위임(단일 구현 공유)
