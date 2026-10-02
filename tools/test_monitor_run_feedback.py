@@ -133,6 +133,67 @@ def test_status_colour_reads_the_head_label():
     assert bg("Settling") == fail
 
 
+def _host(results, channels, fast=False, cap=5000):
+    """Smallest ResultsQCMixin host that can run analysis_finished; QMessageBox
+    calls are captured in host.popups instead of shown."""
+    from types import SimpleNamespace
+    from PyQt6.QtWidgets import QLabel, QProgressBar, QPushButton, QTableWidget, QWidget
+    from gui.app_window_results import ResultsQCMixin
+    import gui.app_window_results as mod
+    _app()
+
+    class Host(ResultsQCMixin, QWidget):
+        def _autosave_close(self):
+            pass
+
+    h = Host()
+    h.popups = []
+    mod.QMessageBox = SimpleNamespace(
+        information=lambda _w, t, m: h.popups.append(("info", t, m)),
+        warning=lambda _w, t, m: h.popups.append(("warn", t, m)))
+    h.table, h.status, h.pbar = QTableWidget(), QLabel(), QProgressBar()
+    h.b_run, h.b_stop = QPushButton(), QPushButton()
+    h.engine = SimpleNamespace(gas_list=['NO2'])
+    h.monitor = SimpleNamespace()
+    h.table.setColumnCount(9)
+    h.results = list(results)
+    h._alpha_groups = {c: ['x'] for c in channels}
+    h._workers_total = len(channels)
+    h._workers_done = 0
+    h._multi_channel_mode = len(channels) > 1
+    h._fast_mode_active = fast
+    h._fast_table_cap = cap
+    return h
+
+
+def _finish_all(h):
+    for _ in range(h._workers_total):
+        h.analysis_finished()
+
+
+def test_parallel_failure_is_not_reported_as_success():
+    """Pattern A: worker ERROR + finished → green 'Completed' / 'successfully'."""
+    h = _host([], [1], fast=True)
+    h._on_analysis_status(1, "ERROR: parallel fit failed — X: boom (no results)")
+    _finish_all(h)
+    assert "FAILED" in h.status.text() and "Completed" not in h.status.text()
+    kind, title, msg = h.popups[-1]
+    assert kind == "warn" and "successfully" not in msg and "boom" in msg
+    # Errors do not leak into the next run.
+    h2 = _host([_row(0)], [1])
+    h2._run_errors = []
+    _finish_all(h2)
+    assert "Completed" in h2.status.text() and h2.popups[-1][0] == "info"
+
+
+def test_channel_without_rows_is_a_failure():
+    """Pattern A: one of two channels returned nothing (no ERROR line seen)."""
+    h = _host([_row(i, ch=1) for i in range(3)], [1, 2])
+    _finish_all(h)
+    assert "FAILED" in h.status.text() and "CH2: no results" in h.status.text()
+    assert h.popups[-1][0] == "warn"
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):

@@ -238,6 +238,26 @@ class ResultsQCMixin:
         if hasattr(self.monitor, 'flush_plots'):
             self.monitor.flush_plots()
 
+    def _on_analysis_status(self, ch, msg):
+        """A channel worker's status_msg: show it, and remember ERROR lines so the
+        completion does not report a failed run as a success."""
+        print(f"[Analysis CH{ch}] {msg}")
+        self.status.setText(f"[CH{ch}] {msg}")
+        if str(msg).startswith("ERROR"):
+            self._run_errors = getattr(self, '_run_errors', []) + [f"CH{ch}: {msg}"]
+
+    def _run_failures(self):
+        """Why this run is not a success: worker ERROR lines + channels that
+        returned no rows at all (every scan, even a skipped one, yields a row)."""
+        fails = list(getattr(self, '_run_errors', []))
+        got = {r.get('Channel', 1) for r in self.results}
+        for ch in sorted(getattr(self, '_alpha_groups', None) or {}):
+            if ch not in got and not any(f.startswith(f"CH{ch}:") for f in fails):
+                fails.append(f"CH{ch}: no results")
+        if not self.results and not fails:
+            fails.append("no results")
+        return fails
+
     def analysis_finished(self, stopped=False):
         """Re-enables UI once ALL channel workers have finished."""
         self._analysis_running = False
@@ -278,9 +298,14 @@ class ResultsQCMixin:
         self._autosave_close()
         was_stopped = getattr(self, '_stop_requested', False)
         self._stop_requested = False
+        failures = [] if was_stopped else self._run_failures()
+        self._run_errors = []
         if was_stopped:
             self.status.setText(f"Stopped — partial results ({len(self.results):,} rows)")
             self.status.setStyleSheet(f"color: {AUGUR.warn}; font-weight: bold;")
+        elif failures:
+            self.status.setText(f"{ch_label}Analysis FAILED — " + "; ".join(failures))
+            self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
         else:
             self.status.setText(f"{ch_label}Analysis Completed!")
             self.status.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
@@ -295,6 +320,13 @@ class ResultsQCMixin:
                 saved_msg = f"\n Auto-save failed: {_e}"
 
         qc_msg = f"\nAuto QC excluded: {len(qc_changed)} rows (gas → NaN)" if qc_changed else ""
+        if failures:
+            QMessageBox.warning(
+                self, "Analysis failed",
+                f"{len(self.results):,} rows from {n_ch} channel(s) — not a complete run:\n  "
+                + "\n  ".join(failures)
+                + f"\n(see logs/session_*.log){qc_msg}{saved_msg}")
+            return
         head = "Analyzed up to the stop point." if was_stopped else f"All files analyzed successfully ({n_ch} channel(s))."
         QMessageBox.information(self, "Done", f"{head}{qc_msg}{saved_msg}")
 
