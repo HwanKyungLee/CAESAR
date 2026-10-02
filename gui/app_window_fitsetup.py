@@ -60,16 +60,20 @@ class FitSetupMixin:
         def on_calib_done(data):
             print(f"📡 Signal Received: {len(data)} wavelength points transferred.")
 
-            # 1. Store wavelength data in main memory
-            self.wavelengths = data 
-            if hasattr(self, 'engine'):
-                self.engine.wavelengths = data
-                print("✅ [Engine Sync] Wavelength data synced.")
-
-            # 2. Instantly apply to graphs if the method exists
-            if hasattr(self, 'apply_new_wavelength'):
-                self.apply_new_wavelength(data)
-                print("🚀 [Automation] X-axis automatically updated to nm.")
+            # 1-2. Apply through the single wavecal loader using the file just saved. Setting only
+            # self.wavelengths/engine.wavelengths left engine._wave_axis, loaded_wl_path and the
+            # channel's wl_path on the OLD wavecal, so alpha generation, R and FitSet saves kept
+            # using it while the popup said "applied instantly" (UX audit 2026-10-02).
+            saved = getattr(dialog, 'saved_path', None)
+            if saved and os.path.exists(saved):
+                self.load_wavelength_cal(auto_path=saved)
+                self._mark_refs_dirty()   # references were resampled on the old axis — re-Lock
+            else:
+                self.wavelengths = data
+                if hasattr(self, 'engine'):
+                    self.engine.wavelengths = data
+                if hasattr(self, 'apply_new_wavelength'):
+                    self.apply_new_wavelength(data)
 
             # 3. Store the lamp spectrum used during calibration for the generator
             if hasattr(dialog, 'spectrum') and dialog.spectrum is not None:

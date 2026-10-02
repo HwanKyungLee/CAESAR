@@ -802,8 +802,9 @@ class WavelengthCalibrationDialog(QDialog):
                     np.savetxt(save_path, self.wavelengths, fmt='%.6f', header=header_msg, encoding='utf-8')
 
                 # 5. Transmit signal to Main App
+                self.saved_path = save_path   # main window loads it through its single wavecal loader
                 self.calibration_finished.emit(self.wavelengths)
-                
+
                 # 6. Completion Message & Close
                 QMessageBox.information(
                     self, "Success", 
