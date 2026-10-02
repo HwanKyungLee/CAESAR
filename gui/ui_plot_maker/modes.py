@@ -805,6 +805,7 @@ class TimeSeriesMode(PlotMode):
         night_on = ((self._chk_night.isChecked() if hasattr(self, "_chk_night") else False)
                     and any_time and tspan[0] is not None)
         for a, s in zip(axes, specs):
+            a._pm_axis = s.axis      # host._apply_axes_mpl: Y-left/Y-right range per panel
             xv = ([datetime.fromtimestamp(v) for v in s.x] if s.extra["has_time"] else s.x)
             if night_on:
                 for s0, s1 in self._night_spans(tspan[0], tspan[1]):

@@ -1681,12 +1681,20 @@ class PlotMakerWidget(QWidget):
         if not axes:
             return
         ax = axes[0]
+        # Which axes take the Y-left vs Y-right settings: a twinx (labels on the right) or a
+        # split panel holding a right-axis series (tagged `_pm_axis` by the split renderer) is
+        # "right"; everything else is "left". Used to be axes[0] vs axes[1:], which in split
+        # mode put the Y-right range on panel 2 (a left-axis series) and log/Y-left on panel 1 only.
+        right = [a for a in axes if a.yaxis.get_label_position() == "right"
+                 or getattr(a, "_pm_axis", "L") == "R"]
+        left = [a for a in axes if a not in right and (a is ax or hasattr(a, "_pm_axis"))]
         if self._chk_logx.isChecked():
             try: ax.set_xscale("log")
             except Exception: pass
         if self._chk_logy.isChecked():
-            try: ax.set_yscale("log")
-            except Exception: pass
+            for a in left:
+                try: a.set_yscale("log")
+                except Exception: pass
         xmin = self._parse_x(self._ax_xmin.text()); xmax = self._parse_x(self._ax_xmax.text())
         if xmin is not None and xmax is not None and xmin < xmax:
             import datetime as _dt2
@@ -1696,10 +1704,11 @@ class PlotMakerWidget(QWidget):
                 a.set_xlim(lo, hi)
         ymin = self._axis_val(self._ax_ymin); ymax = self._axis_val(self._ax_ymax)
         if ymin is not None and ymax is not None and ymin < ymax:
-            ax.set_ylim(ymin, ymax)
+            for a in left:
+                a.set_ylim(ymin, ymax)
         rmin = self._axis_val(self._ax_rmin); rmax = self._axis_val(self._ax_rmax)
         if rmin is not None and rmax is not None and rmin < rmax:
-            for a in axes[1:]:        # twinx 우측 축
+            for a in right:
                 a.set_ylim(rmin, rmax)
         # 그리드 on/off (+ minor) — render_mpl 기본 grid를 여기서 덮어씀
         if hasattr(self, "_chk_grid"):

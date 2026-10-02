@@ -103,6 +103,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     '#' 헤더에 시프트·리샘플 기록, Plot Maker가 다시 읽나 (R3, 2026-10-02)
 47. 시간축 시계 : fit .meta.json time_shift_h·time_KST 열로 데이터셋 시계를 알고 x 라벨에
     (UTC)/(KST) · Night를 UTC 시계에 칠하면 경고 (R4, 2026-10-02)
+48. Split 축 범위 : Y-left 범위·log는 좌축 시리즈 패널 전부, Y-right는 우축 시리즈 패널에만
+    (전엔 axes[0] / axes[1:] 가정이라 Y-right가 둘째 패널에 걸렸다, R5, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2152,6 +2154,29 @@ def c_time_basis_night():
     if "KST" not in w.p1.getAxis("bottom").labelText or "UTC clock" in w._status.text():
         return "FAIL", f"+9h 뒤: {w.p1.getAxis('bottom').labelText!r} / {w._status.text()!r}"
     return "PASS", "meta 없으면 모름 · UTC/KST 라벨(화면·Publish) · time_KST 인식 · 시프트 0+Night 경고, +9h면 해제"
+
+
+# ── 48. Split 패널: Y-left/Y-right 범위·log가 자기 축 시리즈 패널에 (R5, 2026-10-02) ──
+@check("Split: Y-left 범위·log는 좌축 시리즈 패널 전부, Y-right는 우축 시리즈 패널에만")
+def c_split_axis_ranges():
+    w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series += [["fixture:NO2", "L", None, None], ["fixture:CHOCHO", "R", None, None],
+                   ["fixture:NO2", "L", "#000000", None]]
+    ts._chk_split.setChecked(True)
+    w._ax_ymin.setText("1"); w._ax_ymax.setText("10")
+    w._ax_rmin.setText("0"); w._ax_rmax.setText("1")
+    w._chk_logy.setChecked(True)
+    fig = w._build_publish_fig()
+    ax = [a for a in fig.axes if hasattr(a, "_pm_axis")]
+    if len(ax) != 3:
+        return "FAIL", f"분할 패널 {len(ax)}개 (3 기대)"
+    got = [(a._pm_axis, tuple(round(v, 3) for v in a.get_ylim()), a.get_yscale()) for a in ax]
+    want = [("L", (1.0, 10.0), "log"), ("R", (0.0, 1.0), "linear"), ("L", (1.0, 10.0), "log")]
+    if got != want:
+        return "FAIL", f"패널별 (축, ylim, scale) {got} ≠ {want}"
+    return "PASS", "좌축 패널 2개 = Y-left+log · 우축 패널 = Y-right"
 
 
 def main():
