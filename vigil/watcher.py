@@ -130,6 +130,9 @@ class Watcher:
         self._started = False
         self._truncated = False
         self.skipped_backlog: tuple = (0, 0)   # (파일 수, 바이트) — 시작 시 건너뛴 백로그
+        # {path: [profile_id …]} — 열 수는 맞는데 파일명 날짜가 프로파일 date_range 밖이라 감시하지 않는
+        # 파일. 진입점이 한 번씩 경고한다(감시하지 않는 상태는 보여야 한다 — 설계 §2).
+        self.date_excluded: dict = {}
         self.catching_up = False               # 직전 poll 이 상한에 닿았다 = 밀린 분량을 따라잡는 중
         self._files: dict = {}                 # {path: (size, mtime)} — 마지막 나열 결과
         self._paths: list = []                 # sorted(self._files) — 목록이 바뀔 때만 다시 정렬
@@ -285,6 +288,10 @@ class Watcher:
         prof = self.profiles.route(filename=os.path.basename(path), n_columns=n_columns)
         if prof is not None:
             self._profile_cache[path] = prof
+        elif path not in self.date_excluded:
+            ids = self.profiles.date_excluded(os.path.basename(path), n_columns)
+            if ids:
+                self.date_excluded[path] = ids
         return prof
 
     def _skip_stale_backlog(self, paths: list) -> None:

@@ -363,6 +363,10 @@ class Autodetect:
 class Match:
     n_columns: Optional[int] = None
     filename_glob: Optional[str] = None
+    # (lo, hi) "YYYY-MM-DD" — 파일명 날짜가 이 밖이면 이 프로파일을 쓰지 않는다. 같은 열 수라도 광섬유
+    # 배치가 바뀐 구성(핫 6181열: 8/11 이후 block 2053 = cold)에 엉뚱한 채널 정체를 붙이지 않게.
+    # 날짜 판정은 core/raw_parser 와 같은 함수(_file_date): 파일명에 날짜가 없으면 제한하지 않는다.
+    date_range: Optional[tuple] = None
 
     def col_match(self, n_columns: Optional[int]) -> bool:
         """이 프로파일이 주어진 열수를 정확히 요구하면 True."""
@@ -375,6 +379,13 @@ class Match:
             return True
         return self.n_columns == n_columns
 
+    def date_ok(self, filename: Optional[str]) -> bool:
+        """파일명 날짜가 date_range 안이면(또는 제한이 없거나 날짜를 모르면) True."""
+        if self.date_range is None or filename is None:
+            return True
+        from core.raw_parser import _in_date_range
+        return _in_date_range(filename, None, self.date_range)
+
     def name_match(self, filename: Optional[str]) -> bool:
         """파일명 glob이 있고 일치하면 True."""
         return (self.filename_glob is not None and filename is not None
@@ -382,8 +393,10 @@ class Match:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Match":
+        dr = d.get("date_range")
         return cls(n_columns=(int(d["n_columns"]) if "n_columns" in d else None),
-                   filename_glob=d.get("filename_glob"))
+                   filename_glob=d.get("filename_glob"),
+                   date_range=(tuple(str(x) for x in dr) if dr else None))
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -578,8 +591,11 @@ class ProfileSet:
              깨지므로 파일명이 맞아도 배제). 열수 정확 일치가 있으면 그쪽만.
           2. 후보가 여럿이면 filename glob으로 동점 해소.
           3. 그래도 하나로 못 좁히면 첫 후보. 후보가 없으면 None.
-        filename은 후보를 **좁히기만** 하고, 열수 매치를 무효화하지 못한다."""
-        pool = [p for p in self.profiles if p.match.col_compatible(n_columns)]
+        filename은 후보를 **좁히기만** 하고, 열수 매치를 무효화하지 못한다.
+        단 match.date_range 가 있으면 파일명 날짜가 그 밖인 프로파일은 후보에서 뺀다(구성이 바뀐 날짜에
+        같은 열 수라는 이유로 옛 채널 정체를 붙이지 않게) — 빠진 이유는 date_excluded() 로 알 수 있다."""
+        pool = [p for p in self.profiles
+                if p.match.col_compatible(n_columns) and p.match.date_ok(filename)]
         if n_columns is not None:
             exact = [p for p in pool if p.match.col_match(n_columns)]
             if exact:
@@ -593,6 +609,11 @@ class ProfileSet:
         if pool and n_columns is not None:
             return pool[0]   # 열수 양립 후보 중 최선(best-effort)
         return None
+
+    def date_excluded(self, filename: Optional[str], n_columns: Optional[int] = None) -> list:
+        """열 수는 정확히 맞는데 파일명 날짜가 date_range 밖이라 빠진 프로파일 id 들(표시·경고용)."""
+        return [p.profile_id for p in self.profiles
+                if p.match.col_match(n_columns) and not p.match.date_ok(filename)]
 
 
 if __name__ == "__main__":
