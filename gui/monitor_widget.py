@@ -356,7 +356,10 @@ class MonitorWidget(QWidget):
         update_spectrum이 채널 불일치로 그냥 return해서 Components/Fit View 두 탭이
         **아무 말 없이 백지**가 됐다(Trend/Conc는 채널 필터가 없어 정상으로 보였다).
         선택할 수 없는 채널을 없애 그 상태 자체를 만들 수 없게 한다.
+
+        Called once per RUN, so it also drops the previous run's scans (R9).
         """
+        self.reset_spectra()
         chans = sorted({int(c) for c in channels}) or [1]
         cur = [self.cb_fit_channel.itemData(i) for i in range(self.cb_fit_channel.count())]
         if cur == chans:
@@ -369,6 +372,18 @@ class MonitorWidget(QWidget):
         self.cb_fit_channel.blockSignals(False)
         self._view_channel = chans[0]
         self.cb_fit_channel.setEnabled(len(chans) > 1)
+
+    def reset_spectra(self):
+        """Forget the last scans and blank Components / Fit View, so a new RUN never
+        shows the previous run's spectrum under the new run's results."""
+        self._latest_by_channel = {}
+        self.latest_fit_data = None
+        for c in (self.curve_meas, self.curve_fit, self.curve_resid):
+            c.setData([], [])
+        self.p_meas.setTitle(None)
+        self.glw_comp.clear()
+        self.curve_items = {}
+        self.plot_items = {}
 
     def _on_view_channel_changed(self, idx):
         """채널 콤보 변경 → 새로 선택된 채널의 마지막 스캔을 즉시 다시 렌더."""

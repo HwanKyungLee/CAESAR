@@ -101,6 +101,22 @@ def test_components_use_the_scans_own_engine():
     assert "B_fit" in m.curve_items and m.curve_items["B_fit"].yData[0] == 7.0
 
 
+def test_new_run_drops_previous_scans():
+    """R9: Fit View / Components kept the previous run's scan after a new RUN."""
+    m = _monitor()
+    m.engine = _Eng("A", 1.0)
+    m.set_available_channels([1])
+    m.tabs.setCurrentIndex(1)
+    _w = _emit_scan(m, m.engine, 1)
+    assert m.latest_fit_data and m.curve_meas.xData is not None
+    m.set_available_channels([1])               # next RUN start (same channels)
+    assert m.latest_fit_data is None and not m._latest_by_channel
+    assert m.curve_meas.xData is None or len(m.curve_meas.xData) == 0
+    assert not m.curve_items
+    m.tabs.setCurrentIndex(0)                    # tab hop must not redraw old data
+    assert not m.curve_items
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):
