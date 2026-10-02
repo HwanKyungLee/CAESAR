@@ -250,6 +250,7 @@ class DashboardWindow(QMainWindow):
         self.tabs.addTab(self.alarm_table, "Alarms")
         self.tabs.addTab(self.log, "Log")
         grid.addWidget(self.tabs, 1, 1)
+        self._tz_headers()
         grid.setColumnStretch(0, 2)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(0, 1)
@@ -292,7 +293,14 @@ class DashboardWindow(QMainWindow):
             ax.update()
         self._row_of.clear(); self.table.setRowCount(0)   # 시각 칸 다시 쓰기
         self._alarm_sig = None
+        self._tz_headers()
         self.tz_changed.emit(tz)
+
+    def _tz_headers(self) -> None:
+        """Time columns name their zone — the Log/alarm times were bare and mixed zones after a switch."""
+        tz = f" ({self._tz})"
+        self.table.setHorizontalHeaderLabels([c + tz if c == "Last row" else c for c in _COLUMNS])
+        self.alarm_table.setHorizontalHeaderLabels([c + tz if c in ("Start", "End") else c for c in _ALARM_COLUMNS])
 
     def _color_for(self, key) -> str:
         col = self._color_of.get(key)
@@ -586,5 +594,5 @@ class DashboardWindow(QMainWindow):
             self._fit_view(self.p_hk, arrays, key="hk")
 
     def log_line(self, text: str) -> None:
-        self.log.append(f"[{self._fmt_time(datetime.now())}] {text}")
+        self.log.append(f"[{self._fmt_time(datetime.now())} {self._tz}] {text}")
 

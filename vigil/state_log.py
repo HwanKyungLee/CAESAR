@@ -33,7 +33,8 @@ class StateLog:
         # 코드에서 나왔나"가 줄 단위로 확정돼야 한다(현장 PC의 Vigil이 랩 Augur보다
         # 뒤처질 수 있다: tools/bundle_vigil_deps.py USB 배포). code_version()은
         # lru_cache라 프로세스당 git 호출 1회.
-        rec = {"ts": datetime.now().isoformat(timespec="seconds"),
+        # ts carries the UTC offset (2026-10-02) — a bare local time is ambiguous next to UTC raw/vrec times.
+        rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
                "status": status, "msg": msg, "code": code_version(), **fields}
         line = json.dumps(rec, ensure_ascii=False, default=str) + "\n"
         try:

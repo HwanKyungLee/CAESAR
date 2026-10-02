@@ -54,11 +54,32 @@ def test_paused_freshness():
     check("resumed: age again", "3 s ago" in win.fresh.text(), win.fresh.text())
 
 
+def test_tz_labels():
+    print("[3] time-zone labels")
+    import tempfile
+    from vigil.dashboard.dashboard_window import DashboardWindow
+    from vigil.state_log import StateLog
+    win = DashboardWindow(title="t", tz="KST")
+    hdr = lambda t, c: t.horizontalHeaderItem(c).text()
+    check("files header", hdr(win.table, 1) == "Last row (KST)", hdr(win.table, 1))
+    check("alarm headers", (hdr(win.alarm_table, 0), hdr(win.alarm_table, 1)) == ("Start (KST)", "End (KST)"))
+    win.log_line("x")
+    check("log line names zone", " KST] x" in win.log.toPlainText(), win.log.toPlainText())
+    win.cb_tz.setCurrentText("UTC")
+    check("headers follow switch", hdr(win.table, 1) == "Last row (UTC)" and hdr(win.alarm_table, 1) == "End (UTC)")
+    with tempfile.TemporaryDirectory() as d:
+        sl = StateLog(os.path.join(d, "s.jsonl"))
+        sl.append("OK", "m")
+        ts = sl.tail(1)[0]["ts"]
+    check("status.jsonl ts has offset", ts[-6] in "+-" and ts[-3] == ":", ts)
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
     test_glyphs()
     test_paused_freshness()
+    test_tz_labels()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 
