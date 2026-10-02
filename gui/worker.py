@@ -1109,7 +1109,10 @@ class AnalysisWorker(QThread):
                 # SNR: signal / noise, both in the same (scaled) units.
                 n_pts = len(pixel_idx)
                 n_gases = len(self.engine.gas_list)
-                n_params = len(theta0) + n_gases + (poly_order + 1) + 2  # etalon=sin+cos 2열
+                # etalon=sin+cos 2열 — **켰을 때만**. OFF 면 core.doas_fit 이 그 열을 안 넣는데 여기선
+                # 늘 +2 해서 DOF 가 2 작고 Chi2 가 n/(n−2) 배 부풀었다(2026-10-02 리뷰). ON 은 바이트 동일.
+                n_params = (len(theta0) + n_gases + (poly_order + 1)
+                            + (2 if fixed_e_f is not None else 0))
                 dof = max(n_pts - n_params, 1)
                 # Neumann estimator σ on the fitted signal (optical_depth units for both modes)
                 signal_for_stats = intensity_raw if is_linear_mode else optical_depth
