@@ -329,6 +329,18 @@ def test_stats_follow_open_file(w):
     assert w._stats_lines() is None, "stats of the previous fit file while a CSV is open"
 
 
+def test_bom_csv_opens(w):
+    """2026-10-02 R11: the NIER KST CSV starts with a UTF-8 BOM, so '\\ufeff# …' was not a
+    comment and became the header → "No numeric concentration columns"."""
+    from gui.result_viewer_io import detect
+    p = _write_conc_csv(tempfile.mkdtemp(), bom=True)
+    assert detect(p) == "concentration", detect(p)
+    w._path = p
+    w._reload()
+    assert "Failed" not in w._lbl.text(), w._lbl.text()
+    assert "NO2" in [it.name() for it in w._pw_top.plotItem.listDataItems()]
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -342,7 +354,8 @@ def main() -> int:
                      (test_non_fit_restores_old_plots, (w,)),
                      (test_view_toggles_leave_non_fit_alone, (w,)),
                      (test_png_of_fit_is_the_lanes, (w,)),
-                     (test_stats_follow_open_file, (w,))):
+                     (test_stats_follow_open_file, (w,)),
+                     (test_bom_csv_opens, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

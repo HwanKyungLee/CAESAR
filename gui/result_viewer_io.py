@@ -10,7 +10,7 @@ def load_result_time_gas(path, gas='NO2'):
     """결과파일(_fit/_CH*.dat 등)에서 (시각 epoch[], gas 농도[])를 정렬해 반환."""
     import pandas as pd
     from datetime import datetime
-    df = pd.read_csv(path, sep=None, engine='python', comment='#')
+    df = pd.read_csv(path, sep=None, engine='python', comment="#", encoding="utf-8-sig")
     df.columns = [str(c).strip() for c in df.columns]
     gcol = next((c for c in df.columns if c.lower() == gas.lower()), None)
     tcol = next((c for c in df.columns if c.lower() == 'time'), None)
@@ -37,7 +37,7 @@ def detect(path: str) -> str:
     name = os.path.basename(path).lower()
     lines = []
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
             for _ in range(40):
                 ln = f.readline()
                 if not ln:
@@ -89,7 +89,7 @@ def read_numeric(path, sep=None):
 
 
 def detect_sep(path):
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
         for ln in f:
             s = ln.strip()
             if not s or s.startswith("#"):
@@ -118,7 +118,7 @@ def read_alpha_trace(path, want_id=None):
     wave = None
     alpha_start = 3
     ids, rows = [], []
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
         for ln in f:
             if ln.startswith("# wavelength_nm:"):
                 try:
@@ -308,7 +308,7 @@ def _load_fit_table_uncached(path):
            'errs':{name:ndarray|None},'status':list|None,'path'}."""
     hdr, rows = None, []
     is_report = False
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
         lines = f.read().split("\n")
     # 헤더 찾기(예전 한 줄씩 규칙 그대로) → 그 뒤 데이터 줄은 한 번에 거른다(줄마다 파이썬 분기가
     # 26만 행에서 ~1 s였다). 거르는 규칙도 같다: 빈 줄·공백뿐인 줄·'#' 주석 줄은 건너뛴다.

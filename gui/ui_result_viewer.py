@@ -587,7 +587,7 @@ class ResultViewerWidget(QWidget):
     # ── R 트렌드 (.dat) → R/Leff 시계열 ────────────────────────────
     def _plot_r_trend(self, path):
         ts, rmean, rstd, leff = [], [], [], []
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
             for ln in f:
                 s = ln.rstrip("\n")
                 if not s.strip() or s.startswith("#") or s.lower().startswith("timestamp"):
@@ -690,7 +690,7 @@ class ResultViewerWidget(QWidget):
     def _plot_concentration(self, path):
         import pandas as pd
         sep = self._detect_sep(path) or r"\s+"
-        df = pd.read_csv(path, sep=sep, comment="#", engine="python")
+        df = pd.read_csv(path, sep=sep, comment="#", engine="python", encoding="utf-8-sig")
         # 첫 컬럼을 시간축으로 시도
         xcol = df.columns[0]
         x_dt = pd.to_datetime(df[xcol], errors="coerce")
@@ -1494,7 +1494,7 @@ class ResultViewerWidget(QWidget):
             QMessageBox.information(self, "Export", "Open a result file first.")
             return
         sep = self._detect_sep(path) or r"\s+"
-        df = pd.read_csv(path, sep=sep, comment="#", engine="python")
+        df = pd.read_csv(path, sep=sep, comment="#", engine="python", encoding="utf-8-sig")
         xcol = df.columns[0]
         x_dt = pd.to_datetime(df[xcol], errors="coerce")
         if x_dt.notna().mean() <= 0.5:
