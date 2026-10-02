@@ -161,7 +161,7 @@ class MonitorWidget(QWidget):
             p.setClipToView(True)
             p.setDownsampling(auto=True, mode="peak")   # 큰 런에서 전 점 마커 → 화면 솎아내기(gui/pg_perf.py)
             p.showGrid(x=True, y=True)
-            p.setLabel('bottom', 'Time')
+            p.setLabel('bottom', 'Time (UTC)')
             p.addLegend(offset=(10, 10))
 
         # Channel colour palette  CH1=blue  CH2=orange  CH3=green
@@ -628,7 +628,8 @@ class MonitorWidget(QWidget):
             p = pg.PlotItem(axisItems={'bottom': ax})
             p.setTitle(f"{gas}  concentration")
             p.setLabel('left', f"{gas} (ppb)")
-            p.setLabel('bottom', 'Time')
+            # Fit output 'Time' is UTC; _conc_time_x + DateAxisItem round-trip it unchanged.
+            p.setLabel('bottom', 'Time (UTC)')
             p.showGrid(x=True, y=True)
             p.setClipToView(True)
             # 캠페인 규모(수십만 점)에서 모든 점에 마커를 그리던 것 — 화면 peak 솎아내기(gui/pg_perf.py).
