@@ -15,6 +15,7 @@ import pyqtgraph as pg
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QMenu, QMessageBox
+from core.raw_parser import PURGE_SETTLE_SEC
 from core.data_io import DataIO
 from core.paths import WV_CAL_DIR
 from gui.theme import AUGUR
@@ -201,7 +202,7 @@ class InputsAlphaMixin:
         self._alpha_out_dir    = out_dir
         self._alpha_avgsec     = float(avg_sec) if avg_sec is not None else 60.0
         # 교정 직후 퍼지 세틀링(초) — 캐비티 잔류가스. 기본 60 은 여수 콜드 실측.
-        self._alpha_purge_settle = float(purge_settle_sec) if purge_settle_sec is not None else 60.0
+        self._alpha_purge_settle = float(purge_settle_sec) if purge_settle_sec is not None else PURGE_SETTLE_SEC
         self._alpha_rt_map     = dict(rt_map or {})   # {raw채널 -> R(t) npz 경로} 채널별
         self._alpha_dark       = getattr(self, 'dark_data', None)
         self._alpha_done_msgs  = []

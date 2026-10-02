@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime
-import inspect
 from typing import Optional
 import warnings
 
@@ -46,11 +45,8 @@ from tools import optimize_params as OP
 # Purge settle: ambient rows within this many seconds after a calibration (ZA/He) block ends
 # still hold purge gas -- the first fit after every hourly ZA came out 0.0 ppb with
 # rms/sig 2545 % (diagnostics/ux_audit_2026-10-02/vigil_v2_monitors.md §1). Augur's alpha
-# generation drops the same window; its default lives in the AlphaExportWorker signature
-# (gui/worker.py), so it is read from there instead of copying the number.
-from gui.worker import AlphaExportWorker as _AlphaExportWorker   # noqa: E402
-PURGE_SETTLE_SEC = float(
-    inspect.signature(_AlphaExportWorker.__init__).parameters["purge_settle_sec"].default)
+# generation drops the same window — one constant in core.raw_parser for both.
+from core.raw_parser import PURGE_SETTLE_SEC   # noqa: E402
 # Roles that are not a calibration block (Augur: is_amb = header or ambient flag).
 _NOT_CAL_ROLES = (None, "sampling", "header")
 

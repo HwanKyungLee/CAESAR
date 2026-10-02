@@ -13,6 +13,7 @@ try:
 except AttributeError:
     pass
 from gui.worker import AlphaExportWorker
+from core.raw_parser import PURGE_SETTLE_SEC
 
 
 def main() -> None:
@@ -26,7 +27,7 @@ def main() -> None:
     p.add_argument("--pixel-max", type=int, default=2048,
                    help="exclusive; use the actual fit/R-cal ROI, not detector edges")
     p.add_argument("--avg-sec", type=float, default=60.0)
-    p.add_argument("--purge-settle-sec", type=float, default=60.0,
+    p.add_argument("--purge-settle-sec", type=float, default=PURGE_SETTLE_SEC,
                    help="drop ambient scans within N sec after a ZA/He block "
                         "(cavity still holding purge gas); 0 keeps them")
     p.add_argument("--rl-factor", type=float, default=1.0)

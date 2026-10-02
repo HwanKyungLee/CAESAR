@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from gui.dlg_dir import dlg_dir
 from gui.theme import AUGUR
 from core.parallel import set_max_workers
+from core.raw_parser import PURGE_SETTLE_SEC
 
 
 def _qsettings():
@@ -82,7 +83,7 @@ class AlphaGeneratorDialog(QDialog):
         self._spin_purge.setRange(0.0, 600.0)
         self._spin_purge.setDecimals(0)
         self._spin_purge.setSingleStep(10.0)
-        self._spin_purge.setValue(60.0)
+        self._spin_purge.setValue(PURGE_SETTLE_SEC)
         self._spin_purge.setFixedWidth(90)
         self._spin_purge.setToolTip(
             "Drop ambient scans within this many seconds after a ZA/He block "

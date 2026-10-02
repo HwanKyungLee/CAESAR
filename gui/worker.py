@@ -5,7 +5,7 @@ import numpy as np
 
 # DataIO gatekeeper call
 from core.data_io import DataIO
-from core.raw_parser import FLAG_HEADER, SATURATION_ADC_MAX, count_saturated
+from core.raw_parser import FLAG_HEADER, PURGE_SETTLE_SEC, SATURATION_ADC_MAX, count_saturated
 from core.parallel import max_workers
 
 # Core engine imports
@@ -2019,7 +2019,7 @@ class AlphaExportWorker(QThread):
                  r_cal_valid_min=0.90,  # ZA block omr_d 유효 픽셀 최소 비율
                  r_cal_omr_max=1e-5,    # block-mean omr_d 상한 — 이보다 크면 reject
                  avg_sec=60.0,          # ambient 시간평균 창(초). 박사님 avgsec=60. 0이면 스캔별(평균 안 함)
-                 purge_settle_sec=60.0, # 교정(ZA/He) 블록 끝 이후 이 초 동안의 ambient 는 제외
+                 purge_settle_sec=PURGE_SETTLE_SEC, # 교정(ZA/He) 블록 끝 이후 이 초 동안의 ambient 는 제외
                                         # — 캐비티 퍼지가스 잔류. 0이면 제외 안 함(옛 동작).
                                         # 기본 60 은 여수 실측 플러시 곡선(§ _process_scan 주석).
                  channel_label="",      # 채널 라벨(PNs/ANs/Cold 등) — 출력 파일명·헤더에 사용

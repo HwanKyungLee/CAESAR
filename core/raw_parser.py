@@ -230,6 +230,12 @@ FLAG_HE_WAIT_BEFORE = FLAG_HE_WAIT
 FLAG_HE_WAIT_AFTER  = FLAG_HE_END
 
 FLAG_STABLE = {FLAG_ZA, FLAG_HE}              # actual measurement windows
+
+# Ambient rows within this many seconds after a calibration (ZA/He) block ends still hold purge
+# gas in the cavity (2026-09-17: the hourly concentration spike; 60 s measured on Yeosu cold).
+# Single source for Augur alpha generation (worker default, Alpha Generator, headless CLI) and
+# Vigil's concentration monitor.
+PURGE_SETTLE_SEC = 60.0
 FLAG_TRANSITIONAL = {FLAG_ZA_SETFLOW, FLAG_ZA_WAIT, FLAG_ZA_END,
                      FLAG_HE_SETFLOW, FLAG_HE_WAIT, FLAG_HE_END}
 
