@@ -77,7 +77,9 @@ def regress_deming(x, y, lam=1.0):
 
     두 기기·두 채널 비교처럼 **x에도 오차가 있으면** OLS 기울기는 0쪽으로 편향된다
     (regression dilution). Deming은 두 축 오차를 같이 본다. lam=1이면 직교회귀(TLS).
-    r2는 OLS와 같은 Pearson r² — 적합 방법과 무관한 '얼마나 직선에 모였나'."""
+    r2는 OLS와 같은 Pearson r² — 적합 방법과 무관한 '얼마나 직선에 모였나'.
+    기울기·절편은 core.agreement.deming(단일 출처 — 원고·교차검증이 쓰는 그 함수)."""
+    from core.agreement import deming
     m = np.isfinite(x) & np.isfinite(y)
     if m.sum() < 3 or not (lam > 0):
         return None
@@ -88,9 +90,9 @@ def regress_deming(x, y, lam=1.0):
     sxy = float(np.mean((x - mx) * (y - my)))
     if sxy == 0 or sxx == 0:
         return None
-    d = syy - lam * sxx
-    slope = (d + np.sqrt(d * d + 4 * lam * sxy * sxy)) / (2 * sxy)
-    inter = my - slope * mx
+    slope, inter = deming(x, y, lambda_ratio=lam)
+    if not np.isfinite(slope):
+        return None
     r2 = sxy * sxy / (sxx * syy) if syy > 0 else np.nan
     return float(slope), float(inter), float(r2), int(m.sum())
 

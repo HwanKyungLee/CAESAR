@@ -6,7 +6,7 @@ P가 NO2와 직교(corr~0)면 깨끗이 제거, 상관 크면 NO2 잠식 위험.
 import sys, os, json, glob
 import numpy as np
 
-from core.physics import air_number_density   # ppb 환산 단일 출처
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처
 from scipy.interpolate import interp1d
 from scipy.optimize import lsq_linear
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,7 +30,7 @@ def linfit(eng, vp, od, poly, custom=None):
 
 def ppb(eng, coef0, T, P):
     n_air = air_number_density(T, P)
-    return (coef0 * eng.multipliers["NO2"] / eng.scaling_factors["NO2"]) / n_air * 1e9
+    return coeff_to_ppb(coef0, eng.multipliers["NO2"], eng.scaling_factors["NO2"], n_air)
 
 
 for name in ["Cold", "Hot-PNs", "Hot-ANs"]:

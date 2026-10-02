@@ -4,7 +4,7 @@ freq_min을 낮추면(0.02→0.005) 느린 fringe(~0.008cyc/px)를 etalon이 포
 import sys, os, json, glob
 import numpy as np
 
-from core.physics import air_number_density   # ppb 환산 단일 출처
+from core.physics import air_number_density, coeff_to_ppb   # ppb 환산 단일 출처
 from scipy.interpolate import interp1d
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -34,7 +34,7 @@ def fit_floor(eng, fitter, rp, wave, alpha, T, P, pmin, pmax, poly, fmin):
     rms = float(np.sqrt(np.mean(resid ** 2))); sig = float(np.sqrt(np.mean(tot ** 2)))
     n_air = air_number_density(T, P)
     gi = eng.gas_list.index("NO2")
-    no2 = (gco[gi] * eng.multipliers["NO2"] / eng.scaling_factors["NO2"]) / n_air * 1e9
+    no2 = coeff_to_ppb(gco[gi], eng.multipliers["NO2"], eng.scaling_factors["NO2"], n_air)
     rr = resid - resid.mean()
     ac = np.dot(rr[:-1], rr[1:]) / (np.dot(rr, rr) + 1e-30)
     period = 2 * np.pi / ef if ef > 0 else 0
