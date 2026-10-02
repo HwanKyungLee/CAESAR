@@ -10,7 +10,7 @@
 - **col 2053–4100 (청색 LED, 'ch1', 핏창 430–462 nm, roi2) = ΣANs 300 °C / col 4101–6148 (469 nm LED, 'ch2', 444–471 nm, roi1) = ΣPNs 180 °C.**
 - 2026-09-25~27에 쓴 'ch2 = 300 °C'는 **오판**이었다(철회). 근거·영향 목록: [`CHANNEL_IDENTITY_YEOSU2026.md`](CHANNEL_IDENTITY_YEOSU2026.md).
 - raw 블록 번호·라벨·기억만으로 채널을 정하지 말 것 — 8/11 이후 광섬유 배치가 바뀌었다. **LED 스펙트럼 모양**으로 판단.
-- **채널 정의(블록 이름·HK 열·채널별 압력/온도 센서·유효 날짜)는 `vigil/profiles/*.json` 한 곳**이다(2026-10-02 단일화) — Augur(`core/raw_parser`가 import 때 읽음)와 Vigil이 같은 파일을 본다. 핫 프로파일은 파일명 날짜 2026-05-01~08-31에만 ANs/PNs 이름을 붙인다(`match.date_range`, 그 밖은 ch1/ch2). 프로파일은 **기본(구조, `base_*.json`) + 미션(셀 정체·센서·FitSet·날짜)** 두 층 — 채널 추가·배치 변경은 Augur Setup **'Vigil…'**(미션 패키지 내보내기)로, 코드는 안 고친다: `vigil/profiles/README.md`.
+- **채널 정의(블록 이름·HK 열·채널별 압력/온도 센서·유효 날짜)는 `vigil/profiles/*.json` 한 곳**이다(2026-10-02 단일화) — Augur(`core/raw_parser`가 import 때 읽음)와 Vigil이 같은 파일을 본다. 핫 프로파일은 파일명 날짜 2026-05-01~08-31에만 ANs/PNs 이름을 붙인다(`match.date_range`, 그 밖은 ch1/ch2). 프로파일은 **기본(구조, `base_*.json`) + 미션(셀 정체·센서·FitSet·날짜)** 두 층 — 채널 추가·배치 변경은 Augur Setup 탭 **Vigil → 'Export Mission…'**(미션 패키지 내보내기)로, 코드는 안 고친다: `vigil/profiles/README.md`.
 - 압력 센서 짝(2053 ↔ `p_ans_cavity` 6164, 4101 ↔ `p_pns_cavity` 6162 — 옛 이름 `P_ANs`/`P_PNs`)은 프로파일 채널의 `cavity` 목록이 정하고 `core/data_io.py`가 그걸 따른다. R 경로의 `col_press` 인자는 받기만 하고 안 쓰인다(`data_io` 경유) — 그 상수를 근거로 삼지 말 것.
 
 ## 뭘 만드는 저장소인가

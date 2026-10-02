@@ -111,6 +111,23 @@ class CavityTabMixin:
         grp_pipe.setLayout(lay_pipe)
         control_layout.addWidget(grp_pipe)
 
+        # Group: Vigil — hand the finished FitSet over to the live monitor (mission package).
+        grp_vigil = QGroupBox("Vigil")
+        lay_vigil = QVBoxLayout()
+        btn_vigil = QPushButton("Export Mission…")
+        btn_vigil.setToolTip(
+            "Export a mission package for Vigil: this FitSet + references + wavelength calibrations,\n"
+            "with which raw block is which cell and which sensors it uses — one self-contained\n"
+            "folder to copy to the measurement PC (USB). Save the FitSet first.")
+
+        def _open_vigil_export():
+            from gui.dlg_mission_export import open_mission_export
+            open_mission_export(self)
+        btn_vigil.clicked.connect(_open_vigil_export)
+        lay_vigil.addWidget(btn_vigil)
+        grp_vigil.setLayout(lay_vigil)
+        control_layout.addWidget(grp_vigil)
+
         # S-A: 고급 설정 구분선 — Cavity/Override/Detector는 캠페인 시작 때 한 번 맞추고
         # 평소엔 안 건드리므로 접이식 '고급' 영역으로 묶는다.
         _adv_hdr = QLabel("──  Advanced (set once per campaign)  ──")

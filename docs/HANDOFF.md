@@ -22,7 +22,7 @@
   id 그대로. 미션이 없는 날짜 → 기본: Augur 는 ch1/ch2 + 옛 슬롯 규칙(값 동일), Vigil 은 HK·**빛이 들어오는
   블록만** 램프·포화·유입(농도·R 만 빠짐, P2 "No mission"). HK 결측 0/65535 → NaN(0 °C 아님), 경보는
   밴드 있는 필드·채널 1순위 캐비티 센서만.
-- `f8c672e` **미션 패키지**(`core/mission_package.py`): Augur Setup **"Vigil…"**(`gui/dlg_mission_export.py`) —
+- `f8c672e` **미션 패키지**(`core/mission_package.py`): Augur Setup 탭 Vigil 그룹 **"Export Mission…"**(`gui/dlg_mission_export.py`) —
   FitSet 채널마다 raw 구성·블록·셀 이름·센서를 사람이 정하고 **Check with raw…**(블록 스펙트럼, lit/DARK,
   '핏 창이 LED 반치 안 ✓/✗'), Export → 자기완결 폴더(FitSet·refs·wavecal 사본, 경로 상대, manifest sha1·
   출처) + 이 PC Augur 에 설치(`vigil/profiles/missions/` — **커밋하면 분석 PC 끼리 공유**). Vigil 대시보드
@@ -30,7 +30,7 @@
 - 3단계: `tools/bundle_vigil_deps.py` 삭제(패키지가 대체). Vigil 'Augur data…' 는 절대경로 옛 미션(여수)용으로 남김.
 
 **출력 불변**: 기준선 7파일 데이터 경로(flag·T·P·스펙트럼) 동일. 표기만: 날짜 밖 핫 kind `hot(no mission)`.
-**다음 배치가 바뀌면**: 그 배치 raw 하나 + FitSet 으로 "Vigil…" — 그게 이전에 미뤄 둔 '프로파일 초안 도구'다.
+**다음 배치가 바뀌면**: 그 배치 raw 하나 + FitSet 으로 "Export Mission…" — 그게 이전에 미뤄 둔 '프로파일 초안 도구'다.
 
 ## 2026-10-02 (4) — 리뷰 수정 + 채널 정의 단일화 (프로파일 JSON = 유일한 정본)
 

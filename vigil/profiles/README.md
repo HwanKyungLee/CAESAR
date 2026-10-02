@@ -75,7 +75,7 @@ Augur 는 블록 이름 ch1/ch2 + 옛 슬롯 규칙 T/P, Vigil 은 **HK·블록 
 
 ## 채널을 추가하거나 배치가 바뀌었을 때 — 미션 패키지 (권장)
 
-**코드는 고치지 않는다.** Augur Setup 탭 **"Vigil…"** 버튼 → *Export mission for Vigil*:
+**코드는 고치지 않는다.** Augur Setup 탭 **Vigil** 그룹의 **"Export Mission…"** 버튼:
 
 1. FitSet(저장된 것)과 미션 이름·**시작 날짜**를 정한다. 같은 열 수의 옛 미션과 날짜가 겹치면 설치가
    거부된다 — 옛 미션의 끝 날짜를 먼저 정할 것.

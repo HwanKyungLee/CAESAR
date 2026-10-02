@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""gui/dlg_mission_export.py — Setup 탭 'Vigil…' — FitSet 을 Vigil 용 미션 패키지로 내보낸다.
+"""gui/dlg_mission_export.py — Setup 탭 Vigil 그룹 'Export Mission…' — FitSet 을 Vigil 용 미션 패키지로 내보낸다.
 
 FitSet 은 "어느 raw 의 어느 블록이 어느 셀인가"를 모른다(채널 키 = 탭 번호, data_label 은 뒤바뀐 이력).
 여기서 사람이 채널마다 **raw 구성·블록·이름·캐비티 센서**를 한 번 확정하고(raw 파일로 블록 스펙트럼과

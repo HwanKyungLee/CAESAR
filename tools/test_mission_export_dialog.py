@@ -1,4 +1,4 @@
-"""Setup 탭 'Vigil…' 미션 내보내기 대화상자 자체검증 — 합성 FitSet·raw, Qt offscreen.
+"""Setup 탭 Vigil 그룹 'Export Mission…' 미션 내보내기 대화상자 자체검증 — 합성 FitSet·raw, Qt offscreen.
 
   1) FitSet 을 열면 채널마다 한 줄, 기본값(여수 미션의 같은 블록 센서)이 채워진다
   2) Check with raw: 밝은 블록 = lit + 핏 창이 LED 반치 구간 안 ✓, 어두운 블록 = DARK
