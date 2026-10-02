@@ -379,6 +379,14 @@ class AnalysisRunMixin:
                 step_ch = step_limit_val
                 kq_ch = self.spin_kalman_q.value(); kr_ch = self.spin_kalman_r.value()
 
+            if not list(getattr(eng_ch, 'gas_list', []) or []):
+                # Used to fit with no references at all and report success (UX audit 2026-10-02).
+                QMessageBox.warning(
+                    self, "No references",
+                    f"CH{ch} has data but no locked references — nothing to fit.\n"
+                    "Add references to this channel tab (or remove its data) and Lock.")
+                self.b_run.setEnabled(True)
+                return
             if pmax - pmin < 2:
                 # A window outside the wavelength calibration collapses to px 0-0; the worker used
                 # to treat that as "no slice" and silently fit the whole alpha range (UX audit
