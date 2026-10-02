@@ -278,7 +278,10 @@ class Watcher:
         # 섞이면 '연속 N행 실패 시 캐시' 같은 걸 넣을 것."""
         cached = self._profile_cache.get(path)
         if cached is not None:
-            return cached
+            # 파일 중간의 짧은(잘린·깨진) 행 — 캐시된 프로파일로 넘기면 HK 평가가 IndexError 를 내
+            # 그 tick 의 행(~80개)이 통째로 버려졌다(2026-10-02 리뷰). 그 행만 미배정으로.
+            # raw_parser 의 `len(toks) < ncols` 가드와 같은 뜻.
+            return cached if cached.match.col_compatible(n_columns) else None
         prof = self.profiles.route(filename=os.path.basename(path), n_columns=n_columns)
         if prof is not None:
             self._profile_cache[path] = prof
