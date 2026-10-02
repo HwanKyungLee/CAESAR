@@ -865,11 +865,30 @@ class MonitorWidget(QWidget):
                 continue
             ch, k = hit
             tx = self._trend_data[ch]['x'][k]
-            d = self._conc_data[self._conc_gases[0]].get(ch)
-            if d and d['r']:
-                j = min(range(len(d['x'])), key=lambda i: abs(d['x'][i] - tx))
-                self.conc_point_clicked.emit(d['r'][j])
+            r = self._conc_result_at(ch, tx)
+            if r is not None:
+                self.conc_point_clicked.emit(r)
+            else:
+                # 같은 시각의 핏이 없다 = 건너뛴(Skip) 스캔(Fast 추세엔 RMS=0 점으로 그려진다).
+                # 예전엔 '시각이 가장 가까운' 이웃 스캔을 말없이 재생했다(2026-10-02 리뷰).
+                from PyQt6.QtGui import QCursor
+                from PyQt6.QtWidgets import QToolTip
+                QToolTip.showText(QCursor.pos(), "No fit at this point (skipped scan) — nothing to replay")
             return
+
+    def _conc_result_at(self, ch, tx):
+        """채널 ch 에서 시각이 tx 와 **같은** 핏 결과 — 그 채널에 실제로 있는 기체 아무거나에서 찾는다
+        (첫 기체가 이 채널에 없으면 클릭이 말없이 무시되던 것). 없으면 None. x 는 추세·농도 모두
+        _conc_time_x 로 만든 같은 값(epoch 초, 실패 시 행 번호)이라 1 ms 여유로 비교한다."""
+        for gas in self._conc_gases:
+            d = self._conc_data.get(gas, {}).get(ch)
+            if not d or not d['r']:
+                continue
+            xs = d['x']
+            j = min(range(len(xs)), key=lambda i: abs(xs[i] - tx))
+            if abs(xs[j] - tx) <= 1e-3:
+                return d['r'][j]
+        return None
 
     def _export_conc_png(self):
         """현재 농도 그래프(보이는 레이아웃)를 PNG로 저장."""
