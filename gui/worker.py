@@ -2344,6 +2344,12 @@ class AlphaExportWorker(QThread):
                 _hits = {fp for fp in _files
                          if _ac.available(fp, self.channel, self.pixel_min, self.pixel_max)}
             _miss = [fp for fp in _files if fp not in _hits]
+
+            def _stamp(fp):
+                try:
+                    return _ac.file_stamp(fp)
+                except OSError:
+                    return None
             n_cache_hit = n_cache_saved = 0
             # ── 콜드 HDD 대책: 디스크를 읽는 주체를 프리페치 스레드 **하나**로 모은다 ──
             # 실측(diagnostics/parallel_scaling_2026-09/measure_prefetch.py, 핫 raw 8파일):
@@ -2397,7 +2403,8 @@ class AlphaExportWorker(QThread):
                         if _ti >= len(_tasks):
                             return
                         _pf_ready()
-                        _futs.append((_miss[_ti], _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
+                        _st = _stamp(_miss[_ti])          # 파싱 **전** stamp — 캐시 키(alpha_cache.store)
+                        _futs.append((_miss[_ti], _st, _ex.submit(_xtr, _tasks[_ti]))); _ti += 1
 
                     while _ti < len(_tasks) and len(_futs) < _win:
                         _submit_next()
@@ -2412,16 +2419,18 @@ class AlphaExportWorker(QThread):
                         elif _fp in _hits:
                             # 손상·키 불일치·잘라 쓰기 불안전 — 그 자리에서 다시 파싱(드묾)·저장.
                             try:
+                                _st = _stamp(_fp)
                                 _, _flags, _Ts, _Ps, _specs, _secs = _xtr(
                                     (_fp, self.pixel_min, self.pixel_max, self.channel))
-                                _ac.store(_fp, self.channel, self.pixel_min, self.pixel_max,
-                                          _flags, _Ts, _Ps, _specs, _secs)
-                                n_cache_saved += 1
+                                if _st is not None and _ac.store(
+                                        _fp, self.channel, self.pixel_min, self.pixel_max,
+                                        _flags, _Ts, _Ps, _specs, _secs, stamp=_st):
+                                    n_cache_saved += 1
                             except Exception as e:
                                 self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
                                 _flags = None
                         else:
-                            _qfp, _fut = _futs.popleft()
+                            _qfp, _st, _fut = _futs.popleft()
                             assert _qfp == _fp, (_qfp, _fp)   # 미스는 파일 순서대로 제출·소비된다
                             try:
                                 _, _flags, _Ts, _Ps, _specs, _secs = _fut.result()
@@ -2429,9 +2438,10 @@ class AlphaExportWorker(QThread):
                                 self.status_msg.emit(f"SKIP(parse) {os.path.basename(_fp)}: {e}")
                                 _flags = None
                             _submit_next()
-                            if _flags is not None and _use_cache:
-                                _ac.store(_fp, self.channel, self.pixel_min, self.pixel_max,
-                                          _flags, _Ts, _Ps, _specs, _secs)
+                            if (_flags is not None and _use_cache and _st is not None
+                                    and _ac.store(_fp, self.channel, self.pixel_min,
+                                                  self.pixel_max, _flags, _Ts, _Ps, _specs,
+                                                  _secs, stamp=_st)):
                                 n_cache_saved += 1
                         if _flags is None:
                             for _ri in _rpf[_fp]:
