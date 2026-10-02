@@ -286,6 +286,34 @@ def archive_existing(path: str, base: str) -> str | None:
     return dst
 
 
+QC_BACKUP_KEYS = ('_qc_orig', '_qc_orig_sm', '_qc_orig_status')
+
+
+def flatten_qc_backup(df):
+    """Turn the in-memory QC backup (dict-valued `_qc_orig*` columns) into plain columns.
+
+    Auto QC / settling NaN the gas columns and overwrite Status; the originals live in
+    `_qc_orig` dicts, which pandas wrote as `{'NO2': np.float64(...)}` repr strings — the
+    pre-QC values could not be read back from the file (charter ①). Writes `{gas}_preQC`
+    (raw fit value before any exclusion) and `Status_preQC`; rows with no backup copy
+    the current value. `_qc_orig_sm` is dropped: Kalman smoothing is re-derivable from
+    `{gas}_preQC`. Returns a new DataFrame."""
+    out = df.drop(columns=[c for c in QC_BACKUP_KEYS if c in df.columns])
+    if '_qc_orig' in df.columns:
+        gases = []
+        for d in df['_qc_orig']:
+            if isinstance(d, dict):
+                gases += [g for g in d if g not in gases]
+        for g in gases:
+            cur = df[g] if g in df.columns else [float('nan')] * len(df)
+            out[f'{g}_preQC'] = [d[g] if isinstance(d, dict) and g in d else c
+                                 for d, c in zip(df['_qc_orig'], cur)]
+    if '_qc_orig_status' in df.columns and 'Status' in df.columns:
+        out['Status_preQC'] = [o if isinstance(o, str) else s
+                               for o, s in zip(df['_qc_orig_status'], df['Status'])]
+    return out
+
+
 def write_result(out: str, comments, colhdr, rows, note: str = '', extra=()):
     """주석헤더 + 이력주석 + 컬럼헤더 + 행 저장.
 

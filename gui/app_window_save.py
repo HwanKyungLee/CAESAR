@@ -129,7 +129,9 @@ class SaveExportMixin:
                 
                 if 'Params' in df.columns:
                     df = df.drop(columns=['Params'])
-                    
+                from core.result_io import flatten_qc_backup
+                df = flatten_qc_backup(df)
+
                 current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 robust_on = hasattr(self, 'chk_robust') and self.chk_robust.isChecked()
                 robust_status = "ON" if robust_on else "OFF"
@@ -269,6 +271,7 @@ class SaveExportMixin:
                         f"# Etalon Term (sin/cos fringe): {'ON' if cfg.get('use_etalon', True) else 'OFF'}",
                         f"# Allow Negative Gas (±Neg): {neg}",
                         f"# Auto QC: {qc_str}",
+                        "# Excluded rows: gas columns NaN; pre-exclusion values in {gas}_preQC, Status_preQC",
                         f"# Step Limit: {cfg.get('step_limit', step_val)} px",
                         f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (low-signal retry trigger; "
                         f"OK/Unstable label = Chi2 <= {_MISFIT_CHI2})",
