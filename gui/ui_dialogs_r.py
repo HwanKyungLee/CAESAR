@@ -510,11 +510,11 @@ class RCalibratorDialog(QDialog):
                 COL_PRESS_COLD, COL_TEMP_COLD, COL_PRESS_HOT_ANS, COL_TEMP_HOT)
         except ImportError:
             # 도구 폴더를 못 찾을 때도 숫자 사본을 두지 않는다 — raw 레이아웃 단일 출처에서.
-            from core.raw_parser import ColdHKMap, HotHKMap, SPEC_PRIMARY, SPEC_SECONDARY
+            from core.raw_parser import hk_col, SPEC_PRIMARY, SPEC_SECONDARY
             SPEC_START_DEFAULT, SPEC_END_DEFAULT = SPEC_PRIMARY
             SPEC_START_ANS, SPEC_END_ANS = SPEC_SECONDARY
-            COL_PRESS_COLD, COL_TEMP_COLD = ColdHKMap["cavity_P"][0], ColdHKMap["cavity_T"][0]
-            COL_PRESS_HOT_ANS, COL_TEMP_HOT = HotHKMap["P_ANs"][0], HotHKMap["cavity_gas_T"][0]
+            COL_PRESS_COLD, COL_TEMP_COLD = hk_col(6179, "p_cavity"), hk_col(6179, "t_cavity")
+            COL_PRESS_HOT_ANS, COL_TEMP_HOT = hk_col(6181, "p_ans_cavity"), hk_col(6181, "cell_heater")
 
         out_dir = self._out_root()
         # R(t) npz는 하루짜리가 아니라 기간 전체의 교정 산출물이라 날짜 폴더가 아니라

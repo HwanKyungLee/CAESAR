@@ -21,8 +21,12 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from core.raw_parser import (RawParser, ColdHKMap, HotHKMap, SPEC_PRIMARY,
+from core.raw_parser import (RawParser, SPEC_PRIMARY, layout_for,
                              SPEC_SECONDARY, META_COLS, spec_blocks_for_ncols)
+
+# 레이아웃의 HK 지도는 프로파일(vigil/profiles)에서 온다 — 채널 정의 단일 출처(2026-10-02)
+ColdHKMap = layout_for(6179)[0].hk_map
+HotHKMap = layout_for(6181)[0].hk_map
 
 _n_pass = 0
 _n_fail = 0

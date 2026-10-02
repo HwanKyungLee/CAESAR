@@ -92,14 +92,15 @@ if __name__ == '__main__':
     app.setFont(_font)
 
     # ── 캠페인 레이아웃 등록 ──────────────────────────────────────────────────
-    # raw .dat의 컬럼 배치(채널 블록·HK 열)는 캠페인마다 다르다. 기본 등록은 2026 여수
-    # 구성이고, `vigil/profiles/`에 다른 구성의 프로파일 JSON이 있으면 여기서 함께
-    # 등록된다 — **새 캠페인은 코드를 고치지 않고 JSON만 얹으면 된다**(열 수로 자동 라우팅).
-    # 이미 아는 열 수는 덮지 않는다. 실패해도 앱은 그대로 뜬다.
+    # raw .dat의 컬럼 배치(채널 블록·HK 열·채널별 압력/온도 센서)는 `vigil/profiles/*.json` 이
+    # 단일 출처다(2026-10-02) — raw_parser 가 import 때 읽어 등록하고, 여기서는 상태만 보인다
+    # (import 뒤에 폴더에 넣은 프로파일도 이때 등록된다). 실패해도 앱은 그대로 뜬다.
     try:
         from core.raw_parser import autoload_campaign_layouts, CAMPAIGN_LAYOUTS
         _new = autoload_campaign_layouts()
-        splash.step("layouts", f"{len(CAMPAIGN_LAYOUTS)} known ({len(_new)} from profiles)")
+        _n = sum(len(v) for v in CAMPAIGN_LAYOUTS.values())
+        splash.step("layouts", f"{_n} from profiles" + (f" (+{len(_new)} new)" if _new else ""),
+                    "ok" if _n else "fail")
     except Exception as _e:   # noqa: BLE001
         print(f"[main] skipped campaign layout auto-registration: {_e}")
         splash.step("layouts", f"{type(_e).__name__}", "fail")

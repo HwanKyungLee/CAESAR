@@ -18,8 +18,7 @@ from .raw_parser import (
     P_SCALE as _RP_P_SCALE,
     P_VALID_LO as _RP_P_LO,
     P_VALID_HI as _RP_P_HI,
-    CAMPAIGN_LAYOUTS as _CAMPAIGN_LAYOUTS,
-    ROLE_BLOCKS as _RP_ROLE_BLOCKS,
+    layout_for as _rp_layout_for,
     _in_date_range as _rp_in_date_range,
     FLAG_HEADER,
     FLAG_AMBIENT,
@@ -280,7 +279,7 @@ class DataIO:
     # NOTE: these are offsets from DataIO's *dynamic* hk_start
     # (= META_COLS + n_active_channels × CH_PIXELS), which for 2-ch hot files
     # equals raw_parser.HK_START (6149). They therefore resolve to the same
-    # absolute columns as raw_parser.HotHKMap / ColdHKMap for hot files
+    # absolute columns as the profile-built raw_parser layouts for hot files
     # (hot_p→6162=P_PNs, oven_pns→6154, etc.). They are intentionally NOT
     # replaced by the raw_parser maps because DataIO's hk_start is computed
     # from the active-channel count, so changing the offset scheme here could
@@ -301,11 +300,19 @@ class DataIO:
         if dr and not _rp_in_date_range(str(filepath), None, dr):
             return None
         start = DataIO._META_COLS + (int(ch) - 1) * DataIO._CH_PIXELS
-        for name, role in lay.channels.items():
-            blk = _RP_ROLE_BLOCKS.get(role) if isinstance(role, str) else tuple(role)
-            if blk is not None and int(blk[0]) == start:
-                return str(name)
-        return None
+        return lay.channel_at(start)
+
+    # ── 채널 정의가 없는 블록용 T/P 폴백(구조적 슬롯 규칙) ─────────────────────────
+    # 프로파일 채널이 정의한 블록은 그 채널의 `cavity` 목록만 쓴다(아래 load_measurement_with_hk).
+    # 여기는 **정의가 없는** 경우 — 날짜 구간 밖(배치가 바뀐 뒤, 아직 프로파일 없음)이거나 그 블록에
+    # 신호 채널이 없을 때 — 의 옛 슬롯 규칙이다. 9/27 이후 실험실 raw 는 block 4101 = 300 °C 셀이라
+    # 슬롯 2 는 300 °C 경로 압력(p_ans_cavity)이 먼저다. 새 배치가 확정되면 그 배치의 프로파일을
+    # date_range 와 함께 추가하는 것이 답이고(그러면 이 폴백을 안 탄다), 이 규칙을 늘리지 말 것.
+    _SLOT_P = {1: ('p_pns_cavity', 'p_cavity'),
+               2: ('p_ans_cavity', 'p_pns_cavity', 'p_cavity')}
+    _SLOT_T = {1: ('tempcell1', 'tempcell2', 't_cavity'),
+               2: ('tempcell2', 'tempcell1', 't_cavity')}
+    _SLOT_T_LAST = 'cell_heater'    # 셀히터 **설정값**(~75 °C) — 최후 폴백, ppb ~15 % 과대
 
     @staticmethod
     def _warn_once(msg: str) -> None:
@@ -323,8 +330,8 @@ class DataIO:
         'oven_ans': 2,    # ANs oven setpoint             → /100 = °C (~300°C)
         # 셀 통과 가스의 실측 온도(tempcell, 박사님 확인 2026-06-10). ppb 밀도보정(n_air)
         # 기준은 설정값(hot_cav_t 75°C)이 아니라 이 실측값이다 (CH1≈34, CH2≈31.5°C).
-        'tempcell1': 25,  # CH1(PNs) cell gas temperature → /100 = °C
-        'tempcell2': 26,  # CH2(ANs) cell gas temperature → /100 = °C
+        'tempcell1': 25,  # 슬롯 1(block 2053; 여수 = ANs) cell gas T → /100 = °C
+        'tempcell2': 26,  # 슬롯 2(block 4101; 여수 = PNs) cell gas T → /100 = °C
     }
     _P_SCALE = _RP_P_SCALE                 # raw count → mbar (~0.6895), shared
     _P_LO, _P_HI = _RP_P_LO, _RP_P_HI      # plausible atmospheric pressure range, shared
@@ -834,7 +841,7 @@ class DataIO:
             raw_probe = DataIO._read_row_raw(filepath, row_index)
             # 이 행의 raw 구성 — **열 수가 곧 구성**이다(6181 hot / 6179·6174 cold).
             # 값이 그럴듯한지로 열을 찾지 않기 위한 단일 진입점.
-            _lay = _CAMPAIGN_LAYOUTS.get(len(raw_probe))
+            _lay, _ = _rp_layout_for(len(raw_probe), filepath)
 
             # Safe defaults in case housekeeping columns are missing.
             # flag는 Araon 분기에서 raw col4로 덮어쓰고, 비-Araon 1D 분기는
@@ -911,40 +918,42 @@ class DataIO:
                                     return float(v) * ent[1]
                         return np.nan
 
-                    # 채널별 선호 이름 → 공통 이름 → 같은 kind 아무거나.
-                    # 'Cold'/'Hot' 같은 구성 이름으로 분기하지 않는다(Vigil 설계 §0-A.6).
-                    # ★ 압력 센서는 **채널 정체(이름)로** 고른다 — 슬롯 번호로 고르지 않는다
-                    #   (2026-09-27 판정, CHANNEL_IDENTITY_YEOSU2026.md §4). 여수 캠페인에서
-                    #   P_ANs(6164)는 300 °C 경로 = primary(block 2053, 'ANs'),
-                    #   P_PNs(6162)는 180 °C 경로 = secondary(block 4101, 'PNs').
-                    #   근거: 6164가 캠페인 내내 ~43 mbar 낮고, 9/27 180 °C 라인만 바꿨을 때
-                    #   6162의 He−ZA dP만 18→10 mbar로 변함(6164는 41→43 그대로).
-                    #   예전 코드는 슬롯 1 ← P_PNs, 슬롯 2 ← P_ANs 로 **반대**였다(채널당 ~0.6 %).
-                    #   이름이 없는 파일(date_range 밖·미등록)은 예전 슬롯 규칙을 유지한다 —
-                    #   9/27 이후 실험실 raw는 block 4101 = 300 °C 셀이라 그 규칙이 맞다.
+                    # ★ 어느 센서가 이 채널 캐비티의 압력·기체온도인가는 **프로파일 채널 정의**
+                    #   (`cavity.pressure_hk`·`temperature_hk`, 우선순위 순)가 정한다 — 채널 정의 단일
+                    #   출처(2026-10-02). 여기서 채널 이름(ANs/PNs)으로 분기하지 않는다.
+                    #   여수 핫: ANs(block 2053) ↔ p_ans_cavity(6164, 300 °C 경로), PNs(4101) ↔
+                    #   p_pns_cavity(6162) — 2026-09-27 판정(CHANNEL_IDENTITY_YEOSU2026.md §4). 근거:
+                    #   6164가 캠페인 내내 ~43 mbar 낮고, 9/27 180 °C 라인만 바꿨을 때 6162의 He−ZA dP만
+                    #   18→10 mbar로 변함. 셀 온도(tempcell1/2)의 캐비티 짝은 데이터로 특정 불가(항상
+                    #   +3.1–3.4 °C 차) — 영향 < 0.1 %.
+                    # (_slot_identity 를 거친다 — diagnostics/reprocess_2026-09-28 가 이걸 None 으로
+                    #  바꿔 9/27 이전 슬롯 규칙을 재현한다.)
                     _ident = DataIO._slot_identity(_lay, ch, filepath)
-                    if _ident == 'ANs':
-                        pv = _get('P_ANs', 'cavity_P', 'p_cavity')
-                    elif _ident == 'PNs':
-                        pv = _get('P_PNs', 'cavity_P', 'p_cavity')
-                    elif ch >= 2:
-                        pv = _get('P_ANs', 'P_PNs', 'cavity_P', 'p_cavity')
+                    _cav = _lay.cavity.get(_ident) if _ident else None
+                    if _cav:
+                        # 채널이 정의한 목록만 — kind 로 아무 센서나 고르지 않는다. 목록이 다 결측이면
+                        # 기본값(아래 env_t/env_p 초기값)과 경고.
+                        pv = _get(*_cav[0])
+                        tv = _get(*_cav[1])
+                        if not np.isfinite(pv):
+                            DataIO._warn_once(
+                                f"{_ident}: no valid cavity pressure in {list(_cav[0])} — using "
+                                f"{env_p} mbar (check the profile's cavity.pressure_hk)")
+                        if not np.isfinite(tv):
+                            DataIO._warn_once(
+                                f"{_ident}: no valid cavity temperature in {list(_cav[1])} — using "
+                                f"{env_t} °C (check the profile's cavity.temperature_hk)")
                     else:
-                        pv = _get('P_PNs', 'cavity_P', 'p_cavity')
-                    # 셀 온도 센서(tempcell1/2)의 캐비티 짝은 데이터로 특정 불가(오븐과 무관하게
-                    # 항상 +3.1–3.4 °C 차) — 영향 < 0.1 %라 슬롯 규칙 그대로 둔다.
-                    if ch >= 2:
-                        tv = _get('tempcell2', 'tempcell1', 'cavity_T', 't_cavity')
-                    else:
-                        tv = _get('tempcell1', 'tempcell2', 'cavity_T', 't_cavity')
-                    if not np.isfinite(pv):
-                        pv = _any_of_kind('press')
-                    if not np.isfinite(tv):
-                        # 최후: 셀히터 **설정값**(~75 °C). 실측 가스온도보다 45 K 높아
-                        # ppb 를 ~15 % 과대평가하므로 정말 마지막이다.
-                        tv = _get('cavity_gas_T')
-                    if not np.isfinite(tv):
-                        tv = _any_of_kind('temp')
+                        # 정의 없는 블록(구간 밖·신호 채널 없음) — 옛 슬롯 규칙(위 _SLOT_*).
+                        _slot = 2 if ch >= 2 else 1
+                        pv = _get(*DataIO._SLOT_P[_slot])
+                        tv = _get(*DataIO._SLOT_T[_slot])
+                        if not np.isfinite(pv):
+                            pv = _any_of_kind('press')
+                        if not np.isfinite(tv):
+                            tv = _get(DataIO._SLOT_T_LAST)
+                        if not np.isfinite(tv):
+                            tv = _any_of_kind('temp')
 
                     if np.isfinite(pv):
                         env_p = float(pv)

@@ -50,8 +50,7 @@ from core.raw_parser import (  # noqa: E402
     SPEC_PRIMARY,
     SPEC_SECONDARY,
     P_SCALE,
-    HotHKMap,
-    ColdHKMap,
+    hk_col as _hk_col,
 )
 
 try:
@@ -145,15 +144,16 @@ FLAG_HE = [_RP_FLAG_HE]    # = [510]
 PIXEL_MIN = 0
 PIXEL_MAX = None
 
-# Cold
-COL_PRESS_COLD = ColdHKMap["cavity_P"][0]     # 6160
-COL_TEMP_COLD  = ColdHKMap["cavity_T"][0]     # 6173
+# 열 번호는 채널 정의 단일 출처(vigil/profiles → core.raw_parser 레이아웃)에서 — 사본을 두지 않는다.
+# Cold (6179열)
+COL_PRESS_COLD = _hk_col(6179, "p_cavity")        # 6160
+COL_TEMP_COLD  = _hk_col(6179, "t_cavity")        # 6173
 
-# Hot — two cavities, separate pressures, shared gas temperature
-COL_PRESS_HOT     = HotHKMap["P_PNs"][0]        # 6162 (레거시 기본값)
-COL_TEMP_HOT      = HotHKMap["cavity_gas_T"][0] # 6155, cavity gas T setpoint ~75 °C
-COL_PRESS_HOT_PNS = HotHKMap["P_PNs"][0]        # 6162
-COL_PRESS_HOT_ANS = HotHKMap["P_ANs"][0]        # 6164
+# Hot (6181열, 여수 날짜) — two cavities, separate pressures, shared gas temperature
+COL_PRESS_HOT     = _hk_col(6181, "p_pns_cavity") # 6162 (레거시 기본값)
+COL_TEMP_HOT      = _hk_col(6181, "cell_heater")  # 6155, cavity gas T setpoint ~75 °C
+COL_PRESS_HOT_PNS = _hk_col(6181, "p_pns_cavity") # 6162
+COL_PRESS_HOT_ANS = _hk_col(6181, "p_ans_cavity") # 6164
 
 # Spectrum slices (re-export from raw_parser for callers)
 SPEC_START_DEFAULT = SPEC_PRIMARY[0]      # 2053 — 콜드 NO2 / 여수 핫 ANs

@@ -66,7 +66,7 @@ def main():
           ps.route(filename="2026-08-31-024 Hot.dat", n_columns=NC) is not None
           and ps.route(filename="2026-09-01-001 Hot.dat", n_columns=NC) is None)
 
-    lay = raw_parser.CAMPAIGN_LAYOUTS.get(NC)
+    lay, _ = raw_parser.layout_for(NC, "2026-06-20-001 Hot.dat")
     check("프로파일 date_range == raw_parser 6181열 레이아웃 date_range",
           lay is not None and tuple(hot.match.date_range) == tuple(lay.date_range),
           (hot.match.date_range, lay and lay.date_range))

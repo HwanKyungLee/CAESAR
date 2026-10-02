@@ -1,16 +1,18 @@
-"""raw 레이아웃 레지스트리 회귀 검사 — 캠페인별 컬럼 지도를 **데이터로** 다룬다.
+"""raw 레이아웃 레지스트리 회귀 검사 — 채널 정의는 **vigil/profiles/*.json 한 곳**에서 온다.
 
 지키는 것:
-  1. 2026 여수 내장 구성(6179 cold / 6181 hot)의 파싱 결과가 하드코딩 시절과 같다.
-     (채널 블록·HK 절대열·kind, 그리고 HK 맵 **객체 동일성** — 기존 코드가 `is`로 본다)
+  1. 프로파일에서 만든 2026 여수 구성(6179 cold / 6181 hot / 6174 cold)이 옛 내장 표(아래
+     LEGACY_* — 2026-10-02 단일화 전 core/raw_parser 에 있던 값 그대로)와 **같은 열·scale·kind**를
+     만든다. 키 이름만 프로파일 이름으로 바뀌었다(LEGACY_RENAME).
   2. 미등록 ncols는 구조적 폴백으로 간다(HK는 추측하지 않는다 = 빈 맵).
-  3. 같은 ncols 중복 등록은 **조용히 덮지 않는다** — 다른 캠페인의 HK로 파싱하는 사고 방지.
-  4. Vigil 캠페인 프로파일(`vigil/profiles/*.json`)로 레이아웃을 등록할 수 있고,
-     그 결과 채널 블록이 내장 표와 **일치**한다(= 한 파일로 양쪽을 몰 수 있다).
-  5. 단위 환산은 **core가 단일 출처** — 프로파일이 반올림한 scale을 적어놔도 core 값을 쓴다.
-  6. `tools/channel_map.json`의 채널→wavecal 폴더가 캠페인 프로파일과 **일치**한다
-     (같은 매핑이 두 파일에 있으면 어긋난다 — 실제로 2026-09-14에 둘 다 반대로 들어가 있었다).
-  7. **새 캠페인은 JSON만 폴더에 넣으면 잡힌다**(autoload). 아는 ncols는 안 덮는다.
+  3. 같은 ncols·**겹치는 날짜** 중복 등록은 조용히 덮지 않는다. 날짜가 안 겹치면 같은 ncols 에
+     여러 구성을 둘 수 있고 `layout_for` 가 파일 날짜로 고른다(배치가 바뀐 뒤의 프로파일).
+  4. 단위 환산은 **core가 단일 출처** — 프로파일이 반올림한 scale을 적어놔도 core 값을 쓴다.
+  5. `tools/channel_map.json`의 채널→wavecal 폴더가 캠페인 프로파일과 **일치**한다.
+  6. **새 구성은 JSON만 폴더에 넣으면 잡힌다**(autoload) — 새 열 수든, 같은 열 수의 새 날짜든.
+     채널을 추가하면(콜드 블록 4101 을 신호로) Augur 가 그 블록을 채널로 읽고 그 채널의 cavity
+     센서로 T/P 를 고른다 — 코드를 안 고친다.
+  7. core/data_io 의 T/P 는 프로파일 채널 cavity 목록을 따른다(우선순위·결측 폴백).
 
     python tools/test_raw_layout.py
 """
@@ -21,7 +23,11 @@ for _stream in (_sys_utf8.stdout, _sys_utf8.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
+import contextlib
+import io
+import json
 import os
+import shutil
 import sys
 import tempfile
 
@@ -33,6 +39,29 @@ from core import raw_parser as RP
 
 _FAIL = []
 
+# ── 2026-10-02 단일화 전 core/raw_parser 내장 표 — 이제 **검사 기준값**으로만 산다 ──────────
+# (이름 → (절대열, scale, unit, kind)). 프로파일이 이 열들을 같은 scale·kind 로 만들어야 한다.
+LEGACY_HOT = {
+    "templed1": (6149, 0.01, "C", "temp"), "templed2": (6150, 0.01, "C", "temp"),
+    "ANs_oven": (6151, 0.01, "C", "temp"), "templed4": (6152, 0.01, "C", "temp"),
+    "temppreh": (6153, 0.01, "C", "temp"), "PNs_oven": (6154, 0.01, "C", "temp"),
+    "cavity_gas_T": (6155, 0.01, "C", "temp"),
+    "P_PNs": (6162, RP.P_SCALE, "mbar", "press"), "P_ANs": (6164, RP.P_SCALE, "mbar", "press"),
+    "tempcell1": (6174, 0.01, "C", "temp"), "tempcell2": (6175, 0.01, "C", "temp"),
+    "tempcell3": (6176, 0.01, "C", "temp"), "tempsptrm": (6177, 0.01, "C", "temp"),
+}
+LEGACY_COLD = {
+    "cavity_P": (6160, RP.P_SCALE, "mbar", "press"),
+    "cavity_T": (6173, 0.01, "C", "temp"),
+    "tempsptrm": (6174, 0.01, "C", "temp"),
+}
+LEGACY_COLD_6174 = {k: (c - 5, sc, u, kd) for k, (c, sc, u, kd) in LEGACY_COLD.items()}
+LEGACY_RENAME = {   # 옛 이름 → 프로파일 키
+    "ANs_oven": "oven_ans_setpoint", "PNs_oven": "oven_pns_setpoint", "temppreh": "preheater",
+    "cavity_gas_T": "cell_heater", "P_PNs": "p_pns_cavity", "P_ANs": "p_ans_cavity",
+    "tempsptrm": "t_spectrometer", "cavity_P": "p_cavity", "cavity_T": "t_cavity",
+}
+
 
 def check(name, cond, extra=""):
     if cond:
@@ -42,7 +71,17 @@ def check(name, cond, extra=""):
         _FAIL.append(name)
 
 
-def _synth_row(ncols, path, flag=500):
+@contextlib.contextmanager
+def _saved_registry():
+    saved = {k: list(v) for k, v in RP.CAMPAIGN_LAYOUTS.items()}
+    try:
+        yield
+    finally:
+        RP.CAMPAIGN_LAYOUTS.clear()
+        RP.CAMPAIGN_LAYOUTS.update(saved)
+
+
+def _synth_row(ncols, path, flag=500, overrides=None):
     """열마다 값이 다른 한 행 — HK 열을 잘못 짚으면 값이 달라져 드러난다."""
     vals = [str(3000 + i) for i in range(ncols)]
     vals[RP.COL_TIME_LO] = "1234"
@@ -50,38 +89,59 @@ def _synth_row(ncols, path, flag=500):
     vals[RP.COL_EXPOSURE] = "50"
     vals[RP.COL_TEMP_CCD] = "-1000"
     vals[RP.COL_FLAG] = str(flag)
+    for c, v in (overrides or {}).items():
+        vals[c] = str(v)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\t".join(vals) + "\n")
     return path
 
 
-def test_builtin_layouts(d):
-    print("[1] 2026 여수 내장 구성")
+def _same_as_legacy(lay, legacy):
+    """legacy 의 모든 항목이 lay.hk_map 에 (새 이름으로) 같은 열·scale·kind 로 있는가."""
+    bad = {}
+    for old, (col, sc, _u, kd) in legacy.items():
+        ent = lay.hk_map.get(LEGACY_RENAME.get(old, old))
+        if ent is None or ent[0] != col or abs(ent[1] - sc) > 1e-15 or ent[3] != kd:
+            bad[old] = (col, ent)
+    return bad
+
+
+def test_profile_layouts_match_legacy(d):
+    print("[1] 프로파일에서 만든 2026 여수 구성 = 옛 내장 표")
+    for ncols, legacy, kind, chans in ((6179, LEGACY_COLD, "cold", {"NO2": RP.SPEC_PRIMARY}),
+                                       (6174, LEGACY_COLD_6174, "cold", {"NO2": RP.SPEC_PRIMARY}),
+                                       (6181, LEGACY_HOT, "hot",
+                                        {"ANs": RP.SPEC_PRIMARY, "PNs": RP.SPEC_SECONDARY})):
+        lay, _ = RP.layout_for(ncols)
+        check(f"{ncols}: 등록됨(프로파일에서)", lay is not None and lay.source.endswith(".json"),
+              lay and lay.source)
+        if lay is None:
+            continue
+        check(f"{ncols}: kind={kind}, campaign=2026-yeosu",
+              lay.kind == kind and lay.campaign == "2026-yeosu", (lay.kind, lay.campaign))
+        check(f"{ncols}: 채널 블록", lay.spec_blocks() == chans, lay.spec_blocks())
+        bad = _same_as_legacy(lay, legacy)
+        check(f"{ncols}: 옛 HK 열·scale·kind 전부 재현", not bad, bad)
+    check("핫만 날짜 구간(여수 2026-05-01~08-31)",
+          RP.layout_for(6181)[0].date_range == ("2026-05-01", "2026-08-31")
+          and RP.layout_for(6179)[0].date_range is None)
+
+    # 파싱 결과로도 — 합성 행은 col i 에 3000+i
+    hot = RP.RawParser(_synth_row(6181, os.path.join(d, "2026-06-01-001 hot.dat")))
     cold = RP.RawParser(_synth_row(6179, os.path.join(d, "cold.dat")))
-    hot = RP.RawParser(_synth_row(6181, os.path.join(d, "hot.dat")))
-
-    check("cold kind", cold.layout.kind == "cold", cold.layout.kind)
-    check("hot kind", hot.layout.kind == "hot", hot.layout.kind)
-    check("cold 채널 = NO2 primary",
-          cold.layout.spec_blocks == {"NO2": RP.SPEC_PRIMARY}, cold.layout.spec_blocks)
-    check("hot 채널 = ANs primary + PNs secondary (2026-09-27 판정)",
-          hot.layout.spec_blocks == {"ANs": RP.SPEC_PRIMARY, "PNs": RP.SPEC_SECONDARY},
-          hot.layout.spec_blocks)
-    # 기존 코드가 `is`로 본다(tools/test_raw_parser.py) — 레지스트리가 사본을 만들면 깨진다
-    check("cold hk_map is ColdHKMap", cold.layout.hk_map is RP.ColdHKMap)
-    check("hot hk_map is HotHKMap", hot.layout.hk_map is RP.HotHKMap)
-
-    # HK 절대열이 맞는지 값으로 확인 — 합성 행은 col i에 3000+i가 들어있다
     r = next(hot.iter_rows())
-    check("hot HK 절대열(ANs_oven=6151)",
-          abs(r.hk["ANs_oven"] - (3000 + 6151) * 0.01) < 1e-9, r.hk["ANs_oven"])
-    check("hot HK 압력(P_PNs=6162, P_SCALE)",
-          abs(r.hk["P_PNs"] - (3000 + 6162) * RP.P_SCALE) < 1e-9, r.hk["P_PNs"])
+    check("hot HK 절대열(oven_ans_setpoint=6151)",
+          abs(r.hk["oven_ans_setpoint"] - (3000 + 6151) * 0.01) < 1e-9, r.hk.get("oven_ans_setpoint"))
+    check("hot HK 압력(p_pns_cavity=6162, P_SCALE)",
+          abs(r.hk["p_pns_cavity"] - (3000 + 6162) * RP.P_SCALE) < 1e-9, r.hk.get("p_pns_cavity"))
     rc = next(cold.iter_rows())
-    check("cold HK 절대열(cavity_T=6173)",
-          abs(rc.hk["cavity_T"] - (3000 + 6173) * 0.01) < 1e-9, rc.hk["cavity_T"])
+    check("cold HK 절대열(t_cavity=6173)",
+          abs(rc.hk["t_cavity"] - (3000 + 6173) * 0.01) < 1e-9, rc.hk.get("t_cavity"))
     check("bytepack 수식((col0<<16)|col1)",
           rc.bytepack_sec == ((1234 << 16) | 5678) / 100.0, rc.bytepack_sec)
+    check("hk_col 이 같은 열을 준다",
+          (RP.hk_col(6179, "p_cavity"), RP.hk_col(6181, "p_ans_cavity"), RP.hk_col(6181, "nope"))
+          == (6160, 6164, None))
 
 
 def test_unknown_ncols(d):
@@ -113,10 +173,11 @@ def test_short_header_row(d):
     p = RP.RawParser(path)
     check("헤더행이 아니라 데이터행 열수로 판정", p.layout.ncols == 6181, p.layout.ncols)
     check("kind=hot", p.layout.kind == "hot", p.layout.kind)
-    check("hk_map 채워짐", p.layout.hk_map is RP.HotHKMap)
+    check("hk_map 채워짐", p.layout.hk_map is RP.layout_for(6181)[0].hk_map)
     row = next(r for r in p.iter_rows() if r.flag == 500)
-    check("HK 값이 실제로 읽힘(ANs_oven=6151)",
-          abs(row.hk["ANs_oven"] - (3000 + 6151) * 0.01) < 1e-9, row.hk.get("ANs_oven"))
+    check("HK 값이 실제로 읽힘(oven_ans_setpoint=6151)",
+          abs(row.hk["oven_ans_setpoint"] - (3000 + 6151) * 0.01) < 1e-9,
+          row.hk.get("oven_ans_setpoint"))
     # 등록 레이아웃이 하나도 안 나오면 기존 폴백(첫 데이터행 기준)을 유지해야 한다
     path2 = os.path.join(d, "allshort.dat")
     with open(path2, "w", encoding="utf-8") as fh:
@@ -150,7 +211,7 @@ def test_wide_header_row(d):
     check("(a) 데이터행 열수로 판정", p.layout.ncols == 6174, p.layout.ncols)
     check("(a) 데이터행을 버리지 않는다", sum(1 for _ in p.iter_rows()) == 9)
     check("(a) 등록 구성이라 cold + HK 있음",
-          p.layout.kind == "cold" and p.layout.hk_map is RP.Cold6174HKMap,
+          p.layout.kind == "cold" and p.layout.hk_map is RP.layout_for(6174)[0].hk_map,
           (p.layout.kind, list(p.layout.hk_map)))
 
     # (b) 등록 안 된 폭에서도 같은 보호가 걸려야 한다(헤더 6177 > 데이터 6170, 둘 다 미등록)
@@ -159,7 +220,6 @@ def test_wide_header_row(d):
     p2 = RP.RawParser(_write(os.path.join(d, "widehdr_unreg.dat"), 6177, UNREG, 6))
     check("(b) 미등록이어도 최빈(데이터행) 열수로 판정", p2.layout.ncols == UNREG, p2.layout.ncols)
     check("(b) 데이터행을 버리지 않는다", sum(1 for _ in p2.iter_rows()) == 7)
-    # 미등록이면 HK는 추측하지 않는다 — 틀린 HK > 없는 HK
     check("(b) HK는 빈 맵", p2.layout.hk_map == {}, p2.layout.hk_map)
     check("(b) kind에 structural 표시", "structural" in p2.layout.kind, p2.layout.kind)
 
@@ -177,126 +237,83 @@ def test_wide_header_row(d):
 
 
 def test_cold_6174_layout(d):
-    """2026-06-11~06-15 콜드 구성(6174) — HK 선두 5열 결손.
-
-    이 구성이 등록돼 있어야 raw_parser가 data_io(hk_shift)와 **같은 답**을 낸다.
-    등록 전엔 hk_map={}이라 같은 raw에 대해 두 리더가 다른 답을 냈다(원칙 3 위반).
-    지도는 ColdHKMap에서 -5로 **파생**한다 — 열 번호를 두 번 적으면 사본이 된다."""
-    print("[2-D] 콜드 6174 구성(HK 선두 5열 결손) 등록")
-    lay = RP.CAMPAIGN_LAYOUTS.get(6174)
+    """2026-06-11~06-15 콜드 구성(6174) — HK 선두 5열 결손. 정상 6179 의 모든 HK 열 - 5."""
+    print("[2-D] 콜드 6174 구성(HK 선두 5열 결손)")
+    lay, lay79 = RP.layout_for(6174)[0], RP.layout_for(6179)[0]
     check("6174가 등록돼 있다", lay is not None)
     if lay is None:
         return
-    check("kind=cold", lay.kind == "cold", lay.kind)
-    check("채널은 정상 콜드와 동일(NO2 primary)",
-          lay.spec_blocks() == {"NO2": RP.SPEC_PRIMARY}, lay.spec_blocks())
-    # ★ 파생 관계 고정: 6174 지도의 모든 열 = ColdHKMap 열 - 5
-    check("HK 열이 ColdHKMap에서 정확히 -5 파생",
-          all(lay.hk_map[k][0] == RP.ColdHKMap[k][0] - RP.COLD_6174_LEAD_LOSS
-              for k in RP.ColdHKMap),
-          {k: (RP.ColdHKMap[k][0], lay.hk_map[k][0]) for k in RP.ColdHKMap})
-    check("스케일·단위는 그대로",
-          all(lay.hk_map[k][1:] == RP.ColdHKMap[k][1:] for k in RP.ColdHKMap))
-
-    # 합성 행으로 실제 판독 — 열을 잘못 짚으면 값이 달라진다
+    shared = sorted(set(lay.hk_map) & set(lay79.hk_map))
+    check("공통 HK 열이 전부 6179 열 - 5",
+          shared and all(lay.hk_map[k][0] == lay79.hk_map[k][0] - 5 for k in shared),
+          {k: (lay79.hk_map[k][0], lay.hk_map[k][0]) for k in shared})
     p = RP.RawParser(_synth_row(6174, os.path.join(d, "cold6174.dat"), flag=1))
-    check("6174 raw가 cold로 파싱됨", p.layout.kind == "cold", p.layout.kind)
     row = next(p.iter_rows())
-    check("cavity_P를 6155에서 읽는다",
-          abs(row.hk["cavity_P"] - (3000 + 6155) * RP.P_SCALE) < 1e-9, row.hk.get("cavity_P"))
-    check("cavity_T를 6168에서 읽는다",
-          abs(row.hk["cavity_T"] - (3000 + 6168) * 0.01) < 1e-9, row.hk.get("cavity_T"))
-    # 명목 절대열(6173)로 읽으면 다른 값이 나온다는 것 자체를 고정 — 이게 함정의 본체
-    check("명목 6173과는 다른 값이어야 한다",
-          abs(row.hk["cavity_T"] - (3000 + 6173) * 0.01) > 1e-6)
-
-    # 정상 6179는 영향 없음
-    c = RP.RawParser(_synth_row(6179, os.path.join(d, "cold6179b.dat"), flag=1))
-    check("정상 6179는 그대로 ColdHKMap", c.layout.hk_map is RP.ColdHKMap)
+    check("p_cavity를 6155에서 읽는다",
+          abs(row.hk["p_cavity"] - (3000 + 6155) * RP.P_SCALE) < 1e-9, row.hk.get("p_cavity"))
+    check("t_cavity를 6168에서 읽는다(명목 6173 아님 — 함정의 본체)",
+          abs(row.hk["t_cavity"] - (3000 + 6168) * 0.01) < 1e-9
+          and abs(row.hk["t_cavity"] - (3000 + 6173) * 0.01) > 1e-6, row.hk.get("t_cavity"))
 
 
 def test_cold_6174_profile():
     """Vigil이 6174 파일을 배정할 수 있어야 한다 — 없으면 5일치가 감시 사각지대."""
-    print("[4-B] Vigil 프로파일이 6174를 라우팅한다")
+    print("[2-E] Vigil 프로파일이 6174를 라우팅한다")
     from core.profile import ProfileSet
 
     ps = ProfileSet.load_default()
     got = ps.route(filename="2026-06-11-020.dat", n_columns=6174)
     check("6174 -> 전용 프로파일", got is not None and got.profile_id.endswith("_6174"),
           got.profile_id if got else None)
-    # 정상 구성이 이 프로파일로 새지 않아야 한다
     g79 = ps.route(filename="2026-06-11-001.dat", n_columns=6179)
     check("6179는 여전히 기본 콜드", g79 is not None and g79.profile_id == "caesar_cold_2026yeosu",
           g79.profile_id if g79 else None)
     g81 = ps.route(filename="2026-05-18-001.dat", n_columns=6181)
     check("6181은 여전히 핫", g81 is not None and g81.profile_id == "caesar_hot_2026yeosu",
           g81.profile_id if g81 else None)
-    if got is None:
-        return
-    keys = {f.key for f in got.hk.fields}
-    check("p_cavity/t_cavity 키가 유지됨(채널 설정이 이 이름을 참조)",
-          {"p_cavity", "t_cavity"} <= keys, sorted(keys))
-    # 프로파일 rel도 -5 관계여야 한다
-    base = ps.by_id("caesar_cold_2026yeosu")
-    brel = {f.key: f.rel for f in base.hk.fields}
-    check("프로파일 rel도 정상구성 -5",
-          all(f.rel == brel[f.key] - 5 for f in got.hk.fields if f.key in brel),
-          {f.key: (brel.get(f.key), f.rel) for f in got.hk.fields})
 
 
 def test_register_guard():
-    print("[3] 중복 등록 가드")
-    try:
-        RP.register_campaign_layout(6179, "other", {"X": "primary"}, {})
-        check("중복 등록은 예외", False, "예외가 안 났다")
-    except ValueError as e:
-        check("중복 등록은 예외", "replace=True" in str(e), str(e))
-    try:
-        RP.register_campaign_layout(99991, "x", {"X": "nosuchrole"}, {})
-        check("모르는 역할은 예외", False, "예외가 안 났다")
-    except ValueError:
-        check("모르는 역할은 예외", True)
-    finally:
-        RP.CAMPAIGN_LAYOUTS.pop(99991, None)
+    print("[3] 중복 등록 가드 · 같은 열 수의 날짜별 구성")
+    with _saved_registry():
+        try:
+            RP.register_campaign_layout(6179, "other", {"X": "primary"}, {})
+            check("겹치는 날짜 중복 등록은 예외", False, "예외가 안 났다")
+        except ValueError as e:
+            check("겹치는 날짜 중복 등록은 예외", "replace=True" in str(e), str(e))
+        try:
+            RP.register_campaign_layout(99991, "x", {"X": "nosuchrole"}, {})
+            check("모르는 역할은 예외", False, "예외가 안 났다")
+        except ValueError:
+            check("모르는 역할은 예외", True)
+        # 핫(05-01~08-31)과 안 겹치는 새 핫 배치 — 같은 6181 에 둘 다 산다
+        RP.register_campaign_layout(6181, "hot-lab", {"cold": "primary", "ANs": "secondary"}, {},
+                                    date_range=("2026-09-01", "2099-12-31"), source="lab.json")
+        a, ina = RP.layout_for(6181, "2026-06-01-001.dat")
+        b, inb = RP.layout_for(6181, "2026-10-02-001.dat")
+        c, inc = RP.layout_for(6181, "2025-01-01-001.dat")
+        check("layout_for: 6월 = 여수, 10월 = 새 배치",
+              (a.kind, ina, b.kind, inb) == ("hot", True, "hot-lab", True), (a.kind, b.kind))
+        check("layout_for: 어느 구간에도 안 들면 첫 구성을 '구간 밖'으로", (c.kind, inc) == ("hot", False))
+        check("block_channel_name 이 날짜로 다른 이름",
+              RP.block_channel_name(_synth_row(6181, os.path.join(tempfile.mkdtemp(), "2026-10-02-001.dat")),
+                                    2053) == "cold")
 
 
-def test_vigil_profile_adapter():
-    print("[4] Vigil 캠페인 프로파일로 등록")
-    saved = dict(RP.CAMPAIGN_LAYOUTS)
-    try:
-        for fn, ncols in (("caesar_cold.example.json", 6179),
-                          ("caesar_hot.example.json", 6181)):
-            path = os.path.join(_ROOT, "vigil", "profiles", fn)
-            if not os.path.exists(path):
-                check("프로파일 존재: %s" % fn, False, path)
-                continue
-            builtin = saved[ncols]
-            lay = RP.load_campaign_layout(path, kind="from-profile", replace=True)
-            check("%s: ncols" % fn, lay.ncols == ncols, lay.ncols)
-            # ★ 핵심 — 프로파일이 정한 채널 블록이 내장 표와 같다(= 한 파일로 양쪽 구동 가능)
-            check("%s: 채널 블록이 내장과 일치" % fn,
-                  lay.spec_blocks() == builtin.spec_blocks(),
-                  (lay.spec_blocks(), builtin.spec_blocks()))
-            check("%s: source에 파일명 기록" % fn, lay.source == fn, lay.source)
-            # HK 절대열 = start_col + rel
-            press = [v for v in lay.hk_map.values() if v[3] == "press"]
-            check("%s: 압력 열이 잡힘" % fn, bool(press), lay.hk_map)
-            # 단위 환산은 core 상수 — 프로파일의 반올림값(0.6895)이 아니다
-            check("%s: 압력 scale = core P_SCALE" % fn,
-                  all(abs(v[1] - RP.P_SCALE) < 1e-12 for v in press),
-                  [v[1] for v in press])
-    finally:
-        RP.CAMPAIGN_LAYOUTS.clear()
-        RP.CAMPAIGN_LAYOUTS.update(saved)
-    check("검사 후 레지스트리 원복", RP.CAMPAIGN_LAYOUTS[6179].source == "builtin",
-          RP.CAMPAIGN_LAYOUTS[6179].source)
+def test_unit_scales_from_core():
+    print("[4] 단위 환산은 core 상수(프로파일의 반올림 scale 아님)")
+    for ncols in (6179, 6181):
+        lay = RP.layout_for(ncols)[0]
+        press = [v for v in lay.hk_map.values() if v[3] == "press"]
+        check(f"{ncols}: 압력 scale = core P_SCALE",
+              press and all(abs(v[1] - RP.P_SCALE) < 1e-12 for v in press), [v[1] for v in press])
 
 
 def test_channel_map_matches_profiles():
     print("[5] channel_map ↔ 캠페인 프로파일 매핑 대조")
     from tools import optimize_params as OP
 
-    # 알려진 미결 불일치(2026-10-01) — 지우지 말고 표시한다. 핫 프로파일 1.2.0 은 Augur FitSet 이
+    # 알려진 미결 불일치(2026-10-01) — 지우지 말고 표시한다. 핫 프로파일은 Augur FitSet 이
     # 실제로 쓰는 짝(ANs 블록 2053 ↔ wv_cal/roi1)을 따르고, channel_map.json·판정 문서의 wavecal
     # 열은 9-14 메모(ANs ↔ roi2)를 따른다. roi1/roi2 차이는 전 구간 ≈ 0.034 nm(0.7 px)로 핏 shift
     # 가 흡수한다. 어느 Hg 교정이 어느 CCD 영역 것인지 원자료로 확인되면 한쪽을 고치고 이 집합을
@@ -307,9 +324,6 @@ def test_channel_map_matches_profiles():
     check("두 파일이 일치(알려진 wavecal 미결 제외)", unexpected == [], unexpected)
     if bad:
         print(f"  WARN  wavecal 짝 미결 {len(bad)}건(channel_map vs 프로파일): {bad}")
-
-    # 일부러 어긋뜨리면 실제로 잡히는지 — 안 잡히면 이 검사는 장식이다.
-    # 프로파일과 일치하는 매핑을 먼저 만들고(미결분을 프로파일 값으로), 그걸 뒤바꾼다.
     agreed = dict(OP.KEY2WLDIR)
     for key, _cm, prof_val in bad:
         agreed[key] = prof_val
@@ -324,65 +338,130 @@ def test_channel_map_matches_profiles():
         check("뒤바꾼 매핑을 잡아낸다", False, "ans/pns 키가 없다")
 
 
-def test_autoload_new_campaign(d):
-    print("[6] 새 캠페인 JSON 자동 등록")
-    import json
-    import shutil
-
-    src = os.path.join(_ROOT, "vigil", "profiles", "caesar_cold.example.json")
-    if not os.path.exists(src):
-        check("원본 프로파일 존재", False, src)
-        return
-    with open(src, encoding="utf-8") as fh:
-        prof = json.load(fh)
-
-    # 캐비티가 하나 더 켜진 가상의 다음 캠페인 — 열 수가 다르므로 새 구성이다
-    new_ncols = 6179 + 2048
-    prof["profile_id"] = "caesar_next_2027demo"
-    prof["match"]["n_columns"] = new_ncols
-    prof["match"]["filename_glob"] = "*Demo*.dat"
-    pdir = os.path.join(d, "profiles")
-    os.makedirs(pdir, exist_ok=True)
-    shutil.copy(os.path.join(_ROOT, "vigil", "profiles", "_schema.json"), pdir)
-    with open(os.path.join(pdir, "caesar_next.json"), "w", encoding="utf-8") as fh:
+def _profile_dir_with(d, name, edit):
+    """기본 프로파일 폴더 사본 + edit(dict) 를 적용한 새 프로파일 하나."""
+    pdir = os.path.join(d, name)
+    shutil.copytree(os.path.join(_ROOT, "vigil", "profiles"), pdir)
+    src = os.path.join(pdir, "caesar_cold.example.json")
+    prof = json.load(open(src, encoding="utf-8"))
+    edit(prof)
+    with open(os.path.join(pdir, f"{name}.json"), "w", encoding="utf-8") as fh:
         json.dump(prof, fh, ensure_ascii=False)
+    return pdir
 
-    saved = dict(RP.CAMPAIGN_LAYOUTS)
-    try:
+
+def test_autoload_new_configuration(d):
+    print("[6] 새 구성 JSON 자동 등록 — 새 열 수 · 같은 열 수에 채널 추가(날짜)")
+    from core.data_io import DataIO
+
+    # (a) 캐비티가 하나 더 켜진 가상의 다음 캠페인 — 열 수가 다르므로 새 구성
+    new_ncols = 6179 + 2048
+
+    def more_cols(p):
+        p["profile_id"] = "caesar_next_2027demo"
+        p["campaign"] = "2027-demo"
+        p["match"]["n_columns"] = new_ncols
+        p["match"]["filename_glob"] = "*Demo*.dat"
+    pdir = _profile_dir_with(d, "next", more_cols)
+    with _saved_registry():
         got = RP.autoload_campaign_layouts(pdir, verbose=False)
-        check("새 ncols가 등록됨", [l.ncols for l in got] == [new_ncols],
-              [l.ncols for l in got])
-        check("레지스트리에 들어감", new_ncols in RP.CAMPAIGN_LAYOUTS)
-        check("campaign 라벨 기록", RP.CAMPAIGN_LAYOUTS[new_ncols].campaign
-              == "caesar_next_2027demo", RP.CAMPAIGN_LAYOUTS[new_ncols].campaign)
-        # 그 구성의 raw가 실제로 파싱되는지 — 등록만 되고 안 읽히면 의미 없다
+        check("(a) 새 열 수만 새로 등록", [l.ncols for l in got] == [new_ncols], [l.ncols for l in got])
+        check("(a) campaign 기록", RP.layout_for(new_ncols)[0].campaign == "2027-demo")
         pr = RP.RawParser(_synth_row(new_ncols, os.path.join(d, "next.dat")))
-        check("새 구성 raw가 파싱됨", pr.layout.kind == "caesar_next_2027demo",
+        check("(a) 새 구성 raw가 파싱되고 HK가 읽힘", pr.layout.kind == "cold" and bool(next(pr.iter_rows()).hk),
               pr.layout.kind)
-        check("새 구성 HK가 읽힘", bool(next(pr.iter_rows()).hk))
-        # 두 번 돌려도 중복 등록으로 터지지 않는다(가드에 걸려 조용히 건너뜀)
-        again = RP.autoload_campaign_layouts(pdir, verbose=False)
-        check("재실행은 무해", again == [], again)
-        # 기본(여수) 구성은 그대로 — 프로파일이 이기지 않는다
-        check("여수 기본 유지", RP.CAMPAIGN_LAYOUTS[6179].source == "builtin",
-              RP.CAMPAIGN_LAYOUTS[6179].source)
-    finally:
+        check("(a) 재실행은 무해", RP.autoload_campaign_layouts(pdir, verbose=False) == [])
+
+    # (b) 콜드에 채널 추가 — 같은 6179열, 2026-10-01 부터 블록 4101 도 신호(다른 셀, 다른 센서)
+    def add_channel(p):
+        p["profile_id"] = "caesar_cold_2ch_demo"
+        p["profile_version"] = "1.0.0"
+        p["match"]["date_range"] = ["2026-10-01", "2099-12-31"]
+        for ch in p["channels"]:
+            if ch["id"] == "ch_noise2":
+                ch.update({"id": "ch_cell2", "label": "Cell2", "role": "signal",
+                           "cavity": {"pressure_hk": ["unknown_rel28"],
+                                      "temperature_hk": ["t_spectrometer"]}})
+        p["hk"]["fields"] = [dict(f, unit="mbar", scale=0.6895) if f["key"] == "unknown_rel28" else f
+                             for f in p["hk"]["fields"]]
+    pdir = _profile_dir_with(d, "twoch", add_channel)
+    # 여수 콜드 프로파일은 날짜 제한이 없어 새 구성과 겹친다 — 실제로는 여수 프로파일에 끝 날짜를
+    # 붙여야 한다(그게 이 기능의 사용법). 사본에서 그렇게 한다.
+    yp = os.path.join(pdir, "caesar_cold.example.json")
+    y = json.load(open(yp, encoding="utf-8"))
+    y["match"]["date_range"] = ["2026-01-01", "2026-09-30"]
+    json.dump(y, open(yp, "w", encoding="utf-8"), ensure_ascii=False)
+    with _saved_registry():
         RP.CAMPAIGN_LAYOUTS.clear()
-        RP.CAMPAIGN_LAYOUTS.update(saved)
+        with contextlib.redirect_stdout(io.StringIO()):
+            RP.autoload_campaign_layouts(pdir, verbose=False)
+        lays = RP.CAMPAIGN_LAYOUTS.get(6179, [])
+        check("(b) 6179 에 날짜별 구성 2개", len(lays) == 2, [(l.source, l.date_range) for l in lays])
+        old = RP.RawParser(_synth_row(6179, os.path.join(d, "2026-06-02-001.dat"), flag=1))
+        new_fp = _synth_row(6179, os.path.join(d, "2026-10-05-001.dat"), flag=1,
+                            overrides={6177: 1450})        # Cell2 압력 raw(×P_SCALE ≈ 999.7 mbar)
+        new = RP.RawParser(new_fp)
+        check("(b) 6월 파일은 1채널(NO2)", old.layout.spec_blocks == {"NO2": RP.SPEC_PRIMARY},
+              old.layout.spec_blocks)
+        check("(b) 10월 파일은 2채널(NO2 + Cell2)",
+              new.layout.spec_blocks == {"NO2": RP.SPEC_PRIMARY, "Cell2": RP.SPEC_SECONDARY},
+              new.layout.spec_blocks)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, s2, _, t2, p2 = DataIO.load_measurement_with_hk(new_fp, 0, None, 0, 2)
+            _, s1, _, t1, p1 = DataIO.load_measurement_with_hk(new_fp, 0, None, 0, 1)
+        check("(b) data_io: 새 채널(슬롯 2)은 그 채널의 cavity 센서로 T/P",
+              abs(p2 - 1450 * RP.P_SCALE) < 1e-9 and abs(t2 - (3000 + 6174) * 0.01) < 1e-9, (t2, p2))
+        check("(b) data_io: 기존 채널(슬롯 1)은 여전히 p_cavity·t_cavity",
+              abs(p1 - (3000 + 6160) * RP.P_SCALE) < 1e-9 and abs(t1 - (3000 + 6173) * 0.01) < 1e-9,
+              (t1, p1))
+        check("(b) data_io: 슬롯 2 스펙트럼 = 블록 4101", float(s2[0]) == 3000 + 4101, s2[0])
+
+
+def test_data_io_follows_cavity_chain(d):
+    print("[7] data_io T/P = 프로파일 채널 cavity 목록(우선순위·결측 폴백)")
+    from core.data_io import DataIO
+
+    def tp(fp, ch):
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, _, _, t, p = DataIO.load_measurement_with_hk(fp, 0, None, 0, ch)
+        return t, p
+
+    fp = _synth_row(6181, os.path.join(d, "2026-06-01-010 Hot.dat"), flag=1)
+    t1, p1 = tp(fp, 1)
+    t2, p2 = tp(fp, 2)
+    check("ANs(슬롯 1) = p_ans_cavity(6164)·tempcell1(6174)",
+          abs(p1 - (3000 + 6164) * RP.P_SCALE) < 1e-9 and abs(t1 - (3000 + 6174) * 0.01) < 1e-9, (t1, p1))
+    check("PNs(슬롯 2) = p_pns_cavity(6162)·tempcell2(6175)",
+          abs(p2 - (3000 + 6162) * RP.P_SCALE) < 1e-9 and abs(t2 - (3000 + 6175) * 0.01) < 1e-9, (t2, p2))
+    # 첫 센서가 결측(0)이면 목록의 다음
+    fp = _synth_row(6181, os.path.join(d, "2026-06-01-011 Hot.dat"), flag=1,
+                    overrides={6164: 0, 6174: 65535, 6175: 0})
+    t1, p1 = tp(fp, 1)
+    check("ANs 압력 결측 → p_pns_cavity, 온도 둘 다 결측 → cell_heater(6155)",
+          abs(p1 - (3000 + 6162) * RP.P_SCALE) < 1e-9 and abs(t1 - (3000 + 6155) * 0.01) < 1e-9, (t1, p1))
+    # 구간 밖(배치가 바뀐 뒤) — 채널 정의 없음 → 옛 슬롯 규칙: 슬롯 2 = 300 °C 경로 압력(6164)
+    fp = _synth_row(6181, os.path.join(d, "2026-09-28-001 Hot.dat"), flag=1)
+    with contextlib.redirect_stderr(io.StringIO()):
+        t2, p2 = tp(fp, 2)
+        t1, p1 = tp(fp, 1)
+    check("구간 밖: 슬롯 2 = 6164, 슬롯 1 = 6162 (옛 슬롯 규칙 유지)",
+          abs(p2 - (3000 + 6164) * RP.P_SCALE) < 1e-9 and abs(p1 - (3000 + 6162) * RP.P_SCALE) < 1e-9,
+          (p1, p2))
 
 
 def main() -> int:
     d = tempfile.mkdtemp(prefix="raw-layout-")
-    test_builtin_layouts(d)
+    test_profile_layouts_match_legacy(d)
     test_unknown_ncols(d)
     test_short_header_row(d)
     test_wide_header_row(d)
     test_cold_6174_layout(d)
     test_cold_6174_profile()
     test_register_guard()
-    test_vigil_profile_adapter()
+    test_unit_scales_from_core()
     test_channel_map_matches_profiles()
-    test_autoload_new_campaign(d)
+    test_autoload_new_configuration(d)
+    test_data_io_follows_cavity_chain(d)
     if _FAIL:
         print("raw layout tests: %d FAIL" % len(_FAIL))
         return 1

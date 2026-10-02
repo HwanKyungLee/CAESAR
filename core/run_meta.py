@@ -337,12 +337,12 @@ def layout_from_input(path: str) -> dict | None:
     ncols = len(toks)
     try:
         try:                               # 패키지로 임포트된 평소 경로
-            from core.raw_parser import CAMPAIGN_LAYOUTS
+            from core.raw_parser import layout_for
         except ImportError:                # `python core/run_meta.py` 직접 실행(자기검증)
-            from raw_parser import CAMPAIGN_LAYOUTS
+            from raw_parser import layout_for
     except Exception:                      # noqa: BLE001
         return {"ncols": ncols}
-    lay = CAMPAIGN_LAYOUTS.get(ncols)
+    lay, _ = layout_for(ncols, path)
     if lay is None:
         return {"ncols": ncols, "campaign": "unregistered"}
     return {"ncols": ncols, "campaign": lay.campaign or lay.kind, "kind": lay.kind,

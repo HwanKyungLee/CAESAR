@@ -1752,8 +1752,8 @@ def _pass2_write_file(fp, rows, ctx):
                 _seen += 1
                 if _seen >= 5:
                     break
-        from core.raw_parser import CAMPAIGN_LAYOUTS as _CL
-        _l = _CL.get(_ncols)
+        from core.raw_parser import layout_for as _layout_for
+        _l, _ = _layout_for(_ncols, fp)
         _lay_name = (_l.campaign or _l.kind) if _l else "unregistered"
     except Exception:      # noqa: BLE001 — provenance 한 줄 때문에 알파를 못 만들면 안 된다
         pass
