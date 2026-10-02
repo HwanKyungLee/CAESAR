@@ -516,7 +516,7 @@ class SaveExportMixin:
             pixel_idx, intensity_raw, _, _, _ = DataIO.load_measurement_with_hk(
                 filepath, f_min, f_max, row_index=row_idx, channel=ch)
 
-            intensity_fit, _, intensity_poly, _, _ = replay_engine.get_model_components(
+            intensity_fit, _, intensity_poly, etalon_wave, _ = replay_engine.get_model_components(
                 pixel_idx,
                 shifts=params['shifts'],
                 squeezes=params['squeezes'],
@@ -526,6 +526,14 @@ class SaveExportMixin:
                 etalon_freq=params.get('etalon_freq', 0.0),
                 etalon_phase=params.get('etalon_phase', 0.0)
             )
+
+            # Same quantities the live run emits (worker plot_update): Meas = signal − poly −
+            # etalon, Fit = model − poly − etalon. Passing α and the full model here made the
+            # Polynomial panel add the poly twice (dots = α + poly) and gave "Intensity" a
+            # different meaning in replay than during the run.
+            _bg = intensity_poly + etalon_wave
+            intensity_raw = intensity_raw - _bg
+            intensity_fit = intensity_fit - _bg
 
             self.monitor.tabs.setCurrentIndex(0)
 
