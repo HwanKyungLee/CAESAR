@@ -15,6 +15,8 @@ Baseline: state after the 2026-09-30 round. Full diff: `CHANGES_2026-10-03_edit.
     flag, reference identity — `f155d2e` (`I0_/R_dt_s`, `_gap_h`, `_edge`);
   - still not exported (stated as "the remaining fields of Table~\ref{tab:context_fields}"): side of the nearest knot, number of adjacent blocks
     rejected by the gates, build time and time convention of each reference.
+- **Version wording** — "All three numbers … are implemented" → "In the current version of Augur, later than the v0.2.0 used
+  for the results here, all three numbers … are implemented" (`availability.tex` names v0.2.0; the features are later).
 - **Claim "on one day of the budget window this reproduces the zero-air and reflectivity terms record by record"** — evidence:
   2026-05-20 hot, alphas regenerated with the new code and the clock-fixed R, 830 records time-matched to
   `diagnostics/i0_interp_2026-09/production_budget_clockfixed.csv`: per-record correlation ANs i0 +0.996, rt +0.998;
@@ -24,9 +26,9 @@ Baseline: state after the 2026-09-30 round. Full diff: `CHANGES_2026-10-03_edit.
   implementation already computes the flag's fields, except the build time and time convention of a reference".
 
 ## 2. Word count
-sec6_reporting.tex +66 (internal counter). Main text ≈ 12,686 (was 12,620).
+sec6_reporting.tex +81 (internal counter; +66 for the paragraph, +15 for the version clause). Main text ≈ 12,701 (was 12,620).
 
 ## 3. Not done here
 - PDF not rebuilt: no TeX on the editing PC (TinyTeX build per README §2). Rebuild before the next circulation.
-- `availability.tex` names v0.2.0 as the version used in the paper; the features above are later. Either release a version
-  that contains them or word §6 as "the current version".
+- `availability.tex` left at v0.2.0 (the version the results were made with); §6 now says the convention is in a later version.
+  When a release containing it is cut, name it there.
