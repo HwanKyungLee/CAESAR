@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel,
                              QTableWidget, QProgressBar, QGroupBox, QLineEdit,
                              QScrollArea, QComboBox, QSplitter, QTabWidget, QTabBar,
-                             QDoubleSpinBox, QSpinBox, QCheckBox)
+                             QDoubleSpinBox, QSpinBox, QCheckBox, QApplication)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QShortcut, QKeySequence
 
@@ -889,8 +889,27 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
     def _setup_shortcuts(self):
         """Register keyboard shortcuts for common operations."""
         QShortcut(QKeySequence("F5"),      self).activated.connect(self.start_analysis)
-        QShortcut(QKeySequence("Escape"),  self).activated.connect(self.stop_analysis)
-        QShortcut(QKeySequence("Ctrl+S"),  self).activated.connect(self.save)
+        # Esc is the "close this popup" key — it used to stop an overnight run with no question.
+        QShortcut(QKeySequence("Escape"),  self).activated.connect(self._confirm_stop_analysis)
+        sc_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        sc_save.activated.connect(self.save)
+        # Plot Maker registers its own Ctrl+S (save config); with both active Qt fires neither
+        # (ambiguous). Resolve here by focus: inside Plot Maker -> its save, else results save.
+        # Qt hands an ambiguous press to the clashing shortcuts in turn, so wire all of them.
+        clash = [sc_save]
+        pm = getattr(self, 'plot_maker', None)
+        if pm is not None:
+            clash += [s for s in pm.findChildren(QShortcut) if s.key() == QKeySequence("Ctrl+S")]
+        for s in clash:
+            s.activatedAmbiguously.connect(self._dispatch_ctrl_s)
+
+    def _dispatch_ctrl_s(self):
+        pm = getattr(self, 'plot_maker', None)
+        fw = QApplication.focusWidget()
+        if pm is not None and fw is not None and (fw is pm or pm.isAncestorOf(fw)):
+            pm._save_cfg()
+        else:
+            self.save()
 
     # =========================================================
     # Tab 0: Daily Run

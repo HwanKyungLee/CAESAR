@@ -582,6 +582,17 @@ class AnalysisRunMixin:
             self.table.setRowCount(total_scans)
             self.status.setText(f"{total_scans:,} scans / {len(self.file_list)} file(s) — processing...")
 
+    def _confirm_stop_analysis(self):
+        """Esc: ask before stopping a running analysis (STOP button stays one click)."""
+        if not any(w.isRunning() for w in (getattr(self, '_workers', None) or [])):
+            return
+        ok = QMessageBox.question(self, "Stop analysis?",
+                                  "Stop the running analysis? Results so far are kept.",
+                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                  QMessageBox.StandardButton.No)
+        if ok == QMessageBox.StandardButton.Yes:
+            self.stop_analysis()
+
     def stop_analysis(self):
         """Safely stops all worker threads and re-enables UI controls."""
         workers = getattr(self, '_workers', [])
