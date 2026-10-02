@@ -5,7 +5,7 @@
 
 **Note (2026-09-30):** `main.pdf` and `main_fieldnum_coloured.pdf` in this folder were overwritten with the 2026-09-30 build (the 09-29 lock is gone; `main_build_2026-09-29.pdf` no longer exists).
 
-**Status (2026-10-03).** §6 intro updated to the implementation status of the §6.1 convention (all three numbers implemented in the current version, later than v0.2.0; remaining context fields named) — `CHANGES_2026-10-03_edit.md`. +81 words. PDF **not** rebuilt (no TeX on the editing PC).
+**Status (2026-10-03).** §6 intro updated to the implementation status of the §6.1 convention (all three numbers implemented in the current version, later than v0.2.0; remaining context fields named) — `CHANGES_2026-10-03_edit.md`. +81 words. `main.pdf` rebuilt 2026-10-03 (TinyTeX, TeX Live 2026, pdfTeX + BibTeX): 0 errors, 0 undefined references/citations, 0 overfull boxes, 0 BibTeX warnings; 46 pages, Appendix A on p. 33. `main_fieldnum_coloured.pdf` was not rebuilt.
 
 **Status (2026-09-30, follow-up edit round A–F).** §3.6 cause paragraph (time-base test, calibration states, O$_3$ terciles, bound from the laboratory test); §3.3 shift dependence of the QDOAS scale; §2.9 measured runtimes; external-review fixes D1–D12 (abstract 250 words without the 1.44 ratio; §3.5 digits and new Table 4 `tab:relscale`; LOO scope; §4.5 wording; §5.1 fixed-shift framing; Table 13 noise floor recomputed with g′ = 0.9524; cold "earlier run" row removed from Table 5; §4 topic sentences; Stutz/Hausmann, Merchant/JCGM and Horbanski citations); 8 new bib entries (30 total). Main text 12,620 words by the internal counter (12,150 before, +470). 45 pages; 0 errors, 0 undefined references/citations, 0 overfull boxes. Details and old→new numbers in `CHANGES_2026-09-30_edit.md`.
 
@@ -37,6 +37,9 @@ floats" (Fig. 2, a full-page float). 45 pages (rebuilt 2026-09-30 after the foll
 copernicus.cls needs a few packages that a minimal TeX install lacks: `cancel`, `supertabular`, `newunicodechar`,
 `accents`, `subfloat`, `fontawesome5`, `fontawesome` (v4, for `fontawesomesymbols-*.tex`), `regexpatch`, and `t5enc.def`
 from `vntex`. With TeX Live/MiKTeX: `tlmgr install cancel supertabular newunicodechar accents subfloat fontawesome5 fontawesome regexpatch vntex`.
+A fresh TinyTeX (2026-10-03) also needed `ulem upquote listings pgf babel-english courier helvetic times psnfss algorithms
+caption lineno multirow`. The class only *warns* ("Cannot find caption.sty; proceeding without it") when an optional
+package is missing and still produces a PDF with a different layout — check `main.log` for "Cannot find".
 (conda-forge `tectonic` 0.17 was tried first and fails on this Windows sandbox with "Unable to find standard directories for platform".)
 
 **Proof-reading switch.** Uncomment `\fielddrafttrue` in `main.tex` to print every `\fieldnum{}` value in magenta
