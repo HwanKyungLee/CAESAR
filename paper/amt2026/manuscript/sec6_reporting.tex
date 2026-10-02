@@ -6,10 +6,14 @@
 
 This section states what a DOAS product should carry instead of a single uncertainty, and what in the measurement
 schedule is worth changing. The knot gate (Sect.~\ref{sec:6.3}) and the coverage fields (Sect.~\ref{sec:6.4}) are
-implemented in Augur and evaluated against the campaign. The reporting convention of
-Sect.~\ref{sec:6.1} is implemented in part: the termination state, the distance to the nearest knot and the identity
-of the reference file are exported, while the build time and time convention of each reference are specified for
-implementation; Sect.~\ref{sec:6.5} names the errors that none of these measures reaches.
+implemented in Augur and evaluated against the campaign. All three numbers of Sect.~\ref{sec:6.1} are implemented.
+The fit uncertainty is exported with its residual-correlation (sandwich) counterpart (Sect.~\ref{sec:3.4}). The
+structural term is computed in post-processing by re-fitting each record under the perturbations of
+Sect.~\ref{sec:4.2}, rebuilt from the exported record and the stored calibration knots; on one day of the budget
+window this reproduces the zero-air and reflectivity terms record by record. The context flag carries the termination
+state, the distance to the nearest zero-air and reflectivity knot, the bracketing interval, an in-range flag and the
+reference identity; the remaining fields of Table~\ref{tab:context_fields} are not yet exported.
+Sect.~\ref{sec:6.5} names the errors that none of these measures reaches.
 
 \subsection{Three numbers per retrieval, not one}
 \label{sec:6.1}
