@@ -101,6 +101,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     Publish를 죽이지 않고 건너뛰며 이름이 남나 (R1, 2026-10-02)
 46. Export CSV : 시간축 다른 열을 core.align으로 — 끝값 외삽·결손 직선 메움 없이 빈 칸,
     '#' 헤더에 시프트·리샘플 기록, Plot Maker가 다시 읽나 (R3, 2026-10-02)
+47. 시간축 시계 : fit .meta.json time_shift_h·time_KST 열로 데이터셋 시계를 알고 x 라벨에
+    (UTC)/(KST) · Night를 UTC 시계에 칠하면 경고 (R4, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2107,6 +2109,49 @@ def c_csv_no_fabrication():
     finally:
         QFileDialog.getSaveFileName = orig
     return "PASS", "범위 밖·결손은 빈 칸 · 겹친 구간만 값 · 헤더에 시프트/리샘플 · 재로드 정상"
+
+
+# ── 47. 시간축 시계(tz) 표기 + UTC 위 Night 경고 (R4, 2026-10-02) ─────────────
+@check("시간축 시계: fit meta→UTC 표기 · +9h면 KST · time_KST 열 인식 · UTC 위 Night 경고")
+def c_time_basis_night():
+    import tempfile, json
+    from gui.ui_plot_maker.data import load_dataset
+    from core.run_meta import meta_path_for
+    with tempfile.TemporaryDirectory() as tmp:
+        fp = os.path.join(tmp, "rep.dat")
+        _write_report_fixture(fp)
+        if load_dataset(fp).tz_h is not None:
+            return "FAIL", "meta 없는 fit 파일인데 시계를 추측함"
+        with open(meta_path_for(fp), "w", encoding="utf-8") as f:
+            json.dump({"time_shift_h": 0}, f)
+        ds = load_dataset(fp)
+        if ds.tz_h != 0.0:
+            return "FAIL", f"meta time_shift_h=0인데 tz_h={ds.tz_h}"
+        cp = os.path.join(tmp, "sig.csv")
+        with open(cp, "w", encoding="utf-8") as f:
+            f.write("time_KST,SigmaANs\n2026-05-20 00:00,1\n2026-05-20 00:05,2\n")
+        cs = load_dataset(cp)
+        if cs.time is None or cs.tz_h != 9.0:
+            return "FAIL", f"time_KST 열: time={cs.time is not None} tz_h={cs.tz_h}"
+    w = PlotMakerWidget()
+    w.shelf[ds.name] = ds; w._refresh_tree(); w._notify_modes()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget(); ts._series.append([f"{ds.name}:NO2", "L", None, None])
+    ts._chk_night.setChecked(True)
+    ts.render()
+    xl = w.p1.getAxis("bottom").labelText
+    if "UTC" not in xl:
+        return "FAIL", f"화면 x 라벨에 UTC 없음: {xl!r}"
+    if "Night is shaded on a UTC clock" not in w._status.text():
+        return "FAIL", f"UTC 위 Night 경고 없음: {w._status.text()!r}"
+    fig = w._build_publish_fig()
+    if "UTC" not in fig.axes[0].get_xlabel():
+        return "FAIL", f"Publish x 라벨에 UTC 없음: {fig.axes[0].get_xlabel()!r}"
+    w._shift_spin.setValue(9.0); w._on_transform_changed()
+    ts.render()
+    if "KST" not in w.p1.getAxis("bottom").labelText or "UTC clock" in w._status.text():
+        return "FAIL", f"+9h 뒤: {w.p1.getAxis('bottom').labelText!r} / {w._status.text()!r}"
+    return "PASS", "meta 없으면 모름 · UTC/KST 라벨(화면·Publish) · time_KST 인식 · 시프트 0+Night 경고, +9h면 해제"
 
 
 def main():

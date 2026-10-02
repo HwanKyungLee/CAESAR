@@ -517,6 +517,19 @@ class TimeSeriesMode(PlotMode):
             if self._chk_night.isChecked():
                 self.render()
 
+    def _time_xlabel(self, specs):
+        """'Time (UTC)' / 'Time (KST)' … — the clock the x axis is drawn in (see host.time_basis)."""
+        return "Time" + self.host.time_basis([s.label for s in specs])[0]
+
+    def _night_utc_warning(self, specs):
+        """Night shading uses the plotted clock. On plain UTC data that marks KST daytime as night."""
+        if not (hasattr(self, "_chk_night") and self._chk_night.isChecked()):
+            return ""
+        if self.host.time_basis([s.label for s in specs])[1]:
+            return (" · ⚠ Night is shaded on a UTC clock — for local (KST) night set "
+                    "Time shift +9 h")
+        return ""
+
     def _night_spans(self, t0, t1):
         """t0~t1(epoch초) 사이 야간 구간 [(a,b)...]: 매일 start ~ 익일 end(일별).
         단독 주간스크립트 _shade_nights와 동일 알고리즘(전날밤 앞에서 시작해 첫날 새벽도 포함)."""
@@ -760,7 +773,7 @@ class TimeSeriesMode(PlotMode):
                 and any_time and tspan[0] is not None:
             self._draw_night_pg(host, tspan[0], tspan[1])
         host.set_time_axis(any_time)
-        host.pg_label("xlabel", host.lbl("xlabel", "Time" if any_time else "index"))
+        host.pg_label("xlabel", host.lbl("xlabel", self._time_xlabel(specs) if any_time else "index"))
         host.pg_label("ylabel", host.lbl("ylabel", self._auto_ylabel_from_specs(specs, "L", "Value")))
         if use_right:
             host.pg_label("rlabel", host.lbl("rlabel", self._auto_ylabel_from_specs(specs, "R", "Value")))
@@ -772,7 +785,8 @@ class TimeSeriesMode(PlotMode):
                             + (f" · smooth {host.smooth_n}" if host.smooth_n > 1 else "")
                             + (f"·  time shift {host.time_shift_hours:+g}h" if host.time_shift_hours else "")
                             + "".join(f" · {s.display_name}: flag colours {s.extra['flag_note']}"
-                                      for s in specs if s.extra.get("flag_note")))
+                                      for s in specs if s.extra.get("flag_note"))
+                            + self._night_utc_warning(specs))
 
     def _render_mpl_split(self, specs, fig, ax=None):
         """Publish 분할: 시리즈마다 패널 1개(세로 스택, x축 공유). 종별 분리 그림.
@@ -804,7 +818,7 @@ class TimeSeriesMode(PlotMode):
             a.set_ylabel(f"{s.display_name} [{s.unit}]" if s.unit else s.display_name)
             a.grid(True, alpha=0.3)
             a.legend(loc="best", fontsize=8)
-        self.host.mpl_label(axes[-1], "xlabel", self.host.lbl("xlabel", "Time" if any_time else "index"))
+        self.host.mpl_label(axes[-1], "xlabel", self.host.lbl("xlabel", self._time_xlabel(specs) if any_time else "index"))
         self.host.mpl_label(axes[0], "title", self.host.lbl("title", ""))
         if any_time:
             axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
@@ -851,7 +865,7 @@ class TimeSeriesMode(PlotMode):
             for a, b in self._night_spans(tspan[0], tspan[1]):
                 ax.axvspan(_dt.datetime.fromtimestamp(a), _dt.datetime.fromtimestamp(b),
                            color=self._night_color, alpha=0.18, lw=0, zorder=0)
-        host.mpl_label(ax, "xlabel", host.lbl("xlabel", "Time" if any_time else "index"))
+        host.mpl_label(ax, "xlabel", host.lbl("xlabel", self._time_xlabel(specs) if any_time else "index"))
         host.mpl_label(ax, "ylabel", host.lbl("ylabel", self._auto_ylabel_from_specs(specs, "L", "Value")))
         if ax_r is not None:
             host.mpl_label(ax_r, "rlabel", host.lbl("rlabel", self._auto_ylabel_from_specs(specs, "R", "Value")))

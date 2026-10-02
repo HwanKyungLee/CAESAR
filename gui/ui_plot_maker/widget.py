@@ -1951,6 +1951,23 @@ class PlotMakerWidget(QWidget):
             y = np.where(hidden, np.nan, y)
         return ds, col, y, t
 
+    def time_basis(self, labels):
+        """Clock of the plotted time axis → (axis-label suffix or "", any series on plain UTC).
+        Offset = dataset clock (Dataset.tz_h) + global shift + dataset shift. Unknown clock → ""."""
+        offs = set()
+        for lab in labels:
+            ds = self.shelf.get((lab or "").split(":", 1)[0])
+            if ds is None or ds.time is None:
+                continue
+            offs.add(None if ds.tz_h is None
+                     else ds.tz_h + self.time_shift_hours + ds.shift_h)
+        if not offs or None in offs:
+            return "", 0.0 in offs
+        if len(offs) > 1:
+            return " (mixed clocks!)", 0.0 in offs
+        o = offs.pop()
+        return " (" + {0.0: "UTC", 9.0: "KST"}.get(o, f"UTC{o:+g}h") + ")", o == 0.0
+
     # 명시 단위가 없을 때 ppb로 볼 미량기체 농도 컬럼(정확 매칭 — _Shift/_Squeeze 등 제외).
     _PPB_COLS = {"no2", "ans", "pns", "chocho", "glyoxal", "h2o",
                  "o4", "o3", "hcho", "co", "so2"}
