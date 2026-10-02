@@ -74,12 +74,65 @@ def test_tz_labels():
     check("status.jsonl ts has offset", ts[-6] in "+-" and ts[-3] == ":", ts)
 
 
+def test_record_one_file_per_day():
+    print("[4] .vrec: one file per local day, columns grow in place")
+    import math
+    import shutil
+    import tempfile
+    from datetime import datetime
+    from vigil.record import MinuteRecorder, _finish_grow, read_records
+    d = tempfile.mkdtemp()
+    try:
+        t0 = datetime(2026, 10, 2, 0, 30).timestamp()      # local 00:30 — the UTC date is the day before in KST
+        rec = MinuteRecorder(d)
+        rec.maybe_write(t0, {"overall": 0.0, "hk:a": 1.0})
+        rec.maybe_write(t0 + 60, {"overall": 0.0, "hk:a": 2.0, "R:x": 0.99})
+        rec.maybe_write(t0 + 120, {"overall": 1.0, "hk:a": 3.0, "R:x": 0.98, "conc:x:NO2_ppb": 5.0})
+        files = sorted(f for f in os.listdir(os.path.join(d, "records")) if f.endswith(".vrec"))
+        check("one file, named by local date", files == ["2026-10-02.vrec"], files)
+        cols, t, v = read_records(rec._path)
+        check("columns are the union", cols == ["overall", "hk:a", "R:x", "conc:x:NO2_ppb"], cols)
+        check("old rows kept, new columns NaN", list(v[:, 1]) == [1, 2, 3] and math.isnan(v[0, 2])
+              and math.isnan(v[1, 3]) and v[2, 3] == 5.0, v)
+        rec2 = MinuteRecorder(d)                             # restart with fewer columns (monitors not up yet)
+        rec2.maybe_write(t0 + 180, {"overall": 0.0, "hk:a": 4.0})
+        cols, t, v = read_records(rec2._path)
+        check("restart appends with NaN for missing", rec2._path == rec._path and len(t) == 4
+              and math.isnan(v[3, 2]) and v[3, 1] == 4.0, (len(t), v[-1]))
+
+        # interrupted rewrite: each crash point leaves one complete version
+        path = rec._path
+        good = open(path, "rb").read(), open(path + ".json", "rb").read()
+
+        def restore():
+            open(path, "wb").write(good[0]); open(path + ".json", "wb").write(good[1])
+        open(path + ".grow", "wb").write(b"partial")             # crashed while writing new data
+        _finish_grow(path)
+        check("half-written .grow dropped", not os.path.exists(path + ".grow") and len(read_records(path)[1]) == 4)
+        rec3 = MinuteRecorder(d)
+        rec3._open("2026-10-02", ["overall"])
+        rec3._grow(path, rec3._columns + ["new"])                 # complete grow, then simulate crash points
+        grown = open(path, "rb").read(), open(path + ".json", "rb").read()
+        restore()
+        open(path + ".grow", "wb").write(grown[0]); open(path + ".grow.json", "wb").write(grown[1])
+        os.replace(path + ".grow", path)                          # crashed between the two replaces
+        cols, t, _v = read_records(path)
+        check("reader uses .grow.json mid-commit", cols[-1] == "new" and len(t) == 4, cols)
+        _finish_grow(path)
+        cols, t, _v = read_records(path)
+        check("restart finishes the commit", cols[-1] == "new" and len(t) == 4
+              and not os.path.exists(path + ".grow.json"), cols)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
     test_glyphs()
     test_paused_freshness()
     test_tz_labels()
+    test_record_one_file_per_day()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 
