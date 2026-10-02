@@ -276,7 +276,8 @@ class SaveExportMixin:
                         "{gas}_ErrorCorr = same fit with the residual autocorrelation (sandwich); "
                         "{gas}_ErrorJoint = incl. shift/squeeze; {gas}_MDL = 3 x {gas}_Error (fit-based). "
                         "None contains the I0/R/etalon structural terms. Measured floor / MDL: "
-                        "tools/zero_air_floor.py on {campaign}/_zeroair/ (written by alpha generation).",
+                        "tools/zero_air_floor.py on {campaign}/_zeroair/ (written by alpha generation); "
+                        "per-record structural terms: tools/structural_budget.py --result <this file>.",
                         "# Calibration context (alpha input): I0_/R_dt_s = s to the nearest knot, I0_/R_gap_h = "
                         "bracketing knot interval, I0_/R_edge = 1 if extrapolated; NaN = knots unknown "
                         "(alpha made before 2026-10-03 without _calknots.json).",

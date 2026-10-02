@@ -2930,6 +2930,7 @@ class AlphaExportWorker(QThread):
         #    읽어 '시각(rep_sec)'으로 시간보간. 있으면 워커 자체 R보다 우선(단일 진실원천).
         #    채널창 기반이라 핫도 정상(자체 전체범위 R은 핫 98% 탈락·Leff 2배 오차). ──
         rt_omr_interp = None
+        _rt_knot_data = None      # (knot_sec, omr_d on this alpha's pixel axis, breaks) — for the knot npz
         rt_omr_pchip_obj = None   # Pass 2 병렬 ctx용 twin — rt_omr_interp(다중knot)과 동일 객체
         rt_omr_const_obj = None   # Pass 2 병렬 ctx용 twin — rt_omr_interp(단일knot)과 동일 상수
         rt_calib_note = None   # rt_path 적용 시 헤더에 박을 출처(없으면 자체 R)
@@ -2969,6 +2970,7 @@ class AlphaExportWorker(QThread):
                 if len(_ks) >= 2:
                     # 계단 경계에서 분절된 PCHIP — break 없으면 기존과 동일 출력.
                     _prt = _SegPchip(_ks, _od, break_x=_sg_breaks)
+                    _rt_knot_data = (np.asarray(_ks, float), np.asarray(_od, float), list(_sg_breaks))
                     def rt_omr_interp(sec, _p=_prt):
                         if not np.isfinite(sec):
                             return None
@@ -3204,6 +3206,21 @@ class AlphaExportWorker(QThread):
                         "other blocks; first/last block skipped)",
                         f"# zero_air_blocks={len(_za_rows)}  of {len(za_x)} ZA knots"])
                     self.status_msg.emit(f"[zero-air] {len(_za_rows)} LOO rows → {_za_out}")
+                # The I0 and R knots exactly as this run used them (R already on the alpha's pixel axis)
+                # — tools/structural_budget.py rebuilds each record's leave-one-knot-out alpha from
+                # the alpha file plus this, without re-reading raw (manuscript §4.2, §6.1).
+                _npz = _za_out.replace("zeroair_loo_", "calib_knots_").replace("_alpha_trace.dat", ".npz")
+                _r = _rt_knot_data
+                np.savez_compressed(
+                    _npz, za_x=np.asarray(za_x, float), za_arr=np.asarray(za_arr, float),
+                    za_t=np.asarray(za_t, float), za_p=np.asarray(za_p, float),
+                    i0_breaks=np.asarray(_i0_breaks, float), wave_nm=np.asarray(wave_nm, float),
+                    pix_min=int(self.pixel_min), rl_factor=float(self.rl_factor),
+                    za_ref=np.asarray(_ZA_REF, float),
+                    r_sec=(_r[0] if _r else np.zeros(0)), r_omr=(_r[1] if _r else np.zeros((0, 0))),
+                    r_breaks=np.asarray(_r[2] if _r else [], float),
+                    rt_path=os.path.basename(self.rt_path or ""))
+                self.status_msg.emit(f"[structural] knot data → {_npz}")
             except Exception as e:   # noqa: BLE001 — a diagnostic product must never stop alpha generation
                 self.status_msg.emit(f"⚠ [zero-air] LOO file not written: {type(e).__name__}: {e}")
 

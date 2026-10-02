@@ -98,7 +98,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
              controlled_start=None, controlled_bounds=None, controlled_initial_values=None,
              return_solver_diagnostics=False, return_model=False, use_etalon=True,
-             etalon_freq=None):
+             etalon_freq=None, seed=None):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
     이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
     allow_negative_gas = _require_bool(allow_negative_gas)
@@ -137,7 +137,12 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     # 0에 주저앉는다. 앱은 스캔간 last_valid_shift를 이어받아 step_limit씩 걸어가지만,
     # 표본 스캔은 시간연속이 아니므로 **스캔마다 넓은 격자탐색**으로 시드를 잡는다.
     # (DoasFitter.pre_calibrate는 ±0.5 국소 격자라 여기선 부족 → 전역 격자를 직접 돈다.)
-    if controlled_start is None:
+    _seed_given = seed is not None
+    if controlled_start is None and seed is not None:
+        # caller-supplied (shift, squeeze) seed, same box rule as the grid seed (seed ± step) —
+        # a perturbed record re-fit from its unperturbed seed (structural budget, §4.2)
+        seed, seed_sq = map(float, seed)
+    elif controlled_start is None:
         seed, seed_sq = _seed_shift(fitter, vp, a_scaled, poly_deg, ref_props, target, seed_range,
                                     seed_step, allow_negative_gas)
     else:
@@ -230,6 +235,7 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
                 use_etalon=bool(use_etalon),
                 deterministic_seed={"shift": float(seed), "squeeze": float(seed_sq),
                                     "source": ("controlled_start" if controlled_start is not None
+                                               else "caller_seed" if _seed_given
                                                else "deterministic_grid")},
                 nonlinear_initialization={"active": list(active), "theta0": list(map(float, t0)),
                                           "lower": list(map(float, lb)),
