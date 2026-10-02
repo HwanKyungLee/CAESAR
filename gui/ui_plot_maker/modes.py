@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from gui.theme import AUGUR
 from gui.result_viewer_io import flag_color, FLAG_KEYS
-from gui.pg_perf import make_fast, BIG
+from gui.pg_perf import make_fast, set_data, BIG
 
 from .core import (ResolvedSeries, PlotMode, register_mode, _shade,
                    mathtext_to_html)
@@ -642,7 +642,7 @@ class TimeSeriesMode(PlotMode):
                 self._make_clickable(curve, label)
             self._add_pg(host, vb, curve, name)
             make_fast(curve, force=True)        # 붙인 **다음에** — PlotItem.addItem이 꺼 버린다
-            curve.setData(xs, ys)
+            set_data(curve, xs, ys)             # NaN 은 빼고 끊는다 — peak 가 NaN 구간을 지운다
         else:
             curve = pg.PlotDataItem(xs, ys, name=name, **style)
             if label is not None:
