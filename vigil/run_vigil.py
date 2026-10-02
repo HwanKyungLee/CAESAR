@@ -36,8 +36,9 @@ from vigil.alert_engine import OK, P0, P1, P2, SKIP, aggregate, worse
 from vigil.ingest_cursor import IngestCursor
 from vigil.monitors.hk_monitor import evaluate_hk
 from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
-from vigil.monitors.clock_monitor import ClockMonitor, offset_seconds
+from vigil.monitors.clock_monitor import ClockMonitor, RowTimeMonitor, offset_seconds
 
+HEADER_ONLY_SEC = 60.0      # newest file holds only its header row this long after the last write -> P2
 CLOCK_FRESH_SEC = 120.0    # 시각 차이 표본: 이 안에 쓰인 파일의 끝 행만(vigil/monitors/clock_monitor.py)
 from vigil.monitors.lamp_monitor import LampMonitor
 from vigil.monitors.r_monitor import RMonitor
@@ -203,6 +204,8 @@ class VigilApp:
         self._lamp_by_channel: dict = {}
         # 행 시각 vs PC 시계 — 계기(기본 프로파일)마다. 핫·콜드는 다른 DAQ PC 일 수 있다(2026-05 핫만 9 h).
         self._clock_monitors: dict = {}    # {instrument: ClockMonitor}
+        self._rowtime_monitors: dict = {}  # {instrument: RowTimeMonitor} — backward/jump/rollover
+        self._rowtime_last: dict = {}      # {instrument: status} — log on change only
         self._clock_by_inst: dict = {}     # {instrument: (status, msg, metrics)}
         self._lamp_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._lamp_last_status: dict = {}
@@ -541,6 +544,38 @@ class VigilApp:
                 if self.dashboard is not None:
                     self.dashboard.log_line(f"[clock {inst}] {res[0]}: {res[1]}")
 
+    def _files_between(self, a: str, b: str) -> bool:
+        """Any watched file sorting strictly between a and b (same order as the watcher's list)."""
+        import bisect
+        paths = self.watcher._paths
+        return bisect.bisect_right(paths, a) < bisect.bisect_left(paths, b)
+
+    def _rowtime_results(self, now) -> list:
+        """Row-time sequence per instrument (RowTimeMonitor) + a newest file that holds only its header
+        row (DAQ wrote the header at rollover, then nothing) — logged when the status changes."""
+        out = []
+        for inst, mon in self._rowtime_monitors.items():
+            res = mon.status(now)
+            if res is not None:
+                out.append((f"rowtime:{inst}", *res))
+        w = self.watcher
+        if w is not None and w._files:
+            newest = max(w._files, key=lambda p: w._files[p][1])
+            n = w.unknown_layout.get(newest, (0,))[0]
+            age = w.write_age(newest)
+            if 0 < n < UNKNOWN_LAYOUT_MIN_ROWS and w.at_end(newest) and age is not None and age > HEADER_ONLY_SEC:
+                out.append(("ingest:header_only", P2,
+                            f"{os.path.basename(newest)} holds only its header row ({age:.0f} s since the last "
+                            f"write) — DAQ stuck right after the rollover?", {"file": newest}))
+        for name, st, msg, mt in out:
+            if self._rowtime_last.get(name) != st:
+                self.state_log.append(st, msg, kind="rowtime", source=name, **{k: v for k, v in mt.items()
+                                                                                 if k != "file"})
+                if self.dashboard is not None and st != OK:
+                    self.dashboard.log_line(f"[{name}] {st}: {msg}")
+            self._rowtime_last[name] = st
+        return out
+
     def _retire_stale_files(self, now: datetime) -> None:
         stale = [p for p, t in self._files_seen.items()
                  if (now - t).total_seconds() > self.retire_after_sec]
@@ -665,6 +700,11 @@ class VigilApp:
                 if _last is None or (now - _last).total_seconds() >= HK_TREND_EVERY_SEC:
                     self._hk_trend.setdefault(mkey, deque(maxlen=TREND_MAXLEN)).append((now, val))
                     self._hk_trend_t[mkey] = now
+            if ev.row_time is not None and ev.role != "header":
+                inst = prof.base_id or prof.profile_id
+                self._rowtime_monitors.setdefault(
+                    inst, RowTimeMonitor(prof.cadence.file_rollover_sec)).observe(
+                        ev.file, ev.row_time, now, files_between=self._files_between)
             self._observe_reflectance(prof, ev, now)
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
@@ -691,6 +731,7 @@ class VigilApp:
                                  ("lamp", self._lamp_by_channel)):
             results += [(f"{kind}:{key[1]}", s, m, mt) for key, (s, m, mt) in by_channel.items()]
         results += [(f"clock:{inst}", s, m, mt) for inst, (s, m, mt) in self._clock_by_inst.items()]
+        results += self._rowtime_results(now)
         overall_status, overall_msg = aggregate(results)
 
         if overall_status != self._last_status:

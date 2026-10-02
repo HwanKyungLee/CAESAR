@@ -90,6 +90,14 @@ def _year_from_filename(path: str, default: Optional[int] = None) -> int:
     return default if default is not None else datetime.now().year
 
 
+def _date_from_filename(path: str) -> Optional[datetime]:
+    m = _DATE_RE.search(os.path.basename(path))
+    try:
+        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+    except ValueError:
+        return None
+
+
 def _parse_row(line: str) -> Optional[list]:
     """한 줄 → float 리스트. 헤더/주석/빈줄/파싱실패는 None(raw_parser와 같은 관례)."""
     s = line.strip()
@@ -506,6 +514,11 @@ class Watcher:
                         role = prof.flag_role(flag)
                         year = _year_from_filename(path)
                         row_time = prof.header.time_bytepack.to_datetime(row, year)
+                        # bytepack counts from Jan 1: a Dec-31 file's rows after midnight decode to
+                        # Jan 1 of the *file's* year — a year backwards. Those belong to year + 1.
+                        fdate = _date_from_filename(path)
+                        if fdate is not None and (fdate - row_time).days > 180:
+                            row_time = prof.header.time_bytepack.to_datetime(row, year + 1)
                     except (IndexError, ValueError):
                         pass
                 events.append(RowEvent(

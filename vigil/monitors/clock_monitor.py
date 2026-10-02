@@ -63,3 +63,79 @@ def offset_seconds(row_time_utc, arrival_local) -> Optional[float]:
     from datetime import timezone
     arr_utc = arrival_local.astimezone(timezone.utc).replace(tzinfo=None)
     return (arr_utc - row_time_utc).total_seconds()
+
+
+# ── Row-to-row time sequence (§1.4: backward, jump, rollover gap/overdue) ─────────────────
+# Yeosu 2026-06 hot/cold raw: rows 0.8–1.9 s apart inside a file, ~1 s across a rollover,
+# span ≤ 3600 s. Real events seen: DAQ restart gaps of 33 s and ~42 min between files.
+BACK_TOL = 2.0         # s — row time may wobble this much backwards (bytepack rounding)
+JUMP_WARN = 60.0       # s — longer gap between consecutive rows = rows missing / DAQ paused
+ROLLOVER_GRACE = 120.0  # s — file longer than cadence.file_rollover_sec + this = rollover overdue
+EVENT_HOLD = 600.0     # s (wall) — a backward/jump event stays P2 this long, then clears
+_KEEP_FILES = 4
+
+
+class RowTimeMonitor:
+    """One instrument's row-time sequence. observe() per row; status(now) → (status, msg, metrics).
+
+    Inside a file: backward > BACK_TOL or gap > JUMP_WARN. Across files: first row of a newer file
+    (by name — catch-up may interleave older files, those get only the in-file check) against the
+    last row of the previous one. Rollover overdue from row times alone (no wall clock), so a
+    stopped instrument does not trigger it — liveness covers that. All P2: events, not states."""
+
+    def __init__(self, rollover_sec=None, hold_sec: float = EVENT_HOLD):
+        self.rollover_sec = rollover_sec
+        self.hold_sec = hold_sec
+        self.first: dict = {}      # {path: first row time}
+        self.last: dict = {}       # {path: last row time}
+        self.cur: Optional[str] = None
+        self.event = None          # (wall datetime, msg, metrics)
+
+    def _flag(self, now, msg, **metrics):
+        self.event = (now, msg, metrics)
+
+    def observe(self, path: str, row_time, now, files_between=None) -> None:
+        """files_between(a, b) → True if other raw files sit between a and b (skipped as stale
+        backlog, not read yet) — then a gap across them is not a gap in the data."""
+        import os
+        name = os.path.basename(path)
+        prev = self.last.get(path)
+        if prev is None:
+            self.first[path] = row_time
+            if (self.cur is not None and path > self.cur and self.cur in self.last
+                    and not (files_between and files_between(self.cur, path))):
+                gap = (row_time - self.last[self.cur]).total_seconds()
+                if gap > JUMP_WARN:
+                    self._flag(now, f"{gap / 60:.0f} min of rows missing between "
+                                    f"{os.path.basename(self.cur)} and {name} (DAQ restart or skipped file?)",
+                               gap_s=gap)
+                elif gap < -BACK_TOL:
+                    self._flag(now, f"{name} starts {-gap:.0f} s before {os.path.basename(self.cur)} ended "
+                                    f"— row clock went backwards at the rollover", gap_s=gap)
+            if self.cur is None or path > self.cur:
+                self.cur = path
+            for old in sorted(self.last)[:-_KEEP_FILES]:
+                self.first.pop(old, None)
+                self.last.pop(old, None)
+        else:
+            dt = (row_time - prev).total_seconds()
+            if dt < -BACK_TOL:
+                self._flag(now, f"row time went backwards by {-dt:.0f} s inside {name}", gap_s=dt)
+            elif dt > JUMP_WARN:
+                self._flag(now, f"row time jumped {dt / 60:.1f} min inside {name} (rows missing?)", gap_s=dt)
+        self.last[path] = row_time
+
+    def status(self, now):
+        import os
+        metrics = {}
+        if self.cur in self.first and self.rollover_sec:
+            span = (self.last[self.cur] - self.first[self.cur]).total_seconds()
+            metrics["file_span_s"] = span
+            if span > self.rollover_sec + ROLLOVER_GRACE:
+                return P2, (f"{os.path.basename(self.cur)} has run {span / 60:.0f} min without a new file "
+                            f"(expected every {self.rollover_sec / 60:.0f} min) — rollover stuck?"), metrics
+        if self.event is not None and (now - self.event[0]).total_seconds() < self.hold_sec:
+            return P2, self.event[1], {**metrics, **self.event[2]}
+        if not self.first:
+            return None
+        return OK, "row times in sequence", metrics
