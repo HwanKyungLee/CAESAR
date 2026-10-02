@@ -270,6 +270,38 @@ def test_non_fit_restores_old_plots(w):
     assert w._stack_host.isHidden(), "fit이 아닌데 스택이 남아있다"
 
 
+def _write_conc_csv(d, bom=False):
+    p = os.path.join(d, "conc_KST.csv")
+    with open(p, "w", encoding="utf-8-sig" if bom else "utf-8", newline="") as fh:
+        fh.write("# NIER submission\n")
+        fh.write("time_KST,time_UTC,NO2,n_used\n")
+        for i in range(5):
+            fh.write(f"2026-09-04 19:0{i}:00,2026-09-04 10:0{i}:00,{1.0 + i},10\n")
+    return p
+
+
+def test_view_toggles_leave_non_fit_alone(w):
+    """2026-10-02 R4: Hide QC / K / Gas / Err after opening a CSV re-plotted it as a fit
+    (ValueError on CSV, 2,048 'gas' lanes on an alpha trace)."""
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._reload()
+    w._path = _write_conc_csv(d)
+    w._reload()
+    assert w._current_kind == "concentration", w._current_kind
+    errs, old_hook = [], sys.excepthook
+    sys.excepthook = lambda *a: errs.append(a[1])      # Qt slot exceptions land here
+    try:
+        w._chk_hide_qc.toggle()
+        w._spin_qc_k.setValue(3.0)
+        w._chk_err.toggle()
+    finally:
+        sys.excepthook = old_hook
+    assert not errs, f"view toggle re-plotted the CSV as a fit: {errs[0]!r}"
+    assert not w._pw_top.isHidden() and w._stack_host.isHidden(), "CSV was re-plotted as a fit"
+    w._chk_hide_qc.toggle(); w._spin_qc_k.setValue(0.0); w._chk_err.toggle()
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -280,7 +312,8 @@ def main() -> int:
                      (test_real_click_opens_detail, (w,)),
                      (test_big_file_thinning_keeps_flag_share, (w,)),
                      (test_residual_refuses_without_meta, (w,)),
-                     (test_non_fit_restores_old_plots, (w,))):
+                     (test_non_fit_restores_old_plots, (w,)),
+                     (test_view_toggles_leave_non_fit_alone, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

@@ -769,8 +769,9 @@ class ResultViewerWidget(QWidget):
         self._gas_combo.blockSignals(False)
 
     def _on_gas_changed(self, _idx):
-        # fit 모드에서 가스 선택 바뀌면 현재 파일 다시 그림
-        if self._fit_cache and self._path:
+        # fit 모드에서 가스 선택 바뀌면 현재 파일 다시 그림. Only when the open file IS a fit —
+        # _fit_cache may belong to an earlier file (2026-10-02 audit R4: CSV/alpha re-plotted as fit).
+        if getattr(self, "_current_kind", None) == "fit" and self._fit_cache and self._path:
             self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
             self._plot_fit(self._path)
 
