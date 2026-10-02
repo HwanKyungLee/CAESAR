@@ -108,6 +108,7 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 49. Theme 선 굵기 : 테마 굵기는 기본(직전 테마) 굵기 시리즈에만, 사용자 지정은 보존 (R6, 2026-10-02)
 50. 조판 빈 패널 : 데이터셋이 지워진 패널은 'missing: …' + Publish 경고 (R8, 2026-10-02)
 51. Publish 폴더 : 대화상자를 열거나 취소해도 결과 트리에 figures/를 만들지 않나 (R9, 2026-10-02)
+52. Diurnal 시프트 : 전역/데이터셋 시프트가 있으면 Hour shift를 무시(회색)해 +9h 이중 적용 금지 (R11, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2258,6 +2259,33 @@ def c_publish_no_makedirs_before_confirm():
     finally:
         _dd.dlg_dir, QFileDialog.getSaveFileName = orig_dd, orig_dlg
     return "PASS", "대화상자 시작 = 있는 가장 가까운 폴더 · 취소 시 생성 0"
+
+
+# ── 52. Diurnal Hour shift + 전역 Time shift 이중 적용 금지 (R11, 2026-10-02) ──────
+@check("Diurnal: 전역 시프트가 걸려 있으면 Hour shift는 무시(회색) — +9h 두 번 금지")
+def c_diurnal_single_shift():
+    w = _widget_with_fixture()
+    keys = [m.key for m in w._modes]
+    w._mode_combo.setCurrentIndex(keys.index("diurnal"))
+    dm = w._mode
+    dm._c.setCurrentText("fixture:NO2")
+
+    def counts(spin, glob):
+        dm._shift.setValue(spin)
+        w._shift_spin.setValue(float(glob)); w._on_transform_changed()
+        return list(dm._stats()[5])
+    ref = counts(0, 9)
+    if counts(9, 0) != ref:
+        return "FAIL", "Hour shift 단독 +9가 전역 +9와 다름(전제 실패)"
+    both = counts(9, 9)
+    if both != ref:
+        return "FAIL", "Hour shift와 전역 시프트가 합산됨(+18h)"
+    if dm._shift.isEnabled():
+        return "FAIL", "무시되는 Hour shift가 활성으로 보임"
+    counts(9, 0)
+    if not dm._shift.isEnabled():
+        return "FAIL", "전역 시프트 0인데 Hour shift가 꺼져 있음"
+    return "PASS", "전역 +9 + Hour +9 = +9 (Hour 회색) · 전역 0이면 Hour 그대로"
 
 
 def main():

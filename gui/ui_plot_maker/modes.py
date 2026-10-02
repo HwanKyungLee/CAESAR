@@ -1678,7 +1678,7 @@ class DiurnalMode(PlotMode):
         m = np.isfinite(t) & np.isfinite(y)
         if m.sum() < 1:
             return None
-        sh = self._shift.value()
+        sh = self._hour_shift(ds)
         hrs = np.array([(_dt.datetime.fromtimestamp(v).hour + sh) % 24 for v in t[m]])
         vals = y[m]
         H = np.arange(24)
@@ -1691,6 +1691,17 @@ class DiurnalMode(PlotMode):
                 p25[h] = np.percentile(vv, 25); p75[h] = np.percentile(vv, 75)
                 cnt[h] = vv.size
         return H, mean, med, p25, p75, cnt, col
+
+    def _hour_shift(self, ds):
+        """Diurnal's own Hour shift, applied only when no time shift is in effect yet.
+        resolve() already moved t by the global + dataset shift; adding this spin on top
+        counted +9 h twice (peak 10 h → 19 h). The spin is greyed out while it is ignored."""
+        other = self.host.time_shift_hours + (ds.shift_h if ds is not None else 0.0)
+        self._shift.setEnabled(not other)
+        self._shift.setToolTip("Hours to add to local time (e.g. UTC data → KST = +9)" if not other
+                               else f"Ignored: a time shift of {other:+g} h is already applied "
+                                    "(global Time shift / dataset shift)")
+        return 0 if other else self._shift.value()
 
     def _ylabel(self, col):
         u = self.host.unit_of(self._c.currentText())
