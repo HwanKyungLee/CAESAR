@@ -11,9 +11,11 @@ BASE=r"C:\GHL\2026 yeosu"
 def run(ch, mode, rt, files, outdir, label, purge):
     if mode=="oldpair":
         DataIO._slot_identity=staticmethod(lambda lay, c, fp: None)
-    z=np.load(rt,allow_pickle=True); wave=np.asarray(z["wave_nm"],float)
+    rt=None if rt in ("none","None","") else rt
+    wave=np.asarray(np.load(rt,allow_pickle=True)["wave_nm"] if rt else np.loadtxt(os.environ["WAVECAL"]).reshape(-1),float)
     logs=[]
-    wk=AlphaExportWorker(files,0,2048,wave,flag_za=[500],flag_he=[510],flag_amb=[1],rl_factor=1.0,cavity_len=51.8,
+    p0=int(os.environ.get('PXMIN',0)); p1=int(os.environ.get('PXMAX',2048))
+    wk=AlphaExportWorker(files,p0,p1,wave[p0:p1],flag_za=[500],flag_he=[510],flag_amb=[1],rl_factor=1.0,cavity_len=51.8,
                          output_dir=outdir,channel=ch,avg_sec=60.0,purge_settle_sec=purge,channel_label=label,rt_path=rt)
     wk.use_parallel=False
     res={}
