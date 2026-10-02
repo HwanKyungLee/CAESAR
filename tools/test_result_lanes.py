@@ -341,6 +341,40 @@ def test_bom_csv_opens(w):
     assert "NO2" in [it.name() for it in w._pw_top.plotItem.listDataItems()]
 
 
+def _write_fit_rms(d, rms):
+    """Fit report with one RMS per minute (NO2 = 1) — for post-hoc QC population tests."""
+    from datetime import datetime, timedelta
+    p = os.path.join(d, "260904_CH1_PNs_qc.dat")
+    t0 = datetime(2026, 9, 4, 10, 0)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(_HDR + _COLS)
+        for k, r in enumerate(rms):
+            fh.write("\t".join(str(v) for v in (
+                f"a_alpha_trace.dat [{k:04d}]", f"{t0 + timedelta(minutes=k):%Y-%m-%d %H:%M:%S}",
+                1, r, 1.05, 120.0, "OK", 0.0, 1.0, 1.0, 0.06, 0.09, 0.02)) + "\n")
+    return p
+
+
+def test_export_qc_matches_screen(w):
+    """2026-10-02 R6: Export recomputed the K threshold on the *sliced* rows; the screen uses
+    the whole file. A range export must exclude exactly the rows hidden on screen."""
+    rms = [1e-3] * 20 + [2e-3 * (1 + 0.02 * (k % 5)) for k in range(20)]
+    rms[30], rms[35] = 2.3e-3, 1e-2     # whole-file K=3 hides only row 35; slice-only also 30
+    w._path = _write_fit_rms(tempfile.mkdtemp(), rms)
+    w._list.clear()
+    w._reload()
+    w._spin_qc_k.setValue(3.0)
+    t = w._fit_cache
+    w._set_range_edits(t["time"][20], t["time"][39])
+    screen = w._qc_mask(t)[20:40]
+    _c, colhdr, rows, _n, nq = w._build_export([w._path])
+    si = colhdr.split("\t").index("Status")
+    got = [ln.split("\t")[si].startswith("QC-Auto") for _t, ln in rows]
+    w._spin_qc_k.setValue(0.0)
+    assert len(rows) == 20 and int(screen.sum()) == 1, (len(rows), screen)
+    assert got == list(screen) and nq == int(screen.sum()), (got, list(screen), nq)
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -355,7 +389,8 @@ def main() -> int:
                      (test_view_toggles_leave_non_fit_alone, (w,)),
                      (test_png_of_fit_is_the_lanes, (w,)),
                      (test_stats_follow_open_file, (w,)),
-                     (test_bom_csv_opens, (w,))):
+                     (test_bom_csv_opens, (w,)),
+                     (test_export_qc_matches_screen, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

@@ -1390,12 +1390,17 @@ class ResultViewerWidget(QWidget):
                                      for p in paths])
 
     def _bake_qc_into_rows(self, colhdr, rows):
-        """현재 K>0이면 rows(텍스트 행)의 RMS 분포로 robust 임계를 잡아 초과 행의
-        가스 컬럼을 nan + Status=QC-Auto로 바꾼다. 반환: (rows, 제외수). K=0이면 그대로."""
+        """현재 K>0이면 사후 QC 초과 행의 가스 컬럼을 nan + Status=QC-Auto로 바꾼다.
+        반환: (rows, 바꾼 행 수). K=0이면 그대로.
+
+        The mask comes from `qc_hidden_mask` - the same function the screen uses - over
+        **all** rows passed in. Callers pass the whole file(s) *before* slicing to the range,
+        so the threshold population matches the screen (2026-10-02 audit R6: the old copy
+        recomputed thresholds on the sliced rows → 28 rows excluded vs 6 on screen)."""
         K = self._spin_qc_k.value() if hasattr(self, '_spin_qc_k') else 0.0
         if K <= 0 or not rows:
             return rows, 0
-        cols = colhdr.split('\t')
+        cols = colhdr.split('	')
         idx = {c: i for i, c in enumerate(cols)}
         if 'RMS' not in idx:
             return rows, 0
@@ -1407,37 +1412,40 @@ class ResultViewerWidget(QWidget):
                  or [c for c in cols if (c + '_Smooth') in idx]
                  or [c for c in cols if c in ('NO2', 'CHOCHO', 'H2O', 'O4', 'HONO', 'HCHO')])
         gidx = [idx[g] for g in gases] + [idx[g + '_Smooth'] for g in gases if (g + '_Smooth') in idx]
-        # 채널별 임계 (단일 진실원: core.result_io)
-        import numpy as _np
-        from core.result_io import robust_rms_thresholds
-        row_ch, row_rv = [], []
-        for _t, line in rows:
-            p = line.split('\t')
-            row_ch.append(p[ci] if (ci is not None and ci < len(p)) else '0')
-            try:
-                row_rv.append(float(p[ri]))
-            except Exception:
-                row_rv.append(_np.nan)
-        thr = robust_rms_thresholds(row_rv, row_ch, K=K, min_n=5)
-        out = []; nq = 0
-        for k, (t, line) in enumerate(rows):
-            p = line.split('\t')
-            ch = p[ci] if (ci is not None and ci < len(p)) else '0'
-            try:
-                rv = float(p[ri])
-            except Exception:
-                rv = float('nan')
-            if _np.isfinite(rv) and rv > thr.get(ch, _np.inf):
+        parts = [line.split('	') for _t, line in rows]
+        rv = np.array([float(p[ri]) if ri < len(p) and p[ri].strip() else np.nan
+                       for p in parts], dtype=float)
+        ch = ([p[ci] if ci < len(p) else '' for p in parts] if ci is not None else None)
+        mask = qc_hidden_mask(len(rows), rms=rv, channel=ch, K=K)
+        out = []
+        for (t, line), p, m in zip(rows, parts, mask):
+            if m:
                 for j in gidx:
                     if j < len(p):
                         p[j] = 'nan'
                 if si is not None and si < len(p):
                     p[si] = f'QC-Auto(K={K:g})'
-                nq += 1
-                out.append((t, '\t'.join(p)))
-            else:
-                out.append((t, line))
-        return out, nq
+                line = '	'.join(p)
+            out.append((t, line))
+        return out, int(mask.sum())
+
+    def _build_export(self, paths):
+        """Merge → post-hoc QC on the whole set (as on screen) → slice to the range.
+        Returns (comments, colhdr, rows, n_in, nq-in-range). ValueError if nothing to write."""
+        from core.result_io import merge_results, slice_rows
+        comments, colhdr, rows, _ndup = merge_results(paths)
+        n_in = len(rows)
+        rows, _ = self._bake_qc_into_rows(colhdr, rows)    # 사후 QC(K>0) — 전체 기준
+        t0, t1 = self._region_times()
+        rows = slice_rows(rows, t0, t1)
+        if not rows:
+            raise ValueError("No data in the selected range.")
+        K = self._spin_qc_k.value()
+        tag = f"QC-Auto(K={K:g})"
+        si = colhdr.split('	').index('Status') if 'Status' in colhdr.split('	') else None
+        nq = (sum(1 for _t, ln in rows if si is not None and (ln.split('	') + [''] * (si + 1))[si] == tag)
+              if K > 0 else 0)
+        return comments, colhdr, rows, n_in, nq
 
     def _export_region(self):
         """선택구간(없으면 전체)을 result_io로 잘라 새 파일로 저장.
@@ -1445,23 +1453,16 @@ class ResultViewerWidget(QWidget):
         if getattr(self, '_current_kind', None) == 'concentration':
             self._export_concentration_shifted()
             return
-        from core.result_io import merge_results, slice_rows, write_result, bucketed_out_name
+        from core.result_io import write_result, bucketed_out_name
         paths = self._selected_paths()
         if not paths:
             QMessageBox.information(self, "Export", "Open a result file first.")
             return
         try:
-            comments, colhdr, rows, _ndup = merge_results(paths)
+            comments, colhdr, rows, n_in, nq = self._build_export(paths)
         except ValueError as e:
             QMessageBox.warning(self, "Export", str(e))
             return
-        t0, t1 = self._region_times()
-        n_in = len(rows)
-        rows = slice_rows(rows, t0, t1)
-        if not rows:
-            QMessageBox.warning(self, "Export", "No data in the selected range.")
-            return
-        rows, nq = self._bake_qc_into_rows(colhdr, rows)   # 사후 QC(K>0) 반영
         # 자동 저장경로: 날짜/neg/QC 버킷(GUI save와 동일). neg·QC는 입력 # 헤더에서 상속,
         # 뷰어가 사후 QC 재적용(K>0)했으면 그 K로 QC 버킷 덮어씀.
         _kv = self._spin_qc_k.value()
