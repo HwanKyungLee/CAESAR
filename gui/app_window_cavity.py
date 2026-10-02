@@ -112,7 +112,22 @@ class CavityTabMixin:
         control_layout.addWidget(grp_pipe)
 
         # Group: Vigil — hand the finished FitSet over to the live monitor (mission package).
-        grp_vigil = QGroupBox("Vigil")
+        # A group-box title cannot carry an icon, so the "title" is an icon + label row above an
+        # untitled box (same place and font as the other group titles).
+        from PyQt6.QtGui import QPixmap
+        _vig_hdr = QHBoxLayout()
+        _vig_hdr.setContentsMargins(0, 0, 0, 0)
+        _vig_hdr.setSpacing(int(4 * self._s))
+        _vig_icon = QLabel()
+        _png = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons", "vigil_256.png")
+        _h = self.fontMetrics().height()
+        _vig_icon.setPixmap(QPixmap(_png).scaled(_h, _h, Qt.AspectRatioMode.KeepAspectRatio,
+                                                 Qt.TransformationMode.SmoothTransformation))
+        _vig_hdr.addWidget(_vig_icon)
+        _vig_hdr.addWidget(QLabel("Vigil"))
+        _vig_hdr.addStretch(1)
+        control_layout.addLayout(_vig_hdr)
+        grp_vigil = QGroupBox()
         lay_vigil = QVBoxLayout()
         btn_vigil = QPushButton("Export Mission…")
         btn_vigil.setToolTip(
