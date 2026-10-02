@@ -122,7 +122,10 @@ class CavityTabMixin:
         _vig_icon.setPixmap(QPixmap(_png).scaled(_h, _h, Qt.AspectRatioMode.KeepAspectRatio,
                                                  Qt.TransformationMode.SmoothTransformation))
         _vig_hdr.addWidget(_vig_icon)
-        _vig_hdr.addWidget(QLabel("Vigil"))
+        _vig_lbl = QLabel("Vigil")
+        from gui.theme import heading_font as _hf
+        _vig_lbl.setFont(_hf(11))
+        _vig_hdr.addWidget(_vig_lbl)
         _vig_hdr.addStretch(1)
         control_layout.addLayout(_vig_hdr)
         grp_vigil = QGroupBox()

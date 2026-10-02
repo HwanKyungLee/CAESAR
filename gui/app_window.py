@@ -106,7 +106,15 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
 
         # Create horizontal splitter (Left: Control Panel / Right: Monitor Tabs)
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.setCentralWidget(splitter)
+        # Header band + work area. The band carries the identity the splash sets up (emblem, Spectral
+        # wordmark) and the four steps of the left panel as one strip, so "what next" is read at the top.
+        _central = QWidget()
+        _cv = QVBoxLayout(_central)
+        _cv.setContentsMargins(0, 0, 0, 0)
+        _cv.setSpacing(0)
+        _cv.addWidget(self._build_header_band())
+        _cv.addWidget(splitter, 1)
+        self.setCentralWidget(_central)
 
         # =========================================================
         # [Left] Main Control Panel
@@ -408,6 +416,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # --- Parameters Section (Collapsible) ---
         self._params_visible = True
         self._btn_toggle_params = QPushButton("▼  3 · Parameters")
+        from gui.theme import heading_font as _hf
+        self._btn_toggle_params.setFont(_hf(11))
         self._btn_toggle_params.setStyleSheet(
             "text-align: left; font-weight: bold; "
             f"border: 1px solid {AUGUR.rule}; padding: 4px 8px;")
@@ -1112,13 +1122,106 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self._render_day_audit()   # 캐시된 감사 결과는 Refresh로 지워지지 않는다
         self._refresh_step_marks()
 
-    _STATUS_GLYPH = {"ok": "✓", "warn": "!", "fail": "✗", "na": "–"}
+    _STATUS_GLYPH = {"ok": "✔", "warn": "!", "fail": "✘", "na": "–"}
 
     def _set_status_line(self, lbl, level, text):
         """One Setup Status line: glyph + colour from the same level (colour alone is not enough)."""
         col = {"ok": AUGUR.ok, "warn": AUGUR.warn, "fail": AUGUR.fail}.get(level, AUGUR.muted)
+        bg = {"ok": AUGUR.ok_bg, "warn": AUGUR.warn_bg, "fail": AUGUR.fail_bg}.get(level, AUGUR.neutral_bg)
         lbl.setText(f"{self._STATUS_GLYPH.get(level, '·')}  {text}")
-        lbl.setStyleSheet(f"color: {col}; padding: 2px 6px; font-size: 11px;")
+        lbl.setStyleSheet(f"color: {col}; background: {bg}; border-radius: 9px; padding: 3px 10px; "
+                          f"margin: 1px 0; font-size: 11px;")
+
+    _STEPS = ("References", "Wavelength", "Parameters", "Run")
+
+    def _build_header_band(self):
+        from PyQt6.QtGui import QPixmap
+        from gui.theme import heading_font
+        owner = self
+
+        class _Band(QWidget):
+            def resizeEvent(_b, ev):               # narrow: drop the tagline, then shorten the chips
+                super().resizeEvent(ev)
+                owner._band_width = ev.size().width()
+                owner._band_tag.setVisible(owner._band_width >= 1250)
+                owner._refresh_step_marks()
+
+        band = _Band()
+        band.setObjectName("augurBand")
+        band.setStyleSheet(f"#augurBand {{ background: {AUGUR.surface}; border-bottom: 1px solid {AUGUR.rule}; }}")
+        h = QHBoxLayout(band)
+        h.setContentsMargins(12, 6, 12, 6)
+        h.setSpacing(10)
+        icon = QLabel()
+        png = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons", "augur_256.png")
+        icon.setPixmap(QPixmap(png).scaled(30, 30, Qt.AspectRatioMode.KeepAspectRatio,
+                                           Qt.TransformationMode.SmoothTransformation))
+        h.addWidget(icon)
+        word = QLabel("AUGUR")
+        word.setFont(heading_font(16))
+        word.setStyleSheet(f"color: {AUGUR.ink}; letter-spacing: 3px;")
+        h.addWidget(word)
+        tag = QLabel("reads unseen gases through resonators")
+        tf = heading_font(9.5, bold=False)
+        tf.setItalic(True)
+        tag.setFont(tf)
+        tag.setStyleSheet(f"color: {AUGUR.muted};")
+        h.addWidget(tag)
+        self._band_tag = tag
+        for w in (word, tag):
+            from PyQt6.QtWidgets import QSizePolicy as _SPb
+            w.setSizePolicy(_SPb.Policy.Fixed, _SPb.Policy.Preferred)
+        h.addStretch(1)
+        self._step_chips = []
+        for i, name in enumerate(self._STEPS, 1):
+            if i > 1:
+                sep = QLabel("—")
+                sep.setStyleSheet(f"color: {AUGUR.rule};")
+                h.addWidget(sep)
+            chip = QLabel(f"{i}  {name}")
+            # the label's text must not set the window's minimum width — when the band is narrow the
+            # chips switch to numbers (_paint_steps) and fit again
+            from PyQt6.QtWidgets import QSizePolicy as _SPs
+            chip.setSizePolicy(_SPs.Policy.Ignored, _SPs.Policy.Preferred)
+            chip.setMinimumWidth(44)
+            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            h.addWidget(chip)
+            self._step_chips.append(chip)
+        h.addStretch(1)
+        self._band_campaign = QLabel("")
+        self._band_campaign.setStyleSheet(f"color: {AUGUR.sub};")
+        from PyQt6.QtWidgets import QSizePolicy as _SPc
+        self._band_campaign.setSizePolicy(_SPc.Policy.Ignored, _SPc.Policy.Preferred)   # never sets the width
+        self._band_campaign.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._band_campaign.setMinimumWidth(120)
+        h.addWidget(self._band_campaign)
+        self._paint_steps([False] * 4, "")
+        return band
+
+    def _paint_steps(self, done, note4):
+        """done: four booleans. The first not-done step is 'current' (ink outline)."""
+        cur = next((i for i, d in enumerate(done) if not d), None)
+        short = getattr(self, '_band_width', 0) < 1000      # numbers + current step name only
+        for i, (chip, d) in enumerate(zip(self._step_chips, done)):
+            name = self._STEPS[i] + (f" · {note4}" if i == 3 and note4 else "")
+            if short and i != cur:
+                name = ""
+            if d:
+                st = f"color: {AUGUR.ink}; background: {AUGUR.neutral_bg}; border: 1px solid {AUGUR.neutral_bg};"
+                mark = AUGUR.brand
+                chip.setText(f"<span style='color:{mark}; font-weight:bold; font-family:Segoe UI Symbol'>✔</span>&nbsp;&nbsp;{name}")
+            elif i == cur:
+                chip.setText(f"<b>{i + 1}</b>&nbsp;&nbsp;{name}")
+                st = f"color: {AUGUR.ink}; background: {AUGUR.surface}; border: 1px solid {AUGUR.ink};"
+            else:
+                chip.setText(f"{i + 1}&nbsp;&nbsp;{name}")
+                st = f"color: {AUGUR.faint}; background: transparent; border: 1px solid {AUGUR.rule};"
+            chip.setStyleSheet(st + " border-radius: 11px; padding: 2px 10px;")
+            import re as _re_chip
+            plain = _re_chip.sub(r"<[^>]+>", "", chip.text()).replace("&nbsp;", " ")
+            # only the current step claims its full width; the others take what is left (never the
+            # window's minimum — a wide minimum here kept the window wider than a small screen)
+            chip.setMinimumWidth(chip.fontMetrics().horizontalAdvance(plain) + 30 if (i == cur or not short) else 44)
 
     def _refresh_step_marks(self):
         """Left panel section titles carry ✓ once their step is done, so the next step is obvious."""
@@ -1127,9 +1230,15 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         refs = bool(getattr(self.engine, 'gas_list', None)) and not getattr(self, '_refs_dirty', False)
         wl = getattr(self, 'wavelengths', None) is not None
         n = len(getattr(self, 'file_list', None) or [])
-        self._grp_ref.setTitle("1 · References" + ("  ✓" if refs else ""))
-        self._grp_set.setTitle("2 · Wavelength && fit range" + ("  ✓" if wl else ""))
+        self._grp_ref.setTitle("1 · References" + ("  ✔" if refs else ""))
+        self._grp_set.setTitle("2 · Wavelength && fit range" + ("  ✔" if wl else ""))
         self._grp_ctl.setTitle("4 · Data && run" + (f"  — {n} file(s) loaded" if n else ""))
+        if hasattr(self, '_step_chips'):
+            ran = bool(getattr(self, 'results', None))
+            self._paint_steps([refs, wl, refs and wl, ran],
+                              f"{len(self.results):,} results" if ran else (f"{n} files" if n else ""))
+            camp = (self._ed_campaign.text().strip() if hasattr(self, '_ed_campaign') else "") or DEFAULT_CAMPAIGN
+            self._band_campaign.setText(f"campaign  <b>{camp}</b>")
 
     # ── 측정일 감사 (D1) ───────────────────────────────────────────────
     _AUDIT_STYLE = {

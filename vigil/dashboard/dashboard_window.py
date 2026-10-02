@@ -40,6 +40,14 @@ _LEVEL = {   # status → (모양, 글자, 색)
     SKIP: ("○", "waiting", VIGIL.skip),
 }
 _BADGE_BASE = " font-size:18px; font-weight:600; padding:12px 16px;"
+# Quiet while fine, loud when not (2026-10-03): an OK badge is a slim line, an alarm fills the bar.
+_BADGE_SIZE = {OK: " font-size:15px; font-weight:600; padding:6px 14px;",
+               SKIP: " font-size:15px; font-weight:600; padding:6px 14px;",
+               P2: " font-size:19px; font-weight:700; padding:12px 18px;",
+               P1: " font-size:21px; font-weight:700; padding:14px 18px;",
+               P0: " font-size:23px; font-weight:800; padding:16px 18px;"}
+# Cards by subsystem, product first; caption shown before each group.
+_CARD_GROUPS = (("conc", "GAS"), ("r", "MIRROR"), ("lamp", "LIGHT"), ("hk", "CELL"), ("clock", "CLOCK"))
 _BADGE_STYLE = {
     OK:   f"background:{VIGIL.surface}; color:{VIGIL.text}; border-left:6px solid {VIGIL.lamp};",
     P2:   f"background:{VIGIL.p2}; color:{VIGIL.night};",
@@ -215,6 +223,8 @@ class DashboardWindow(QMainWindow):
         self._watch_dir = None
 
         root = QWidget()
+        root.setObjectName("vigilRoot")
+        root.setStyleSheet("#vigilRoot { border: 4px solid transparent; }")
         lay = QVBoxLayout(root)
 
         # 1) 배지 · 신선도 · 폴더 · Start
@@ -371,7 +381,7 @@ class DashboardWindow(QMainWindow):
         pw.setLabel('left', ylabel)
         pw.setLabel('bottom', f"Time ({self._tz})")
         pw.addLegend(offset=(10, 10))
-        pw.showGrid(x=True, y=True, alpha=0.2)
+        pw.showGrid(x=True, y=True, alpha=0.12)
         pw.setTitle(_PLACEHOLDER[kind], color=VIGIL.dim, size="10pt")
         pw.setMouseEnabled(x=True, y=False)
         # Before the first point the date axis spanned epoch 0–1 s ("00.250" ticks): show the last hour.
@@ -558,7 +568,12 @@ class DashboardWindow(QMainWindow):
         self.badge.setText(text)
         self.badge.setToolTip(tip)
         _glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
-        self.badge.setStyleSheet(_BADGE_STYLE.get(status, _BADGE_STYLE[SKIP]) + _BADGE_BASE)
+        self.badge.setStyleSheet(_BADGE_STYLE.get(status, _BADGE_STYLE[SKIP])
+                                 + _BADGE_SIZE.get(status, _BADGE_SIZE[SKIP]))
+        # the whole window says it, not only the badge — visible from across the room
+        frame = {P0: VIGIL.p0, P1: VIGIL.p1}.get(status)
+        self.centralWidget().setStyleSheet(
+            f"#vigilRoot {{ border: 4px solid {frame}; }}" if frame else "#vigilRoot { border: 4px solid transparent; }")
         self.setWindowTitle(f"[{level}] {self._base_title}" if status in (P0, P1, P2) else self._base_title)
         if status == P0 and (self._last_status != P0 or time.monotonic() - self._p0_alert_t >= REALERT_SEC):
             QApplication.alert(self)      # 작업표시줄 깜빡임
@@ -577,18 +592,43 @@ class DashboardWindow(QMainWindow):
 
     def update_cards(self, cards: list) -> None:
         """cards: [{key, title, value, sub, status}] — 새 키만 위젯을 만들고 나머지는 글자만 바꾼다."""
-        seen = set()
+        seen, changed = set(), False
         for c in cards:
             w = self._cards.get(c["key"])
             if w is None:
                 w = _Card(self._mono, compact=self._compact_cards)
                 self._cards[c["key"]] = w
-                self._cards_flow.addWidget(w)
+                changed = True
             w.set(c["title"], c["value"], c.get("sub", ""), c.get("status"), c.get("tip", ""))
             seen.add(c["key"])
         for k in [k for k in self._cards if k not in seen]:
             self._cards.pop(k).setParent(None)
+            changed = True
+        if changed:
+            self._relayout_cards()
         self._cards_empty.setVisible(not self._cards)
+
+    def _relayout_cards(self) -> None:
+        """Re-add cards grouped by subsystem, each group led by a caption (only when the set changes)."""
+        while self._cards_flow.count():
+            it = self._cards_flow.takeAt(0)
+            w = it.widget() if it is not None else None
+            if w is not None and w is not self._cards_empty and w not in self._cards.values():
+                w.setParent(None)
+        self._cards_flow.addWidget(self._cards_empty)
+        order = {kind: i for i, (kind, _c) in enumerate(_CARD_GROUPS)}
+        caption = dict(_CARD_GROUPS)
+        by = {}
+        for key, w in self._cards.items():
+            by.setdefault(key[0], []).append((key, w))
+        for kind in sorted(by, key=lambda k: order.get(k, 99)):
+            cap = QLabel(caption.get(kind, kind.upper()))
+            cap.setStyleSheet(f"color:{VIGIL.dim}; font-size:10px; font-weight:700; letter-spacing:2px;"
+                              f" padding:0 2px 0 6px; border-left:2px solid {VIGIL.rule};")
+            cap.setMinimumHeight(40)
+            self._cards_flow.addWidget(cap)
+            for _k, w in sorted(by[kind], key=lambda kw: str(kw[0])):
+                self._cards_flow.addWidget(w)
 
     def update_alarms(self, alarms: list) -> None:
         """경보 이력 — 최근 것이 위, 진행 중(End 없음)은 등급색. 바뀐 게 없으면 다시 그리지 않는다."""
@@ -680,7 +720,7 @@ class DashboardWindow(QMainWindow):
                 if item is None:
                     is_target = gas == target
                     # live curves: width-1 pen, no antialias — painting was 99 % of the tick when full
-                    item = self.p_conc.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False,
+                    item = self.p_conc.plot(pen=pg.mkPen(self._color_for(ck), width=2), antialias=False,
                                             name=f"{label}:{gas}" + (" (target)" if is_target else ""))
                     if is_target:
                         item.setZValue(1)
@@ -718,7 +758,7 @@ class DashboardWindow(QMainWindow):
             ck = ("r", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1), symbol='o', antialias=False,
+                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=2), symbol='o', antialias=False,
                                      symbolSize=4, symbolBrush=self._color_for(ck), name=label)
                 self.p_r.setTitle(None)
                 self._curve_items[ck] = item
@@ -758,7 +798,7 @@ class DashboardWindow(QMainWindow):
             ck = ("hk", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False, name=label)
+                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=2), antialias=False, name=label)
                 self.p_hk.setTitle(None)
                 self._curve_items[ck] = item
             xs = [t.timestamp() for t, _v in dq]
