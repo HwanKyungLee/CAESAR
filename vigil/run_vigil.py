@@ -125,6 +125,20 @@ class VigilApp:
         log.info("profiles: %s", ", ".join(_profs))
         self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
                               kind="profiles", profiles=_profs)
+        # Loader-time warnings (shown in the dashboard Log at startup, kept in status.jsonl).
+        import importlib.util
+        self.profile_warnings = []
+        if importlib.util.find_spec("jsonschema") is None:
+            self.profile_warnings.append(
+                "jsonschema not installed — profiles get only the required-key and meaning checks; "
+                "a misspelled optional key (e.g. 'alrt') is ignored")
+        for g in self.profiles.ambiguous_groups():
+            self.profile_warnings.append(
+                f"profiles {', '.join(g)} match the same files (same column count, overlapping dates, "
+                f"no filename_glob) — '{g[0]}' wins silently; give them date_range or filename_glob")
+        for w in self.profile_warnings:
+            log.warning(w)
+            self.state_log.append(P2, w, kind="profiles")
 
     def load_mission(self, pkg_dir: str) -> list:
         """미션 패키지(Augur 'Export mission for Vigil')를 검사·설치하고 프로파일을 다시 읽는다 → 새로 들어온
@@ -883,6 +897,8 @@ def main(argv=None) -> int:
         win.set_data_root(_data_root)
     splash.step("profiles", f"{len(core.profiles)} loaded", "ok" if len(core.profiles) else "fail")
     win.log_line(f"poll {args.poll_sec:.1f}s, {len(core.profiles)} profile(s) loaded")
+    for w in core.profile_warnings:
+        win.log_line(f"WARNING: {w}")
     win.set_watch_dir(args.dir)
 
     # 모션은 여기서부터 — 위의 준비(git·대시보드 생성)는 메인 스레드를 막으므로 첫 장면에서

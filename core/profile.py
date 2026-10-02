@@ -538,6 +538,67 @@ class Profile:
         own = f"{name}@{self.profile_version}#{self.source_sha or '?'}"
         return f"{own}+{self.base_provenance}" if self.base_provenance else own
 
+    def semantic_problems(self) -> list:
+        """Meaning checks the JSON schema cannot express → list of messages (empty = fine).
+        Column/rel past the row width made every tick raise IndexError and drop its rows; reversed
+        bands or ROIs and unknown HK keys were accepted silently (audit 2026-10-02 V2 §6)."""
+        out = []
+        n = self.match.n_columns
+
+        def col(name, c):
+            if c is not None and (c < 0 or (n is not None and c >= n)):
+                out.append(f"{name} column {c} outside the row (0..{n - 1 if n else '?'})")
+
+        h = self.header
+        col("header.time_bytepack.hi_col", h.time_bytepack.hi_col)
+        col("header.time_bytepack.lo_col", h.time_bytepack.lo_col)
+        col("header.state_flag_col", h.state_flag_col)
+        col("header.exposure_col", h.exposure_col)
+        col("header.ccd_temp", h.ccd_temp.col if h.ccd_temp else None)
+
+        keys = [f.key for f in self.hk.fields]
+        for k in sorted({k for k in keys if keys.count(k) > 1}):
+            out.append(f"hk key '{k}' defined twice")
+        for f in self.hk.fields:
+            col(f"hk '{f.key}' (start_col+rel)", self.hk.start_col + f.rel)
+            for name, band in (("warn", f.warn), ("alarm", f.alarm)):
+                if band and None not in band and band[0] > band[1]:
+                    out.append(f"hk '{f.key}' {name} band reversed {list(band)}")
+            if f.warn and f.alarm:
+                (wl, wh), (al, ah) = f.warn, f.alarm
+                if (al is not None and (wl is None or wl < al)) or (ah is not None and (wh is None or wh > ah)):
+                    out.append(f"hk '{f.key}' warn band {list(f.warn)} not inside alarm band {list(f.alarm)}")
+
+        ids = [c.id for c in self.channels]
+        for i in sorted({i for i in ids if ids.count(i) > 1}):
+            out.append(f"channel id '{i}' defined twice")
+        known = set(keys)
+        for c in self.channels:
+            if c.columns:
+                s0, e0 = c.columns
+                if s0 > e0:
+                    out.append(f"channel '{c.id}' columns reversed {list(c.columns)}")
+                col(f"channel '{c.id}' start", s0)
+                col(f"channel '{c.id}' end", e0)
+            refs = [*c.cavity_pressure_hk, *c.cavity_temp_hk]
+            for cfg in (c.reflectance, c.concentration):
+                if cfg is not None:
+                    refs += [k for k in (cfg.cavity_pressure_hk, cfg.cavity_temp_hk) if k]
+            for k in refs:
+                if k not in known:
+                    out.append(f"channel '{c.id}' refers to unknown hk key '{k}'")
+            roi = c.reflectance.roi_nm if c.reflectance else None
+            if roi and roi[0] >= roi[1]:
+                out.append(f"channel '{c.id}' reflectance.roi_nm reversed {list(roi)}")
+
+        seen = {}
+        for role, vals in self.flags.mapping.items():
+            for v in vals:
+                if v in seen:
+                    out.append(f"flag {v} in two roles: {seen[v]}, {role}")
+                seen[v] = role
+        return out
+
     def candidate_channels(self) -> list:
         """신호(signal) + 자동(auto) 블록 — 구조적으로 이름을 붙일 블록(Augur 레이아웃용)."""
         return [c for c in self.channels if c.is_signal or c.is_auto]
@@ -728,14 +789,19 @@ def _build(path, d, sha, bases: dict) -> Profile:
     d = absolutize_profile_dict(d, os.path.dirname(os.path.abspath(path)))
     bid = d.get("base")
     if not bid:
-        return Profile.from_dict(d, source_path=path, source_sha=sha)
-    if bid not in bases:
-        raise ProfileError(f"mission {d.get('profile_id')} ({os.path.basename(path)}): base profile "
-                           f"'{bid}' not found")
-    bpath, bd, bsha = bases[bid]
-    bprov = f"{os.path.basename(bpath)}@{bd.get('profile_version')}#{bsha}"
-    return Profile.from_dict(merge_mission(bd, d), source_path=path, source_sha=sha,
-                             base_provenance=bprov)
+        prof = Profile.from_dict(d, source_path=path, source_sha=sha)
+    else:
+        if bid not in bases:
+            raise ProfileError(f"mission {d.get('profile_id')} ({os.path.basename(path)}): base profile "
+                               f"'{bid}' not found")
+        bpath, bd, bsha = bases[bid]
+        bprov = f"{os.path.basename(bpath)}@{bd.get('profile_version')}#{bsha}"
+        prof = Profile.from_dict(merge_mission(bd, d), source_path=path, source_sha=sha,
+                                 base_provenance=bprov)
+    probs = prof.semantic_problems()
+    if probs:
+        raise ProfileError(f"{os.path.basename(path)}: " + "; ".join(probs))
+    return prof
 
 
 def load_profile(path: str, validate: bool = True,
@@ -835,6 +901,29 @@ class ProfileSet:
         if pool and n_columns is not None:
             return pool[0]   # 열수 양립 후보 중 최선(best-effort)
         return None
+
+    def ambiguous_groups(self) -> list:
+        """Profiles route() cannot tell apart → [[profile_id, ...], ...]: same column count, same
+        tier (mission/base), overlapping date ranges and no filename_glob to separate them. route()
+        then silently takes the alphabetically first one (audit 2026-10-02 V2 §6)."""
+        def overlap(a, b):
+            ra, rb = a.match.date_range, b.match.date_range
+            return ra is None or rb is None or (ra[0] <= rb[1] and rb[0] <= ra[1])
+
+        groups = []
+        ps = [p for p in self.profiles if p.match.n_columns is not None]
+        for i, a in enumerate(ps):
+            for b in ps[i + 1:]:
+                if (a.match.n_columns == b.match.n_columns and a.is_mission == b.is_mission
+                        and overlap(a, b)
+                        and not (a.match.filename_glob and b.match.filename_glob
+                                 and a.match.filename_glob != b.match.filename_glob)):
+                    g = next((g for g in groups if a.profile_id in g or b.profile_id in g), None)
+                    if g is None:
+                        groups.append([a.profile_id, b.profile_id])
+                    else:
+                        g += [x for x in (a.profile_id, b.profile_id) if x not in g]
+        return groups
 
     def date_excluded(self, filename: Optional[str], n_columns: Optional[int] = None) -> list:
         """열 수는 정확히 맞는데 파일명 날짜가 date_range 밖이라 빠진 **미션** id 들(표시·경고용) —
