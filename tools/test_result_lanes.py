@@ -409,6 +409,25 @@ def test_outputs_carry_provenance(w):
     assert f"# A = {os.path.abspath(w._path)} :: NO2" in head, head
 
 
+def test_shifted_concentration_relabels_time(w):
+    """2026-10-02 R10: a −9 h export kept UTC values under `time_KST`; only the first time
+    column moved."""
+    p = _write_conc_csv(tempfile.mkdtemp())
+    df = ResultViewerWidget._shifted_concentration_df(p, -9.0)
+    assert "time_KST" not in df.columns, list(df.columns)
+    # time_KST −9 h = UTC, but time_UTC already exists → explicit shift suffix, both moved
+    assert list(df.columns[:2]) == ["time_KST_shift-9h", "time_UTC_shift-9h"], list(df.columns)
+    assert df.iloc[0, 0] == "2026-09-04 10:00:00" and df.iloc[0, 1] == "2026-09-04 01:00:00"
+    assert list(df["NO2"]) == [1.0, 2.0, 3.0, 4.0, 5.0]
+    import pandas as pd
+    one = pd.read_csv(p, comment="#")[["time_KST", "NO2"]]
+    q = os.path.join(os.path.dirname(p), "one.csv")
+    one.to_csv(q, index=False)
+    df = ResultViewerWidget._shifted_concentration_df(q, -9.0)
+    assert list(df.columns) == ["time_UTC", "NO2"], list(df.columns)
+    assert list(ResultViewerWidget._shifted_concentration_df(q, 0).columns) == ["time_KST", "NO2"]
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -425,7 +444,8 @@ def main() -> int:
                      (test_stats_follow_open_file, (w,)),
                      (test_bom_csv_opens, (w,)),
                      (test_export_qc_matches_screen, (w,)),
-                     (test_outputs_carry_provenance, (w,))):
+                     (test_outputs_carry_provenance, (w,)),
+                     (test_shifted_concentration_relabels_time, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

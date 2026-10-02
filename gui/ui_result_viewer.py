@@ -1500,26 +1500,57 @@ class ResultViewerWidget(QWidget):
             f"Saved: {os.path.basename(out)}  ({len(rows)} rows{qmsg}, "
             f"{rows[0][0]:%m-%d %H:%M} ~ {rows[-1][0]:%m-%d %H:%M})")
 
+    @classmethod
+    def _shifted_concentration_df(cls, path, shift_h):
+        """Concentration CSV with **every** time column shifted by shift_h hours, or None if the
+        first column is not a time. A shifted column must not keep its timezone label
+        (2026-10-02 audit R10: UTC values went out under `time_KST`, and only the first time
+        column moved): KST −9 h → UTC, UTC +9 h → KST, anything else gets `_shift±Nh`."""
+        import pandas as pd
+        sep = cls._detect_sep(path) or r"\s+"
+        df = pd.read_csv(path, sep=sep, comment="#", engine="python", encoding="utf-8-sig")
+        times = {}
+        for c in df.columns:
+            if pd.api.types.is_numeric_dtype(df[c]):   # numbers would parse as epoch-ns "times"
+                continue
+            dt = pd.to_datetime(df[c], errors="coerce")
+            if dt.notna().mean() > 0.5:
+                times[c] = dt
+        if df.columns[0] not in times:
+            return None
+        out = df.copy()
+        if not shift_h:
+            return out
+        names = {}
+        for c, dt in times.items():
+            out[c] = (dt + pd.Timedelta(hours=shift_h)).dt.strftime("%Y-%m-%d %H:%M:%S")
+            s = str(c)
+            if shift_h == -9 and "KST" in s:
+                names[c] = s.replace("KST", "UTC")
+            elif shift_h == 9 and "UTC" in s:
+                names[c] = s.replace("UTC", "KST")
+            else:
+                names[c] = f"{s}_shift{shift_h:+g}h"
+        taken = set(map(str, out.columns))
+        for c, n in list(names.items()):       # never collide with an existing column name
+            if n in taken and n != str(c):
+                names[c] = f"{c}_shift{shift_h:+g}h"
+        return out.rename(columns=names)
+
     def _export_concentration_shifted(self):
         """Concentration 종류(계산기 CSV 등)는 fit용 merge_results/slice_rows 포맷과
         안 맞아 여기서 따로 처리 — 원본을 다시 읽어 time 컬럼에 현재 Time shift만
         반영해 그대로 새 CSV로 저장(구간선택 없이 전체, 시프트=0이면 사본).
         보정 사실은 파일 첫 줄에 남겨 무엇이 바뀌었는지 항상 드러낸다."""
-        import pandas as pd
         path = self._path
         if not path:
             QMessageBox.information(self, "Export", "Open a result file first.")
             return
-        sep = self._detect_sep(path) or r"\s+"
-        df = pd.read_csv(path, sep=sep, comment="#", engine="python", encoding="utf-8-sig")
-        xcol = df.columns[0]
-        x_dt = pd.to_datetime(df[xcol], errors="coerce")
-        if x_dt.notna().mean() <= 0.5:
+        shift_h = self._time_shift_hours
+        out_df = self._shifted_concentration_df(path, shift_h)
+        if out_df is None:
             QMessageBox.warning(self, "Export", "No time column found to shift/save.")
             return
-        shift_h = self._time_shift_hours
-        out_df = df.copy()
-        out_df[xcol] = (x_dt + pd.Timedelta(hours=shift_h)).dt.strftime("%Y-%m-%d %H:%M:%S")
         base, ext = os.path.splitext(path)
         tag = f"_shift{shift_h:+g}h" if shift_h else "_copy"
         suggest = f"{base}{tag}{ext or '.csv'}"
