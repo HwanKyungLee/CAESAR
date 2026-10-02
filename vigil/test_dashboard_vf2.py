@@ -258,6 +258,25 @@ def test_close_confirm():
         dw.QMessageBox.question = real
 
 
+def test_lifecycle():
+    print("[10] status.jsonl lifecycle lines")
+    import tempfile
+    from vigil.state_log import StateLog
+    with tempfile.TemporaryDirectory() as d:
+        sl = StateLog(os.path.join(d, "status.jsonl"))
+        sl.lifecycle("start", "Vigil started")
+        check("first start: one line", [r["event"] for r in sl.tail()] == ["start"])
+        sl.append("OK", "normal")
+        sl.lifecycle("exit", "Vigil exited (rc=0)", rc=0, reason="window closed by the user")
+        sl.lifecycle("start", "Vigil started")
+        check("clean restart: no unclean line", [r.get("event") for r in sl.tail()] == ["start", None, "exit", "start"])
+        sl.append("P1", "x")                               # then the process dies (no exit line)
+        sl.lifecycle("start", "Vigil started")
+        recs = sl.tail(2)
+        check("after a crash: unclean_exit line first", [r["event"] for r in recs] == ["unclean_exit", "start"]
+              and recs[0]["last_ts"] == sl.tail(3)[0]["ts"], recs)
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -270,6 +289,7 @@ def main():
     test_realert()
     test_badge_cause()
     test_close_confirm()
+    test_lifecycle()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 
