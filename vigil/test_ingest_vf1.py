@@ -1,6 +1,7 @@
 """Vigil ingest/liveness/alert fixes VF1 (UX audit 2026-10-02, no data needed).
 
   1) liveness counts only rows routed to a profile — a growing analysis .dat must not mask a raw stop
+  2) "no rows seen yet" is SKIP only for a while after start / folder change / Start, then P0
 """
 import os
 import shutil
@@ -73,12 +74,40 @@ def test_liveness_routed_only(d):
     check("growing analysis .dat does not keep liveness alive -> P0", _live(core) == "P0", _live(core))
 
 
+def test_no_rows_escalates(d):
+    print("[2] no rows since start -> P0 after the limit")
+    from datetime import datetime
+    from vigil.monitors.liveness_monitor import NO_ROWS_MIN_SEC, check_liveness
+    now = datetime(2026, 6, 20, 12, 0, 0)
+    s, _m, _mt = check_liveness(None, now, 10, now - timedelta(seconds=NO_ROWS_MIN_SEC - 1))
+    check("before the limit: SKIP", s == "SKIP", s)
+    s, m, _mt = check_liveness(None, now, 10, now - timedelta(seconds=NO_ROWS_MIN_SEC + 1), "X:/raw")
+    check("after the limit: P0 naming the folder", s == "P0" and "X:/raw" in m, (s, m))
+    s, _m, _mt = check_liveness(None, now, 30, now - timedelta(seconds=120))
+    check("limit is at least 6 x grace", s == "SKIP", s)
+    check("no waiting_since: SKIP as before", check_liveness(None, now, 10)[0] == "SKIP")
+
+    raw, st = os.path.join(d, "raw2"), os.path.join(d, "st2")
+    os.makedirs(raw)
+    core = _app(raw, st)                                  # empty folder = DAQ dead at restart
+    core.tick()
+    check("just started: liveness SKIP (not an alarm)", "liveness" not in core._open_alarms)
+    core._waiting_since -= timedelta(seconds=NO_ROWS_MIN_SEC + 5)
+    core.tick()
+    check("no raw for longer than the limit: P0", _live(core) == "P0", _live(core))
+    core.pause()
+    core.resume()                                         # paused time does not count
+    core.tick()
+    check("after Start the wait restarts", "liveness" not in core._open_alarms)
+
+
 def main():
     from PyQt6.QtCore import QCoreApplication
     _app_qt = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])  # noqa: F841
     d = tempfile.mkdtemp()
     try:
         test_liveness_routed_only(d)
+        test_no_rows_escalates(d)
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print(f"\nVF1 ingest tests: {_n_pass} PASS · {_n_fail} FAIL")

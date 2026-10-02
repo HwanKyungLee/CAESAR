@@ -120,6 +120,7 @@ class VigilApp:
         self._date_excluded_logged: set = set()
         self._was_catching_up = False
         self._last_arrival = None
+        self._waiting_since = datetime.now()   # liveness: no row since this -> P0 after a limit
         self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
         self._hk_trend_t: dict = {}        # {(profile_id, field_key): 마지막으로 그래프에 넣은 시각}
         self.alarms: list = []             # 경보 이력 [{start, end, source, level, msg}] — 최근 것이 끝
@@ -342,6 +343,7 @@ class VigilApp:
         if not self.paused:
             return
         self.paused = False
+        self._waiting_since = datetime.now()   # paused time is not "no raw arriving"
         self._note_control("Monitoring resumed (user Start) — reading from the backlog onward")
 
     def _note_control(self, msg: str) -> None:
@@ -503,7 +505,8 @@ class VigilApp:
         self._retire_stale_files(now)
 
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
-        live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec)
+        live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec,
+                                                                   self._waiting_since, self.watch_dir)
 
         # HK 는 매 행 판정이라 (퇴역 안 한) 파일별로, R·램프·농도는 교정 주기마다 한 번 나오는
         # 판정이라 **채널별 최신값**으로 모은다 — 파일 기준이면 rollover 직후 새 파일에 아직

@@ -18,16 +18,31 @@ from typing import Optional, Sequence
 from vigil.alert_engine import OK, P0, SKIP
 
 DEFAULT_GRACE_SEC = 10.0   # 프로파일에 liveness_grace_sec이 없을 때의 폴백
+# "No row seen yet" is SKIP only this long after start / folder change / Start, then P0. A running DAQ
+# shows its current file on the first poll (it is recent, so never skipped as backlog) and a new file
+# within 1-2 s; the slowest path is the 30 s full rescan (watcher.DEFAULT_RESCAN_SEC). 60 s = twice that
+# and 6 x the 10 s grace — past it, "initializing" is not an excuse: DAQ dead after a reboot, or a
+# wrong/empty folder (audit 2026-10-02: SKIP forever, never an alarm).
+NO_ROWS_MIN_SEC = 60.0
 
 
 def check_liveness(last_arrival: Optional[datetime], now: Optional[datetime] = None,
-                    grace_sec: float = DEFAULT_GRACE_SEC):
+                    grace_sec: float = DEFAULT_GRACE_SEC, waiting_since: Optional[datetime] = None,
+                    where: str = "the watch folder"):
     """마지막으로 새 행을 관측한 벽시계 시각 vs 지금 — (status, msg, metrics).
 
-    status: SKIP(아직 아무 행도 못 봄) | OK | P0(측정 정지 의심, grace_sec 초과)."""
-    if last_arrival is None:
-        return SKIP, "no rows seen yet (initializing, or no raw in watch folder)", {}
+    status: SKIP(아직 아무 행도 못 봄) | OK | P0(측정 정지 의심, grace_sec 초과).
+    waiting_since = when monitoring (re)started with no row yet; no row for max(NO_ROWS_MIN_SEC,
+    6 x grace) after it is P0 too."""
     now = now or datetime.now()
+    if last_arrival is None:
+        if waiting_since is not None:
+            waited = (now - waiting_since).total_seconds()
+            limit = max(NO_ROWS_MIN_SEC, 6 * grace_sec)
+            if waited > limit:
+                return P0, (f"no raw arriving in {where} — no monitored row for {waited:.0f}s since start "
+                            f"(limit {limit:.0f}s): DAQ not running, or wrong/empty folder"),                     {"waited_sec": waited, "limit_sec": limit}
+        return SKIP, "no rows seen yet (initializing, or no raw in watch folder)", {}
     gap = (now - last_arrival).total_seconds()
     metrics = {"gap_sec": gap, "grace_sec": grace_sec,
               "last_arrival": last_arrival.isoformat()}
