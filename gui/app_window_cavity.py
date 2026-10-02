@@ -19,6 +19,18 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFileDialo
 
 from core.data_io import DataIO
 from gui.theme import AUGUR
+from PyQt6.QtCore import QEvent, QObject
+
+
+class _WheelOnlyWhenFocused(QObject):
+    """Physical constants must not change while the user scrolls the Setup page: an unfocused
+    spin box under the cursor took the wheel (d 51.8 -> 50.8 cm, UX audit 2026-10-02)."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Wheel and not obj.hasFocus():
+            ev.ignore()          # let the scroll area scroll instead
+            return True
+        return False
 
 
 class CavityTabMixin:
@@ -371,6 +383,12 @@ class CavityTabMixin:
         )
         lay_det.addRow("Stray Light ε:", self.spin_stray_light)
 
+        self._wheel_guard = _WheelOnlyWhenFocused(self)
+        for _sp in (self.spin_d_len, self.spin_rl_factor, self.spin_temp, self.spin_pres,
+                    self.spin_dark_scale, self.spin_offset_scale, self.spin_stray_light):
+            _sp.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            _sp.installEventFilter(self._wheel_guard)
+
         grp_det.setLayout(lay_det)
         _det_outer.addWidget(grp_det)
         control_layout.addWidget(self._det_corr_container)
@@ -542,7 +560,7 @@ class CavityTabMixin:
 
         self._aqc_pw = pg.PlotWidget()
         self._aqc_pw.showGrid(x=True, y=True, alpha=0.3)
-        self._aqc_pw.setLabel('left', 'α (optical depth)')
+        self._aqc_pw.setLabel('left', 'α (cm⁻¹)')
         self._aqc_pw.setLabel('bottom', 'Wavelength (nm)')
         self._aqc_pw.setTitle("mean α + min/max envelope")
         self._aqc_pw.addLegend(offset=(10, 10))
@@ -801,6 +819,15 @@ class CavityTabMixin:
             raise ValueError("No *_alpha_trace.dat in folder (including subfolders).")
         g_sum = g_cnt = g_min = g_max = wl_ref = None
         n_scans_total = 0
+        # The mean/envelope must come from ONE channel: a campaign folder holds cold, ANs and
+        # PNs alphas on different wavelength axes, and summing them by column index made a
+        # meaningless curve with steps near 435/450 nm (UX audit 2026-10-02). Average only the
+        # active channel's label (the wavecal/refs checks are per active channel too).
+        _want = (self._ed_ch_datalabel.text().strip() if hasattr(self, '_ed_ch_datalabel') else '').lower()
+        _labels = {fp: (self._alpha_head_label(fp) or '').lower() for fp in files}
+        if not _want or _want not in _labels.values():
+            _want = next(iter(_labels.values()), '')
+        n_mean_files = 0
         per_file = []            # (name, n_scans, nan_frac, flat, mag)
         dates = set()
         for k, fp in enumerate(files):
@@ -839,6 +866,9 @@ class CavityTabMixin:
             m = _re.search(r'(\d{4})[-_]?(\d{2})[-_]?(\d{2})', os.path.basename(fp))
             if m:
                 dates.add(f"{m.group(1)}-{m.group(2)}-{m.group(3)}")
+            if _labels.get(fp, '') != _want:
+                continue          # per-file stats above count every file; the mean is one channel
+            n_mean_files += 1
             if g_sum is None:
                 g_sum = np.zeros(L); g_cnt = np.zeros(L)
                 g_min = np.full(L, np.inf); g_max = np.full(L, -np.inf)
@@ -851,6 +881,8 @@ class CavityTabMixin:
             with np.errstate(invalid='ignore'):
                 g_min[:Lc] = np.minimum(g_min[:Lc], np.nanmin(np.where(fin, sub, np.nan), axis=0))
                 g_max[:Lc] = np.maximum(g_max[:Lc], np.nanmax(np.where(fin, sub, np.nan), axis=0))
+        if g_sum is None:
+            raise ValueError(f"No readable alpha file with label '{_want}' to average.")
         mean = np.where(g_cnt > 0, g_sum / np.maximum(g_cnt, 1), np.nan)
         scans = np.array([p[1] for p in per_file if p[1] > 0], dtype=float)
         med_scans = float(np.median(scans)) if len(scans) else 0.0
@@ -859,6 +891,7 @@ class CavityTabMixin:
         anomalies = [p for p in per_file
                      if p[1] < low_thr or p[3] or p[2] > 0.05]
         return dict(wl=wl_ref, mean=mean, lo=g_min, hi=g_max,
+                    mean_label=_want or '?', n_mean_files=n_mean_files,
                     n_files=len(files), n_scans=n_scans_total, med_scans=med_scans,
                     dates=sorted(dates), per_file=per_file, anomalies=anomalies)
 
@@ -921,8 +954,9 @@ class CavityTabMixin:
                 except Exception:
                     pass
                 self._aqc_pw.plot(wl[fin], mean[fin], pen=pg.mkPen('#1565C0', width=2),
-                                  name="mean α")
-            self._aqc_pw.setTitle(f"mean α + envelope — {r['n_files']} files, {r['n_scans']:,} scans")
+                                  name=f"mean α ({r['mean_label']}, {r['n_mean_files']} files)")
+            self._aqc_pw.setTitle(f"mean α + envelope — {r['mean_label']}: {r['n_mean_files']} of "
+                                  f"{r['n_files']} files · folder {r['n_scans']:,} scans")
         else:
             self._aqc_pw.setTitle("(α folder not set — file-level scan skipped)")
 
