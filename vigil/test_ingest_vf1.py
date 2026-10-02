@@ -5,6 +5,7 @@
   3) aggregate never says "normal — all OK" while sources were not evaluated
   5) empty watch folder: the first file is seen on the next poll, not at the next full listing
   6) same file name in hot/ and cold/ is not a "collected twice" copy unless size and first line match
+  7) a tick that fails mid-batch says how many rows went unmonitored
 """
 import os
 import shutil
@@ -178,6 +179,36 @@ def test_duplicate_names(d):
           and "cold" not in dup[0], dup)
 
 
+def test_dropped_rows_logged(d):
+    print("[7] failing tick reports the dropped rows")
+    import json
+    import vigil.run_vigil as rv
+    raw, st = os.path.join(d, "raw7"), os.path.join(d, "st7")
+    os.makedirs(raw)
+    _append(os.path.join(raw, "2026-06-20-001 Hot.dat"), [_row(13_000_000 + k) for k in range(10)])
+    core = _app(raw, st)
+    real, calls = rv.evaluate_hk, {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 4:
+            raise RuntimeError("boom")
+        return real(*a, **k)
+    rv.evaluate_hk = flaky
+    try:
+        core.tick()                                       # row index 3 fails -> rows 3..9 never monitored
+    finally:
+        rv.evaluate_hk = real
+    lines = [json.loads(x) for x in open(os.path.join(st, "status.jsonl"), encoding="utf-8")]
+    err = [x for x in lines if x.get("kind") == "internal"]
+    check("internal error line says 7 rows were skipped", err and "7 raw row(s)" in err[0]["msg"],
+          err[:1])
+    core.tick()
+    lines = [json.loads(x) for x in open(os.path.join(st, "status.jsonl"), encoding="utf-8")]
+    rec = [x for x in lines if x.get("kind") == "internal" and x["status"] == "OK"]
+    check("recovery line carries the total", rec and rec[0].get("dropped_rows") == 7, rec[:1])
+
+
 def main():
     from PyQt6.QtCore import QCoreApplication
     _app_qt = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])  # noqa: F841
@@ -188,6 +219,7 @@ def main():
         test_aggregate_not_evaluated()
         test_empty_folder_first_file(d)
         test_duplicate_names(d)
+        test_dropped_rows_logged(d)
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print(f"\nVF1 ingest tests: {_n_pass} PASS · {_n_fail} FAIL")

@@ -88,6 +88,8 @@ class VigilApp:
         self.retire_after_sec = retire_after_sec
         self.paused = False                # 대시보드 Stop — 정지 중엔 tick 이 아무것도 읽지 않는다
         self._tick_errors = 0              # 연속 tick 예외 수(성공하면 0)
+        self._dropped_rows = 0             # rows lost to those failures (cursor already past them)
+        self._tick_rows = (0, 0)           # (rows processed, rows polled) in the current tick
         self.dashboard = dashboard
         self._wavecal_cache: dict = {}     # {wavecal_path: np.ndarray|None} — 파일당 1회만 로드
         self._fitset_cache: dict = {}      # {fitset_path: dict} — FitSet json 1회만 로드
@@ -358,12 +360,22 @@ class VigilApp:
         것이 가장 나쁜 실패다. 정지(pause) 중이거나 아직 폴더가 없으면 아무것도 하지 않는다."""
         if self.paused or self.watcher is None:
             return
+        self._tick_rows = (0, 0)
         try:
             self._tick()
         except Exception as e:                # noqa: BLE001
             self._tick_errors += 1
-            log.exception("tick failed (%d in a row)", self._tick_errors)
+            # The watcher's cursor is already past this tick's rows: the ones after the failing row are
+            # never re-read. Say how many (not re-reading them is deliberate — a row that always fails
+            # would wedge ingest).
+            done, total = self._tick_rows
+            dropped = total - done
+            self._dropped_rows += dropped
+            log.exception("tick failed (%d in a row) — %d of %d rows of this tick not monitored",
+                          self._tick_errors, dropped, total)
             msg = f"Vigil internal error, {self._tick_errors} in a row: {type(e).__name__}: {e}"
+            if dropped:
+                msg += f" — {self._dropped_rows} raw row(s) skipped by monitoring so far"
             if self._tick_errors == 1:        # 연속 실패의 첫 번만 상태 로그에(매초 쌓이지 않게)
                 self.state_log.append(P1, msg, kind="internal")
             if self.dashboard is not None:
@@ -375,10 +387,13 @@ class VigilApp:
                     log.exception("failed to report the error as well")
         else:
             if self._tick_errors:
-                log.info("tick recovered (after %d consecutive failures)", self._tick_errors)
-                self.state_log.append(OK, f"Vigil internal error recovered (after {self._tick_errors})",
-                                      kind="internal")
+                log.info("tick recovered (after %d consecutive failures, %d rows not monitored)",
+                         self._tick_errors, self._dropped_rows)
+                self.state_log.append(OK, f"Vigil internal error recovered (after {self._tick_errors}; "
+                                          f"{self._dropped_rows} raw row(s) were not monitored)",
+                                      kind="internal", dropped_rows=self._dropped_rows)
             self._tick_errors = 0
+            self._dropped_rows = 0
 
     def shutdown(self) -> None:
         """종료 시 미저장 커서를 쓴다(저장 간격 때문에 마지막 몇 초가 메모리에만 있을 수 있다)."""
@@ -470,7 +485,8 @@ class VigilApp:
         events = self.watcher.poll()
         now = datetime.now()
         self._log_ingest_state()
-        for ev in events:
+        for i, ev in enumerate(events):
+            self._tick_rows = (i, len(events))
             self._files_seen[ev.file] = now
             if not ev.profile_id:
                 continue
@@ -501,6 +517,7 @@ class VigilApp:
             self._observe_reflectance(prof, ev, now)
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
+        self._tick_rows = (len(events), len(events))
         self._last_arrival = latest_arrival(events, self._last_arrival)
         self._retire_stale_files(now)
 
