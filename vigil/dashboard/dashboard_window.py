@@ -620,7 +620,7 @@ class DashboardWindow(QMainWindow):
         caption = dict(_CARD_GROUPS)
         by = {}
         for key, w in self._cards.items():
-            by.setdefault(key[0], []).append((key, w))
+            by.setdefault(key[0] if isinstance(key, tuple) else "other", []).append((key, w))
         for kind in sorted(by, key=lambda k: order.get(k, 99)):
             cap = QLabel(caption.get(kind, kind.upper()))
             cap.setStyleSheet(f"color:{VIGIL.dim}; font-size:10px; font-weight:700; letter-spacing:2px;"
@@ -720,7 +720,7 @@ class DashboardWindow(QMainWindow):
                 if item is None:
                     is_target = gas == target
                     # live curves: width-1 pen, no antialias — painting was 99 % of the tick when full
-                    item = self.p_conc.plot(pen=pg.mkPen(self._color_for(ck), width=2), antialias=False,
+                    item = self.p_conc.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False,
                                             name=f"{label}:{gas}" + (" (target)" if is_target else ""))
                     if is_target:
                         item.setZValue(1)
@@ -758,7 +758,7 @@ class DashboardWindow(QMainWindow):
             ck = ("r", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=2), symbol='o', antialias=False,
+                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1), symbol='o', antialias=False,
                                      symbolSize=4, symbolBrush=self._color_for(ck), name=label)
                 self.p_r.setTitle(None)
                 self._curve_items[ck] = item
@@ -798,7 +798,7 @@ class DashboardWindow(QMainWindow):
             ck = ("hk", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=2), antialias=False, name=label)
+                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False, name=label)
                 self.p_hk.setTitle(None)
                 self._curve_items[ck] = item
             xs = [t.timestamp() for t, _v in dq]

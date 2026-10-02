@@ -1179,10 +1179,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 sep.setStyleSheet(f"color: {AUGUR.rule};")
                 h.addWidget(sep)
             chip = QLabel(f"{i}  {name}")
-            # the label's text must not set the window's minimum width — when the band is narrow the
-            # chips switch to numbers (_paint_steps) and fit again
-            from PyQt6.QtWidgets import QSizePolicy as _SPs
-            chip.setSizePolicy(_SPs.Policy.Ignored, _SPs.Policy.Preferred)
+            # the explicit minimum (set in _paint_steps), not the text, bounds the window's minimum width.
+            # Not Policy.Ignored: that zeroes the size hint and a roomy layout then gives the chips no
+            # width at all, so they overlap (FHD showed only the ✔ marks)
             chip.setMinimumWidth(44)
             chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
             h.addWidget(chip)
@@ -1190,8 +1189,6 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         h.addStretch(1)
         self._band_campaign = QLabel("")
         self._band_campaign.setStyleSheet(f"color: {AUGUR.sub};")
-        from PyQt6.QtWidgets import QSizePolicy as _SPc
-        self._band_campaign.setSizePolicy(_SPc.Policy.Ignored, _SPc.Policy.Preferred)   # never sets the width
         self._band_campaign.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._band_campaign.setMinimumWidth(120)
         h.addWidget(self._band_campaign)

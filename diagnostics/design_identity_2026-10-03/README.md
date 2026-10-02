@@ -16,18 +16,24 @@
 - 배지: OK 면 가는 한 줄, P2/P1/P0 일수록 크게(`_BADGE_SIZE`).
 - P0/P1 이면 **창 전체 테두리** 4 px 경보색(`#vigilRoot`).
 - 값 카드를 계통별로 묶고 캡션(GAS · MIRROR · LIGHT · CELL · CLOCK, `_relayout_cards`).
-- 곡선 굵기 1→2, 격자 흐리게, 축 글자 밝게.
+- 격자 흐리게, 축 글자 밝게. (곡선 굵기 1→2 는 되돌렸다 — 꽉 찬 그래프에서 그리기가 틱의 99 % 라는
+  실측 때문에 width-1 이 성능 가드(`vigil/test_dashboard_vf2.py` [5])로 묶여 있다.)
 
-## 미해결 (다음 사람이 할 일)
-1. **FHD 에서 머리띠 단계 칩이 숫자/✔ 만 나온다**(이름이 안 보임). `_paint_steps` 의 `short` 판정이
-   `_band_width < 1000` 인데 FHD 에서도 short 로 그려진다 — `_Band.resizeEvent` 가 `_grp_ref` 생성 전에만
-   불리거나, 마지막 `_refresh_step_marks` 가 resize 전에 돈 것으로 의심. 작은 화면(1366@150)에선 정상.
-   확인: `python shoot_data.py 1920 1080 1 fhd` 후 머리띠 크롭.
-2. 사용자 검토 후 main 병합 여부 결정. 테스트(pytest)는 이 브랜치에서 아직 안 돌렸다.
+## 고친 것 (2026-10-03 후속)
+1. ~~FHD 에서 머리띠 단계 칩이 ✔ 만 나온다~~ — 원인은 short 판정이 아니라 칩·캠페인 라벨의
+   `QSizePolicy.Ignored`. Ignored 는 sizeHint 를 0 으로 만들어, 공간이 넉넉하면(FHD) 레이아웃이 남는 폭을
+   전부 stretch 에 주고 칩 자리는 0 — 위젯은 최소폭(111 px)으로 그려지지만 서로 겹친다(item x 간격 29 px).
+   좁은 화면에선 공간이 빠듯해 최소폭이 강제되니 멀쩡해 보였다. 기본 Preferred 로 — 최소폭은 여전히
+   `_paint_steps` 의 명시값이 정한다. 캠페인 표시도 같은 이유로 화면 밖에 밀려 있었다.
+2. Vigil 카드 묶음이 튜플 아닌 키(테스트의 int)에서 죽던 것 → "other" 묶음.
+3. 이 폴더의 measure/shoot 스크립트를 `main()` 으로 — 최상위 실행이 `ci_import_smoke` 를 segfault 시켰다.
+
+## 미해결
+- 사용자 검토 후 main 병합 여부 결정.
 
 ## 화면 찍는 법 (이 폴더의 스크립트, 실제 창을 화면 밖에 띄워 grab)
     PYTHONIOENCODING=utf-8 python shoot_augur.py 1920 1080 1 fhd          # 빈 상태
     PYTHONIOENCODING=utf-8 python shoot_data.py 1366 768 1.5 small run    # FitSet+05-20 알파 로드(+Fast 런)
     ALARM=1 PYTHONIOENCODING=utf-8 python shoot_vigil.py 1366 768 1.5 data E:/Yeosu_2026/CAESAR_Hot/2026-06/2026-06-01-003.dat
     python measure.py 1.5        # 1366×768@150 % 에서 창·패널 최소폭
-결과는 `%TEMP%\ux3\shots\`. shoot_data 는 C:\Doasis_Work\Output 의 FitSet·60s 알파를 쓴다(경로는 스크립트 안).
+결과는 이 폴더의 `shots/`(커밋 안 함). shoot_data 는 C:\Doasis_Work\Output 의 FitSet·60s 알파를 쓴다(경로는 스크립트 안).
