@@ -358,6 +358,16 @@ class Watcher:
             self.cursor.save()
         self.skipped_backlog = (n, nbytes)
 
+    def write_age(self, path: str) -> Optional[float]:
+        """마지막 나열 때 본 파일 mtime 이 지금부터 몇 초 전인가(모르면 None)."""
+        ent = self._files.get(path)
+        return None if ent is None else time.time() - float(ent[1])
+
+    def at_end(self, path: str) -> bool:
+        """이 파일을 (마지막 poll 시점 크기까지) 끝까지 읽었나 — 그때 마지막 행이 계기가 쓴 최신 행이다."""
+        ent = self._files.get(path)
+        return ent is not None and self.cursor.get(path) >= ent[0]
+
     def _read_new_lines(self, path: str, max_bytes: Optional[int] = None,
                         size: Optional[int] = None) -> list:
         """오프셋 이후 **완성된** 줄만 읽고 커서를 그만큼만 전진시킨다.

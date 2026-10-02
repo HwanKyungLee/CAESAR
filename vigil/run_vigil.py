@@ -36,6 +36,9 @@ from vigil.alert_engine import OK, P0, P1, P2, SKIP, aggregate, worse
 from vigil.ingest_cursor import IngestCursor
 from vigil.monitors.hk_monitor import evaluate_hk
 from vigil.monitors.liveness_monitor import DEFAULT_GRACE_SEC, check_liveness, latest_arrival
+from vigil.monitors.clock_monitor import ClockMonitor, offset_seconds
+
+CLOCK_FRESH_SEC = 120.0    # 시각 차이 표본: 이 안에 쓰인 파일의 끝 행만(vigil/monitors/clock_monitor.py)
 from vigil.monitors.lamp_monitor import LampMonitor
 from vigil.monitors.r_monitor import RMonitor
 from vigil.profile import DEFAULT_PROFILE_DIR, ProfileSet
@@ -183,6 +186,9 @@ class VigilApp:
         self._r_last_status: dict = {}     # {path: status} — 로그 중복 방지용
         self._lamp_monitors: dict = {}     # {(profile_id, channel_id): LampMonitor}
         self._lamp_by_channel: dict = {}
+        # 행 시각 vs PC 시계 — 계기(기본 프로파일)마다. 핫·콜드는 다른 DAQ PC 일 수 있다(2026-05 핫만 9 h).
+        self._clock_monitors: dict = {}    # {instrument: ClockMonitor}
+        self._clock_by_inst: dict = {}     # {instrument: (status, msg, metrics)}
         self._lamp_status: dict = {}       # {path: (status, msg, metrics)} — 파일의 채널들 중 worst
         self._lamp_last_status: dict = {}
         self._conc_monitors: dict = {}     # {(profile_id, channel_id): ConcMonitor}
@@ -490,6 +496,36 @@ class VigilApp:
         """종료 시 미저장 커서를 쓴다(저장 간격 때문에 마지막 몇 초가 메모리에만 있을 수 있다)."""
         self.cursor.flush()
 
+    def _observe_clock(self, events) -> None:
+        """행 시각 vs PC 시계(vigil/monitors/clock_monitor.py). 표본은 이번 poll 에서 **끝까지 읽은 파일의
+        마지막 행**만 — 시작·일시정지 뒤 밀린 행(원래 오래된 행)을 '늦게 도착'으로 보지 않는다. 계기가 멈춰
+        있으면 그 끝 행도 오래돼 지연으로 잡힌다."""
+        last = {}
+        for ev in events:
+            if ev.profile_id and ev.row_time is not None:
+                last[ev.file] = ev
+        for path, ev in last.items():
+            # 끝까지 읽었고 **계기가 방금도 쓰고 있는** 파일만 — 시작 때 끝까지 읽은 지난 시간 파일(이미
+            # 닫힌 파일)의 끝 행은 원래 오래됐다. 계기가 완전히 멈춘 경우는 liveness 가 잡는다.
+            age = self.watcher.write_age(path)
+            if not self.watcher.at_end(path) or age is None or age > CLOCK_FRESH_SEC:
+                continue
+            prof = self.profiles.by_id(ev.profile_id)
+            inst = (prof.base_id or prof.profile_id) if prof is not None else ev.profile_id
+            off = offset_seconds(ev.row_time, ev.arrival_time)
+            if off is None:
+                continue
+            res = self._clock_monitors.setdefault(inst, ClockMonitor()).observe(off)
+            if res is None:
+                continue
+            prev = self._clock_by_inst.get(inst)
+            self._clock_by_inst[inst] = res
+            if prev is None or prev[0] != res[0]:
+                self.state_log.append(res[0], f"[{inst}] {res[1]}", kind="clock", instrument=inst,
+                                      offset_s=res[2].get("offset_s"))
+                if self.dashboard is not None:
+                    self.dashboard.log_line(f"[clock {inst}] {res[0]}: {res[1]}")
+
     def _retire_stale_files(self, now: datetime) -> None:
         stale = [p for p, t in self._files_seen.items()
                  if (now - t).total_seconds() > self.retire_after_sec]
@@ -545,6 +581,11 @@ class VigilApp:
                           "value": f"{lvl:.0f}" if isinstance(lvl, float) else "—",
                           "sub": f"{rel:+.1%} vs baseline" if isinstance(rel, float) and rel == rel else "building baseline",
                           "status": s, "tip": m})
+        for inst, (s, m, mt) in sorted(self._clock_by_inst.items()):
+            off = mt.get("offset_s")
+            cards.append({"key": ("clock", inst), "title": f"Clock {inst.replace('caesar_', '').replace('_base', '')}",
+                          "value": f"{off:+.0f} s" if isinstance(off, float) else "—",
+                          "sub": "row time vs PC (UTC)", "status": s, "tip": m})
         sev_status = {None: OK, "warn": P2, "alarm": P1}
         for mkey, (val, sev, _t) in sorted(self._hk_latest.items()):
             meta = self._trend_meta.get(mkey, {})
@@ -570,6 +611,8 @@ class VigilApp:
             v[f"lamp:{key[1]}_I"] = mt.get("I")
         for mkey, (val, _sev, _t) in sorted(self._hk_latest.items()):
             v[f"hk:{mkey[1]}"] = val
+        for inst, (_s, _m, mt) in sorted(self._clock_by_inst.items()):
+            v[f"clock:{inst}_offset_s"] = mt.get("offset_s")
         return v
 
     def _tick(self) -> None:
@@ -610,6 +653,7 @@ class VigilApp:
             self._observe_lamp(prof, ev)
             self._observe_concentration(prof, ev, now)
         self._tick_rows = (len(events), len(events))
+        self._observe_clock(events)
         self._last_arrival = latest_arrival(events, self._last_arrival)
         self._retire_stale_files(now)
 
@@ -630,6 +674,7 @@ class VigilApp:
         for kind, by_channel in (("r", self._r_by_channel), ("conc", self._conc_by_channel),
                                  ("lamp", self._lamp_by_channel)):
             results += [(f"{kind}:{key[1]}", s, m, mt) for key, (s, m, mt) in by_channel.items()]
+        results += [(f"clock:{inst}", s, m, mt) for inst, (s, m, mt) in self._clock_by_inst.items()]
         overall_status, overall_msg = aggregate(results)
 
         if overall_status != self._last_status:
