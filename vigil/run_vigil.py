@@ -66,17 +66,10 @@ def _grace_sec_for(profiles: ProfileSet, routed_ids: set) -> float:
     return min(vals) if vals else DEFAULT_GRACE_SEC
 
 
-def _hk_value(prof, row, key):
-    """key(hk.fields[].key)로 그 행의 물리값 하나만 뽑는다. key/필드 없으면 NaN(R 계산이 알아서 실패 처리)."""
-    if not key:
-        return float("nan")
-    field = prof.hk.field(key)
-    if field is None:
-        return float("nan")
-    try:
-        return field.value(row, prof.hk.start_col)
-    except (IndexError, ValueError):
-        return float("nan")
+def _hk_value(prof, row, keys):
+    """keys(채널 cavity 우선순위 목록)에서 처음으로 유효한 물리값. 없으면 NaN(R·농도 계산이 실패 처리).
+    고르는 규칙은 Augur 와 같은 core.profile.HK.first_valid — 채널 정의 단일 출처(2026-10-02)."""
+    return prof.hk.first_valid(row, keys) if keys else float("nan")
 
 
 class VigilApp:
@@ -90,6 +83,12 @@ class VigilApp:
         self.profiles = ProfileSet.load(profile_dir)
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
+        # 어느 채널 정의로 감시하나 — 측정 PC 는 USB 로 받아 git 으로 확인할 수 없으니 파일·판·내용
+        # 해시를 남긴다(Augur 알파 헤더 raw_layout 의 profile= 와 같은 문자열 — 둘을 대조하면 된다).
+        _profs = [p.provenance for p in self.profiles.profiles]
+        log.info("profiles: %s", ", ".join(_profs))
+        self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
+                              kind="profiles", profiles=_profs)
         self._watcher_kw = dict(max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
                                 cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec
@@ -203,8 +202,8 @@ class VigilApp:
                 self._trend_meta[key] = {"label": ch.label or ch.id,
                                          "warn_drop": rc.warn_drop, "alarm_drop": rc.alarm_drop}
             spectrum = ch.slice(ev.row)
-            temp_c = _hk_value(prof, ev.row, ch.reflectance.cavity_temp_hk)
-            press_mbar = _hk_value(prof, ev.row, ch.reflectance.cavity_pressure_hk)
+            temp_c = _hk_value(prof, ev.row, ch.temp_keys(ch.reflectance))
+            press_mbar = _hk_value(prof, ev.row, ch.pressure_keys(ch.reflectance))
             result = rm.observe(ev.role, spectrum, temp_c, press_mbar)
             if result is not None:
                 status, msg, metrics = result
@@ -274,8 +273,8 @@ class VigilApp:
                                          "conc_min_ppb": ch.concentration.conc_min_ppb,
                                          "conc_max_ppb": ch.concentration.conc_max_ppb}
             spectrum = ch.slice(ev.row)
-            temp_c = _hk_value(prof, ev.row, ch.concentration.cavity_temp_hk)
-            press_mbar = _hk_value(prof, ev.row, ch.concentration.cavity_pressure_hk)
+            temp_c = _hk_value(prof, ev.row, ch.temp_keys(ch.concentration))
+            press_mbar = _hk_value(prof, ev.row, ch.pressure_keys(ch.concentration))
             # (1-R)/d from the same channel's RMonitor (it ran first in this tick, so this
             # row's calibration is already in). No reflectance config -> None -> SKIP.
             rm = self._r_monitors.get(key)

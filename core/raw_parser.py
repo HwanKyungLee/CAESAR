@@ -64,27 +64,23 @@ compared to our 2026 Yeosu data values. The mapping here reflects what the
 **data** actually shows, not necessarily the MATLAB label. Where the two
 disagree the MATLAB label is recorded as a comment for reference.
 
-캠페인별 레이아웃 (2026-09-14~)
-------------------------------
-위 컬럼 표는 **2026 여수 구성**이다. CAESAR는 캐비티가 재구성되므로 캠페인마다 ncols·
-채널 이름·HK 열이 달라진다. 그래서 표는 이제 코드가 아니라 **데이터**로 산다:
+캠페인별 레이아웃 — 채널 정의는 vigil/profiles/*.json 한 곳 (2026-10-02~)
+---------------------------------------------------------------------
+위 컬럼 표는 **2026 여수 구성**의 설명이다. 실제로 쓰는 표는 코드가 아니라 **프로파일 JSON**에
+산다 — 블록 이름·HK 열·채널별 압력/온도 센서(`channels[].cavity`)·유효 날짜(`match.date_range`).
+Augur(이 모듈·core/data_io)와 Vigil 이 같은 파일을 읽는다(vigil/profiles/README.md).
 
-* ``CAMPAIGN_LAYOUTS`` — ncols → :class:`CampaignLayout`(채널 지도 + HK 지도). 2026 여수
-  두 구성(6179 cold / 6181 hot)이 기본 등록돼 있다.
-* ``register_campaign_layout(...)`` — 새 구성을 등록. 같은 ncols를 **조용히 덮지 않는다**
-  (다른 캠페인 HK로 파싱하는 사고 방지).
-* ``autoload_campaign_layouts()`` — 프로파일 폴더를 훑어 **아직 모르는 열 수만** 등록.
-  앱 시작(`main.py`)에서 한 번 돈다. 즉 **새 캠페인은 JSON을 폴더에 넣기만 하면 된다** —
-  사용자가 고르거나 경로를 적을 필요가 없고, 라우팅은 raw의 열 수(데이터)가 한다.
-  이미 아는 열 수는 덮지 않는다(기본 등록이 이긴다 — `row.hk` 키가 조용히 바뀌면
-  기존 소비자가 말없이 깨지므로).
-* ``load_campaign_layout(path)`` — **캠페인 프로파일**(``vigil/profiles/*.json``)을
-  읽어 등록(특정 파일을 명시할 때). 캠페인별 컬럼 지도는 그 파일이 이미 갖고 있으므로 새 포맷을 만들지 않는다.
-  단위 환산(°C ÷100, mbar ×P_SCALE)은 **core가 단일 출처**이고, 프로파일이 다른 scale을
+* import 때 ``autoload_campaign_layouts()`` 가 프로파일 폴더를 읽어 ``CAMPAIGN_LAYOUTS``
+  (열 수 → 구성 **목록**)를 만든다. 같은 열 수라도 날짜 구간이 다른 구성이 여럿일 수 있다.
+* ``layout_for(ncols, path)`` — 열 수 + 파일명 날짜로 구성을 고른다(어느 구간에도 안 들면
+  '구간 밖' — 블록·HK 는 쓰고 채널 이름은 주장하지 않는다).
+* ``register_campaign_layout(...)`` — 같은 열 수·**겹치는 날짜**는 조용히 덮지 않는다.
+* ``hk_col(ncols, key)`` — 도구가 HK 열 번호를 따로 적지 않게.
+* 단위 환산(°C ÷100, mbar ×P_SCALE)은 **core가 단일 출처**이고, 프로파일이 다른 scale을
   적어두면 0.1% 초과일 때 경고한다.
 
-즉 **다음 캠페인은 이 파일을 고치지 않는다** — 프로파일 JSON을 하나 얹는다.
-검사: ``python tools/test_raw_layout.py`` (내장 구성 파싱 동일성 + 프로파일 등록).
+즉 **채널을 추가하거나 배치가 바뀌어도 이 파일을 고치지 않는다** — 프로파일 JSON 을 고친다.
+검사: ``python tools/test_raw_layout.py`` (옛 내장 표 재현 + 날짜별 구성 + 채널 추가 시나리오).
 
 State flag conventions
 ----------------------
@@ -310,77 +306,19 @@ def _is_sentinel(v: float) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────────────────────────
-# HK column maps — explicit name → (absolute col, scale, units, kind)
+# 캠페인 레이아웃 — **채널 정의의 단일 출처는 vigil/profiles/*.json** (2026-10-02)
 # ──────────────────────────────────────────────────────────────────────────────────
-
-# kind: "temp" → ÷100 = °C, "press" → ×0.6895 = mbar, "raw" → use as-is
-# ⚠ 전수조사(2026-09-15, 핫 1314개 × 5행 = 6570행) — 아래 세 열은
-# **한 번도 실측값이 없다**(항상 0 또는 65535):
-#     templed4(6152) · tempcell3(6176) · **tempsptrm(6177)**
-# 반면 **미지도인 col 6180은 1314개 중 1239개 파일에서 median 29.74 °C**의
-# 실신호를 낸다(콜드의 tempsptrm=6174가 26.98 °C인 것과 같은 계열로 보임).
-# → 핫 분광기 온도는 6177이 아니라 **6180일 가능성이 높다.** 다만 어느 센서가
-#   어느 열인지는 **하드웨어 사실**이라 계기 담당자 확인 전에는 바꾸지 않는다
-#   (추측으로 재배치하면 ‘조용히 틀린 HK’가 되는데, 이 모듈은 그걸 가장 경계한다).
-#   현재 소비자는 없다(data_io._HK_REL 최대 rel=26) — 즉각적 피해는 없다.
-#   참고: campaigns/yeosu_2026/hot_cavity_t/scripts/02_backcast_all.py 는 핫 col 6174를
-#   'T_spt'라 부르는데 여긴 같은 열을 'tempcell1'이라 한다 — 이름 충돌도 같이 정리할 것.
-HotHKMap: dict[str, tuple[int, float, str, str]] = {
-    "templed1":       (6149, 0.01,      "C",    "temp"),   # MATLAB:templed1
-    "templed2":       (6150, 0.01,      "C",    "temp"),   # MATLAB:templed2
-    "ANs_oven":       (6151, 0.01,      "C",    "temp"),   # MATLAB:templed3 (actually ANs oven ~300C)
-    "templed4":       (6152, 0.01,      "C",    "temp"),  # 전수 sentinel
-    "temppreh":       (6153, 0.01,      "C",    "temp"),   # MATLAB:temppreh ~38C
-    "PNs_oven":       (6154, 0.01,      "C",    "temp"),   # MATLAB:tempcellh (actually PNs oven ~180C)
-    "cavity_gas_T":   (6155, 0.01,      "C",    "temp"),   # MATLAB:tempoptbx (actually cell heater ~75C — gas T setpoint)
-    "P_PNs":          (6162, P_SCALE,   "mbar", "press"),  # PNs cavity inlet
-    "P_ANs":          (6164, P_SCALE,   "mbar", "press"),  # ANs cavity inlet
-    "tempcell1":      (6174, 0.01,      "C",    "temp"),   # cavity T sensor 1 (always working)
-    "tempcell2":      (6175, 0.01,      "C",    "temp"),   # cavity T sensor 2 (broken until 5/27 10:56)
-    "tempcell3":      (6176, 0.01,      "C",    "temp"),   # cavity T sensor 3  # 전수 sentinel
-    "tempsptrm":      (6177, 0.01,      "C",    "temp"),   # spectrometer housing T  # ⚠ 전수 sentinel — 위 주석 참고(6180 의심)
-}
-
-ColdHKMap: dict[str, tuple[int, float, str, str]] = {
-    "cavity_P":       (6160, P_SCALE,   "mbar", "press"),  # Cold cavity pressure
-    "cavity_T":       (6173, 0.01,      "C",    "temp"),   # Cold cavity wall T
-    "tempsptrm":      (6174, 0.01,      "C",    "temp"),   # spectrometer T
-}
-
-
-# ── 2026-06-11 ~ 06-15 콜드 구성 (ncols 6174) ─────────────────────────────────
-# 이 5일치는 **다른 캐비티 빌드가 아니다** — 스펙트럼 블록은 그대로고 HK 블록의
-# **선두 5열만** 통째로 빠졌다. 그래서 새 표를 손으로 쓰지 않고 ColdHKMap을 옮긴다
-# (열 번호를 두 번 적으면 그 순간 사본이 생기고 한쪽만 고쳐지는 사고가 난다 — 원칙 3).
+# 어느 열 블록이 어느 셀인지, HK 열이 무엇인지, 채널마다 어느 압력·온도 센서를 쓰는지는
+# 이제 **프로파일 JSON 한 곳**에만 있다. 예전엔 같은 사실이 세 곳에 있었다 — 여기 내장 표
+# (HotHKMap/ColdHKMap), core/data_io 의 채널↔센서 짝, Vigil 프로파일 — 그래서 채널을 하나
+# 추가하면 세 곳을 같이 고쳐야 했고, 한쪽만 고치면 Augur 와 Vigil 이 다른 채널을 봤다.
+# 이 모듈은 import 때 프로파일 폴더를 읽어 레이아웃 표를 만든다(jsonschema 검증 없이 — 1.9 s
+# 라 부팅에 안 넣는다. 검증은 vigil/test_profile.py·CI). 옛 내장 표의 열 번호는
+# tools/test_raw_layout.py 가 "프로파일이 같은 열을 만든다"로 지킨다. 열별 근거(전수 sentinel
+# 열, 6180 의심, 6174 선두 5열 결손)는 vigil/profiles/README.md "HK 열 근거" 절로 옮겼다.
 #
-# 근거(전수조사 2026-09-15, E:/Yeosu_2026/CAESAR_Cold 748개 중 97개):
-#   6174행을 +5 이동하면 6179행과 열이 정확히 겹친다 —
-#   cavity_P 1466↔1462 · cavity_T 3012↔2948 · 꼬리 2889/2809↔2891/2800.
-#   구간은 2026-06-11-020 ~ 06-15-026 연속이고 양쪽 경계가 DAQ 재시작 직후다.
-# 주의: 보정 없이 명목 절대열로 읽으면 cavity_T가 33.93°C(진값 29.16°C)로 나온다 —
-#   **둘 다 말이 되는 온도라 범위검사로 안 걸린다.**
-COLD_6174_LEAD_LOSS = 5
-
-
-def _shift_hk_map(hk_map: dict, delta: int) -> dict:
-    """HK 지도를 delta 열만큼 옮긴 새 지도. 스케일·단위·kind는 그대로."""
-    return {n: (c + delta, sc, u, k) for n, (c, sc, u, k) in hk_map.items()}
-
-
-Cold6174HKMap: dict[str, tuple[int, float, str, str]] = _shift_hk_map(
-    ColdHKMap, -COLD_6174_LEAD_LOSS)
-
-
-# ──────────────────────────────────────────────────────────────────────────────────
-# 캠페인 레이아웃 레지스트리 — "어느 구성이냐"를 코드가 아니라 **데이터로** 들고 있는다
-# ──────────────────────────────────────────────────────────────────────────────────
-# 아래 두 항목(6179 cold / 6181 hot)은 **2026 여수 구성**이다. CAESAR는 캐비티가
-# 재구성되므로 다음 캠페인엔 ncols·채널이름·HK 열이 달라진다 — 그때 이 파일을 고치는 게
-# 아니라 항목을 **등록**한다(`register_campaign_layout`, 또는 캠페인 프로파일 JSON에서
-# `load_campaign_layout`). 표는 데이터, 파서는 코드.
-#
-# 채널 위치는 **역할 이름**으로 적는다(block_a/primary/secondary). 절대 열은
-# META_COLS·CH_PIXELS에서 유도되므로 SPEC_* 한 곳에만 존재한다(사본 금지).
+# 채널 위치는 **역할 이름**으로도 적는다(block_a/primary/secondary) — 절대 열은 META_COLS·
+# CH_PIXELS에서 유도되므로 SPEC_* 한 곳에만 존재한다.
 
 ROLE_BLOCKS: dict[str, tuple[int, int]] = {
     "block_a":   SPEC_BLOCK_A,
@@ -400,7 +338,7 @@ UNIT_SCALES: dict[str, tuple[float, str]] = {
 
 @dataclass
 class CampaignLayout:
-    """한 raw 구성(= ncols 하나)의 채널·HK 지도."""
+    """한 raw 구성(열 수 + 파일 날짜 구간)의 채널·HK 지도 — 프로파일 하나에서 만든다."""
     ncols: int
     kind: str
     channels: dict                # 표시이름 → 역할명 또는 (start, end)
@@ -412,6 +350,12 @@ class CampaignLayout:
     # (실측: 2026-09-27 실험실 raw는 6181열인데 block 2053 = 콜드 캐비티).
     # 구간 밖 파일은 구조적 이름(ch1/ch2)으로 떨어뜨린다 — 블록 위치·HK 열은 그대로.
     date_range: tuple = None
+    # 채널 이름 → (압력 키 목록, 온도 키 목록) — 프로파일 채널 `cavity`(우선순위 순).
+    # core/data_io 가 n_air 용 T/P 를 이걸로 고른다(채널 이름으로 분기하지 않는다).
+    cavity: dict = field(default_factory=dict)
+    # 'caesar_hot.example.json@1.3.0#1a2b3c4d' — 어느 프로파일(파일·판·내용 해시)에서 왔나.
+    # 알파 헤더 raw_layout 줄·결과 meta 에 남는다(오프라인 PC 끼리 정의가 같은지 대조용).
+    profile: str = ""
 
     def spec_blocks(self) -> dict:
         out = {}
@@ -419,52 +363,95 @@ class CampaignLayout:
             out[name] = ROLE_BLOCKS[role] if isinstance(role, str) else tuple(role)
         return out
 
+    def channel_at(self, block_start: int):
+        """block_start 열로 시작하는 블록의 채널 이름(없으면 None)."""
+        for name, (start, _end) in self.spec_blocks().items():
+            if int(start) == int(block_start):
+                return name
+        return None
 
-CAMPAIGN_LAYOUTS: dict[int, CampaignLayout] = {}
+
+# 열 수 → 레이아웃 **목록**. 같은 열 수라도 날짜 구간이 다른 구성(배치가 바뀐 뒤의 프로파일)이
+# 여럿 있을 수 있다 — 고르는 건 `layout_for(ncols, path)`.
+CAMPAIGN_LAYOUTS: dict[int, list] = {}
+
+
+def _ranges_overlap(a, b) -> bool:
+    if a is None or b is None:
+        return True
+    return not (a[1] < b[0] or b[1] < a[0])
 
 
 def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
                              source="builtin", replace=False,
-                             date_range=None) -> CampaignLayout:
-    """raw 구성 하나를 등록한다. 같은 ncols가 이미 있으면 `replace=True`라야 덮는다.
+                             date_range=None, cavity=None, profile="") -> CampaignLayout:
+    """raw 구성 하나를 등록한다. 같은 ncols 에 **날짜 구간이 겹치는** 구성이 이미 있으면
+    `replace=True` 라야 덮는다(겹치는 것들을 뺀다).
 
-    조용한 덮어쓰기를 막는 이유: 두 캠페인이 우연히 같은 ncols를 쓰면 나중에 등록된 쪽이
-    이기는데, 그러면 **다른 캠페인의 HK 지도로 파싱**하면서 아무 경고도 안 난다.
+    조용한 덮어쓰기를 막는 이유: 두 구성이 같은 ncols·같은 날짜를 주장하면 어느 HK 지도로
+    파싱할지 정할 수 없다 — 그걸 말없이 고르면 다른 구성의 HK 로 파싱하면서 아무 경고도 안 난다.
     """
-    if ncols in CAMPAIGN_LAYOUTS and not replace:
-        have = CAMPAIGN_LAYOUTS[ncols]
+    dr = tuple(date_range) if date_range else None
+    have = CAMPAIGN_LAYOUTS.get(int(ncols), [])
+    clash = [h for h in have if _ranges_overlap(h.date_range, dr)]
+    if clash and not replace:
+        h = clash[0]
         raise ValueError(
-            f"ncols={ncols} layout already exists ({have.kind}, source={have.source}). "
-            f"Pass replace=True to overwrite — if it is a different configuration, first check whether ncols really match")
-    # hk_map은 **사본을 만들지 않는다** — 기존 코드가 `layout.hk_map is ColdHKMap`로
-    # 동일성을 본다(tools/test_raw_parser.py). 사본을 쥐어주면 조용히 깨진다.
+            f"ncols={ncols} layout already exists for overlapping dates ({h.kind}, source={h.source}, "
+            f"date_range={h.date_range}). Pass replace=True to overwrite — or give the new "
+            f"configuration a date_range that does not overlap")
     lay = CampaignLayout(ncols=int(ncols), kind=str(kind), channels=dict(channels),
                          hk_map=hk_map, campaign=str(campaign), source=str(source),
-                         date_range=(tuple(date_range) if date_range else None))
+                         date_range=dr, cavity=dict(cavity or {}), profile=str(profile))
     for name, role in lay.channels.items():
         if isinstance(role, str) and role not in ROLE_BLOCKS:
             raise ValueError(f"Channel '{name}' has unknown role '{role}'. "
                              f"Must be one of {list(ROLE_BLOCKS)} or (start, end)")
-    CAMPAIGN_LAYOUTS[lay.ncols] = lay
+    CAMPAIGN_LAYOUTS[lay.ncols] = [h for h in have if h not in clash] + [lay]
     return lay
 
 
-def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayout:
+def layout_for(ncols, path=None):
+    """(레이아웃, 날짜 구간 안인가) — 이 열 수·파일에 맞는 구성. 모르는 열 수면 (None, False).
+
+    path 의 파일명 날짜가 어느 구성의 date_range 안이면 그 구성(제한 없는 구성은 언제나 '안').
+    어느 구간에도 안 들면 그 열 수의 첫 구성을 **구간 밖**으로 돌려준다 — 블록 위치·HK 열은
+    쓰되 채널 이름은 주장하지 않는다(호출측 규약, `_detect_layout`). path 가 없으면 첫 구성."""
+    lays = CAMPAIGN_LAYOUTS.get(int(ncols)) if ncols else None
+    if not lays:
+        return None, False
+    if path is None:
+        return lays[0], True
+    for lay in lays:
+        if not lay.date_range or _in_date_range(str(path), None, lay.date_range):
+            return lay, True
+    return lays[0], False
+
+
+def hk_col(ncols, key, path=None):
+    """이 구성에서 HK 키의 절대 열(없으면 None) — 도구가 열 번호를 따로 적지 않게."""
+    lay, _ = layout_for(ncols, path)
+    ent = lay.hk_map.get(key) if lay is not None else None
+    return ent[0] if ent else None
+
+
+def load_campaign_layout(path: str, *, kind=None, replace=False,
+                         validate=False, verbose=True) -> CampaignLayout:
     """**캠페인 프로파일 JSON**(`vigil/profiles/*.json`)에서 raw 레이아웃을 등록.
 
-    캠페인별 컬럼 지도는 이미 그 파일이 갖고 있다(`match.n_columns`, `channels[].columns`,
-    `hk.start_col`+`fields[].rel`, `flags`). 새 포맷을 만들지 않고 그걸 읽는다 — Augur와
-    Vigil이 **한 파일**을 본다(Vigil 설계 §2-A "역수혈").
+    캠페인별 컬럼 지도는 그 파일이 갖고 있다(`match.n_columns`·`date_range`, `channels[].columns`·
+    `cavity`, `hk.start_col`+`fields[].rel`). 새 포맷을 만들지 않고 그걸 읽는다 — Augur와 Vigil이
+    **한 파일**을 본다(Vigil 설계 §2-A "역수혈").
 
-    파싱은 `core.profile`(스키마 검증 포함, 그 포맷의 **유일한** 리더)에 맡기고, 여기서는
-    그 결과를 raw_parser의 레이아웃 표로 옮기기만 한다.
+    파싱은 `core.profile`(그 포맷의 **유일한** 리더)에 맡기고, 여기서는 그 결과를 raw_parser의
+    레이아웃 표로 옮기기만 한다. validate=True 면 jsonschema 검증까지(느리다 — 테스트용).
 
     단위 환산은 **core 상수**를 쓴다(UNIT_SCALES). 프로파일이 반올림한 scale을 적어 두면
     0.1%까지는 무시하고, 그보다 크게 어긋나면 경고한다 — 조용히 다른 물리를 쓰지 않도록.
     """
     from core.profile import load_profile   # 지연 임포트(순환 없음: profile은 stdlib만 씀)
 
-    prof = load_profile(path)
+    prof = load_profile(path, validate=validate)
     ncols = prof.match.n_columns if prof.match else None
     if not ncols:
         raise ValueError(f"{os.path.basename(path)}: no match.n_columns, so "
@@ -483,14 +470,16 @@ def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayo
     if getattr(hdr, "state_flag_col", COL_FLAG) != COL_FLAG:
         warn.append(f"state_flag_col {hdr.state_flag_col} != core {COL_FLAG}")
 
-    channels = {}
+    channels, cavity = {}, {}
     for ch in prof.signal_channels():
         if ch.columns is None:
             warn.append(f"channel '{ch.id}' has no columns (autodetect only) — skipped")
             continue
         block = (int(ch.columns[0]), int(ch.columns[1]) + 1)   # 프로파일은 포함 끝
         role = next((r for r, b in ROLE_BLOCKS.items() if b == block), block)
-        channels[str(ch.label or ch.id)] = role
+        name = str(ch.label or ch.id)
+        channels[name] = role
+        cavity[name] = (tuple(ch.pressure_keys()), tuple(ch.temp_keys()))
 
     hk_map = {}
     for f in prof.hk.fields:
@@ -505,29 +494,30 @@ def load_campaign_layout(path: str, *, kind=None, replace=False) -> CampaignLayo
             warn.append(f"{f.key}: profile scale {f.scale} vs core {scale:.8g} "
                         f"({unit}) — using the core value")
         hk_map[str(f.key)] = (int(prof.hk.start_col) + int(f.rel), scale, unit, knd)
+    for name, (pk, tk) in cavity.items():
+        missing = [k for k in (*pk, *tk) if k not in hk_map]
+        if missing:
+            warn.append(f"channel '{name}' cavity refers to unknown hk keys {missing}")
 
-    for w in warn:
-        print(f"[raw_parser] Campaign profile note ({os.path.basename(path)}): {w}")
+    if verbose:
+        for w in warn:
+            print(f"[raw_parser] Campaign profile note ({os.path.basename(path)}): {w}")
 
     return register_campaign_layout(
-        ncols, kind or str(prof.profile_id or "campaign"), channels, hk_map,
-        campaign=str(prof.profile_id or ""), source=os.path.basename(path),
-        replace=replace)
+        ncols, kind or prof.kind or str(prof.profile_id or "campaign"), channels, hk_map,
+        campaign=str(prof.campaign or prof.profile_id or ""), source=os.path.basename(path),
+        replace=replace, date_range=prof.match.date_range, cavity=cavity,
+        profile=prof.provenance)
 
 
 def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
-    """프로파일 폴더의 캠페인 JSON을 훑어 **아직 등록 안 된 ncols만** 등록한다.
+    """프로파일 폴더의 캠페인 JSON 을 **아직 등록 안 된 것만** 등록한다(파일 이름 기준, 여러 번
+    불러도 안전). import 때 한 번 돌고(`_PROFILE_LOAD`), main.py 가 부팅 단계로 다시 부른다.
 
-    이게 "다음 캠페인은 JSON만 얹으면 된다"를 실제로 성립시키는 지점이다 — 사용자가
-    프로파일을 고르거나 경로를 적을 필요가 없다. raw 파일의 열 수가 곧 그 구성이므로
-    라우팅은 **데이터가** 한다.
-
-    **이미 등록된 ncols는 건드리지 않는다**(기본 등록 = 2026 여수가 이긴다). 이유:
-    같은 ncols에 프로파일을 덮어씌우면 `row.hk`의 키 이름이 조용히 바뀌어
-    (`cavity_P` → `p_cavity`) 기존 소비자가 말없이 깨진다. 새 구성(새 ncols)만 늘린다.
-
-    한 파일이 깨져 있어도 나머지는 등록한다 — 프로파일 하나 때문에 앱이 안 뜨면 안 된다.
-    반환: 등록된 CampaignLayout 목록.
+    raw 파일의 열 수(+ 파일명 날짜)가 곧 그 구성이므로 라우팅은 **데이터가** 한다 — 사용자가
+    프로파일을 고를 필요가 없다. 한 파일이 깨져 있어도 나머지는 등록한다(앱이 안 뜨면 안 된다)
+    — 대신 stderr 로 반드시 알린다: 등록이 빠진 열 수는 HK 지도 없이 구조적 폴백으로 떨어진다.
+    반환: 이번에 새로 등록된 CampaignLayout 목록.
     """
     import glob as _glob
 
@@ -537,52 +527,21 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
             profile_dir = DEFAULT_PROFILE_DIR
         except Exception:                        # noqa: BLE001
             return []
+    known = {lay.source for lays in CAMPAIGN_LAYOUTS.values() for lay in lays}
     out = []
     for path in sorted(_glob.glob(os.path.join(profile_dir, "*.json"))):
-        if os.path.basename(path).startswith("_"):
-            continue                             # _schema.json 등 메타 파일
+        name = os.path.basename(path)
+        if name.startswith("_") or name in known:
+            continue                             # _schema.json 등 메타 파일 · 이미 등록
         try:
-            # 열 수만 먼저 본다 — 이미 아는 구성이면 스키마 검증 없이 넘어간다. 검증용 jsonschema
-            # 임포트가 1.9 s 라(rfc3987_syntax 문법 빌드 1.5 s) 등록할 게 0개인 평소 부팅에서도
-            # Augur 시작이 그만큼 늦었다(2026-10-01 실측). 처음 보는 열 수만 아래에서 전체 검증·등록.
-            import json as _json
-            with open(path, encoding="utf-8") as _fh:
-                _peek = _json.load(_fh)
-            ncols = (_peek.get("match") or {}).get("n_columns") if isinstance(_peek, dict) else None
-            if not ncols or ncols in CAMPAIGN_LAYOUTS:
-                continue                         # 이미 아는 구성 — 덮지 않는다
-            out.append(load_campaign_layout(path))
+            out.append(load_campaign_layout(path, verbose=verbose))
             if verbose:
-                print(f"[raw_parser] Registered campaign layout: {os.path.basename(path)} "
-                      f"(ncols={ncols}, channels={list(out[-1].channels)})")
+                print(f"[raw_parser] Registered campaign layout: {name} "
+                      f"(ncols={out[-1].ncols}, channels={list(out[-1].channels)})")
         except Exception as e:                   # noqa: BLE001
-            # verbose와 무관하게 알린다. 캠페인 프로파일이 조용히 등록 안 되면
-            # 그 ncols는 구조적 폴백으로 떨어지고, HK 열 지도가 없는 채로 파싱된다
-            # (= T/P가 기본값으로 대체될 수 있다). 레이아웃은 이 파일이 단일
-            # 출처이므로, 등록 실패는 stderr로라도 반드시 보여야 한다.
             print(f"[raw_parser] ⚠ Campaign profile registration failed — skipped "
-                  f"({os.path.basename(path)}): {type(e).__name__}: {e}",
-                  file=sys.stderr)
+                  f"({name}): {type(e).__name__}: {e}", file=sys.stderr)
     return out
-
-
-# 2026 여수 구성 — 이 파일 상단 VALUE-INSPECTION 기록에서 나온 값.
-register_campaign_layout(6179, "cold", {"NO2": "primary"}, ColdHKMap,
-                         campaign="2026-yeosu")
-# ★ 핫 채널 정체 (2026-09-27 판정, RAW/260927 failed/채널정체_판정_2026-09-27.md):
-#   primary   (col 2053-4100, 청색 LED 반치 ~428-456 nm) = **ANs 300 °C** 셀
-#   secondary (col 4101-6148, 청록 469 nm LED)          = **PNs 180 °C** 셀
-#   근거: 300 °C 오븐만 통과시킨 NO2가 청색 LED 캐비티에서 흡수(t=72), 그 LED+필터
-#   스펙트럼이 캠페인 block 2053과 r=0.991. 캠페인 이후 LED·캐비티 교체 없음(사용자 확인).
-#   (2026-09-25~27에 쓰던 'PNs=primary'는 틀렸다.)
-#   **여수 캠페인(+같은 배치인 8/10-11 실험실) 전용** — date_range 밖 6181열 파일은
-#   ch1/ch2 구조 이름으로 떨어진다(9/27 실험실은 block 2053 = 콜드).
-#   HK 이름(P_PNs/P_ANs, tempcell1/2)의 센서-캐비티 짝은 **미검증** — 이름만 보고 쓰지 말 것.
-register_campaign_layout(6181, "hot", {"ANs": "primary", "PNs": "secondary"}, HotHKMap,
-                         campaign="2026-yeosu", date_range=("2026-05-01", "2026-08-31"))
-
-register_campaign_layout(6174, "cold", {"NO2": "primary"}, Cold6174HKMap,
-                         campaign="2026-yeosu")   # 6/11~6/15 HK 선두 5열 결손 구성
 
 
 # ──────────────────────────────────────────────────────────────────────────────────
@@ -707,8 +666,8 @@ class RawParser:
             ncols = min(seen, key=lambda k: (-seen[k], k))
         mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=KST)
 
-        lay = CAMPAIGN_LAYOUTS.get(ncols)
-        if lay is not None and lay.date_range and not _in_date_range(path, mtime, lay.date_range):
+        lay, in_range = layout_for(ncols, path)
+        if lay is not None and not in_range:
             # 같은 열 수지만 캠페인 기간 밖 — 채널 이름은 주장하지 않는다(블록·HK는 유지).
             blocks = spec_blocks_for_ncols(ncols)
             blocks = {k: v for k, v in blocks.items() if v in lay.spec_blocks().values()}
@@ -730,7 +689,7 @@ class RawParser:
             )
         # 등록 안 된 구성(예: 세 번째 캐비티가 켜진 CAESAR) — HK는 모르지만 스펙트럼
         # 블록은 구조적으로 추론해서 R 계산 등 스펙트럼 레벨 도구는 그대로 돌게 한다.
-        # 실제 HK 레이아웃이 확인되면 위에 (ncols, kind, HotHKMap류) 항목을 추가할 것.
+        # 실제 HK 레이아웃이 확인되면 vigil/profiles 에 그 구성의 프로파일 JSON 을 추가할 것.
         blocks = spec_blocks_for_ncols(ncols)
         return FileLayout(
             path=path, ncols=ncols, kind=f"unknown({len(blocks)}ch structural)",
@@ -915,13 +874,10 @@ def block_channel_name(path: str, block_start: int):
         fl = RawParser._detect_layout(path)
     except OSError:
         return None
-    lay = CAMPAIGN_LAYOUTS.get(fl.ncols)
-    if lay is None:
+    lay, in_range = layout_for(fl.ncols, path)
+    if lay is None or not in_range:
         return None
-    for name, (start, _end) in fl.spec_blocks.items():
-        if start == int(block_start) and name in lay.channels:
-            return name
-    return None
+    return lay.channel_at(block_start)
 
 
 def block_label(path: str, block_start: int, prefix: str = "") -> str:
@@ -932,13 +888,20 @@ def block_label(path: str, block_start: int, prefix: str = "") -> str:
     return f"{head}{name} (block {int(block_start)})" if name else f"{head}block {int(block_start)}"
 
 
+# ── 채널 정의 로드 — 프로파일 폴더(단일 출처)에서 레이아웃 표를 만든다 ───────────────
+_PROFILE_LOAD = autoload_campaign_layouts(verbose=False)
+if not CAMPAIGN_LAYOUTS:
+    print("[raw_parser] ⚠ No campaign layouts — the profile folder (vigil/profiles) is missing or "
+          "unreadable. Raw files will be parsed with structural fallbacks only (no HK map: T/P may "
+          "fall back to defaults).", file=sys.stderr)
+
+
 __all__ = [
     "RawParser",
     "block_channel_name", "block_label",
     "ParsedRow",
     "FileLayout",
-    "HotHKMap",
-    "ColdHKMap",
+    "layout_for", "hk_col", "CAMPAIGN_LAYOUTS",
     "FLAG_HEADER", "FLAG_AMBIENT", "FLAG_ZA", "FLAG_ZA_WAIT", "FLAG_ZA_END",
     "FLAG_HE", "FLAG_HE_WAIT", "FLAG_HE_END",
     "FLAG_STABLE", "FLAG_TRANSITIONAL", "FLAG_NAMES",

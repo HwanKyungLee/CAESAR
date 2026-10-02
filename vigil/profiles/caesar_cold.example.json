@@ -1,8 +1,10 @@
 {
   "profile_id": "caesar_cold_2026yeosu",
-  "profile_version": "1.0.0",
+  "profile_version": "1.1.0",
   "description": "CAESAR Cold-cavity raw layout (2026 Yeosu). PRIMARY=NO2 cell 1채널. core/raw_parser.py의 VALUE-INSPECTION 기록에서 파생한 기본 프로파일 — 값은 캠페인별로 복제·조정.",
   "instrument": "CAESAR",
+  "kind": "cold",
+  "campaign": "2026-yeosu",
 
   "match": {
     "n_columns": 6179,
@@ -35,13 +37,12 @@
   "channels": [
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
     { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100],
+      "cavity": { "pressure_hk": ["p_cavity"], "temperature_hk": ["t_cavity", "t_spectrometer"] },
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
         "wl_dir": "cold",
         "target": "NO2",
-        "cavity_temp_hk": "t_cavity",
-        "cavity_pressure_hk": "p_cavity",
         "throttle_sec": 10,
         "seed_narrow_px": 2.0,
         "alert": { "conc_max_ppb": 100, "spike_ppb": 20, "rms_alarm": 5e-8, "flatline_n": 5 }
@@ -49,8 +50,6 @@
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260523_Hg_4line_400-497nm_Poly2.txt",
         "roi_nm": [438.0, 476.0],
-        "cavity_temp_hk": "t_cavity",
-        "cavity_pressure_hk": "p_cavity",
         "cavity_len_cm": 51.8,
         "rl_factor": 0.933,
         "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }

@@ -1,23 +1,30 @@
-# Vigil 인스트루먼트 프로파일
+# CAESAR 인스트루먼트 프로파일 — 채널 정의의 단일 출처
 
-Vigil이 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 읽어** 모니터링한다"는 원칙
-(설계문서 §0-A.6 · §2-A)을 실현하는 설정 계층이다. `Cold`/`Hot`/`PNs`/`ANs` 같은 이름은
-채널 구성·캐비티 선택에 따라 매번 달라지므로, 이런 것들을 코드에서 빼내 **프로파일 JSON**으로
-옮긴다. 파싱·경보 로직은 프로파일이 선언한 열지도·밴드·flag 규약만 본다.
+**raw 파일의 채널 정의는 이 폴더의 JSON 한 곳에만 있다**(2026-10-02 단일화). Augur
+(`core/raw_parser` → 알파·R·핏의 블록·HK·n_air T/P)와 Vigil(실시간 감시)이 **같은 파일**을 읽는다.
+예전엔 같은 사실이 세 곳(raw_parser 내장 표, data_io 의 채널↔센서 짝, 이 폴더)에 있어서 채널을
+추가하면 세 곳을 같이 고쳐야 했고, 한쪽만 고치면 Augur 와 Vigil 이 다른 채널을 봤다.
+
+`Cold`/`Hot`/`PNs`/`ANs` 같은 이름은 채널 구성·캐비티 선택에 따라 매번 달라지므로 코드에 두지
+않는다. 파싱·경보 로직은 프로파일이 선언한 열지도·채널·센서·밴드·flag 규약만 본다.
 
 ## 파일
 
 | 파일 | 역할 |
 |---|---|
 | `_schema.json` | 프로파일 JSON Schema (draft 2020-12). 모든 프로파일은 이걸로 검증된다. |
-| `caesar_cold.example.json` | Cold 캐비티 레이아웃 예제 (6179열, NO₂ 1채널) |
-| `caesar_hot.example.json` | Hot 캐비티 레이아웃 예제 (6181열, PNs+ANs 2채널) |
+| `caesar_cold.example.json` | 2026 여수 Cold (6179열, NO₂ 1채널, 블록 2053) |
+| `caesar_cold_6174.example.json` | 2026 여수 Cold 6/11~6/15 (6174열 — HK 선두 5열 결손, 아래 §HK 열 근거) |
+| `caesar_hot.example.json` | 2026 여수 Hot (6181열, ANs 블록 2053 + PNs 블록 4101, **파일 날짜 2026-05-01~08-31**) |
 
 `.example.` 프로파일은 **기본값(씨앗)**이다. 새 캠페인은 이걸 복제해
 `caesar_hot_<campaign>.json` 처럼 이름 붙이고 값만 조정한다.
 
 ## 동작 방식
 
+0. **Augur**: `core/raw_parser` 가 import 때 이 폴더를 읽어 raw 레이아웃 표를 만든다(열 수 +
+   파일 날짜 → 구성). 블록 이름·HK 열·채널별 압력/온도 센서가 전부 여기서 온다. 폴더가 없거나
+   못 읽으면 stderr 로 경고하고 구조적 폴백(HK 없음)으로 파싱한다.
 1. Vigil은 이 폴더의 프로파일을 전부 로드한다.
 2. 감시 폴더에서 raw 파일을 만나면 `match`(우선 `n_columns`, 보조 `filename_glob`)로
    프로파일을 **라우팅**한다. → 한 인스턴스가 Cold·Hot 등 여러 레이아웃을 동시에 처리(§0-A.5).
@@ -26,7 +33,11 @@ Vigil이 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 읽
 
 ## 필드 요약
 
-- **`match`** — 파일 → 프로파일 라우팅. `n_columns`가 1차 판별(견고), `filename_glob` 보조.
+- **`match`** — 파일 → 프로파일 라우팅. `n_columns`가 1차 판별(견고), `filename_glob` 보조,
+  **`date_range`** `["YYYY-MM-DD","YYYY-MM-DD"]` = 파일명 날짜가 이 밖이면 이 프로파일을 쓰지
+  않는다(같은 열 수인데 배치가 바뀐 경우를 날짜로 나눈다). 같은 열 수의 프로파일끼리 날짜가 겹치면
+  Augur 가 등록을 거부한다.
+- **`kind`·`campaign`** — 결과 헤더 `raw_layout` 줄에 남는 이름(예 `hot`, `2026-yeosu`). 표시용.
 - **`header`** — CAESAR 공통 선두 열. `time_bytepack`은 `(raw[hi]<<16)|raw[lo]` = 연초 기준
   센티초. `state_flag_col`이 측정 상태.
 - **`flags`** — **의미 역할 → flag 숫자** 매핑. 역할 이름은 **열린 집합**이라 새 단계가
@@ -34,7 +45,10 @@ Vigil이 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 읽
   숫자를 직접 보지 않는다. (규약 표는 아래 §교정 시퀀스 참조)
 - **`channels`** — 스펙트럼 블록. `id`는 로직이 참조하는 안정 식별자, `label`은 **표시용
   문자열**(로직이 여기 의존 금지). `role`이 `signal`인 것만 피팅·감시. `columns`는 절대
-  열범위 `[start, end]`(양끝 포함).
+  열범위 `[start, end]`(양끝 포함). Augur 의 채널 번호는 블록 위치다(1 = 2053, 2 = 4101).
+  **`cavity`** `{pressure_hk: [...], temperature_hk: [...]}` = 이 채널 캐비티의 압력·기체온도
+  센서(hk 키) **우선순위 목록** — 앞 센서가 결측(0/65535)이면 다음. Augur 의 n_air(ppb 밀도 보정)와
+  Vigil 의 농도·R 이 모두 이걸 쓴다. 목록이 다 결측이면 Augur 는 25 °C·1013.25 mbar + 경고.
 - **`autodetect`** — `columns`를 비운 채널을, 첫 몇 스캔의 **블록별 최대값**으로 signal/noise
   분류(실측: 신호 6,445~50,833 / 노이즈 502~1,011). 프로파일이 부분적이거나 새 구성일 때 무설정 폴백.
 - **`hk`** — Housekeeping 열지도. `start_col` + 각 필드 `rel`(상대 오프셋), `scale`/`offset`
@@ -47,6 +61,63 @@ Vigil이 "특정 장비 구성에 박제되지 않고 **어떤 CAESAR raw든 읽
 - **`cadence`** — 정상 유입 리듬. `scan_interval_sec`(실측 ≈0.965초 = exposure 900ms + 오버헤드),
   `file_rollover_sec`(현 3600),
   `liveness_grace_sec`(이 시간 넘게 새 행 없으면 측정 정지 → **P0**).
+
+## 채널을 추가하거나 배치가 바뀌었을 때
+
+**코드는 고치지 않는다 — JSON 만.** 예: 콜드의 어두운 블록 4101 에 광섬유를 연결해 2채널이 됐다.
+
+1. 옛 프로파일(`caesar_cold.example.json`)의 `match` 에 끝 날짜를 붙인다:
+   `"date_range": ["2026-01-01", "2026-09-30"]`.
+2. 그걸 복제해 새 프로파일(새 `profile_id`)을 만들고 `date_range` 를 새 배치 시작일부터로 둔다.
+3. 새 채널 블록을 `"role": "signal"` 로 바꾸고 `label`, `cavity`(그 셀의 압력·온도 센서), 필요하면
+   `concentration`(FitSet·wl_dir)·`reflectance`(wavecal·roi)를 채운다. 그 셀의 센서가 HK 에
+   없으면 `hk.fields` 에 추가한다.
+4. **채널 정체는 LED 스펙트럼으로 판정**한다(블록 번호·기억으로 정하지 말 것 — 2026-09 오판,
+   `CHANNEL_IDENTITY_YEOSU2026.md`).
+5. `python tools/test_raw_layout.py`, `python vigil/test_profile.py` — 스키마·날짜 겹침·키 참조 검사.
+
+그러면 Augur 는 그 날짜 이후 파일에서 블록 4101 을 그 채널로 읽고(채널 2), 그 채널 센서로 T/P 를
+고르며, Vigil 은 그 채널의 농도·R·램프 감시기를 따로 만든다. 날짜가 어느 프로파일에도 안 드는
+같은 열 수 파일은 Augur 에선 구조적 이름(ch1/ch2)+옛 슬롯 규칙, Vigil 에선 "NOT monitored" P2.
+
+## 측정 PC 배포 (인터넷 없음 — USB)
+
+측정 PC 는 git 을 쓸 수 없다고 보고 설계했다.
+
+- **옮기는 단위는 프로그램 폴더 전체**(이 폴더 `vigil/profiles/` 포함). Augur 와 Vigil 이 같은
+  폴더의 같은 JSON 을 읽으므로 따로 설정할 것이 없다. FitSet·wavecal·레퍼런스는 Augur `Output`
+  폴더 쪽이라 같이 옮기고, Vigil 대시보드에서 그 폴더를 **Augur 데이터 폴더**로 지정한다
+  (`tools/bundle_vigil_deps.py` 가 필요한 것만 모아 준다).
+- **프로파일만 바뀌었으면** 그 JSON 을 모든 PC 의 `vigil/profiles/` 에 덮어 쓰고 Augur·Vigil 을
+  다시 켠다(import·시작 때 한 번 읽는다).
+- **어느 PC 가 어느 정의를 쓰는지는 해시로 대조한다.** 프로파일마다
+  `파일@판#내용해시8` 문자열(예 `caesar_hot.example.json@1.3.0#af04dbf2`)이 남는다:
+  - Vigil — 시작할 때 `status.jsonl` 에 `profiles loaded: …`(kind=profiles)
+  - Augur — 알파 헤더 `# raw_layout: … profile=…`, raw 입력 결과의 meta `raw_layout.profile`
+  같은 문자열이면 같은 정의다(줄바꿈 CRLF/LF 차이는 해시에서 무시). 내용을 바꾸면
+  `profile_version` 도 올릴 것 — 해시는 바뀐 걸 알려 줄 뿐 무엇이 바뀌었는지는 판 번호와 기록이 말한다.
+
+## HK 열 근거 (옛 core/raw_parser 내장 표에서 옮김, 2026-10-02)
+
+옛 이름 → 프로파일 키: `ANs_oven`→`oven_ans_setpoint`, `PNs_oven`→`oven_pns_setpoint`,
+`temppreh`→`preheater`, `cavity_gas_T`→`cell_heater`, `P_PNs`→`p_pns_cavity`(6162),
+`P_ANs`→`p_ans_cavity`(6164), `tempsptrm`→`t_spectrometer`, `cavity_P`→`p_cavity`,
+`cavity_T`→`t_cavity`. 열 번호·scale 은 그대로다(`tools/test_raw_layout.py` 가 옛 표를 기준값으로 고정).
+
+- **핫 전수 sentinel 열**(2026-09-15, 1314개 × 5행): `templed4`(6152)·`tempcell3`(6176)·
+  `t_spectrometer`(6177)은 한 번도 실측값이 없다(항상 0 또는 65535). 반면 지도에 이름 없던
+  **6180(`unknown_rel31`)은 1314개 중 1239개 파일에서 median 29.74 °C** — 콜드 분광기 온도(6174,
+  26.98 °C)와 같은 계열로 보여 **핫 분광기 온도는 6180일 가능성이 높다.** 하드웨어 사실이라 계기
+  담당자 확인 전에는 바꾸지 않는다. (campaigns/yeosu_2026/hot_cavity_t 스크립트는 핫 6174 를
+  'T_spt' 라 부르는데 여기선 `tempcell1` — 이름 충돌 주의.)
+- **`cell_heater`(6155)는 셀히터 설정값(~75 °C)** 이지 기체 온도가 아니다. cavity 목록의 마지막
+  폴백 — 쓰이면 ppb 가 ~15 % 과대.
+- **`tempcell2`(6175)는 5/27 10:56 까지 고장.** 셀 온도 센서의 캐비티 짝(1→2053, 2→4101)은 데이터로
+  특정 불가(항상 +3.1–3.4 °C 차, 영향 < 0.1 %).
+- **6174열 콜드(2026-06-11-020 ~ 06-15-026)** 는 다른 캐비티가 아니라 HK 블록 **선두 5열**이 빠진
+  것이다(전수 748개 중 97개, 양쪽 경계가 DAQ 재시작 직후). 6174행을 +5 이동하면 6179행과 정확히
+  겹친다(cavity_P 1466↔1462 · cavity_T 3012↔2948). 명목 열로 읽으면 t_cavity 가 33.93 °C(진값
+  29.16 °C) — 둘 다 그럴듯해서 범위검사로 안 걸린다. 그래서 `caesar_cold_6174` 의 rel 은 전부 -5.
 
 ## 프로파일 검증
 

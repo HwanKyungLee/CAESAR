@@ -1741,7 +1741,7 @@ def _pass2_write_file(fp, rows, ctx):
     # (실측 2026-05-18-001 앞 6줄 = [6177, 6181x5]). 첫 줄만 보던 옛 코드는 핫 알파에
     # `ncols=6177 campaign=unregistered` 를 적고 있었다 — 콜드는 헤더도 6179 라 우연히
     # 맞았다. 앞 몇 줄의 **최대** 폭을 쓴다. 여전히 수 KB 만 읽으므로 비용은 없다.
-    _ncols, _lay_name = 0, "unknown"
+    _ncols, _lay_name, _lay_prof = 0, "unknown", ""
     try:
         with open(fp, encoding="utf-8", errors="replace") as _fh:
             _seen = 0
@@ -1752,9 +1752,10 @@ def _pass2_write_file(fp, rows, ctx):
                 _seen += 1
                 if _seen >= 5:
                     break
-        from core.raw_parser import CAMPAIGN_LAYOUTS as _CL
-        _l = _CL.get(_ncols)
+        from core.raw_parser import layout_for as _layout_for
+        _l, _ = _layout_for(_ncols, fp)
         _lay_name = (_l.campaign or _l.kind) if _l else "unregistered"
+        _lay_prof = getattr(_l, "profile", "") if _l else ""
     except Exception:      # noqa: BLE001 — provenance 한 줄 때문에 알파를 못 만들면 안 된다
         pass
 
@@ -1788,7 +1789,8 @@ def _pass2_write_file(fp, rows, ctx):
         # ⚠ 알파 생성은 RawParser가 아니라 DataIO의 동적 채널탐지를 쓴다. 그래서 레지스트리
         # 이름은 "그 열 수를 우리가 뭐라 부르는가"의 **참조**일 뿐, 파싱에 쓴 표가 아니다 —
         # parser= 를 같이 적어 그 구분이 나중에도 남게 한다.
-        f.write(f"# raw_layout: ncols={_ncols} campaign={_lay_name} parser=DataIO-dynamic\n")
+        f.write(f"# raw_layout: ncols={_ncols} campaign={_lay_name} parser=DataIO-dynamic"
+                + (f" profile={_lay_prof}" if _lay_prof else "") + "\n")
         f.write(f"# ambient_avg_sec={ctx['avg_sec']:.0f}  (alpha after {ctx['avg_sec']:.0f}s time-average of ambient)\n")
         f.write(f"# purge_settle_sec={ctx['purge_settle_sec']:.0f}  (ambient within this "
                 f"many sec after a ZA/He block excluded — cavity still holding purge gas)\n")

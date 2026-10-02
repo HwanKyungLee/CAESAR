@@ -322,17 +322,16 @@ def test_real_raw_end_to_end():
         rm = RMonitor(wave_nm=wave, cavity_len_cm=rc.cavity_len_cm, rl_factor=rc.rl_factor,
                       roi_nm=rc.roi_nm)
 
-        def hk(row, key):
-            f = prof.hk.field(key)
-            return f.value(row, prof.hk.start_col) if f is not None else float("nan")
+        def hk(row, keys):
+            return prof.hk.first_valid(row, keys)
 
         concs, conc_without_r = [], 0
         for row in rows:
             role = prof.flag_role(int(row[prof.header.state_flag_col]))
             spec = ch.slice(row)
-            rm.observe(role, spec, hk(row, rc.cavity_temp_hk), hk(row, rc.cavity_pressure_hk))
+            rm.observe(role, spec, hk(row, ch.temp_keys(rc)), hk(row, ch.pressure_keys(rc)))
             had_r = rm.omr_d is not None
-            out = cm.observe(role, spec, hk(row, cc.cavity_temp_hk), hk(row, cc.cavity_pressure_hk),
+            out = cm.observe(role, spec, hk(row, ch.temp_keys(cc)), hk(row, ch.pressure_keys(cc)),
                              omr_d=rm.omr_d, rl=rc.rl_factor)
             if out is not None and "conc_ppb" in out[2]:
                 concs.append(out[2]["conc_ppb"])

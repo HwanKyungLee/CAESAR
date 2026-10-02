@@ -219,10 +219,23 @@ class Channel:
     columns: Optional[tuple] = None  # (start, end) 절대 열, 양끝 포함
     reflectance: Optional[ReflectanceConfig] = None
     concentration: Optional[ConcentrationConfig] = None
+    # 이 채널 캐비티의 압력·기체온도 HK 키 — **우선순위 순 목록**(앞이 유효하지 않으면 다음).
+    # Augur(core/data_io 의 n_air 용 T/P)와 Vigil(농도·R)이 **이 한 곳**을 본다(2026-10-02 단일화).
+    # concentration/reflectance 의 cavity_*_hk 는 있으면 맨 앞에 끼우는 덮어쓰기(옛 프로파일 호환).
+    cavity_pressure_hk: tuple = ()
+    cavity_temp_hk: tuple = ()
 
     @property
     def is_signal(self) -> bool:
         return self.role == "signal"
+
+    def pressure_keys(self, cfg=None) -> list:
+        """압력 HK 키 우선순위 목록 — cfg(농도/R 설정)의 덮어쓰기가 있으면 맨 앞."""
+        return _chain(getattr(cfg, "cavity_pressure_hk", None), self.cavity_pressure_hk)
+
+    def temp_keys(self, cfg=None) -> list:
+        """기체온도 HK 키 우선순위 목록 — cfg 의 덮어쓰기가 있으면 맨 앞."""
+        return _chain(getattr(cfg, "cavity_temp_hk", None), self.cavity_temp_hk)
 
     def slice(self, row: Sequence[float]):
         """이 채널의 스펙트럼 절편 반환(양끝 포함). columns 미지정이면 오류."""
@@ -234,12 +247,31 @@ class Channel:
     @classmethod
     def from_dict(cls, d: dict) -> "Channel":
         cols = d.get("columns")
+        cav = d.get("cavity") or {}
         return cls(id=d["id"], role=d["role"], label=d.get("label"),
                    columns=(tuple(int(c) for c in cols) if cols else None),
+                   cavity_pressure_hk=_keys(cav.get("pressure_hk")),
+                   cavity_temp_hk=_keys(cav.get("temperature_hk")),
                    reflectance=(ReflectanceConfig.from_dict(d["reflectance"])
                                if "reflectance" in d else None),
                    concentration=(ConcentrationConfig.from_dict(d["concentration"])
                                  if "concentration" in d else None))
+
+
+def _keys(v) -> tuple:
+    """JSON 의 키 하나(str) 또는 목록 → tuple."""
+    if not v:
+        return ()
+    return (str(v),) if isinstance(v, str) else tuple(str(x) for x in v)
+
+
+def _chain(first, rest) -> list:
+    """덮어쓰기(first) + 기본 목록(rest), 중복 제거·순서 유지."""
+    out = []
+    for k in (*_keys(first), *rest):
+        if k not in out:
+            out.append(k)
+    return out
 
 
 def _band_check(value: float, band: Optional[Sequence]) -> bool:
@@ -315,6 +347,24 @@ class HK:
             if f.key == key:
                 return f
         return None
+
+    def first_valid(self, row: Sequence[float], keys: Sequence[str]) -> float:
+        """keys 순서대로 — 처음으로 **유효한** 물리값(없으면 NaN). 결측 규약은 Augur 와 같다
+        (core.raw_parser._is_sentinel: 0·65535·비유한 raw 는 '값 없음'). 채널 cavity 우선순위 목록을
+        이걸로 읽어서 Augur(data_io)와 Vigil 이 같은 센서를 고른다."""
+        from core.raw_parser import _is_sentinel
+        for k in keys:
+            f = self.field(k)
+            if f is None:
+                continue
+            try:
+                raw = float(row[self.start_col + f.rel])
+            except (IndexError, ValueError, TypeError):
+                continue
+            if _is_sentinel(raw):
+                continue
+            return raw * f.scale + f.offset
+        return float("nan")
 
     def read(self, row: Sequence[float], phase: Optional[str] = None) -> dict:
         """{key: (물리값, 심각도)} 한 번에. 대시보드·경보 공통 입력.
@@ -414,10 +464,23 @@ class Profile:
     cadence: Cadence
     description: Optional[str] = None
     instrument: Optional[str] = None
+    # Augur raw 레이아웃 이름(결과 헤더의 raw_layout 출처 줄): kind = "cold"/"hot" 같은 구성 종류,
+    # campaign = "2026-yeosu" 같은 캠페인. 둘 다 표시·기록용 — 로직은 열 지도만 본다.
+    kind: Optional[str] = None
+    campaign: Optional[str] = None
     spectrum_block_width: Optional[int] = None
     autodetect: Optional[Autodetect] = None
     saturation_adc_max: Optional[float] = None
     source_path: Optional[str] = None
+    # 프로파일 **파일 내용**의 sha1 앞 8자리 — 측정 PC 가 인터넷 없이 USB 로 받으면 git 으로 어느
+    # 판인지 확인할 수 없으니, 결과 헤더·Vigil 로그에 이걸 남겨 PC 끼리 같은 정의를 쓰는지 대조한다.
+    source_sha: Optional[str] = None
+
+    @property
+    def provenance(self) -> str:
+        """'caesar_hot.example.json@1.3.0#1a2b3c4d' — 어느 프로파일(파일·판·내용)을 썼나."""
+        name = os.path.basename(self.source_path) if self.source_path else self.profile_id
+        return f"{name}@{self.profile_version}#{self.source_sha or '?'}"
 
     # ── 편의 접근 ────────────────────────────────────────────────
     def signal_channels(self) -> list:
@@ -467,7 +530,8 @@ class Profile:
         return detected
 
     @classmethod
-    def from_dict(cls, d: dict, source_path: Optional[str] = None) -> "Profile":
+    def from_dict(cls, d: dict, source_path: Optional[str] = None,
+                  source_sha: Optional[str] = None) -> "Profile":
         try:
             return cls(
                 profile_id=d["profile_id"],
@@ -480,6 +544,8 @@ class Profile:
                 cadence=Cadence.from_dict(d["cadence"]),
                 description=d.get("description"),
                 instrument=d.get("instrument"),
+                kind=d.get("kind"),
+                campaign=d.get("campaign"),
                 spectrum_block_width=(int(d["spectrum_block_width"])
                                       if "spectrum_block_width" in d else None),
                 autodetect=(Autodetect.from_dict(d["autodetect"])
@@ -488,6 +554,7 @@ class Profile:
                                     if d.get("saturation", {}).get("adc_max") is not None
                                     else None),
                 source_path=source_path,
+                source_sha=source_sha,
             )
         except (KeyError, TypeError, ValueError) as e:
             raise ProfileError(f"Profile parse failed ({source_path or d.get('profile_id')}): {e}") from e
@@ -532,11 +599,15 @@ def validate_profile_dict(d: dict, schema: Optional[dict] = None) -> None:
 def load_profile(path: str, validate: bool = True,
                  schema: Optional[dict] = None) -> Profile:
     """단일 프로파일 JSON 로드(+검증) → Profile."""
-    with open(path, encoding="utf-8") as fh:
-        d = json.load(fh)
+    import hashlib
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    d = json.loads(raw.decode("utf-8"))
     if validate:
         validate_profile_dict(d, schema)
-    return Profile.from_dict(d, source_path=path)
+    # 줄바꿈은 해시 전에 맞춘다 — 같은 내용이 git 설정(autocrlf)에 따라 PC 마다 CRLF/LF 로 풀린다.
+    sha = hashlib.sha1(raw.replace(b"\r\n", b"\n")).hexdigest()[:8]
+    return Profile.from_dict(d, source_path=path, source_sha=sha)
 
 
 def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,
