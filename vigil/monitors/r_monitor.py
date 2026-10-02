@@ -26,6 +26,11 @@ FAIL_STREAK_FOR_P0 = 3
 DEFAULT_ROI_NM = (430.0, 470.0)   # 프로파일에 roi_nm 없을 때의 폴백(reflectance_calc 기본 근방)
 HISTORY_WINDOW = 20                # 롤링 기준선에 쓸 최근 R값 개수
 MIN_HISTORY_FOR_BASELINE = 3       # 이보다 적으면 "베이스라인 축적 중"(경보 안 냄)
+# ZA and He windows pair only when adjacent: at most this many non-calibration rows (role not
+# za_*/he_*) between them. Yeosu order is He(512→510→513) then ZA(500) — He every 3 h, ZA hourly —
+# so pairing "latest of each" used the ZA from an hour before (R scatter ×1.4–1.7, audit 2026-10-02 V2 §4).
+# ponytail: row count assumes ~1 s scans; switch to row time if a slower instrument shows up.
+MAX_PAIR_GAP_ROWS = 60
 
 
 class RMonitor:
@@ -53,6 +58,8 @@ class RMonitor:
         self._he_buf = self._new_buf()
         self._last_za: Optional[tuple] = None   # (spectrum, T, P) — 가장 최근 완결된 윈도우 평균
         self._last_he: Optional[tuple] = None
+        self._gap_za = 0                        # non-calibration rows since that window ended
+        self._gap_he = 0
         self._history: deque = deque(maxlen=history_window)
         self._fail_streak = 0
         # (1-R)/d [cm^-1] per pixel of the last successful calibration; ConcMonitor builds
@@ -77,21 +84,31 @@ class RMonitor:
         buf[2].add(press_mbar)
 
     def observe(self, role: Optional[str], spectrum, temp_c: float, press_mbar: float):
-        """새 행 한 개 관측. za_inject/he_inject 구간 동안 버퍼링하고, **둘 다** 갓
-        완결된 새 평균을 갖고 있을 때만 R을 재계산해 반환(그리고 즉시 소비/리셋한다) —
-        그래야 이전 사이클의 묵은 za/he 평균이 이번 사이클의 새 평균과 잘못 짝지어져
-        엉뚱한 R이 나오는 걸 막는다. 이번 행으로 새 R이 안 나왔으면 None."""
+        """새 행 한 개 관측. za_inject/he_inject 구간 동안 버퍼링하고, **인접한** ZA·He 윈도우 한
+        쌍이 완결됐을 때만 R을 재계산해 반환(그리고 즉시 소비한다). 인접 = 두 윈도우 사이의 비교정 행이
+        MAX_PAIR_GAP_ROWS 이하(어느 순서든). 더 떨어진 묵은 윈도우는 버린다 — He 가 1시간 전 ZA 와
+        짝지어지지 않게. 이번 행으로 새 R이 안 나왔으면 None."""
+        if not (role or "").startswith(("za_", "he_")):
+            self._gap_za += 1
+            self._gap_he += 1
         if role == "za_inject":
             self._add(self._za_buf, spectrum, temp_c, press_mbar)
         elif self._za_buf[0]:   # za 윈도우가 방금 끝남
             self._last_za = self._avg(self._za_buf)
             self._za_buf = self._new_buf()
+            self._gap_za = 0
         if role == "he_inject":
             self._add(self._he_buf, spectrum, temp_c, press_mbar)
         elif self._he_buf[0]:   # he 윈도우가 방금 끝남
             self._last_he = self._avg(self._he_buf)
             self._he_buf = self._new_buf()
+            self._gap_he = 0
 
+        # the window that just completed has gap 0; the other one must be close to it
+        if self._last_za is not None and self._gap_za > MAX_PAIR_GAP_ROWS:
+            self._last_za = None
+        if self._last_he is not None and self._gap_he > MAX_PAIR_GAP_ROWS:
+            self._last_he = None
         if self._last_za is not None and self._last_he is not None:
             result = self._compute()
             self._last_za = None
