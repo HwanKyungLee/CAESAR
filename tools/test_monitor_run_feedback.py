@@ -117,6 +117,22 @@ def test_new_run_drops_previous_scans():
     assert not m.curve_items
 
 
+def test_status_colour_reads_the_head_label():
+    """R7: 'OK · AT_BOUND' was painted with the failure colour."""
+    from gui.app_window_results import ResultsQCMixin
+    from gui.theme import AUGUR
+    from PyQt6.QtGui import QColor
+    _app()
+    bg = lambda st: ResultsQCMixin._status_item(st).background().color().name()
+    fail, warn = QColor(AUGUR.fail_bg).name(), QColor(AUGUR.warn_bg).name()
+    assert bg("OK · AT_BOUND") not in (fail, warn)
+    assert bg("OK") not in (fail, warn)
+    assert bg("Recovered · STEP_LIMITED") == warn
+    assert bg("Unstable") == fail
+    assert bg("QC-Auto (rms=1e-3>1e-4)") == fail
+    assert bg("Settling") == fail
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):

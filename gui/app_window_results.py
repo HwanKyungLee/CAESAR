@@ -140,21 +140,27 @@ class ResultsQCMixin:
         self.table.setItem(row, c + 2, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
         self.table.setItem(row, c + 3, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))
         self.table.setItem(row, c + 4, QTableWidgetItem(f"{result_dict.get('SNR', 0):.1f}"))
-        item_status = QTableWidgetItem(str(result_dict.get('Status', '')))
-        try:
-            status = result_dict.get('Status', '')
-            if status not in ("OK", "Recovered"):
-                item_status.setBackground(QColor(AUGUR.fail_bg)); item_status.setForeground(QColor(AUGUR.ink))
-            elif status == "Recovered":
-                item_status.setBackground(QColor(AUGUR.warn_bg)); item_status.setForeground(QColor(AUGUR.ink))
-        except Exception:
-            pass
-        self.table.setItem(row, c + 5, item_status)
+        self.table.setItem(row, c + 5, self._status_item(result_dict.get('Status', '')))
         for i, gas_name in enumerate(self.engine.gas_list):
             self.table.setItem(row, c + 6 + i, QTableWidgetItem(f"{result_dict.get(gas_name, 0):.2e}"))
         go = len(self.engine.gas_list)
         self.table.setItem(row, c + 6 + go,     QTableWidgetItem(f"{result_dict.get('Shift', 0):.2f}"))
         self.table.setItem(row, c + 6 + go + 1, QTableWidgetItem(f"{result_dict.get('Squeeze', 1):.4f}"))
+
+    @staticmethod
+    def _status_item(status):
+        """Status cell coloured by its head label (text before ' · '), the
+        core.result_io.quality_label convention: notes such as 'OK · AT_BOUND' keep
+        the OK colour; only Recovered warns and every other head (Unstable, QC-…,
+        Settling, Error…) is a failure."""
+        st = str(status)
+        it = QTableWidgetItem(st)
+        head = st.split(' · ')[0]
+        if head == "Recovered":
+            it.setBackground(QColor(AUGUR.warn_bg)); it.setForeground(QColor(AUGUR.ink))
+        elif head != "OK":
+            it.setBackground(QColor(AUGUR.fail_bg)); it.setForeground(QColor(AUGUR.ink))
+        return it
 
     def _apply_row_to_table(self, result_dict, row_index):
         """Live per-row update (Step mode): cells + conc plot + scroll + progress bar."""
@@ -477,13 +483,7 @@ class ResultsQCMixin:
                 if i >= self.table.rowCount():
                     continue
                 r = self.results[i]
-                st = str(r.get('Status', ''))
-                it = QTableWidgetItem(st)
-                if st.startswith('QC-') or st not in ("OK", "Recovered"):
-                    it.setBackground(QColor(AUGUR.fail_bg)); it.setForeground(QColor(AUGUR.ink))
-                elif st == "Recovered":
-                    it.setBackground(QColor(AUGUR.warn_bg)); it.setForeground(QColor(AUGUR.ink))
-                self.table.setItem(i, c + 5, it)
+                self.table.setItem(i, c + 5, self._status_item(r.get('Status', '')))
                 for gi, gas in enumerate(self.engine.gas_list):
                     try:
                         txt = f"{float(r.get(gas, 0)):.2e}"
