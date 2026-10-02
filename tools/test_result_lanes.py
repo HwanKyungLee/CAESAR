@@ -302,6 +302,19 @@ def test_view_toggles_leave_non_fit_alone(w):
     w._chk_hide_qc.toggle(); w._spin_qc_k.setValue(0.0); w._chk_err.toggle()
 
 
+def test_png_of_fit_is_the_lanes(w):
+    """2026-10-02 R7: PNG of a fit result saved the hidden `_pw_top` (blank 2400x37)."""
+    from PyQt6.QtGui import QImage
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._reload()
+    out = os.path.join(d, "x.png")
+    n = w._save_png(out)
+    assert n == 4, n                           # 2 gas lanes + shift/squeeze + RMS
+    im = QImage(out)
+    assert im.width() == 2400 and im.height() > 400, (im.width(), im.height())
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -313,7 +326,8 @@ def main() -> int:
                      (test_big_file_thinning_keeps_flag_share, (w,)),
                      (test_residual_refuses_without_meta, (w,)),
                      (test_non_fit_restores_old_plots, (w,)),
-                     (test_view_toggles_leave_non_fit_alone, (w,))):
+                     (test_view_toggles_leave_non_fit_alone, (w,)),
+                     (test_png_of_fit_is_the_lanes, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

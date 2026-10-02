@@ -1612,9 +1612,7 @@ class ResultViewerWidget(QWidget):
         dlg.show()
 
     def _export_png(self):
-        """현재 위/아래 그래프를 고해상도(폭 2400px) PNG 합본으로 저장."""
-        import pyqtgraph.exporters as pgex
-        from PyQt6.QtGui import QImage, QPainter
+        """현재 화면의 그래프를 고해상도(폭 2400px) PNG 합본으로 저장."""
         base = os.path.splitext(os.path.basename(self._path or 'plot'))[0]
         out, _ = QFileDialog.getSaveFileName(self, "Export high-res PNG",
                                              f"{base}.png", "PNG (*.png)")
@@ -1623,29 +1621,41 @@ class ResultViewerWidget(QWidget):
         if not out.lower().endswith('.png'):
             out += '.png'
         try:
-            imgs = []
-            for pw in (self._pw_top, self._pw_bot):
-                if not pw.isVisible() and pw is self._pw_bot:
-                    continue
-                ex = pgex.ImageExporter(pw.plotItem)
-                ex.parameters()['width'] = 2400
-                imgs.append(ex.export(toBytes=True))   # QImage
-            if not imgs:
-                return
-            if len(imgs) == 1:
-                imgs[0].save(out)
-            else:
-                wmax = max(im.width() for im in imgs)
-                htot = sum(im.height() for im in imgs)
-                combo = QImage(wmax, htot, QImage.Format.Format_ARGB32)
-                combo.fill(0xFFFFFFFF)
-                p = QPainter(combo)
-                y = 0
-                for im in imgs:
-                    p.drawImage(0, y, im)
-                    y += im.height()
-                p.end()
-                combo.save(out)
-            self._stats_lbl.setText(f"PNG saved: {os.path.basename(out)} (2400px)")
+            n = self._save_png(out)
         except Exception as e:
             QMessageBox.warning(self, "PNG export", f"Failed: {e}")
+            return
+        if not n:
+            QMessageBox.warning(self, "PNG export", "No plot is shown - nothing saved.")
+            return
+        self._stats_lbl.setText(f"PNG saved: {os.path.basename(out)} ({n} plot(s), 2400px)")
+
+    def _save_png(self, out):
+        """Stack the plots currently on screen into one 2400 px PNG. Returns how many plots.
+        A fit result lives in the lane stack - the old code exported the hidden `_pw_top`
+        (a blank 2400x37 strip) and still reported "saved" (2026-10-02 audit R7)."""
+        import pyqtgraph.exporters as pgex
+        from PyQt6.QtGui import QImage, QPainter
+        if getattr(self, '_current_kind', None) == "fit":
+            plots = [pw for pw in self._lanes if not pw.isHidden()]
+        else:
+            plots = [pw for pw in (self._pw_top, self._pw_bot) if not pw.isHidden()]
+        imgs = []
+        for pw in plots:
+            ex = pgex.ImageExporter(pw.plotItem)
+            ex.parameters()['width'] = 2400
+            imgs.append(ex.export(toBytes=True))   # QImage
+        if not imgs:
+            return 0
+        wmax = max(im.width() for im in imgs)
+        htot = sum(im.height() for im in imgs)
+        combo = QImage(wmax, htot, QImage.Format.Format_ARGB32)
+        combo.fill(0xFFFFFFFF)
+        p = QPainter(combo)
+        y = 0
+        for im in imgs:
+            p.drawImage(0, y, im)
+            y += im.height()
+        p.end()
+        combo.save(out)
+        return len(imgs)
