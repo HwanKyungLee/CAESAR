@@ -28,15 +28,33 @@ class IngestCursor:
     def __init__(self, state_path: str):
         self.state_path = state_path
         self._data: dict = {}
+        # 디스크에 쓰지 않는 항목(시작 시 '오래된 백로그 → 파일 끝' 커서). 재시작하면 같은 규칙이
+        # 같은 값을 다시 만든다. 이걸 다 쓰던 때는 13.6만 파일 폴더에서 cursors.json 이 ~20 MB,
+        # 저장 한 번 1.26 s 가 GUI 스레드에서 5초마다 돌았다(2026-10-02 리뷰).
+        self._ephemeral: set = set()
         self._dirty = False
         self._load()
 
     def _load(self) -> None:
         try:
             with open(self.state_path, encoding="utf-8") as fh:
-                self._data = json.load(fh)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self._data = {}
+                data = json.load(fh)
+        except FileNotFoundError:
+            data = {}
+        except (OSError, ValueError) as e:            # 깨진 파일(JSONDecodeError ⊂ ValueError)
+            data = None
+            log.warning("cursors.json unreadable (%s) — moved aside, starting without cursors", e)
+        if data is not None and not (isinstance(data, dict) and all(
+                isinstance(v, dict) and isinstance(v.get("offset"), int) for v in data.values())):
+            log.warning("cursors.json has an unexpected shape — moved aside, starting without cursors")
+            data = None
+        if data is None:
+            try:                                       # 지우지 않고 옆으로 — 원인 조사용
+                os.replace(self.state_path, self.state_path + ".bad")
+            except OSError:
+                pass
+            data = {}
+        self._data = data
 
     def _save(self) -> None:
         """원자적 저장(임시파일 → os.replace) — 쓰는 도중 프로세스가 죽어도
@@ -45,8 +63,9 @@ class IngestCursor:
         os.makedirs(d, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=d, prefix=".cursors_", suffix=".tmp")
         try:
+            keep = {k: v for k, v in self._data.items() if k not in self._ephemeral}
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(self._data, fh, indent=2)
+                json.dump(keep, fh, separators=(",", ":"))   # indent 없이 — 순수 파이썬 인코더라 느리다
             os.replace(tmp, self.state_path)
         except Exception:
             try:
@@ -63,11 +82,17 @@ class IngestCursor:
     def has(self, path: str) -> bool:
         return os.path.abspath(path) in self._data
 
-    def set(self, path: str, offset: int, mtime: Optional[float] = None, save: bool = True) -> None:
+    def set(self, path: str, offset: int, mtime: Optional[float] = None, save: bool = True,
+            persist: bool = True) -> None:
         """오프셋 갱신 + 즉시 저장. mtime은 참고용(파일 교체 감지에 쓸 수 있음).
-        여러 파일을 한꺼번에 갱신할 땐 save=False 로 모은 뒤 save() 한 번."""
+        여러 파일을 한꺼번에 갱신할 땐 save=False 로 모은 뒤 save() 한 번.
+        persist=False = 메모리에만(디스크에 안 씀) — 재시작 때 같은 규칙으로 다시 만들 수 있는 값."""
         key = os.path.abspath(path)
         self._data[key] = {"offset": int(offset), "mtime": float(mtime or 0.0)}
+        if persist:
+            self._ephemeral.discard(key)
+        else:
+            self._ephemeral.add(key)
         self._dirty = True
         if save:
             self.save()
@@ -105,6 +130,13 @@ class IngestCursor:
             self.set(path, 0)
             return 0, size
         return off, size
+
+    def mark_ephemeral(self, path: str) -> None:
+        """이미 있는 항목을 '디스크에 안 씀'으로 — 옛 버전이 써 둔 백로그 항목을 줄일 때."""
+        key = os.path.abspath(path)
+        if key in self._data and key not in self._ephemeral:
+            self._ephemeral.add(key)
+            self._dirty = True
 
     def known_files(self) -> list:
         return list(self._data.keys())

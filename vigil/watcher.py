@@ -289,16 +289,25 @@ class Watcher:
         if self.backlog_age_sec is None:
             return
         cutoff = time.time() - self.backlog_age_sec
-        n = nbytes = 0
+        n = nbytes = n_shrunk = 0
         for path in paths:
-            if self.cursor.has(path) or path not in self._files:
+            if path not in self._files:
                 continue
             size, mtime = self._files[path]          # 나열 결과 — 파일마다 stat 하지 않는다
-            if mtime < cutoff:
-                self.cursor.set(path, size, mtime=mtime, save=False)
-                n += 1
-                nbytes += size
-        if n:
+            if mtime >= cutoff:
+                continue
+            if self.cursor.has(path):
+                # 다 읽은 오래된 파일 — 재시작해도 이 규칙이 같은 값(파일 끝)을 다시 만든다.
+                # 옛 버전이 써 둔 백로그 항목도 여기서 디스크에서 빠진다(cursors.json 축소).
+                if self.cursor.get(path) == size:
+                    self.cursor.mark_ephemeral(path)
+                    n_shrunk += 1
+                continue
+            # 디스크에는 안 쓴다 — 13.6만 파일 폴더에서 cursors.json 이 20 MB·저장 1.26 s 가 됐다
+            self.cursor.set(path, size, mtime=mtime, save=False, persist=False)
+            n += 1
+            nbytes += size
+        if n or n_shrunk:
             self.cursor.save()
         self.skipped_backlog = (n, nbytes)
 
