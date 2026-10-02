@@ -188,13 +188,18 @@ class ChannelConfigMixin:
             "stray_light": _val('spin_stray_light'),
             "temporal_i0": bool(getattr(self, 'chk_temporal_i0', None)
                                 and self.chk_temporal_i0.isChecked()),
-            "d_cm": _val('spin_d_len'),
-            "rl_factor": _val('spin_rl_factor'),
+            # d/RL are per-channel config values — the worker uses cfg['cavity_d'/'rl_factor'];
+            # reading the live spin put CH1's value into every channel's meta (UX audit 2026-10-02).
+            "d_cm": (cfg or {}).get('cavity_d', _val('spin_d_len')),
+            "rl_factor": (cfg or {}).get('rl_factor', _val('spin_rl_factor')),
         }
 
 
-    def _qc_state(self):
-        """`.meta.json`용 QC/후처리 상태. 재핏 없이 적용되는 값이라 **저장 시점**이 정본이다."""
+    def _qc_state(self, cfg=None):
+        """`.meta.json`용 QC/후처리 상태. 재핏 없이 적용되는 값이라 **저장 시점**이 정본이다.
+        Fit parameters kept in this block for runid stability (tikhonov/robust/etalon/kalman) are
+        NOT post-processing: with `cfg` (the channel config frozen at RUN) they come from there,
+        not from the live widgets — those may belong to another channel or be edited after RUN."""
         def _val(name, default=None):
             w = getattr(self, name, None)
             return w.value() if w is not None else default
@@ -211,11 +216,11 @@ class ChannelConfigMixin:
             "settling": _chk('chk_settle'),
             "settling_n": _val('spin_settle_n'),
             "ok_rms_pct": _val('spin_rms_thresh'),
-            "tikhonov": _val('spin_lambda', 0.0),
-            "robust": _chk('chk_robust'),
-            "etalon": _chk('chk_etalon'),
-            "kalman_q": _val('spin_kalman_q'),
-            "kalman_r": _val('spin_kalman_r'),
+            "tikhonov": (cfg or {}).get('tikhonov_lambda', _val('spin_lambda', 0.0)),
+            "robust": bool((cfg or {}).get('use_robust', _chk('chk_robust'))),
+            "etalon": bool((cfg or {}).get('use_etalon', _chk('chk_etalon'))),
+            "kalman_q": (cfg or {}).get('kalman_q', _val('spin_kalman_q')),
+            "kalman_r": (cfg or {}).get('kalman_r', _val('spin_kalman_r')),
         }
 
     def _apply_config(self, scenario, load_refs=True):

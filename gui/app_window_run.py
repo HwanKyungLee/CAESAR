@@ -680,7 +680,7 @@ class AnalysisRunMixin:
             from core.provenance import code_version as _cv
             meta = run_meta.build_meta(
                 cfg, channel=ch,
-                qc=self._qc_state(),
+                qc=self._qc_state(cfg),
                 # 채널별 동결값 우선. 옛 런(전역 dict 하나)도 읽히게 dict-of-channel 이
                 # 아니면 그대로 쓴다 — 없으면 지금 cfg 로 만든다.
                 calibration=(_frozen_cal.get(ch) if isinstance(_frozen_cal, dict)
