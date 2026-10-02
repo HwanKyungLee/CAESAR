@@ -194,6 +194,14 @@ def test_channel_without_rows_is_a_failure():
     assert h.popups[-1][0] == "warn"
 
 
+def test_table_cap_note_survives_completion():
+    """R3: the 5,000-row cap note was overwritten by 'Analysis Completed!'."""
+    h = _host([_row(i % 50) for i in range(12)], [1], fast=True, cap=5)
+    _finish_all(h)
+    assert "5 of 12 rows" in h.status.text() and "Completed" in h.status.text()
+    assert "5 of 12 rows" in h.popups[-1][2]
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):

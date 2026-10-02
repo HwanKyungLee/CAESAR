@@ -222,10 +222,11 @@ class ResultsQCMixin:
         if hasattr(self.monitor, 'rebuild_trend'):
             self.monitor.rebuild_trend(res)
         self.pbar.setValue(len(res))
-        if len(res) > n_show:
-            self.status.setText(
-                f"Fast complete: {len(res):,} scans fitted — table previews only {n_show:,} rows, "
-                f"see full results in the graph + autosave file (Result Viewer).")
+        # analysis_finished overwrites the status line right after this, so the note is
+        # kept and appended to the completion text + Done popup there.
+        self._table_cap_note = (
+            f"Table previews only {n_show:,} of {len(res):,} rows — full results are in "
+            f"the graph + autosave file (Result Viewer)." if len(res) > n_show else "")
 
     def _fast_finalize(self):
         """End of a Fast run: stop the feedback timer and render results once."""
@@ -300,6 +301,8 @@ class ResultsQCMixin:
         self._stop_requested = False
         failures = [] if was_stopped else self._run_failures()
         self._run_errors = []
+        cap_note = getattr(self, '_table_cap_note', "")
+        self._table_cap_note = ""
         if was_stopped:
             self.status.setText(f"Stopped — partial results ({len(self.results):,} rows)")
             self.status.setStyleSheet(f"color: {AUGUR.warn}; font-weight: bold;")
@@ -307,7 +310,8 @@ class ResultsQCMixin:
             self.status.setText(f"{ch_label}Analysis FAILED — " + "; ".join(failures))
             self.status.setStyleSheet(f"color: {AUGUR.fail}; font-weight: bold;")
         else:
-            self.status.setText(f"{ch_label}Analysis Completed!")
+            self.status.setText(f"{ch_label}Analysis Completed!"
+                                + (f"  {cap_note}" if cap_note else ""))
             self.status.setStyleSheet(f"color: {AUGUR.ok}; font-weight: bold;")
         # L3: 완료 시 자동 저장 (QC 적용 후, 정식 파일명 규칙)
         saved_msg = ""
@@ -320,15 +324,16 @@ class ResultsQCMixin:
                 saved_msg = f"\n Auto-save failed: {_e}"
 
         qc_msg = f"\nAuto QC excluded: {len(qc_changed)} rows (gas → NaN)" if qc_changed else ""
+        cap_msg = f"\n{cap_note}" if cap_note else ""
         if failures:
             QMessageBox.warning(
                 self, "Analysis failed",
                 f"{len(self.results):,} rows from {n_ch} channel(s) — not a complete run:\n  "
                 + "\n  ".join(failures)
-                + f"\n(see logs/session_*.log){qc_msg}{saved_msg}")
+                + f"\n(see logs/session_*.log){qc_msg}{cap_msg}{saved_msg}")
             return
         head = "Analyzed up to the stop point." if was_stopped else f"All files analyzed successfully ({n_ch} channel(s))."
-        QMessageBox.information(self, "Done", f"{head}{qc_msg}{saved_msg}")
+        QMessageBox.information(self, "Done", f"{head}{qc_msg}{cap_msg}{saved_msg}")
 
     def reapply_qc(self):
         """재핏 없이 라벨(Chi2) → Kalman Q/R → 자동 QC 순서로 후처리 재적용."""
