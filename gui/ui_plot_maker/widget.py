@@ -2782,11 +2782,12 @@ class PlotMakerWidget(QWidget):
         from core.paths import campaign_dir
         base = dlg_dir("figure") or dlg_dir("result") or "."
         d = os.path.join(campaign_dir(base, campaign_of(self)), "figures")
-        try:
-            os.makedirs(d, exist_ok=True)
-        except OSError:
-            return base
-        return d
+        # Never create folders just to open a dialog — that used to make `figures/` inside the
+        # last result (possibly production) tree even when the user cancelled (R9).
+        # Not there yet → start from the nearest existing parent.
+        while d and not os.path.isdir(d) and os.path.dirname(d) != d:
+            d = os.path.dirname(d)
+        return d if os.path.isdir(d) else base
 
     def _export_publish(self):
         """현재 모드를 matplotlib로 재렌더 → 고화질 PNG / 벡터 PDF·SVG."""
@@ -2801,6 +2802,7 @@ class PlotMakerWidget(QWidget):
         if not os.path.splitext(out)[1]:
             out += ".png"
         try:
+            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)   # only after the user confirmed
             fig = self._build_publish_fig()
             if fig is None:
                 return

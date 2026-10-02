@@ -107,6 +107,7 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     (전엔 axes[0] / axes[1:] 가정이라 Y-right가 둘째 패널에 걸렸다, R5, 2026-10-02)
 49. Theme 선 굵기 : 테마 굵기는 기본(직전 테마) 굵기 시리즈에만, 사용자 지정은 보존 (R6, 2026-10-02)
 50. 조판 빈 패널 : 데이터셋이 지워진 패널은 'missing: …' + Publish 경고 (R8, 2026-10-02)
+51. Publish 폴더 : 대화상자를 열거나 취소해도 결과 트리에 figures/를 만들지 않나 (R9, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2230,6 +2231,33 @@ def c_composer_missing_dataset():
     if not any("(b)" in m and "fx2" in m for m in w._publish_warnings):
         return "FAIL", f"Publish 경고에 패널·데이터셋 없음: {w._publish_warnings}"
     return "PASS", "지워진 데이터셋 패널 = 'missing: fx2' 표시 + '(b) missing dataset(s): fx2' 경고"
+
+
+# ── 51. Publish 대화상자는 폴더를 만들지 않는다 — 취소해도 흔적 없음 (R9, 2026-10-02) ──
+@check("Publish: 대화상자를 열기만/취소해도 결과 트리에 figures 폴더를 만들지 않음")
+def c_publish_no_makedirs_before_confirm():
+    import tempfile
+    import gui.dlg_dir as _dd
+    from PyQt6.QtWidgets import QFileDialog
+    w = _widget_with_fixture()
+    orig_dd, orig_dlg = _dd.dlg_dir, QFileDialog.getSaveFileName
+    seen = {}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            _dd.dlg_dir = lambda key, *a, **k: tmp if not a else None
+            def fake(parent, title, start, *a, **k):
+                seen["start"] = start
+                return "", ""
+            QFileDialog.getSaveFileName = staticmethod(fake)
+            w._export_publish()
+            made = [os.path.join(r, d) for r, ds, _ in os.walk(tmp) for d in ds]
+            if made:
+                return "FAIL", f"취소했는데 폴더 생성: {made}"
+            if not os.path.isdir(os.path.dirname(seen.get("start", ""))):
+                return "FAIL", f"대화상자 시작 폴더가 없는 폴더: {seen.get('start')}"
+    finally:
+        _dd.dlg_dir, QFileDialog.getSaveFileName = orig_dd, orig_dlg
+    return "PASS", "대화상자 시작 = 있는 가장 가까운 폴더 · 취소 시 생성 0"
 
 
 def main():
