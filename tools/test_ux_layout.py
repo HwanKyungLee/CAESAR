@@ -62,8 +62,11 @@ if __name__ == "__main__":
     _app = QApplication.instance()
     if _app is not None:
         for _w in _app.topLevelWidgets():
-            _w.close()
-            _w.deleteLater()
+            try:
+                _w.close()
+                _w.deleteLater()
+            except RuntimeError:     # already deleted on the C++ side
+                pass
         _app.processEvents()
     sys.stdout.flush()
     os._exit(0)
