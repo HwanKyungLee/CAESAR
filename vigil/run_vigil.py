@@ -707,11 +707,13 @@ def main(argv=None) -> int:
     qs = QSettings("CAESAR", "vigil")
     win = DashboardWindow(title="Vigil", tz=qs.value("tz", "KST", type=str))
     win.tz_changed.connect(lambda tz: qs.setValue("tz", tz))
+    # before VigilApp: its 'Watch folder' line would otherwise hide whether the last run wrote an exit line
+    StateLog(os.path.join(args.state_dir, "status.jsonl")).lifecycle(
+        "start", f"Vigil started (v{__version__}, autostart={bool(args.autostart and args.dir)})",
+        pid=os.getpid(), watch_dir=args.dir, autostart=bool(args.autostart and args.dir))
     core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win,
                     max_bytes_per_tick=int(args.max_mb_per_tick * 2**20),
                     backlog_age_sec=(args.backlog_age_min * 60 if args.backlog_age_min >= 0 else None))
-    core.state_log.lifecycle("start", f"Vigil started (v{__version__}, autostart={bool(args.autostart and args.dir)})",
-                             pid=os.getpid(), watch_dir=args.dir, autostart=bool(args.autostart and args.dir))
     _data_root = qs.value("data_root", "", type=str)
     if _data_root and os.path.isdir(_data_root):
         core.data_root = _data_root          # 시작 시엔 감시기가 아직 없으니 경로만
