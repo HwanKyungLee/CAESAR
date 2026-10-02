@@ -45,7 +45,7 @@ Sigma ANs combination (paired knots; I0 errors of the two channels correlate onl
 ### Realised error at the operational 1-h cadence (Sigma ANs, g' = 0.9524), decomposition
 - knot-noise part: per knot 0.044 ppb; propagated to a record through interpolation, sqrt(2/3) x 0.044 = 0.036 ppb.
 - drift part at a 2-h bracket: sqrt(0.0667^2 - 1.5 x 0.044^2) = 0.039 ppb; at 1 h it is smaller by an unknown factor.
-- reflectivity part: ~0.014 ppb (from the R held-out test, 0.8 % and 0.5 % of channel NO2, correlation 0.49).
+- reflectivity part: ~0.014 ppb. Derived from the Yeosu R held-out test at m = 2 (robust 1.20 % / 0.77 %): knot noise s = robust/sqrt(1.5) = 0.98 % / 0.63 %, propagated to a record at 1-h cadence as sqrt(2/3)*s = 0.80 % (300 C) / 0.51 % (180 C) of channel NO2 (2.03 / 1.63 ppb), combined with g' = 0.9524 and inter-channel correlation 0.49.
 => realised calibration-chain term ~0.036-0.055 ppb = 0.66-1.0 x the 60-s fit sigma of Sigma ANs (0.0546 ppb).
 The leave-one-out budget gave 0.070 ppb (1.28 sigma, robust): LOO overestimates by ~1.3-1.9.
 This term does not average down within an interval: an hourly mean keeps ~0.031-0.05 ppb while the fit error of the mean is ~0.007 ppb.
