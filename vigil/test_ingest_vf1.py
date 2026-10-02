@@ -6,6 +6,7 @@
   5) empty watch folder: the first file is seen on the next poll, not at the next full listing
   6) same file name in hot/ and cold/ is not a "collected twice" copy unless size and first line match
   7) a tick that fails mid-batch says how many rows went unmonitored
+  8) files no profile accepts (unknown column count) are reported P2 "not monitored"
 """
 import os
 import shutil
@@ -209,6 +210,31 @@ def test_dropped_rows_logged(d):
     check("recovery line carries the total", rec and rec[0].get("dropped_rows") == 7, rec[:1])
 
 
+def test_unknown_layout_reported(d):
+    print("[8] unknown-layout files -> P2 not monitored")
+    import json
+    from vigil.monitors.liveness_monitor import NO_ROWS_MIN_SEC
+    raw, st = os.path.join(d, "raw8"), os.path.join(d, "st8")
+    os.makedirs(raw)
+    _append(os.path.join(raw, "2026-06-01-001.dat"), ["	".join(["1"] * 100)] * 20)
+    hot = os.path.join(raw, "2026-06-20-001 Hot.dat")
+    _append(hot, [_row(13_000_000, ncols=6177)])          # header row: unrouted, but the file is fine
+    core = _app(raw, st)
+    core.tick()
+    core._waiting_since -= timedelta(seconds=NO_ROWS_MIN_SEC + 5)
+    core.tick()
+    p2 = [x for x in (json.loads(y) for y in open(os.path.join(st, "status.jsonl"), encoding="utf-8"))
+          if x["status"] == "P2" and x.get("kind") == "ingest"]
+    check("one P2 line naming the unknown-layout file and its column count",
+          len(p2) == 1 and "2026-06-01-001.dat" in p2[0]["msg"] and "100 columns" in p2[0]["msg"]
+          and "Hot" not in p2[0]["msg"], p2)
+    a = core._open_alarms.get("liveness")
+    check("liveness P0 says rows exist but are not monitored", a and "no profile monitors" in a["msg"], a)
+    _append(hot, [_row(13_000_001 + k) for k in range(3)])
+    core.tick()
+    check("routed rows: file never listed as unknown", hot not in core.watcher.unknown_layout)
+
+
 def main():
     from PyQt6.QtCore import QCoreApplication
     _app_qt = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])  # noqa: F841
@@ -220,6 +246,7 @@ def main():
         test_empty_folder_first_file(d)
         test_duplicate_names(d)
         test_dropped_rows_logged(d)
+        test_unknown_layout_reported(d)
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print(f"\nVF1 ingest tests: {_n_pass} PASS · {_n_fail} FAIL")

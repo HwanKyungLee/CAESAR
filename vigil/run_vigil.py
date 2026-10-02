@@ -56,6 +56,9 @@ ALARM_HISTORY_MAX = 500
 # liveness(전체 최신 행 기준)가 따로 잡으므로 여기서 빼도 숨겨지지 않는다.
 RETIRE_AFTER_SEC = 600.0
 CURSOR_SAVE_INTERVAL_SEC = 5.0
+# A file whose rows no profile accepts is reported once it has this many (its header row alone is
+# unrouted too, and the first data row may come a tick later).
+UNKNOWN_LAYOUT_MIN_ROWS = 3
 
 
 def _grace_sec_for(profiles: ProfileSet, routed_ids: set) -> float:
@@ -120,6 +123,7 @@ class VigilApp:
         self._tick_errors = 0
         self._backlog_logged = False
         self._date_excluded_logged: set = set()
+        self._unknown_logged: set = set()
         self._was_catching_up = False
         self._last_arrival = None
         self._waiting_since = datetime.now()   # liveness: no row since this -> P0 after a limit
@@ -313,6 +317,18 @@ class VigilApp:
                    f"layout) — add a profile for this layout")
             log.warning(msg)
             self.state_log.append(P2, msg, kind="ingest", file=path, profiles=ids)
+            if self.dashboard is not None:
+                self.dashboard.log_line(msg)
+        new = sorted(p for p, (n, _nc) in w.unknown_layout.items()
+                     if n >= UNKNOWN_LAYOUT_MIN_ROWS and p not in self._unknown_logged)
+        if new:
+            self._unknown_logged.update(new)
+            ncols = sorted({w.unknown_layout[p][1] for p in new})
+            names = ", ".join(os.path.basename(p) for p in new[:5]) + (" …" if len(new) > 5 else "")
+            msg = (f"NOT monitored: {len(new)} file(s) with an unknown layout "
+                   f"({', '.join(map(str, ncols))} columns — no profile matches): {names}")
+            log.warning(msg)
+            self.state_log.append(P2, msg, kind="ingest", files=new[:50], n_columns=ncols)
             if self.dashboard is not None:
                 self.dashboard.log_line(msg)
         if not self._backlog_logged:
@@ -524,6 +540,10 @@ class VigilApp:
         grace_sec = _grace_sec_for(self.profiles, self._routed_ids)
         live_status, live_msg, live_metrics = check_liveness(self._last_arrival, now, grace_sec,
                                                                    self._waiting_since, self.watch_dir)
+        if live_status == P0 and self._last_arrival is None:
+            n_unmon = len(self._unknown_logged) + len(self._date_excluded_logged)
+            if n_unmon:
+                live_msg += f" — {n_unmon} file(s) here have rows that no profile monitors (see the log)"
 
         # HK 는 매 행 판정이라 (퇴역 안 한) 파일별로, R·램프·농도는 교정 주기마다 한 번 나오는
         # 판정이라 **채널별 최신값**으로 모은다 — 파일 기준이면 rollover 직후 새 파일에 아직
