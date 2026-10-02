@@ -28,8 +28,10 @@
 2. Vigil 카드 묶음이 튜플 아닌 키(테스트의 int)에서 죽던 것 → "other" 묶음.
 3. 이 폴더의 measure/shoot 스크립트를 `main()` 으로 — 최상위 실행이 `ci_import_smoke` 를 segfault 시켰다.
 
-## 미해결
-- 사용자 검토 후 main 병합 여부 결정.
+4. FHD 에서 Setup Status 긴 줄(Fit range …)이 잘리던 것 — 왼쪽 열 최대폭이 첫 틱(문구가 아직 짧을 때)에
+   고정된다(`_cap_left_to_collapsed`). 그 측정 **뒤에** 상태 줄 줄바꿈을 켠다(먼저 켜면 열이 좁아진다).
+
+사용자 확인 후 2026-10-03 main 병합.
 
 ## 화면 찍는 법 (이 폴더의 스크립트, 실제 창을 화면 밖에 띄워 grab)
     PYTHONIOENCODING=utf-8 python shoot_augur.py 1920 1080 1 fhd          # 빈 상태
