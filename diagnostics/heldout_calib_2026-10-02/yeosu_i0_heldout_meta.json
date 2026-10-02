@@ -1,0 +1,14 @@
+{
+ "1": {
+  "sh_fix": -5.9627471653880635,
+  "n_shift_seeds": 23,
+  "za_knots": 157,
+  "R_overlap_frac": 1.0
+ },
+ "2": {
+  "sh_fix": -0.5626658552930416,
+  "n_shift_seeds": 23,
+  "za_knots": 157,
+  "R_overlap_frac": 1.0
+ }
+}

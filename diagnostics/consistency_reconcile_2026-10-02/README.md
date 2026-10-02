@@ -46,3 +46,7 @@ ch1/ch2 ratio drift of +4.6 % at 5-8.5 h from a knot points the same way). The L
    At 3-16 h intervals (Seosan) a realised slow error of ~4 % of NO2 (several sigma) is allowed and indicated.
 3. The manuscript's 'structural/sigma 1.28 (robust) / 2.28 (SD)' are LOO values; they overstate the realised term at Yeosu.
 Caveats: independence of error and atmosphere; 2-h high-pass excludes slower error components; one week at Yeosu; Seosan channel identity.
+
+
+## CORRECTION (later 2026-10-02)
+The statement that the realised Yeosu term is <= 0.6-0.7 of the 60-s fit sigma is withdrawn: the 2-h high-pass removes ~60 % of a knot-noise error, so the filtered bound does not bound the unfiltered error. The Seosan '~4 % of NO2 realised slow error' is also withdrawn (truth-based held-out test: 0.4-1.5 %). See heldout_calib_2026-10-02/README.md.

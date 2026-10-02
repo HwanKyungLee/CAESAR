@@ -57,3 +57,12 @@ Caveats: nominal T/P; no in-file cal blocks; LOO doubles the bracket and overest
 
 Files: stage1_bins_knots.py, stage2_loo.py (functions as run), seosan_loo_results.npz, results.json,
 loo_compare_yeosu_seosan.csv (all terms i0/rt/tri), seosan_loo_by_knot.csv, seosan_loo_budget.png.
+
+## Correction (2026-10-02, later the same day)
+The reflectivity step between knots 5 and 6 (doy 329.412 -> 329.543) coincides with a 3.4-h stop of data acquisition
+(last record of 2020-11-24-022 at doy 329.4146, next file -023 at 329.5389). The instrument was calibrated immediately before
+the stop and immediately after restart (pairs 021/022 and 023/024), so the step is most likely mirror cleaning or realignment
+during maintenance, bracketed by calibrations. No ambient record lies inside the step interval: the production retrieval is not
+affected. The large LOO responses of knots 5 and 6 (ch1 -1.4 ppb, ch2 +3.4 ppb) are therefore hypothetical (they remove a
+calibration that was actually made) and must not be reported as a realised event. Practical lesson only: interpolation should be
+broken at maintenance gaps, because PCHIP slopes at a knot use the neighbouring knots.
