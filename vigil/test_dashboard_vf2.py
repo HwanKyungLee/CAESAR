@@ -177,6 +177,28 @@ def test_hk_view():
     check("reset clears the field list", win.cb_hk.count() == 1 and win._hk_sel is None and not win._hk_lines)
 
 
+def test_realert():
+    print("[7] P0 re-alert")
+    from vigil.alert_engine import OK, P0
+    from vigil.dashboard import dashboard_window as dw
+    win = dw.DashboardWindow(title="t", tz="UTC")
+    clock = [1000.0]
+    alerts = []
+    real_mono, real_alert = dw.time.monotonic, dw.QApplication.alert
+    dw.time.monotonic = lambda: clock[0]
+    dw.QApplication.alert = staticmethod(lambda *a, **k: alerts.append(clock[0]))
+    try:
+        win.set_status(P0, "stopped")
+        clock[0] += 60; win.set_status(P0, "stopped")
+        check("one alert on entering P0", alerts == [1000.0], alerts)
+        clock[0] += dw.REALERT_SEC; win.set_status(P0, "stopped")
+        check("again after REALERT_SEC while P0 persists", len(alerts) == 2, alerts)
+        clock[0] += 10; win.set_status(OK, "ok"); win.set_status(P0, "stopped")
+        check("new P0 episode alerts at once", len(alerts) == 3, alerts)
+    finally:
+        dw.time.monotonic, dw.QApplication.alert = real_mono, real_alert
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -186,6 +208,7 @@ def main():
     test_record_one_file_per_day()
     test_trend_skip()
     test_hk_view()
+    test_realert()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 

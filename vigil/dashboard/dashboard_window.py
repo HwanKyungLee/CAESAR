@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -67,6 +68,9 @@ _ALARM_COLOR = VIGIL.p0
 # 시각 기준 — 표시만 바꾼다(저장·판정은 모두 실제 시각 epoch). pyqtgraph DateAxisItem 의 utcOffset 은
 # '표시 = 실제 − offset' 규칙이라 UTC+9 는 −32400.
 TZ_CHOICES = {"KST": 9.0, "UTC": 0.0}
+
+# While P0 persists, flash the taskbar again this often — one flash is lost if nobody was looking.
+REALERT_SEC = 300.0
 
 _HK_ALL_LABEL = "HK — % of warn band"
 
@@ -150,6 +154,7 @@ class DashboardWindow(QMainWindow):
         self.setWindowTitle(title)
         self.resize(1360, 860)
         self._last_status = None
+        self._p0_alert_t = 0.0            # monotonic time of the last taskbar alert
         self._curve_items: dict = {}      # 커브 캐시(키→PlotDataItem)
         self._threshold_items: dict = {}  # 임계선 캐시(키→[InfiniteLine,...])
         self._out_items: dict = {}        # 범위 밖 표시 ▲▼ (plot 키 → ScatterPlotItem)
@@ -440,8 +445,9 @@ class DashboardWindow(QMainWindow):
         self.badge.setText(f"{glyph}  {level}   {msg}")
         self.badge.setStyleSheet(_BADGE_STYLE.get(status, _BADGE_STYLE[SKIP]) + _BADGE_BASE)
         self.setWindowTitle(f"[{level}] {self._base_title}" if status in (P0, P1, P2) else self._base_title)
-        if status == P0 and self._last_status != P0:
+        if status == P0 and (self._last_status != P0 or time.monotonic() - self._p0_alert_t >= REALERT_SEC):
             QApplication.alert(self)      # 작업표시줄 깜빡임
+            self._p0_alert_t = time.monotonic()
         self._last_status = status
 
     def set_freshness(self, last_arrival, now, grace_sec) -> None:
