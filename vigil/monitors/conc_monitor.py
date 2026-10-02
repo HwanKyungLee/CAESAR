@@ -2,9 +2,9 @@
 
 `core/param_optimizer.fit_scan()`(단일 스캔 핏 → 지표, 이 세션의 옵티마이저 CLI들과
 같은 단일 출처)을 그대로 재사용한다. 이 모듈이 얹는 건 딱 세 가지:
-  1. **I0 관리** — ZA 윈도우가 완결될 때마다 평균을 갱신(r_monitor.py의 윈도우 완결
-     감지와 같은 패턴, 독립적으로 유지 — R과 농도가 서로 다른 ZA 창을 쓰고 싶을 수 있어
-     굳이 상태를 공유하지 않는다).
+  1. **I0 관리** — ZA 윈도우가 완결될 때마다 평균(과 그 블록의 T/P)을 갱신
+     (r_monitor.py의 윈도우 완결 감지와 같은 패턴). (1-R)/d 는 같은 채널
+     RMonitor.omr_d 를 호출부가 넘겨준다.
   2. **속도 우선 자유도 축소**(§1.1 "shift/squeeze 자유도를 줄이거나 고정") — 첫 핏은
      원본 FitSet ref_props(보통 Limit, 넓은 격자탐색 포함)로 정직하게 돌리고, 그 다음부턴
      타깃 shift를 직전 핏값 중심 Center 모드로 좁힌다. `_seed_shift`는 Limit/Free에서만
@@ -17,6 +17,14 @@
 레퍼런스·핏창·poly·ref_props는 여기서 새로 정의하지 않고 Augur FitSet json을 그대로
 읽는다(ConcentrationConfig.fitset_path) — 사용자가 Augur에서 이미 검증한 세팅과
 갈라지지 않는다.
+
+Alpha is the BBCEAS extinction alpha [cm^-1], not the optical density (fixed 2026-10-02,
+first written 2026-09-23 but never committed). The old `alpha = -log(I/I0)` fed OD ~ alpha*L_eff
+to fit_scan, which assumes cm^-1, so every concentration came out L_eff (~1e6 cm) too high and
+the monitor sat in P1 permanently (diagnostics/ux_audit_2026-10-02/vigil_v2_monitors.md §1).
+Now alpha comes from core.physics.bbceas_alpha (the same function as Augur's alpha generation)
+with (1-R)/d from RMonitor.omr_d. Without R there is no concentration (SKIP) -- never an OD
+fallback.
 """
 from __future__ import annotations
 
@@ -28,8 +36,9 @@ import warnings
 import numpy as np
 
 from core.doas_fit import DoasFitter
+from core.physics import RayleighPhysics, bbceas_alpha
 from core import param_optimizer as PO
-from vigil.alert_engine import OK, P0, P1, P2, worse
+from vigil.alert_engine import OK, P0, P1, P2, SKIP, worse
 from vigil.monitors.running_mean import RunningMean
 from tools import optimize_params as OP
 
@@ -52,7 +61,7 @@ class ConcMonitor:
 
         fit_ch = pick_fitset_channel(scen, cfg.wl_dir)
         cm = ConcMonitor(fit_ch, cfg)
-        result = cm.observe(role, spectrum, temp_c, press_mbar)  # 매 행 호출
+        result = cm.observe(role, spectrum, temp_c, press_mbar, omr_d=rm.omr_d, rl=rl)  # 매 행 호출
         if result is not None:
             status, msg, metrics = result   # 이번 행에서 새 핏이 돌았음(throttle 통과 + I0 있음)
     """
@@ -83,7 +92,9 @@ class ConcMonitor:
             self.gas_policy_provenance = "legacy FitSet fallback: Vigil profile"
 
         self._za_buf = RunningMean()   # I0 누적 평균 — 행을 쌓지 않는다(running_mean 참조)
+        self._za_t, self._za_p = RunningMean(), RunningMean()   # I0 block T/P (alpha_ZA Rayleigh term)
         self._i0: Optional[np.ndarray] = None
+        self._i0_tp: Optional[tuple] = None
         self._last_fit_time: Optional[datetime] = None
         self._last_shift: Optional[float] = None
         self._history: deque = deque(maxlen=HISTORY_WINDOW)
@@ -96,16 +107,25 @@ class ConcMonitor:
             rp[self.cfg.target]["sh_val"] = f"{self._last_shift},{self.cfg.seed_narrow_px}"
         return rp
 
-    def observe(self, role: Optional[str], spectrum, temp_c: float, press_mbar: float):
+    def observe(self, role: Optional[str], spectrum, temp_c: float, press_mbar: float,
+                omr_d=None, rl: float = 1.0):
         """새 행 한 개 관측. za_inject 구간 동안 I0 버퍼링, sampling 구간이면
         (throttle 통과 + I0 있을 때) 경량 핏을 돌려 (status, msg, metrics)를 반환.
-        핏이 안 돌면 None(호출부는 이전 상태를 유지하면 된다)."""
+        핏이 안 돌면 None(호출부는 이전 상태를 유지하면 된다).
+
+        omr_d : (1-R)/d [cm^-1] per pixel, normally the same channel's RMonitor.omr_d.
+                None (no ZA/He cycle completed yet) -> SKIP, no concentration.
+        rl    : purge length ratio; already in omr_d, applied to alpha_ZA only
+                (same convention as gui/worker.py)."""
         if role == "za_inject":
             self._za_buf.add(spectrum)
+            self._za_t.add(temp_c)
+            self._za_p.add(press_mbar)
             return None
         if self._za_buf:   # za 윈도우가 방금 끝남 — I0 갱신
             self._i0 = self._za_buf.mean()
-            self._za_buf = RunningMean()
+            self._i0_tp = (float(self._za_t.mean()), float(self._za_p.mean()))
+            self._za_buf, self._za_t, self._za_p = RunningMean(), RunningMean(), RunningMean()
 
         if role != "sampling" or self._i0 is None:
             return None
@@ -115,12 +135,38 @@ class ConcMonitor:
             return None
         self._last_fit_time = now
 
+        if omr_d is None:
+            # No R -> no alpha in cm^-1. A wrong number is worse than none (the old OD path
+            # was L_eff ~1e6 too high). He cycles are 3 h apart, so this is normal after start-up.
+            return SKIP, f"{self.cfg.target} waiting for R (needs one ZA/He calibration)", {}
+        omr_d = np.asarray(omr_d, dtype=float)
+        if omr_d.shape != self.wave.shape:
+            self._fail_streak += 1
+            return self._fail_status(
+                f"R wavelength axis mismatch (omr_d {omr_d.shape} vs fit axis {self.wave.shape})")
+        # RMonitor sets omr_d to NaN outside its ROI (extrapolated R can clip to 1 -> omr_d 0,
+        # which would fake 'no absorption'). A fit window outside the ROI is a profile error.
+        n_bad_r = int(np.count_nonzero(~np.isfinite(omr_d[self.px_min:self.px_max + 1])))
+        if n_bad_r:
+            self._fail_streak += 1
+            return self._fail_status(
+                f"{n_bad_r}/{self.px_max - self.px_min + 1} fit-window px outside the R ROI "
+                "(profile reflectance.roi_nm does not cover this channel's fit window)")
+
+        t_za, p_za = self._i0_tp
+        alpha_za = RayleighPhysics.get_alpha_rayleigh(self.wave, t_za, p_za, "zero_air")
+        alpha_sample = RayleighPhysics.get_alpha_rayleigh(self.wave, temp_c, press_mbar, "zero_air")
+        i_meas = np.asarray(spectrum, dtype=float)
+        # I <= 0 is unphysical (dead pixel / over-subtraction): NaN, not a clamp, so the
+        # finiteness check below drops the scan instead of fitting a fake value.
+        bad = (i_meas <= 0) | (self._i0 <= 0)
         with np.errstate(divide="ignore", invalid="ignore"):
-            alpha = -np.log(np.asarray(spectrum, dtype=float) / self._i0)
+            alpha = bbceas_alpha(i_meas, self._i0, omr_d, alpha_za, alpha_sample, rl)
+        alpha = np.where(bad, np.nan, alpha)
         window = alpha[self.px_min:self.px_max + 1]
         if not np.all(np.isfinite(window)):
             self._fail_streak += 1
-            return self._fail_status("alpha computation failed (zero/negative intensity in window)")
+            return self._fail_status("alpha computation failed (zero/negative intensity or T/P missing)")
 
         try:
             result = PO.fit_scan(self.eng, self.fitter, self._seeded_ref_props(), self.wave,
