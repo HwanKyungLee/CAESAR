@@ -284,7 +284,7 @@ class ResultViewerWidget(QWidget):
         self._pw_top = pg.PlotWidget()
         self._pw_bot = pg.PlotWidget()
         for pw in (self._pw_top, self._pw_bot):
-            pw.setBackground('w')
+            pw.setBackground(AUGUR.surface)
             pw.showGrid(x=True, y=True, alpha=0.3)
             pw.addLegend(offset=(10, 10))
         psplit.addWidget(self._pw_top)
@@ -305,7 +305,7 @@ class ResultViewerWidget(QWidget):
         # 클릭한 스캔의 상세(아래 패널) — 시계열을 가리지 않고 같은 화면에 뜬다.
         # 예전엔 팝업이라 창을 옮겨가며 봐야 했다.
         self._pw_detail = pg.PlotWidget()
-        self._pw_detail.setBackground('w')
+        self._pw_detail.setBackground(AUGUR.surface)
         self._pw_detail.showGrid(x=True, y=True, alpha=0.3)
         self._pw_detail.addLegend(offset=(10, 10))
         self._pw_detail.setLabel("bottom", "Wavelength (nm) / pixel")
@@ -316,7 +316,7 @@ class ResultViewerWidget(QWidget):
         # α와 스케일이 100배쯤 다르므로 같은 축에 겹치면 잔차가 직선으로 보인다 → 별도 축,
         # x만 링크해서 같은 파장 구간을 본다.
         self._pw_resid = pg.PlotWidget()
-        self._pw_resid.setBackground('w')
+        self._pw_resid.setBackground(AUGUR.surface)
         self._pw_resid.showGrid(x=True, y=True, alpha=0.3)
         self._pw_resid.addLegend(offset=(10, 10))
         self._pw_resid.setLabel("left", "residual (cm^-1)")
@@ -843,7 +843,7 @@ class ResultViewerWidget(QWidget):
         X축은 첫 레인에 링크해 시간축을 공유한다."""
         while len(self._lanes) <= i:
             pw = pg.PlotWidget()
-            pw.setBackground('w')
+            pw.setBackground(AUGUR.surface)
             pw.showGrid(x=True, y=True, alpha=0.3)
             pw.addLegend(offset=(10, 6))
             self._stack_lay.addWidget(pw)

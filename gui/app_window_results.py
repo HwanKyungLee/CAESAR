@@ -266,6 +266,9 @@ class ResultsQCMixin:
     def analysis_finished(self, stopped=False):
         """Re-enables UI once ALL channel workers have finished."""
         self._analysis_running = False
+        if hasattr(self, '_refresh_step_marks'):          # header step 4 → "N results"
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._refresh_step_marks)
         if stopped:
             # Stop requested — re-enable immediately regardless of pending workers
             self._fast_finalize()

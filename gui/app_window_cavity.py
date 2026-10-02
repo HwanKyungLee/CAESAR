@@ -122,7 +122,10 @@ class CavityTabMixin:
         _vig_icon.setPixmap(QPixmap(_png).scaled(_h, _h, Qt.AspectRatioMode.KeepAspectRatio,
                                                  Qt.TransformationMode.SmoothTransformation))
         _vig_hdr.addWidget(_vig_icon)
-        _vig_hdr.addWidget(QLabel("Vigil"))
+        _vig_lbl = QLabel("Vigil")
+        from gui.theme import heading_font as _hf
+        _vig_lbl.setFont(_hf(11))
+        _vig_hdr.addWidget(_vig_lbl)
         _vig_hdr.addStretch(1)
         control_layout.addLayout(_vig_hdr)
         grp_vigil = QGroupBox()
@@ -454,6 +457,11 @@ class CavityTabMixin:
                 self._setup_left_max_w = w
                 if self._setup_main_layout.direction() == self._setup_main_layout.Direction.LeftToRight:
                     _left_container.setMaximumWidth(w)
+            # the Setup Status texts are still short now; the longer ones that come later wrap inside
+            # this width instead of clipping (wrapping before the measure would narrow the column)
+            for lbl in (self.lbl_st_wl, self.lbl_st_i0, self.lbl_st_r,
+                        self.lbl_st_refs, self.lbl_st_range, self.lbl_st_audit):
+                lbl.setWordWrap(True)
         _QTimer.singleShot(0, _cap_left_to_collapsed)
 
         # --- Right Panel: Diagnostic Viewer ---

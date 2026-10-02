@@ -173,10 +173,39 @@ def _set_scheme(app, dark: bool) -> None:
         pass
 
 
+SERIF = ("Spectral", "Georgia", "Malgun Gothic")          # headings — the splash's scholar voice
+SANS = ("IBM Plex Sans", "Segoe UI", "Malgun Gothic")      # UI text (Plex has no Hangul → Malgun)
+CHECK = "✔"   # U+2714: Plex has no glyph → falls back to Segoe UI Symbol; Plex's own ✓ reads as "√"
+
+
+def _families(cands) -> str:
+    """QSS font-family list of the candidates that exist (registered brand fonts first)."""
+    from PyQt6.QtGui import QFontDatabase
+    have = set(QFontDatabase.families())
+    got = [c for c in cands if c in have] or [cands[-1]]
+    return ", ".join(f'"{c}"' for c in got)
+
+
+def heading_font(point_size=12.0, bold=True):
+    """QFont for titles drawn outside the stylesheet (header band, section labels)."""
+    from PyQt6.QtGui import QFont
+    f = QFont()
+    f.setFamilies([c for c in SERIF])
+    f.setPointSizeF(point_size)
+    f.setBold(bold)
+    return f
+
+
 def apply_augur(app) -> None:
-    """Augur: 종이·잉크. QApplication 직후, 창을 만들기 전에 부른다."""
+    """Augur: 종이·잉크. QApplication 직후, 창을 만들기 전에 부른다.
+    2026-10-03 identity pass: the splash's typography and colours carried into the app — Spectral
+    headings, IBM Plex text and numbers, ink primary action, vermilion for "done", plots on paper."""
     t = AUGUR
-    register_fonts()
+    fams = register_fonts()
+    if "IBM Plex Sans" in fams:
+        f = app.font()
+        f.setFamilies(list(SANS))
+        app.setFont(f)
     app.setStyle("Fusion")
     _set_scheme(app, dark=False)
     app.setPalette(_palette(
@@ -186,31 +215,51 @@ def apply_augur(app) -> None:
         tooltip_base=t.paper, tooltip_text=t.ink, placeholder=t.faint))
     app.setStyleSheet(_augur_qss(t))
     keep_windows_on_screen(app)
+    try:
+        import pyqtgraph as pg
+        pg.setConfigOption("background", t.surface)   # plots on the page, not pasted-in white boxes
+        pg.setConfigOption("foreground", t.sub)
+    except ImportError:
+        pass
 
 
 def _augur_qss(t) -> str:
-    """App-wide widget styling (2026-10-03): sections as cards, one button language.
-    Roles are a dynamic property — `set_role(button, "primary" | "danger")` — so a window marks
-    *what a button does*, not its colours. Per-widget setStyleSheet still wins where it is set."""
+    """App-wide widget styling. Roles are a dynamic property — `set_role(button, "primary" |
+    "danger")` — so a window marks *what a button does*, not its colours. Per-widget setStyleSheet
+    still wins where it is set."""
+    serif, sans = _families(SERIF), _families(SANS)
+    # The group-box title takes the box's own font (::title cannot set one), so the box gets the
+    # heading face and everything inside it is set back to the text face.
     return f"""
 QGroupBox {{ background: {t.surface}; border: 1px solid {t.rule}; border-radius: 6px;
-             margin-top: 1.1em; padding: 6px 6px 6px 6px; }}
-QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; color: {t.ink};
-                    font-weight: bold; }}
+             margin-top: 1.35em; padding: 8px 6px 6px 6px;
+             font-family: {serif}; font-size: 11pt; font-weight: bold; }}
+QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {t.ink}; }}
+QGroupBox * {{ font-family: {sans}; font-size: 9pt; font-weight: normal; }}
 QPushButton {{ background: {t.button}; border: 1px solid #CFC9BB; border-radius: 4px;
                padding: 3px 6px; min-height: 1.5em; }}
 QPushButton:hover {{ background: #E1DCCF; }}
 QPushButton:pressed {{ background: #D6D0C1; }}
 QPushButton:disabled {{ color: {t.faint}; background: #EEEBE3; border-color: #E2DDD2; }}
 QPushButton:flat {{ background: transparent; border: none; }}
-QPushButton[role="primary"] {{ background: {t.select}; color: #FFFFFF; border-color: #2F519A;
-                              font-weight: bold; }}
-QPushButton[role="primary"]:hover {{ background: #33579F; }}
-QPushButton[role="primary"]:disabled {{ background: #B9C6E2; color: #F4F6FA; border-color: #B9C6E2; }}
+QPushButton[role="primary"] {{ background: {t.ink}; color: {t.paper}; border-color: {t.ink};
+                              font-weight: bold; letter-spacing: 1px; }}
+QPushButton[role="primary"]:hover {{ background: #2C313C; }}
+QPushButton[role="primary"]:disabled {{ background: #B9B5AC; color: {t.paper}; border-color: #B9B5AC; }}
 QPushButton[role="danger"] {{ color: {t.fail}; border-color: #E2B4B0; font-weight: bold; }}
 QPushButton[role="danger"]:disabled {{ color: {t.faint}; border-color: #E2DDD2; font-weight: normal; }}
-QTabBar::tab:selected {{ font-weight: bold; }}
+QTabWidget::pane {{ border: 1px solid {t.rule}; border-radius: 4px; top: -1px; background: {t.paper}; }}
+QTabBar::tab {{ background: transparent; color: {t.sub}; padding: 6px 14px; margin-right: 2px;
+                border: none; border-bottom: 2px solid transparent; }}
+QTabBar::tab:hover {{ color: {t.ink}; border-bottom: 2px solid {t.rule}; }}
+QTabBar::tab:selected {{ color: {t.ink}; font-weight: bold; border-bottom: 2px solid {t.brand}; }}
 QToolTip {{ background: {t.paper}; color: {t.ink}; border: 1px solid {t.rule}; padding: 4px; }}
+QHeaderView::section {{ background: {t.neutral_bg}; color: {t.sub}; border: none;
+                        border-right: 1px solid {t.rule}; border-bottom: 1px solid {t.rule}; padding: 3px 6px; }}
+QProgressBar {{ border: 1px solid {t.rule}; border-radius: 4px; background: {t.surface}; text-align: center;
+                color: {t.ink};
+                height: 14px; }}
+QProgressBar::chunk {{ background: #CFC6B3; border-radius: 3px; }}
 """
 
 
@@ -270,7 +319,7 @@ def apply_vigil(app) -> None:
     try:
         import pyqtgraph as pg
         pg.setConfigOption("background", t.surface)
-        pg.setConfigOption("foreground", t.sub)
+        pg.setConfigOption("foreground", t.log)   # axis text readable at a glance (was t.sub)
         pg.setConfigOption("antialias", True)
     except ImportError:
         pass
