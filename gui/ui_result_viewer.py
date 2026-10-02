@@ -535,12 +535,24 @@ class ResultViewerWidget(QWidget):
         self._current_kind = kind
         self._pw_top.clear()
         self._pw_bot.clear()
+        # New file (or type): drop what belonged to the previous one — stats line, plot titles,
+        # scan detail/residual (2026-10-02 audit R14). Same file redrawn (shift) keeps them.
+        if getattr(self, "_shown", None) != (self._path, kind):
+            self._shown = (self._path, kind)
+            self._stats_lbl.setText("")
+            self._pw_top.setTitle(None)
+            self._pw_bot.setTitle(None)
+            self._pw_detail.clear()
+            self._pw_detail.setTitle("Scan detail — click a point above")
+            self._pw_resid.clear()
+            self._pw_resid.setTitle("Residual - click a point above")
         # B2 스택은 fit 전용 — 다른 종류는 예전 2단 플롯으로 되돌린다.
         if kind == "fit":
             self._pw_top.hide(); self._pw_bot.hide()
         else:
             self._stack_host.hide()
             self._pw_detail.hide()
+            self._pw_resid.hide()
             for pw in self._lanes:
                 pw.hide()
             self._pw_top.show(); self._pw_bot.show()
@@ -556,13 +568,21 @@ class ResultViewerWidget(QWidget):
             }.get(kind, self._plot_array)
             handler(self._path)
             auto = "" if forced != "auto" else " (auto-detected)"
-            shift_tag = (f"time shift {self._time_shift_hours:+g}h (display only)"
+            shift_tag = (f"  ·  time shift {self._time_shift_hours:+g}h (display only)"
                         if self._time_shift_hours else "")
             self._lbl.setText(f"{os.path.basename(self._path)}  —  {_KIND_KO.get(kind, kind)}{auto}{shift_tag}")
             self._lbl.setStyleSheet(f"color:{AUGUR.fail};" if self._time_shift_hours else f"color:{AUGUR.info};")
         except Exception as e:
             self._lbl.setText(f"Failed to display: {e}  (try selecting Type manually)")
             self._lbl.setStyleSheet(f"color:{AUGUR.fail};")
+            if kind == "fit":            # don't leave the previous file's lanes on screen
+                self._fit_cache = None
+                self._stack_host.hide(); self._pw_detail.hide(); self._pw_resid.hide()
+        # Range fields drive fit Export/Stats only — grey them out when they mean nothing here
+        has_t = (kind == "fit" and bool(self._fit_cache)
+                 and self._fit_cache.get("time") is not None)
+        for de in (self._dt_from, self._dt_to):
+            de.setEnabled(has_t)
         # 버전 목록은 핏 결과에만 의미가 있다(R 커브·α엔 meta가 없다).
         # 표시가 실패해도 목록은 갱신한다 — 어느 버전이 열려 있는지가 그때 더 궁금하다.
         try:
@@ -969,6 +989,7 @@ class ResultViewerWidget(QWidget):
         self._pw_bot.hide()
         self._stack_host.show()
         self._pw_detail.show()
+        self._pw_resid.show()
 
         n_flag = {f: flags.count(f) for f in set(flags) if f != "ok"}
         flag_tag = ("  ·  " + " ".join(f"{k}:{v}" for k, v in sorted(n_flag.items()))

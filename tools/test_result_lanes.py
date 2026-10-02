@@ -428,6 +428,32 @@ def test_shifted_concentration_relabels_time(w):
     assert list(ResultViewerWidget._shifted_concentration_df(q, 0).columns) == ["time_KST", "NO2"]
 
 
+def test_file_switch_resets_state(w):
+    """2026-10-02 R14: after switching file the stats line, plot titles, range fields and the
+    scan-detail panel still showed the previous file."""
+    d = tempfile.mkdtemp()
+    _write_alpha(d, _STEM)
+    w._path = _write_fit(d)
+    w._reload()
+    w._show_scan_detail(1)
+    assert w._stats_lbl.text() and w._dt_from.isEnabled()
+    w._path = _write_conc_csv(d)
+    w._reload()
+    assert w._stats_lbl.text() == "", w._stats_lbl.text()
+    assert w._pw_detail.plotItem.titleLabel.text.startswith("Scan detail"), "stale detail"
+    assert not w._pw_detail.plotItem.listDataItems()
+    assert not w._dt_from.isEnabled(), "range fields look live for a CSV"
+    assert w._pw_resid.isHidden()
+    # a fit that fails to load must not leave the previous fit's lanes on screen
+    w._path = _write_fit(d)
+    w._reload()
+    bad = os.path.join(d, "bad_fit.tsv")
+    open(bad, "w", encoding="utf-8").write("nothing here\n")
+    w._path = bad
+    w._reload()
+    assert "Failed" in w._lbl.text() and w._stack_host.isHidden(), w._lbl.text()
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -445,7 +471,8 @@ def main() -> int:
                      (test_bom_csv_opens, (w,)),
                      (test_export_qc_matches_screen, (w,)),
                      (test_outputs_carry_provenance, (w,)),
-                     (test_shifted_concentration_relabels_time, (w,))):
+                     (test_shifted_concentration_relabels_time, (w,)),
+                     (test_file_switch_resets_state, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")
