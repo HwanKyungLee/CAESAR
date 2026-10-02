@@ -106,6 +106,7 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 48. Split 축 범위 : Y-left 범위·log는 좌축 시리즈 패널 전부, Y-right는 우축 시리즈 패널에만
     (전엔 axes[0] / axes[1:] 가정이라 Y-right가 둘째 패널에 걸렸다, R5, 2026-10-02)
 49. Theme 선 굵기 : 테마 굵기는 기본(직전 테마) 굵기 시리즈에만, 사용자 지정은 보존 (R6, 2026-10-02)
+50. 조판 빈 패널 : 데이터셋이 지워진 패널은 'missing: …' + Publish 경고 (R8, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2071,8 +2072,8 @@ def c_annot_time_parse():
         return "FAIL", "깨진 주석 하나로 Publish 실패"
     import io
     fig.savefig(io.BytesIO(), format="png")
-    if len(w._annot_skipped) != 1 or "bad" not in w._annot_skipped[0]:
-        return "FAIL", f"건너뛴 주석 지목 안 됨: {w._annot_skipped}"
+    if len(w._publish_warnings) != 1 or "bad" not in w._publish_warnings[0]:
+        return "FAIL", f"건너뛴 주석 지목 안 됨: {w._publish_warnings}"
     texts = {t.get_text().strip() for a in fig.axes for t in a.texts}
     if "good" not in texts:
         return "FAIL", f"정상 주석까지 사라짐: {texts}"
@@ -2202,6 +2203,33 @@ def c_theme_keeps_user_width():
     if (a, b) != (3, 5):
         return "FAIL", f"PPT 뒤 (기본, 사용자) 굵기 = {(a, b)} (3, 5 기대)"
     return "PASS", "테마 굵기는 기본 시리즈에만 · 사용자 5 보존"
+
+
+# ── 50. 조판: 데이터셋이 사라진 패널은 'missing: …' + 경고 (R8, 2026-10-02) ──────
+@check("Composer: 데이터셋이 지워진 패널은 빈 축 대신 'missing: …' + Publish 경고")
+def c_composer_missing_dataset():
+    w = _widget_with_fixture()
+    ds2 = _fixture_dataset("fx2", seed=5)
+    w.shelf["fx2"] = ds2; w._refresh_tree(); w._notify_modes()
+    keys = [m.key for m in w._modes]
+    ts = w._modes[keys.index("timeseries")]
+    ts.options_widget(); ts._series.append(["fixture:NO2", "L", None, None]); ts._refresh_list()
+    w._mode_combo.setCurrentIndex(keys.index("timeseries"))
+    comp = w.composer
+    comp.add_current()                                            # (a) fixture
+    ts._series[:] = [["fx2:NO2", "L", None, None]]; ts._refresh_list()
+    comp.add_current()                                            # (b) fx2
+    fig = w._build_publish_fig()
+    if w._publish_warnings:
+        return "FAIL", f"재료가 다 있는데 경고: {w._publish_warnings}"
+    w.shelf.pop("fx2"); w._refresh_tree(); w._notify_modes()
+    fig = w._build_publish_fig()
+    texts = [t.get_text() for a in fig.axes for t in a.texts]
+    if "missing: fx2" not in texts:
+        return "FAIL", f"빈 패널에 missing 표시 없음: {texts}"
+    if not any("(b)" in m and "fx2" in m for m in w._publish_warnings):
+        return "FAIL", f"Publish 경고에 패널·데이터셋 없음: {w._publish_warnings}"
+    return "PASS", "지워진 데이터셋 패널 = 'missing: fx2' 표시 + '(b) missing dataset(s): fx2' 경고"
 
 
 def main():

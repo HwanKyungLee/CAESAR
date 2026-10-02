@@ -1814,9 +1814,10 @@ class PlotMakerWidget(QWidget):
                            for v in (x1, x2) if v is not None):
                         raise ValueError
                 except (OSError, OverflowError, ValueError):
-                    skipped = getattr(self, "_annot_skipped", None)
-                    if skipped is not None:
-                        skipped.append(f"{kind} '{lbl or ''}' (x={x1})")
+                    warns = getattr(self, "_publish_warnings", None)
+                    if warns is not None:
+                        warns.append(f"annotation {kind} '{lbl or ''}' (x={x1}) skipped — "
+                                     "invalid time, fix or remove it in Annotate…")
                     continue
             for ai, a in enumerate(axes):
                 show_label = (ai == 0) and lbl   # 라벨은 첫 패널에만(중복 방지)
@@ -2708,7 +2709,7 @@ class PlotMakerWidget(QWidget):
             QMessageBox.warning(self, "Publish", f"matplotlib unavailable: {e}")
             return None
         self._apply_mpl_rc(matplotlib)
-        self._annot_skipped = []          # filled by _apply_axes_mpl (annotations it could not draw)
+        self._publish_warnings = []       # what could not be drawn (bad annotation, missing dataset)
         fig = Figure(figsize=(self._fig_w.value(), self._fig_h.value()))
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
         notes = []
@@ -2738,9 +2739,8 @@ class PlotMakerWidget(QWidget):
             fig.tight_layout()
         return fig
 
-    def _annot_skipped_msg(self):
-        return (f"⚠ {len(self._annot_skipped)} annotation(s) skipped — invalid time: "
-                + "; ".join(self._annot_skipped) + " (fix or remove in Annotate…)")
+    def _publish_warn_msg(self):
+        return "⚠ " + "; ".join(self._publish_warnings)
 
     def render_preview_png(self, dpi=110):
         """Publish와 **같은 함수**(`_build_publish_fig`)로 그린 PNG 바이트 — 미리보기 = 저장 파일.
@@ -2751,8 +2751,8 @@ class PlotMakerWidget(QWidget):
         import io
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")  # 화면용 해상도
-        if self._annot_skipped:
-            self.set_status(self._annot_skipped_msg())
+        if self._publish_warnings:
+            self.set_status(self._publish_warn_msg())
         mixed = self._mixed_hangul_mathtext()
         if mixed:
             self.set_status(f"⚠ {len(mixed)} label(s) mix Korean text and math — the Korean renders as □"
@@ -2808,8 +2808,8 @@ class PlotMakerWidget(QWidget):
             ext = os.path.splitext(out)[1].lstrip(".").upper()
             extra = f" @ {self._dpi_spin.value()}dpi" if ext == "PNG" else " (vector)"
             msg = f"Published: {os.path.basename(out)} [{ext}{extra}]"
-            if self._annot_skipped:
-                msg += "  " + self._annot_skipped_msg()
+            if self._publish_warnings:
+                msg += "  " + self._publish_warn_msg()
             mixed = self._mixed_hangul_mathtext()
             if mixed:
                 msg += (f"  ⚠ {len(mixed)} label(s) mixing Korean text and math will render the Korean as □"
