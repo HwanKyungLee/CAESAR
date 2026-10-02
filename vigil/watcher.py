@@ -102,6 +102,15 @@ def _parse_row(line: str) -> Optional[list]:
         return None
 
 
+def _first_line(path: str) -> Optional[bytes]:
+    """First line (up to 64 KB) — read-only; None if unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.readline(65536)
+    except OSError:
+        return None
+
+
 class Watcher:
     """raw 폴더를 폴링해 새 행을 RowEvent로 낸다. 파일당 커서는 IngestCursor에 위임.
 
@@ -397,20 +406,40 @@ class Watcher:
         **지우거나 건너뛰지 않는다**(무결성 헌장: 지우지 말고 flag). 어느 쪽이
         진짜인지는 코드가 알 수 없고, 과필터링이 부족한 필터링보다 위험하다.
         운용자가 사본 폴더를 치우거나 watch_dir 을 좁히면 경고가 사라진다.
-        폴링이 1초 주기라 **경고한 파일명은 기억해 두고 다시 찍지 않는다.**"""
+        폴링이 1초 주기라 **경고한 파일명은 기억해 두고 다시 찍지 않는다.**
+
+        A copy = same name, same size and same first line. Hot/ and cold/ trees name their hourly files
+        alike (2026-06-01-001.dat in both) — that is the normal setup, not a copy (audit 2026-10-02:
+        false warning). Sizes are compared first; only equal non-empty sizes open the files."""
         seen: dict = {}
         for p in paths:
             seen.setdefault(os.path.basename(p), []).append(p)
         shown = hidden = 0
         for name, group in seen.items():
-            if len(group) > 1 and name not in self._warned_dupes:
-                self._warned_dupes.add(name)
-                if shown < 20:                        # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
-                    shown += 1
-                    log.warning("same file name in %d places — the same scan is collected twice: %s | %s",
-                                len(group), name, " | ".join(group))
-                else:
-                    hidden += 1
+            if len(group) < 2 or name in self._warned_dupes:
+                continue
+            by_key: dict = {}
+            for p in group:
+                size = self._files[p][0]
+                if size:                              # two fresh empty files (rollover) are not copies
+                    by_key.setdefault(size, []).append(p)
+            copies = []
+            for same in by_key.values():
+                if len(same) > 1:
+                    heads: dict = {}
+                    for p in same:
+                        heads.setdefault(_first_line(p), []).append(p)
+                    copies += [g for k, g in heads.items() if k is not None and len(g) > 1]
+            if not copies:
+                continue
+            self._warned_dupes.add(name)
+            if shown < 20:                            # 산출물 폴더가 섞이면 수천 건 — 로그를 덮지 않게
+                shown += 1
+                group = [p for g in copies for p in g]
+                log.warning("same file name in %d places — the same scan is collected twice: %s | %s",
+                            len(group), name, " | ".join(group))
+            else:
+                hidden += 1
         if hidden:
             log.warning("%d more duplicate file names (omitted) — narrow the watch folder to the raw folder", hidden)
 

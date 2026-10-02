@@ -4,6 +4,7 @@
   2) "no rows seen yet" is SKIP only for a while after start / folder change / Start, then P0
   3) aggregate never says "normal — all OK" while sources were not evaluated
   5) empty watch folder: the first file is seen on the next poll, not at the next full listing
+  6) same file name in hot/ and cold/ is not a "collected twice" copy unless size and first line match
 """
 import os
 import shutil
@@ -145,6 +146,38 @@ def test_empty_folder_first_file(d):
           len(ev) == 2 and all(e.profile_id for e in ev), len(ev))
 
 
+def test_duplicate_names(d):
+    print("[6] duplicate-name warning only for real copies")
+    import logging
+    from vigil.ingest_cursor import IngestCursor
+    from vigil.profile import ProfileSet
+    from vigil.watcher import Watcher
+    raw = os.path.join(d, "raw6")
+    for sub in ("hot", "cold", "copy"):
+        os.makedirs(os.path.join(raw, sub))
+    _append(os.path.join(raw, "hot", "2026-06-01-001.dat"), ["1	2	3"] * 5)
+    _append(os.path.join(raw, "cold", "2026-06-01-001.dat"), ["4	5	6	7"] * 5)   # other size
+    _append(os.path.join(raw, "hot", "2026-06-01-002.dat"), ["1	2	3"] * 5)
+    _append(os.path.join(raw, "cold", "2026-06-01-002.dat"), ["1	2	9"] * 5)      # same size, other line
+    for sub in ("hot", "cold"):                                                      # fresh rollover files
+        open(os.path.join(raw, sub, "2026-06-01-003.dat"), "w").close()
+    _append(os.path.join(raw, "copy", "2026-06-01-001.dat"), ["1	2	3"] * 5)      # a real copy of hot/001
+    msgs = []
+
+    class _H(logging.Handler):
+        def emit(self, r):
+            msgs.append(r.getMessage())
+    h = _H()
+    logging.getLogger("vigil").addHandler(h)
+    try:
+        Watcher(raw, ProfileSet.load_default(), IngestCursor(os.path.join(d, "c6.json"))).poll()
+    finally:
+        logging.getLogger("vigil").removeHandler(h)
+    dup = [m for m in msgs if "same file name" in m]
+    check("one warning, for the real copy only", len(dup) == 1 and "2026-06-01-001.dat" in dup[0]
+          and "cold" not in dup[0], dup)
+
+
 def main():
     from PyQt6.QtCore import QCoreApplication
     _app_qt = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])  # noqa: F841
@@ -154,6 +187,7 @@ def main():
         test_no_rows_escalates(d)
         test_aggregate_not_evaluated()
         test_empty_folder_first_file(d)
+        test_duplicate_names(d)
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print(f"\nVF1 ingest tests: {_n_pass} PASS · {_n_fail} FAIL")
