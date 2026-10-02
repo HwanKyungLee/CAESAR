@@ -71,3 +71,6 @@ worker.py는 W1(AlphaExportWorker, ~2000행 이후)과 W5(AnalysisWorker, ~1–1
 - P2(단일 채널 런 중 엔진 바꿔치기)는 F9 입력 잠금(채널 탭·fitset Load·Lock 비활성)으로 경로가 막혀 별도 수정 불필요.
 - 남은 것: W3(진행 중), W5 잔여(replay poly 이중가산 R5·findData R6, lock_ref 실패 시 엔진 보존, Pipeline mean α 채널별, 휠 무시, wavecal Apply 일원화),
   `core/refit.read_alpha_row` 위치 기반(W2 후속), `_qc_orig` repr 직렬화(원본 복원 불가 — 헌장 ①), Versions 에 _archive 포함, Mask 의 FitSet 저장, 3단계 UX.
+- 2026-10-03 — 잔여 4건: `_qc_orig*` repr → `{gas}_preQC`·`Status_preQC` 열(7c85ab8), replay poly 이중가산 R5(38599ba),
+  Mask 를 FitSet·config·meta·헤더에 + "Remove mask"(44b135d), Versions 에 `_archive` + meta 짝 유지(78ecbcc).
+  핏 숫자 불변(마스크 없는 FitSet). 남은 것: 3단계 UX, Vigil VF3 ②③④⑥⑧·VF4 나머지.
