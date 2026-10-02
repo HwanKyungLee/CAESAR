@@ -476,7 +476,11 @@ class SaveExportMixin:
         try:
             ch = int(params.get('channel', _res.get('Channel', 1)))
             if hasattr(self.monitor, 'cb_fit_channel'):
-                self.monitor.cb_fit_channel.setCurrentIndex(max(0, min(ch - 1, self.monitor.cb_fit_channel.count() - 1)))
+                # The combo only lists channels with data (e.g. [CH2, CH3]); index ch-1 picked
+                # CH3 for a CH2 replay and the plot was skipped. Select by the stored channel.
+                _i = self.monitor.cb_fit_channel.findData(ch)
+                if _i >= 0:
+                    self.monitor.cb_fit_channel.setCurrentIndex(_i)
         except Exception:
             pass
 

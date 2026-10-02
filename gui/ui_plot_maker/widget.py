@@ -869,17 +869,15 @@ class PlotMakerWidget(QWidget):
                     self.p1.addItem(ti, ignoreBounds=True)
 
     def _parse_annot_x(self, text):
-        """주석 세로선 값 파싱: 시간축이면 날짜시각→epoch, 아니면 숫자. 실패 None."""
-        text = (text or "").strip()
-        if self._time_axis:
-            try:
-                import pandas as pd
-                ts = pd.to_datetime(text)
-                return float(ts.timestamp())
-            except Exception:
-                pass
+        """Annotation x value: same parser as the X-range box (`_parse_x` — local time, data year
+        when the year is omitted), with a plain-number fallback. Unparseable = None.
+        The old pd.to_datetime().timestamp() path stored 'MM-DD HH:MM' as year 1 (every Publish
+        then died with OSError 22) and read naive date-times as UTC (+9 h in KST)."""
+        v = self._parse_x(text)
+        if v is not None:
+            return v
         try:
-            return float(text)
+            return float((text or "").strip())
         except ValueError:
             return None
 
@@ -1683,12 +1681,20 @@ class PlotMakerWidget(QWidget):
         if not axes:
             return
         ax = axes[0]
+        # Which axes take the Y-left vs Y-right settings: a twinx (labels on the right) or a
+        # split panel holding a right-axis series (tagged `_pm_axis` by the split renderer) is
+        # "right"; everything else is "left". Used to be axes[0] vs axes[1:], which in split
+        # mode put the Y-right range on panel 2 (a left-axis series) and log/Y-left on panel 1 only.
+        right = [a for a in axes if a.yaxis.get_label_position() == "right"
+                 or getattr(a, "_pm_axis", "L") == "R"]
+        left = [a for a in axes if a not in right and (a is ax or hasattr(a, "_pm_axis"))]
         if self._chk_logx.isChecked():
             try: ax.set_xscale("log")
             except Exception: pass
         if self._chk_logy.isChecked():
-            try: ax.set_yscale("log")
-            except Exception: pass
+            for a in left:
+                try: a.set_yscale("log")
+                except Exception: pass
         xmin = self._parse_x(self._ax_xmin.text()); xmax = self._parse_x(self._ax_xmax.text())
         if xmin is not None and xmax is not None and xmin < xmax:
             import datetime as _dt2
@@ -1698,10 +1704,11 @@ class PlotMakerWidget(QWidget):
                 a.set_xlim(lo, hi)
         ymin = self._axis_val(self._ax_ymin); ymax = self._axis_val(self._ax_ymax)
         if ymin is not None and ymax is not None and ymin < ymax:
-            ax.set_ylim(ymin, ymax)
+            for a in left:
+                a.set_ylim(ymin, ymax)
         rmin = self._axis_val(self._ax_rmin); rmax = self._axis_val(self._ax_rmax)
         if rmin is not None and rmax is not None and rmin < rmax:
-            for a in axes[1:]:        # twinx 우측 축
+            for a in right:
                 a.set_ylim(rmin, rmax)
         # 그리드 on/off (+ minor) — render_mpl 기본 grid를 여기서 덮어씀
         if hasattr(self, "_chk_grid"):
@@ -1799,6 +1806,19 @@ class PlotMakerWidget(QWidget):
             col = an.get("color") or "#555"
             lbl = an.get("label") or None
             x1, y1, x2, y2 = an.get("x1"), an.get("y1"), an.get("x2"), an.get("y2")
+            if self._time_axis:
+                # A broken time (e.g. year 1 from the old annotation parser) used to raise
+                # OSError 22 here and kill every Publish. Skip that annotation and name it.
+                try:
+                    if any(_dt.datetime.fromtimestamp(v).year < 1970
+                           for v in (x1, x2) if v is not None):
+                        raise ValueError
+                except (OSError, OverflowError, ValueError):
+                    warns = getattr(self, "_publish_warnings", None)
+                    if warns is not None:
+                        warns.append(f"annotation {kind} '{lbl or ''}' (x={x1}) skipped — "
+                                     "invalid time, fix or remove it in Annotate…")
+                    continue
             for ai, a in enumerate(axes):
                 show_label = (ai == 0) and lbl   # 라벨은 첫 패널에만(중복 방지)
                 # 라벨은 axvline(label=)이 아니라 text()로 — 범례를 꺼도 보여야 한다
@@ -1940,6 +1960,23 @@ class PlotMakerWidget(QWidget):
         if hidden is not None and hidden.any():
             y = np.where(hidden, np.nan, y)
         return ds, col, y, t
+
+    def time_basis(self, labels):
+        """Clock of the plotted time axis → (axis-label suffix or "", any series on plain UTC).
+        Offset = dataset clock (Dataset.tz_h) + global shift + dataset shift. Unknown clock → ""."""
+        offs = set()
+        for lab in labels:
+            ds = self.shelf.get((lab or "").split(":", 1)[0])
+            if ds is None or ds.time is None:
+                continue
+            offs.add(None if ds.tz_h is None
+                     else ds.tz_h + self.time_shift_hours + ds.shift_h)
+        if not offs or None in offs:
+            return "", 0.0 in offs
+        if len(offs) > 1:
+            return " (mixed clocks!)", 0.0 in offs
+        o = offs.pop()
+        return " (" + {0.0: "UTC", 9.0: "KST"}.get(o, f"UTC{o:+g}h") + ")", o == 0.0
 
     # 명시 단위가 없을 때 ppb로 볼 미량기체 농도 컬럼(정확 매칭 — _Shift/_Squeeze 등 제외).
     _PPB_COLS = {"no2", "ans", "pns", "chocho", "glyoxal", "h2o",
@@ -2145,7 +2182,12 @@ class PlotMakerWidget(QWidget):
             if isinstance(data, tuple):
                 names.add(data[1])
         if names:
-            self.push_undo("dataset", [(n, self.shelf[n]) for n in names if n in self.shelf])
+            # Mode settings too: removing a dataset prunes the series/selections that used it,
+            # and Undo must bring those back, not only the shelf entry.
+            import copy
+            modes_cfg = {m.key: copy.deepcopy(m.to_config()) for m in self._modes}
+            self.push_undo("dataset", ([(n, self.shelf[n]) for n in names if n in self.shelf],
+                                       modes_cfg))
         for n in names:
             self.shelf.pop(n, None)
         if names:
@@ -2316,14 +2358,19 @@ class PlotMakerWidget(QWidget):
         kind, payload = self._undo_slot
         self._undo_slot = None
         if kind == "dataset":
+            items, modes_cfg = payload
             restored = 0
-            for name, ds in payload:
+            for name, ds in items:
                 if name not in self.shelf:
                     self.shelf[name] = ds
                     restored += 1
             self._refresh_tree()
             self._notify_modes()
-            self.set_status(f"{restored} dataset(s) restored")
+            for m in self._modes:            # series/selections as they were before the removal
+                if m.key in modes_cfg:
+                    m.from_config(modes_cfg[m.key])
+            self._mode.render()
+            self.set_status(f"{restored} dataset(s) restored with the series that used them")
         elif kind == "timeseries_series":
             ts = next((m for m in self._modes if m.key == "timeseries"), None)
             if ts is not None:
@@ -2467,12 +2514,18 @@ class PlotMakerWidget(QWidget):
             self._chk_grid.blockSignals(True)
             self._chk_grid.setChecked(bool(th["grid"]))
             self._chk_grid.blockSignals(False)
-        # 시계열 시리즈 기본 선두께를 테마에 맞춤(개별 지정은 보존)
+        # Series line width follows the theme only where it still has the previous theme's
+        # (or the default) width — a width the user picked is kept. It used to be overwritten
+        # (5 → 1) despite this comment saying otherwise.
+        # ponytail: a user width equal to the previous theme's width is indistinguishable and follows.
+        prev = getattr(self, "_theme_line", 2)
         ts = next((m for m in self._modes if m.key == "timeseries"), None)
         if ts is not None:
             for lab in [s[0] for s in getattr(ts, "_series", [])]:
                 st = ts._styles.setdefault(lab, {})
-                st["width"] = int(th["line"])
+                if int(st.get("width", 2)) == prev:
+                    st["width"] = int(th["line"])
+        self._theme_line = int(th["line"])
         # 저널 프리셋의 추가 항목(일반 테마엔 없다 — 색·크기는 안 건드린다)
         extra = []
         if "tick" in th:
@@ -2656,6 +2709,7 @@ class PlotMakerWidget(QWidget):
             QMessageBox.warning(self, "Publish", f"matplotlib unavailable: {e}")
             return None
         self._apply_mpl_rc(matplotlib)
+        self._publish_warnings = []       # what could not be drawn (bad annotation, missing dataset)
         fig = Figure(figsize=(self._fig_w.value(), self._fig_h.value()))
         FigureCanvasAgg(fig)              # savefig용 캔버스 부착(백엔드 무관)
         notes = []
@@ -2685,6 +2739,9 @@ class PlotMakerWidget(QWidget):
             fig.tight_layout()
         return fig
 
+    def _publish_warn_msg(self):
+        return "⚠ " + "; ".join(self._publish_warnings)
+
     def render_preview_png(self, dpi=110):
         """Publish와 **같은 함수**(`_build_publish_fig`)로 그린 PNG 바이트 — 미리보기 = 저장 파일.
         None = 그릴 게 없음. NotImplementedError/예외는 호출측이 처리."""
@@ -2694,6 +2751,8 @@ class PlotMakerWidget(QWidget):
         import io
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")  # 화면용 해상도
+        if self._publish_warnings:
+            self.set_status(self._publish_warn_msg())
         mixed = self._mixed_hangul_mathtext()
         if mixed:
             self.set_status(f"⚠ {len(mixed)} label(s) mix Korean text and math — the Korean renders as □"
@@ -2723,11 +2782,12 @@ class PlotMakerWidget(QWidget):
         from core.paths import campaign_dir
         base = dlg_dir("figure") or dlg_dir("result") or "."
         d = os.path.join(campaign_dir(base, campaign_of(self)), "figures")
-        try:
-            os.makedirs(d, exist_ok=True)
-        except OSError:
-            return base
-        return d
+        # Never create folders just to open a dialog — that used to make `figures/` inside the
+        # last result (possibly production) tree even when the user cancelled (R9).
+        # Not there yet → start from the nearest existing parent.
+        while d and not os.path.isdir(d) and os.path.dirname(d) != d:
+            d = os.path.dirname(d)
+        return d if os.path.isdir(d) else base
 
     def _export_publish(self):
         """현재 모드를 matplotlib로 재렌더 → 고화질 PNG / 벡터 PDF·SVG."""
@@ -2742,6 +2802,7 @@ class PlotMakerWidget(QWidget):
         if not os.path.splitext(out)[1]:
             out += ".png"
         try:
+            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)   # only after the user confirmed
             fig = self._build_publish_fig()
             if fig is None:
                 return
@@ -2749,6 +2810,8 @@ class PlotMakerWidget(QWidget):
             ext = os.path.splitext(out)[1].lstrip(".").upper()
             extra = f" @ {self._dpi_spin.value()}dpi" if ext == "PNG" else " (vector)"
             msg = f"Published: {os.path.basename(out)} [{ext}{extra}]"
+            if self._publish_warnings:
+                msg += "  " + self._publish_warn_msg()
             mixed = self._mixed_hangul_mathtext()
             if mixed:
                 msg += (f"  ⚠ {len(mixed)} label(s) mixing Korean text and math will render the Korean as □"
@@ -2786,6 +2849,18 @@ class PlotMakerWidget(QWidget):
         cols = list(dict.fromkeys(s[0] for s in ts._series))   # "ds:col" 중복제거, 순서유지
         saved, failed = [], []
         dpi = self._dpi_spin.value()
+        used = set()
+
+        def _out_path(prefix, lab):
+            # File name carries the dataset tag — CH1:NO2 and CH2:NO2 both used to become
+            # 'timeseries_NO2.png', the second overwrote the first and both were listed as saved.
+            import re as _re
+            base = prefix + "_" + _re.sub(r"[^0-9A-Za-z가-힣._-]+", "-", lab).strip("-")
+            name, k = base, 2
+            while name.lower() in used:
+                name, k = f"{base}_{k}", k + 1
+            used.add(name.lower())
+            return os.path.join(out_dir, name + ".png")
 
         if self._mode.key == "timeseries":
             orig_series = ts._series
@@ -2799,8 +2874,7 @@ class PlotMakerWidget(QWidget):
                         fig = self._build_publish_fig()
                         if fig is None:
                             failed.append(f"{lab}: figure creation failed"); continue
-                        col = lab.split(":", 1)[-1]
-                        path = os.path.join(out_dir, f"timeseries_{col}.png")
+                        path = _out_path("timeseries", lab)
                         fig.savefig(path, dpi=dpi, bbox_inches="tight")
                         saved.append(os.path.basename(path))
                     except Exception as e:
@@ -2821,8 +2895,7 @@ class PlotMakerWidget(QWidget):
                         fig = self._build_publish_fig()
                         if fig is None:
                             failed.append(f"{lab}: figure creation failed"); continue
-                        col = lab.split(":", 1)[-1]
-                        path = os.path.join(out_dir, f"diurnal_{col}.png")
+                        path = _out_path("diurnal", lab)
                         fig.savefig(path, dpi=dpi, bbox_inches="tight")
                         saved.append(os.path.basename(path))
                     except Exception as e:
@@ -2864,6 +2937,17 @@ class PlotMakerWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Copy", f"Failed: {e}")
 
+    def _csv_provenance(self):
+        """'#' header lines for Export CSV — what was done to the values (Plot Maker reads '#' as comments)."""
+        from core.provenance import code_version
+        ds_sh = ", ".join(f"{n} {ds.shift_h:+g}h" for n, ds in self.shelf.items() if ds.shift_h)
+        return [f"Augur Plot Maker export · code {code_version()} · mode {self._mode.key}",
+                f"time shift {self.time_shift_hours:+g}h (global)"
+                + (f" · dataset shift: {ds_sh}" if ds_sh else ""),
+                f"resample {self.resample_sec:g} s (0 = raw) · smooth {self.smooth_n} point(s)",
+                "time series: columns on another time axis are aligned to the first one with "
+                "core.align (linear, gap guard); no extrapolation, gaps left empty"]
+
     def _export_csv(self):
         """현재 모드가 제공하는 데이터(csv_table)를 CSV로 저장."""
         table = self._mode.csv_table()
@@ -2881,6 +2965,8 @@ class PlotMakerWidget(QWidget):
         try:
             import csv
             with open(out, "w", newline="", encoding="utf-8") as f:
+                for line in self._csv_provenance():
+                    f.write("# " + line + "\n")
                 w = csv.writer(f)
                 w.writerow(headers)
                 w.writerows(rows)

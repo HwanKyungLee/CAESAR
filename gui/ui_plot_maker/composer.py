@@ -48,6 +48,25 @@ def _parse_ratios(text, n):
     return vals if len(vals) == n and all(v > 0 for v in vals) else None
 
 
+
+def _missing_datasets(cfg, shelf):
+    """Dataset names referenced by a panel's mode config ('ds:col' strings, also as dict keys)
+    that are not on the shelf."""
+    out = set()
+
+    def walk(v):
+        if isinstance(v, str):
+            if ":" in v and v.split(":", 1)[0] and v.split(":", 1)[0] not in shelf:
+                out.add(v.split(":", 1)[0])
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                walk(k); walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+    walk(cfg or {})
+    return out
+
 class Composer:
     def __init__(self, host):
         self.host = host
@@ -227,6 +246,17 @@ class Composer:
             h.time_shift_hours = p.get("time_shift_hours", 0.0)
             h._set_axes_widgets({**(p.get("axes") or {}), **look}, block=True)
             m, w, _bl = self._mode_instance(p)
+            missing = sorted(_missing_datasets(p.get("mode_cfg"), h.shelf))
+            if missing:
+                # The panel's data is gone — say so on the panel and in the status line
+                # instead of publishing silent empty axes.
+                ax.text(0.5, 0.5, "missing: " + ", ".join(missing), transform=ax.transAxes,
+                        ha="center", va="center", color="#b00", fontsize=9)
+                warns = getattr(h, "_publish_warnings", None)
+                if warns is not None:
+                    idx = next((i for i, q in enumerate(self.panels) if q is p), 0)
+                    warns.append(f"panel ({LETTERS[idx % 26]}) missing dataset(s): "
+                                 + ", ".join(missing))
             before = set(fig.axes)
             m.render_mpl(fig, ax)
             # ax가 아직 살아 있나: 분할 시계열은 ax를 지우고 칸을 쪼갠다. inset 축은 fig.axes가

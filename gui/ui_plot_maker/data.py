@@ -35,7 +35,7 @@ class Dataset:
     """
     __slots__ = ("name", "path", "time", "cols", "units", "errs", "cats",
                  "rules", "rules_on", "shift_h", "_hidden", "derived", "derived_errors", "_dcols",
-                 "rule_errors", "join", "join_info", "origin")
+                 "rule_errors", "join", "join_info", "origin", "tz_h")
 
     # 식에서 열 이름 대신 쓸 수 있는 예약 변수 — 파생 열 이름으로 못 쓴다.
     RESERVED = ("time", "hour")
@@ -56,6 +56,7 @@ class Dataset:
         self.rule_errors = {}   # {규칙 번호: 오류문} — 깨진 조건식 규칙(hidden_mask가 채움)
         self.join = None        # Join 데이터셋이면 레시피 dict(파일이 아니라 다른 데이터셋에서 만든다)
         self.join_info = {}
+        self.tz_h = None        # clock of `time` as hours from UTC (fit: .meta.json time_shift_h); None = unknown
         self.origin = None      # 콘솔에서 push한 데이터셋이면 {"kind": "console", "history": [...]}
         self.derived = [dict(d) for d in (derived or [])]
         self.derived_errors = {}
@@ -330,9 +331,19 @@ def load_dataset(path) -> Dataset:
             cats["Flag"] = np.asarray([flag_of(s) for s in st], dtype=object)
         if t.get("channel") is not None:
             cats["Channel"] = np.asarray(t["channel"], dtype=object)
-        return Dataset(name, path, t.get("time"), cols, units,
-                       errs={g: e for g, e in (t.get("errs") or {}).items() if e is not None},
-                       cats=cats)
+        ds = Dataset(name, path, t.get("time"), cols, units,
+                     errs={g: e for g, e in (t.get("errs") or {}).items() if e is not None},
+                     cats=cats)
+        # Fit Time = recorded UTC + the run's time_shift_h (stated in the .meta.json beside it).
+        # No meta → unknown; we do not guess.
+        from core.run_meta import read_meta
+        meta = read_meta(path)
+        if meta is not None:
+            try:
+                ds.tz_h = float(meta.get("time_shift_h") or 0.0)
+            except (TypeError, ValueError):
+                pass
+        return ds
 
     # ② 일반 표(csv/tsv/농도) → pandas로 시간컬럼 + 수치컬럼
     try:
@@ -342,8 +353,13 @@ def load_dataset(path) -> Dataset:
                          comment="#", engine="python")
         df.columns = [str(c).strip() for c in df.columns]
         time, tcol = None, None
+        tz_h = None
         for c in df.columns:
-            if c.lower() in ("time", "datetime", "timestamp", "date"):
+            # 'time_KST' / 'datetime_UTC' — the suffix names the clock
+            low = c.lower()
+            stem, _, tzs = (low.rpartition("_") if low.endswith(("_kst", "_utc"))
+                            else (low, "", ""))
+            if stem in ("time", "datetime", "timestamp", "date"):
                 dt = pd.to_datetime(df[c], errors="coerce")
                 if dt.notna().mean() > 0.5:
                     # naive 시각을 로컬(머신 TZ)로 간주해 epoch화 — 야간음영(_night_spans)·
@@ -352,6 +368,7 @@ def load_dataset(path) -> Dataset:
                     tt = np.array([t_.timestamp() if pd.notna(t_) else np.nan
                                    for t_ in dt.dt.to_pydatetime()], dtype=float)
                     time, tcol = tt, c
+                    tz_h = {"utc": 0.0, "kst": 9.0}.get(tzs)
                     break
         cols = {}
         for c in df.columns:
@@ -361,7 +378,9 @@ def load_dataset(path) -> Dataset:
             if np.isfinite(y).any():
                 cols[c] = y
         if cols:
-            return Dataset(name, path, time, cols)
+            ds = Dataset(name, path, time, cols)
+            ds.tz_h = tz_h
+            return ds
     except Exception:
         pass
 
