@@ -344,6 +344,20 @@ class AnalysisWorker(QThread):
             note += " · UNDERDETERMINED"
         return note
 
+    @staticmethod
+    def _calib_context_cols(result, file_path, ts):
+        """§6.1 context: seconds to the nearest I0 / R knot, bracketing interval, extrapolated.
+        Knots from the alpha header (or the folder's _calknots.json); NaN when unknown.
+        `ts` is the record time as stored (instrument clock, before the channel time shift),
+        on the same axis as the knots: seconds from the start of the year."""
+        from core.calib_context import COLUMNS, row_context
+        if ts is None:
+            result.update({c: float('nan') for c in COLUMNS})
+            return
+        import datetime as _dtm
+        sec = (ts - _dtm.datetime(ts.year, 1, 1)).total_seconds()
+        result.update(row_context(file_path, sec))
+
     def _fit_status_cols(self, result):
         """종료 상태를 **기계가 읽을 수 있는 열**로. Status 문자열은 그대로 둔다.
 
@@ -603,6 +617,7 @@ class AnalysisWorker(QThread):
             # Falls back to file mtime → KST if column 0 is not a recognisable timestamp.
             if self._is_alpha_input(file_path):
                 _ts = DataIO.parse_alpha_row_time(file_path, row_idx)   # 알파: doy/datetime 컬럼
+                self._calib_context_cols(result, file_path, _ts)        # before the time shift
             else:
                 _ts = DataIO.parse_row_timestamp(file_path, row_index=row_idx)
             # 채널 시각 시프트(초). 순수 시간이동 — 계기시각을 출력 시각으로만 보정.
@@ -1191,6 +1206,7 @@ class AnalysisWorker(QThread):
                       'Channel': self.channel, 'Params': {}}
             try:
                 _ts = DataIO.parse_alpha_row_time(file_path, row_idx)
+                self._calib_context_cols(result, file_path, _ts)        # before the time shift
                 _off = getattr(self, 'tz_offset_sec', 0)
                 if _ts is not None and _off:
                     from datetime import timedelta as _td_tz
@@ -1809,6 +1825,12 @@ def _pass2_write_file(fp, rows, ctx):
         f.write(f"# offset_correction={'applied×%g' % ctx['offset_scale_factor'] if ctx['offset'] is not None else 'None'}"
                 f"  stray_light_eps={ctx['stray_light_fraction']:g}\n")
         f.write(f"# Calibration: {ctx['rt_calib_note'] or ctx['calib_info_per_file'].get(fp, 'unknown')}\n")
+        # knots actually used (core.calib_context reads them back for the per-record context columns)
+        from core.calib_context import format_knot_line
+        for _tag, _key in (("I0", 'i0_knot_sec'), ("R", 'r_knot_sec')):
+            _ln = format_knot_line(_tag, ctx.get(_key))
+            if _ln:
+                f.write(_ln + "\n")
         wv_str = '\t'.join(f"{w:.4f}" for w in ctx['wave_nm'])
         f.write(f"# wavelength_nm:\t{wv_str}\n")
         # 시각 규약을 파일이 스스로 말하게 한다 — 보정이 걸렸는지 결과만 보고
@@ -3109,6 +3131,9 @@ class AlphaExportWorker(QThread):
             'n_ll_drop': n_ll_drop,
             'i0_low_light_frac': self.i0_low_light_frac,
             'rt_calib_note': rt_calib_note, 'calib_info_per_file': calib_info_per_file,
+            # knot times on the real-time axis (start-of-year s) → alpha header → fit context cols
+            'i0_knot_sec': (list(map(float, za_x)) if use_pchip and _i0_axis_is_sec else None),
+            'r_knot_sec': (list(map(float, _ks)) if rt_omr_pchip_obj is not None else None),
         }
 
         def _finish_one(fp, out_path, n_rows, err):

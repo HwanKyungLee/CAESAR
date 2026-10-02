@@ -69,21 +69,27 @@ def read_trace_times(path):
     return np.asarray(doy, float)
 
 
-def context(sec, knots):
-    """(최근접거리[s], 감싼간격[h], 범위밖?) — knots 는 정렬된 초 배열."""
-    n = len(sec)
-    if knots is None or len(knots) < 2:
-        nan = np.full(n, np.nan)
-        return nan, nan, np.zeros(n, bool)
-    k = np.sort(np.asarray(knots, float))
-    i = np.searchsorted(k, sec)
-    lo = np.clip(i - 1, 0, len(k) - 1)
-    hi = np.clip(i, 0, len(k) - 1)
-    dt = np.minimum(np.abs(sec - k[lo]), np.abs(sec - k[hi]))
-    edge = (sec < k[0]) | (sec > k[-1])
-    gap = (k[hi] - k[lo]) / 3600.0
-    gap = np.where(edge, np.nan, gap)      # 범위 밖은 "간격" 이 정의되지 않는다
-    return dt, gap, edge
+# single source: the fit writes the same columns per record (core.calib_context)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from core.calib_context import SIDECAR, context  # noqa: E402
+
+
+def write_knot_sidecars(dirs, za, rk, sources):
+    """`_calknots.json` in each alpha folder — the fit reads it for alphas whose header has no
+    knot lines (made before 2026-10-03). ⚠ I0 knots from raw (extract_cal_knots) are *all* ZA
+    blocks; alpha generation may have dropped a few (short or low-light blocks)."""
+    import json
+    from core.provenance import code_version
+    for d in dirs:
+        with open(os.path.join(d, SIDECAR), "w", encoding="utf-8") as fh:
+            json.dump({"I0_knot_sec": [] if za is None else [float(v) for v in np.sort(za)],
+                       "R_knot_sec": [] if rk is None else [float(v) for v in np.sort(rk)],
+                       "source": sources, "code": code_version(),
+                       "note": "axis: seconds from the start of the year (= (doy-1)*86400)"},
+                      fh, indent=0)
+        print(f"→ {os.path.join(d, SIDECAR)}")
 
 
 def main():
@@ -95,7 +101,10 @@ def main():
     ap.add_argument("--za-npz", help="ZA knot 시각을 가진 npz (za_sec). 없으면 I0_* 는 NaN")
     ap.add_argument("--year-start-doy", type=float, default=1.0,
                     help="doy 규약. 1.0 이면 sec=(doy-1)*86400 (연초 = doy 1)")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="CSV of the context per row (optional with --write-knots)")
+    ap.add_argument("--write-knots", action="store_true",
+                    help="also write _calknots.json into every alpha folder (the fit then exports "
+                         "the context columns for these older alphas)")
     a = ap.parse_args()
 
     paths = []
@@ -106,6 +115,8 @@ def main():
     if not paths:
         raise SystemExit(f"ABSTAIN: {a.alpha_dir} 에 *alpha_trace.dat 이 없다")
 
+    if not a.out and not a.write_knots:
+        raise SystemExit("give --out and/or --write-knots")
     za = None
     if a.za_npz:
         z = np.load(a.za_npz)
@@ -117,6 +128,11 @@ def main():
         r = np.load(a.rt, allow_pickle=True)
         rk = np.asarray(r["knot_sec"], float)
 
+    if a.write_knots:
+        write_knot_sidecars(sorted({os.path.dirname(p) for p in paths}), za, rk,
+                            {"za_npz": a.za_npz, "rt": a.rt})
+    if not a.out:
+        return
     rows = 0
     _span = [np.inf, -np.inf]
     with open(a.out, "w", encoding="utf-8") as fh:

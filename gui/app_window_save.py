@@ -276,6 +276,9 @@ class SaveExportMixin:
                         "{gas}_ErrorCorr = same fit with the residual autocorrelation (sandwich); "
                         "{gas}_ErrorJoint = incl. shift/squeeze; {gas}_MDL = 3 x {gas}_Error. "
                         "None contains the I0/R/etalon structural terms.",
+                        "# Calibration context (alpha input): I0_/R_dt_s = s to the nearest knot, I0_/R_gap_h = "
+                        "bracketing knot interval, I0_/R_edge = 1 if extrapolated; NaN = knots unknown "
+                        "(alpha made before 2026-10-03 without _calknots.json).",
                         "# Reference Masks: " + ("; ".join(
                             f"{r['name']} " + (f"keep px {r['mask']['range'][0]}-{r['mask']['range'][1]}"
                                                if r['mask'].get('mode') == 'manual'
