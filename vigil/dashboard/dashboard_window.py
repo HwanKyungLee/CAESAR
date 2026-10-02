@@ -142,6 +142,7 @@ class DashboardWindow(QMainWindow):
         self._curve_items: dict = {}      # 커브 캐시(키→PlotDataItem)
         self._threshold_items: dict = {}  # 임계선 캐시(키→[InfiniteLine,...])
         self._out_items: dict = {}        # 범위 밖 표시 ▲▼ (plot 키 → ScatterPlotItem)
+        self._trend_sig: dict = {}        # plot 키 → (len, last time) per series — skip redraw if unchanged
         self._color_idx = 0
         self._color_of: dict = {}
         self._cards: dict = {}
@@ -382,7 +383,7 @@ class DashboardWindow(QMainWindow):
                 pw.plotItem.legend.clear()
             pw.clear()
             pw.setTitle(_PLACEHOLDER[kind], color=VIGIL.dim, size="10pt")
-        self._curve_items.clear(); self._threshold_items.clear(); self._out_items.clear()
+        self._curve_items.clear(); self._threshold_items.clear(); self._out_items.clear(); self._trend_sig.clear()
         self._color_of.clear(); self._color_idx = 0
         self.table.setRowCount(0); self._row_of.clear()
         self.alarm_table.setRowCount(0); self._alarm_sig = None
@@ -495,7 +496,19 @@ class DashboardWindow(QMainWindow):
                 txt, col = self._status_text(info.get(f"{k}_status"))
                 self._set_cell(r, c, txt, col, info.get(f"{k}_msg") or "")
 
+    def _unchanged(self, plot_key, trend) -> bool:
+        """True if no series got a point since the last draw. The deques are mutated in place, so the
+        signature is (length, newest time) — a full deque keeps its length but its newest time moves.
+        Redrawing 720-point curves every tick cost ~231 ms when full (2026-10-02 bench)."""
+        sig = tuple((k, len(dq), dq[-1][0]) for k, dq in trend.items() if dq)
+        if self._trend_sig.get(plot_key) == sig:
+            return True
+        self._trend_sig[plot_key] = sig
+        return False
+
     def update_conc_trend(self, trend: dict, meta: dict) -> None:
+        if self._unchanged("conc", trend):
+            return
         arrays = []
         for key, dq in trend.items():
             if not dq:
@@ -510,8 +523,11 @@ class DashboardWindow(QMainWindow):
                 item = self._curve_items.get(ck)
                 if item is None:
                     is_target = gas == target
-                    pen = pg.mkPen(self._color_for(ck), width=2.5 if is_target else 1.0)
-                    item = self.p_conc.plot(pen=pen, name=f"{label}:{gas}" + (" (target)" if is_target else ""))
+                    # live curves: width-1 pen, no antialias — painting was 99 % of the tick when full
+                    item = self.p_conc.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False,
+                                            name=f"{label}:{gas}" + (" (target)" if is_target else ""))
+                    if is_target:
+                        item.setZValue(1)
                     self.p_conc.setTitle(None)
                     self._curve_items[ck] = item
                 ys = [gd.get(gas, float('nan')) for _t, gd in dq]
@@ -532,6 +548,8 @@ class DashboardWindow(QMainWindow):
             self._fit_view(self.p_conc, arrays, key="conc")
 
     def update_r_trend(self, trend: dict, meta: dict) -> None:
+        if self._unchanged("r", trend):
+            return
         arrays = []
         for key, dq in trend.items():
             if not dq:
@@ -544,7 +562,7 @@ class DashboardWindow(QMainWindow):
             ck = ("r", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1.5), symbol='o',
+                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1), symbol='o', antialias=False,
                                      symbolSize=4, symbolBrush=self._color_for(ck), name=label)
                 self.p_r.setTitle(None)
                 self._curve_items[ck] = item
@@ -552,7 +570,8 @@ class DashboardWindow(QMainWindow):
             bk = ("r_baseline", key)
             bitem = self._curve_items.get(bk)
             if bitem is None:
-                bitem = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1.0, style=Qt.PenStyle.DotLine))
+                faint = QColor(self._color_for(ck)); faint.setAlpha(110)   # solid, not dotted (cheaper)
+                bitem = self.p_r.plot(pen=pg.mkPen(faint, width=1), antialias=False)
                 self._curve_items[bk] = bitem
             bitem.setData(xs, bs)
             arrays += [(xs, ys), (xs, bs)]
@@ -560,6 +579,8 @@ class DashboardWindow(QMainWindow):
             self._fit_view(self.p_r, arrays, key="r")
 
     def update_hk_trend(self, trend: dict, meta: dict) -> None:
+        if self._unchanged("hk", trend):
+            return
         arrays = []
         for key, dq in trend.items():
             if not dq:
@@ -572,7 +593,7 @@ class DashboardWindow(QMainWindow):
             ck = ("hk", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1.5),
+                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False,
                                       name=f"{label} ({unit})" if unit else label)
                 self.p_hk.setTitle(None)
                 self._curve_items[ck] = item

@@ -126,6 +126,29 @@ def test_record_one_file_per_day():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_trend_skip():
+    print("[5] trends: no redraw when nothing changed, cheap pens")
+    from collections import deque
+    from datetime import datetime, timedelta
+    from vigil.dashboard.dashboard_window import DashboardWindow
+    win = DashboardWindow(title="t", tz="UTC")
+    now = datetime.now()
+    hk = {("p", "f"): deque([(now + timedelta(seconds=10 * k), 1.0) for k in range(5)], maxlen=5)}
+    meta = {("p", "f"): {"label": "f", "warn": [0, 2]}}
+    win.update_hk_trend(hk, meta)
+    item = win._curve_items[("hk", ("p", "f"))]
+    calls = []
+    real = item.setData
+    item.setData = lambda *a, **k: (calls.append(1), real(*a, **k))
+    win.update_hk_trend(hk, meta)
+    check("unchanged deque: no setData", not calls, len(calls))
+    hk[("p", "f")].append((now + timedelta(seconds=60), 1.5))           # full deque: same length, new point
+    win.update_hk_trend(hk, meta)
+    check("full deque gets a point: redrawn", len(calls) == 1, len(calls))
+    check("live curve: width 1, no antialias", item.opts["pen"].widthF() <= 1 and item.opts["antialias"] is False,
+          (item.opts["pen"].widthF(), item.opts["antialias"]))
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -133,6 +156,7 @@ def main():
     test_paused_freshness()
     test_tz_labels()
     test_record_one_file_per_day()
+    test_trend_skip()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 
