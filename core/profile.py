@@ -219,10 +219,23 @@ class Channel:
     columns: Optional[tuple] = None  # (start, end) 절대 열, 양끝 포함
     reflectance: Optional[ReflectanceConfig] = None
     concentration: Optional[ConcentrationConfig] = None
+    # 이 채널 캐비티의 압력·기체온도 HK 키 — **우선순위 순 목록**(앞이 유효하지 않으면 다음).
+    # Augur(core/data_io 의 n_air 용 T/P)와 Vigil(농도·R)이 **이 한 곳**을 본다(2026-10-02 단일화).
+    # concentration/reflectance 의 cavity_*_hk 는 있으면 맨 앞에 끼우는 덮어쓰기(옛 프로파일 호환).
+    cavity_pressure_hk: tuple = ()
+    cavity_temp_hk: tuple = ()
 
     @property
     def is_signal(self) -> bool:
         return self.role == "signal"
+
+    def pressure_keys(self, cfg=None) -> list:
+        """압력 HK 키 우선순위 목록 — cfg(농도/R 설정)의 덮어쓰기가 있으면 맨 앞."""
+        return _chain(getattr(cfg, "cavity_pressure_hk", None), self.cavity_pressure_hk)
+
+    def temp_keys(self, cfg=None) -> list:
+        """기체온도 HK 키 우선순위 목록 — cfg 의 덮어쓰기가 있으면 맨 앞."""
+        return _chain(getattr(cfg, "cavity_temp_hk", None), self.cavity_temp_hk)
 
     def slice(self, row: Sequence[float]):
         """이 채널의 스펙트럼 절편 반환(양끝 포함). columns 미지정이면 오류."""
@@ -234,12 +247,31 @@ class Channel:
     @classmethod
     def from_dict(cls, d: dict) -> "Channel":
         cols = d.get("columns")
+        cav = d.get("cavity") or {}
         return cls(id=d["id"], role=d["role"], label=d.get("label"),
                    columns=(tuple(int(c) for c in cols) if cols else None),
+                   cavity_pressure_hk=_keys(cav.get("pressure_hk")),
+                   cavity_temp_hk=_keys(cav.get("temperature_hk")),
                    reflectance=(ReflectanceConfig.from_dict(d["reflectance"])
                                if "reflectance" in d else None),
                    concentration=(ConcentrationConfig.from_dict(d["concentration"])
                                  if "concentration" in d else None))
+
+
+def _keys(v) -> tuple:
+    """JSON 의 키 하나(str) 또는 목록 → tuple."""
+    if not v:
+        return ()
+    return (str(v),) if isinstance(v, str) else tuple(str(x) for x in v)
+
+
+def _chain(first, rest) -> list:
+    """덮어쓰기(first) + 기본 목록(rest), 중복 제거·순서 유지."""
+    out = []
+    for k in (*_keys(first), *rest):
+        if k not in out:
+            out.append(k)
+    return out
 
 
 def _band_check(value: float, band: Optional[Sequence]) -> bool:
@@ -315,6 +347,24 @@ class HK:
             if f.key == key:
                 return f
         return None
+
+    def first_valid(self, row: Sequence[float], keys: Sequence[str]) -> float:
+        """keys 순서대로 — 처음으로 **유효한** 물리값(없으면 NaN). 결측 규약은 Augur 와 같다
+        (core.raw_parser._is_sentinel: 0·65535·비유한 raw 는 '값 없음'). 채널 cavity 우선순위 목록을
+        이걸로 읽어서 Augur(data_io)와 Vigil 이 같은 센서를 고른다."""
+        from core.raw_parser import _is_sentinel
+        for k in keys:
+            f = self.field(k)
+            if f is None:
+                continue
+            try:
+                raw = float(row[self.start_col + f.rel])
+            except (IndexError, ValueError, TypeError):
+                continue
+            if _is_sentinel(raw):
+                continue
+            return raw * f.scale + f.offset
+        return float("nan")
 
     def read(self, row: Sequence[float], phase: Optional[str] = None) -> dict:
         """{key: (물리값, 심각도)} 한 번에. 대시보드·경보 공통 입력.
@@ -414,6 +464,10 @@ class Profile:
     cadence: Cadence
     description: Optional[str] = None
     instrument: Optional[str] = None
+    # Augur raw 레이아웃 이름(결과 헤더의 raw_layout 출처 줄): kind = "cold"/"hot" 같은 구성 종류,
+    # campaign = "2026-yeosu" 같은 캠페인. 둘 다 표시·기록용 — 로직은 열 지도만 본다.
+    kind: Optional[str] = None
+    campaign: Optional[str] = None
     spectrum_block_width: Optional[int] = None
     autodetect: Optional[Autodetect] = None
     saturation_adc_max: Optional[float] = None
@@ -480,6 +534,8 @@ class Profile:
                 cadence=Cadence.from_dict(d["cadence"]),
                 description=d.get("description"),
                 instrument=d.get("instrument"),
+                kind=d.get("kind"),
+                campaign=d.get("campaign"),
                 spectrum_block_width=(int(d["spectrum_block_width"])
                                       if "spectrum_block_width" in d else None),
                 autodetect=(Autodetect.from_dict(d["autodetect"])

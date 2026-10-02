@@ -1,8 +1,10 @@
 {
   "profile_id": "caesar_cold_2026yeosu_6174",
-  "profile_version": "1.0.0",
+  "profile_version": "1.1.0",
   "description": "CAESAR Cold-cavity raw layout (2026 Yeosu) — 2026-06-11~06-15 구성. caesar_cold.example.json과 같은 장비·같은 스펙트럼 배치인데 HK 블록의 선두 5열이 빠져 있다(ncols 6179 -> 6174). 다른 캐비티 빌드가 아니다. 그래서 hk.fields의 rel만 전부 -5 했고 rel<5였던 항목(unknown_rel0)은 그 손실된 5열에 속하므로 뺐다. 근거: docs/기초파싱_전수검증_2026-09-15.md §1.2 (콜드 748개 중 97개, 2026-06-11-020 ~ 06-15-026 연속, 양쪽 경계가 DAQ 재시작 직후).",
   "instrument": "CAESAR",
+  "kind": "cold",
+  "campaign": "2026-yeosu",
 
   "match": {
     "n_columns": 6174,
@@ -35,13 +37,12 @@
   "channels": [
     { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
     { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100],
+      "cavity": { "pressure_hk": ["p_cavity"], "temperature_hk": ["t_cavity", "t_spectrometer"] },
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
         "wl_dir": "cold",
         "target": "NO2",
-        "cavity_temp_hk": "t_cavity",
-        "cavity_pressure_hk": "p_cavity",
         "throttle_sec": 10,
         "seed_narrow_px": 2.0,
         "alert": { "conc_max_ppb": 100, "spike_ppb": 20, "rms_alarm": 5e-8, "flatline_n": 5 }
@@ -49,8 +50,6 @@
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260523_Hg_4line_400-497nm_Poly2.txt",
         "roi_nm": [438.0, 476.0],
-        "cavity_temp_hk": "t_cavity",
-        "cavity_pressure_hk": "p_cavity",
         "cavity_len_cm": 51.8,
         "rl_factor": 0.933,
         "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }

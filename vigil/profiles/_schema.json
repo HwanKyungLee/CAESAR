@@ -19,6 +19,8 @@
     },
     "description": { "type": "string" },
     "instrument": { "type": "string", "description": "장비명(예: CAESAR)." },
+    "kind": { "type": "string", "description": "구성 종류(예: 'cold', 'hot'). Augur 결과 헤더의 raw_layout 줄에 기록된다 — 표시·출처용, 로직은 열 지도만 본다." },
+    "campaign": { "type": "string", "description": "캠페인 이름(예: '2026-yeosu'). Augur 결과 헤더에 기록된다." },
 
     "match": {
       "type": "object",
@@ -93,6 +95,15 @@
             "minItems": 2,
             "maxItems": 2
           },
+          "cavity": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "이 채널 캐비티의 압력·기체온도 센서(hk.fields[].key) — **우선순위 순 목록**(앞 센서 값이 결측(0/65535)이면 다음). Augur 의 n_air(T/P)와 Vigil 의 농도·R 이 모두 여기를 본다(채널 정의 단일 출처, 2026-10-02). 목록이 다 결측이면 Augur 는 기본값(25 °C·1013.25 mbar)+경고.",
+            "properties": {
+              "pressure_hk": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+              "temperature_hk": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            }
+          },
           "concentration": {
             "type": "object",
             "description": "이 채널의 경량 DOAS 농도 피팅 설정(M3, 선택). 없으면 농도 모니터가 SKIP. 레퍼런스·핏창·poly·ref_props는 새로 안 만들고 Augur FitSet json을 그대로 가리킨다 — Augur 확정 설정과 갈라지지 않게(§2-A 채널별 파장보정·레퍼런스 매핑).",
@@ -103,8 +114,8 @@
               "wl_dir": { "type": "string", "description": "FitSet 안 이 채널을 찾을 wavecal 폴더명(roi1/roi2/cold 등). data_label은 안 씀 — 뒤바뀐 사례 있음(fit_optimizer_handoff.md §14-D)." },
               "allow_negative_gas": { "type": "boolean", "description": "가스 계수 음수 허용 정책. Augur 분석 정책과 같게 명시한다." },
               "target": { "type": "string", "default": "NO2", "description": "농도를 낼 타깃 기체." },
-              "cavity_temp_hk": { "type": "string", "description": "air_number_density 계산에 쓸 캐비티 가스온도 hk.fields[].key." },
-              "cavity_pressure_hk": { "type": "string", "description": "air_number_density 계산에 쓸 캐비티 압력 hk.fields[].key." },
+              "cavity_temp_hk": { "type": "string", "description": "(선택·덮어쓰기) 채널 cavity.temperature_hk 앞에 끼울 키. 보통은 비워 두고 채널 cavity 를 쓴다." },
+              "cavity_pressure_hk": { "type": "string", "description": "(선택·덮어쓰기) 채널 cavity.pressure_hk 앞에 끼울 키. 보통은 비워 두고 채널 cavity 를 쓴다." },
               "throttle_sec": { "type": "number", "exclusiveMinimum": 0, "default": 10, "description": "이 이상 간격으로만 재핏(매 행마다 하면 DAQ PC에 부담 — §8 CPU 예산)." },
               "seed_narrow_px": { "type": "number", "exclusiveMinimum": 0, "default": 2.0, "description": "첫 핏 이후엔 shift 탐색을 직전 핏값 ± 이 값으로 좁힌다(속도, §1.1 '자유도 축소')." },
               "alert": {
@@ -129,8 +140,8 @@
             "properties": {
               "wavecal_path": { "type": "string", "description": "파장보정 파일 경로(nm, 1열, Augur wv_cal 형식과 동일)." },
               "roi_nm": { "$ref": "#/$defs/band", "description": "[lo, hi] R 계산에 쓸 파장대(nm). tools/reflectance_calc.py의 roi_min/roi_max." },
-              "cavity_temp_hk": { "type": "string", "description": "이 채널 캐비티 가스온도로 쓸 hk.fields[].key." },
-              "cavity_pressure_hk": { "type": "string", "description": "이 채널 캐비티 압력으로 쓸 hk.fields[].key." },
+              "cavity_temp_hk": { "type": "string", "description": "(선택·덮어쓰기) 채널 cavity.temperature_hk 앞에 끼울 키. 보통은 비워 두고 채널 cavity 를 쓴다." },
+              "cavity_pressure_hk": { "type": "string", "description": "(선택·덮어쓰기) 채널 cavity.pressure_hk 앞에 끼울 키. 보통은 비워 두고 채널 cavity 를 쓴다." },
               "cavity_len_cm": { "type": "number", "exclusiveMinimum": 0, "default": 51.8, "description": "tools/reflectance_calc.ReflectanceCalculator의 cavity_len 기본값과 동일." },
               "rl_factor": { "type": "number", "exclusiveMinimum": 0, "default": 0.933 },
               "alert": {
