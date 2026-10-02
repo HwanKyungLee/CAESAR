@@ -753,6 +753,20 @@ class DoasFitter:
             # NaN은 '모른다'이고, 하류(fit_optimizer)가 이미 쓰는 센티넬이다.
             perr_lin = np.full_like(c_opt, np.nan)
 
+        # Separate try: a failure here must not touch perr_lin (<gas>_Error).
+        perr_corr, resid_acf1 = None, float("nan")
+        try:
+            # Residual-correlation (sandwich) error — same system, residual not assumed white.
+            # cov = G Gᵀ σ̂² with G = M⁻¹ A_sᵀ (holds with and without the penalty); replacing σ̂² I
+            # by σ̂²·Toeplitz(ρ) gives Var = σ̂² Σ_k ρ_k Σ_i G_i G_{i+k} (both signs of k).
+            # Manuscript §3.4/§4.6: recovers the AR(1) benchmark deficit (1.65 → 1.04), leaves white
+            # cases unchanged; field median inflation 1.24 (300 °C) / 1.02 (180 °C).
+            q = toeplitz_quadform_diag(M_inv @ A_s.T, residual_acf(resid_w))
+            perr_corr = np.sqrt(np.maximum(q, 0.0) * mse) / s_fin
+            resid_acf1 = float(_acf_lag(resid_w, 1))
+        except Exception:
+            perr_corr, resid_acf1 = None, float("nan")
+
         # ── θ 불확도를 포함한 결합 공분산 (A8-2) ─────────────────────────────
         # 위 `cov`는 shift/squeeze를 최적값에 **고정한** 설계행렬에서 나온다.
         # 즉 조건부 Cov(c | θ=θ̂)다. VarPro는 θ와 c를 분리해 풀지만 **불확도는
@@ -807,10 +821,13 @@ class DoasFitter:
 
         c_gas = c_opt[0:num_gases].copy()
         c_perr = perr_lin[0:num_gases].copy()
+        c_perr_corr = (np.asarray(perr_corr[0:num_gases], float).copy() if perr_corr is not None
+                       else np.full(num_gases, np.nan))
         for i, name in enumerate(self.engine.gas_list):
             if not gas_active[name]:
                 c_gas[i] = 0.0
                 c_perr[i] = 0.0
+                c_perr_corr[i] = 0.0
 
         # etalon: 마지막 두 열 = a·sin + b·cos → 진폭/위상으로 환산해 반환(하류의
         # `amp·sin(f·x + phase)` 재구성과 정확히 동일: a=A·cosφ, b=A·sinφ).
@@ -851,6 +868,10 @@ class DoasFitter:
                        # 기체 계수 단위. 조건부(반환 튜플의 c_perr)와 **나란히** 쓰라고
                        # 따로 낸다 — 기존 열을 덮지 않는다.
                        "perr_joint": perr_joint.tolist(),
+                       # residual-correlation (sandwich) error, gas coefficient units like
+                       # c_perr; NaN when it could not be formed. resid_acf1 = lag-1 ACF.
+                       "perr_corr": c_perr_corr.tolist(),
+                       "resid_acf1": resid_acf1,
                        # active_vars 이름 → 그 파라미터의 결합 표준오차(px 단위).
                        # 못 구했으면 **빈 dict** — 0 으로 채우면 "오차 없음"이라는
                        # 거짓 주장이 된다(perr_joint 와 같은 규약).
@@ -861,6 +882,50 @@ class DoasFitter:
                        "cond_normalized": _safe_cond(
                            (A_f_w / s_fin)[:, keep_mask])}
         return result, diagnostics
+
+
+RESID_ACF_MAX_LAG = 120
+
+
+def _acf_lag(r, k):
+    """Lag-k autocorrelation of r about its mean (biased estimator, as in residual_acf)."""
+    r = np.asarray(r, float)
+    rc = r - r.mean()
+    g0 = float(rc @ rc)
+    if g0 <= 0 or k >= len(r):
+        return float("nan")
+    return float(rc[:-k] @ rc[k:]) / g0
+
+
+def residual_acf(r, max_lag=RESID_ACF_MAX_LAG):
+    """ρ_0..ρ_L of a fit residual, truncated at the first non-positive lag.
+
+    The "trunc" estimator of diagnostics/residual_corr_2026-09-30 (manuscript §3.4): positive
+    short-range correlation is kept, the noisy tail is not summed. ρ_0 = 1. A constant or empty
+    residual gives [1] (white)."""
+    r = np.asarray(r, float)
+    n = len(r)
+    rc = r - r.mean() if n else r
+    g0 = float(rc @ rc) / n if n else 0.0
+    out = [1.0]
+    if g0 <= 0:
+        return np.array(out)
+    for k in range(1, min(max_lag, n - 1) + 1):
+        v = float(rc[:-k] @ rc[k:]) / n / g0
+        if v <= 0:
+            break
+        out.append(v)
+    return np.array(out)
+
+
+def toeplitz_quadform_diag(G, rho):
+    """diag(G · Toeplitz(ρ) · Gᵀ) without forming the n×n matrix: Σ_k ρ_|k| Σ_i G_i G_{i+k}.
+    G is p×n, ρ = residual_acf(...) (ρ_0 = 1). Cost O(p·n·len(ρ))."""
+    G = np.asarray(G, float)
+    q = rho[0] * np.einsum("ij,ij->i", G, G)
+    for k in range(1, len(rho)):
+        q = q + 2.0 * rho[k] * np.einsum("ij,ij->i", G[:, :-k], G[:, k:])
+    return q
 
 
 def alpha_fit_scale(alpha):

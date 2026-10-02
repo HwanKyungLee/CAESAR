@@ -272,6 +272,10 @@ class SaveExportMixin:
                         f"# Allow Negative Gas (±Neg): {neg}",
                         f"# Auto QC: {qc_str}",
                         "# Excluded rows: gas columns NaN; pre-exclusion values in {gas}_preQC, Status_preQC",
+                        "# Error columns (1 sigma, ppb): {gas}_Error = fit covariance, white residual (product column); "
+                        "{gas}_ErrorCorr = same fit with the residual autocorrelation (sandwich); "
+                        "{gas}_ErrorJoint = incl. shift/squeeze; {gas}_MDL = 3 x {gas}_Error. "
+                        "None contains the I0/R/etalon structural terms.",
                         "# Reference Masks: " + ("; ".join(
                             f"{r['name']} " + (f"keep px {r['mask']['range'][0]}-{r['mask']['range'][1]}"
                                                if r['mask'].get('mode') == 'manual'

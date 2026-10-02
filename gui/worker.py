@@ -287,12 +287,15 @@ class AnalysisWorker(QThread):
         self._last_active_vars = list(active_vars or [])
         self._last_underdetermined = bool(diag.get("underdetermined"))
         self._last_perr_joint = diag.get("perr_joint")
+        self._last_perr_corr = diag.get("perr_corr")
+        self._last_resid_acf1 = diag.get("resid_acf1", float("nan"))
         return result
 
-    def _joint_error_ppb(self, gi, nm, scale_factor, is_linear_mode, n_air):
+    def _joint_error_ppb(self, gi, nm, scale_factor, is_linear_mode, n_air, attr='_last_perr_joint'):
         """A8-2 결합 오차를 ppb로. 조건부 `<gas>_Error`와 **같은 환산**을 쓴다.
-        못 구했으면 NaN — 0으로 채우면 '오차 없음'이라는 거짓 주장이 된다."""
-        pj = getattr(self, '_last_perr_joint', None)
+        못 구했으면 NaN — 0으로 채우면 '오차 없음'이라는 거짓 주장이 된다.
+        attr='_last_perr_corr' → 같은 환산으로 잔차상관(sandwich) 오차."""
+        pj = getattr(self, attr, None)
         if not pj or gi >= len(pj):
             return float('nan')
         v = float(pj[gi])
@@ -355,6 +358,8 @@ class AnalysisWorker(QThread):
         result['Fit_Status'] = str(t.get("status") or "")
         result['Bound_Params'] = ",".join(self._bound_param_names())
         result['Underdetermined'] = int(bool(getattr(self, '_last_underdetermined', False)))
+        # lag-1 autocorrelation of the fit residual — what <gas>_ErrorCorr corrects for
+        result['Resid_ACF1'] = float(getattr(self, '_last_resid_acf1', float('nan')))
 
     def _low_signal_retry(self, rms, signal_mean):
         """`rms >= mean|신호| × ok_rms_threshold` — **재시도를 걸지** 판단한다.
@@ -1098,6 +1103,10 @@ class AnalysisWorker(QThread):
                     # 그대로 두고 **나란히** 낸다 — 두 값의 비가 논문 재료다.
                     result[f"{nm}_ErrorJoint"] = self._joint_error_ppb(
                         gi, nm, scale_factor, is_linear_mode, n_air)
+                    # Same fit, residual not assumed white (sandwich, manuscript §3.4/§4.6).
+                    # Alongside _Error, never instead of it — _Error stays the product column.
+                    result[f"{nm}_ErrorCorr"] = self._joint_error_ppb(
+                        gi, nm, scale_factor, is_linear_mode, n_air, attr='_last_perr_corr')
                     result[f"{nm}_Shift"] = opt_shifts[gi]
                     result[f"{nm}_Squeeze"] = opt_squeezes[gi]
 
