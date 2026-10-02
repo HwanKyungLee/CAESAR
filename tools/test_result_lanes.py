@@ -315,6 +315,20 @@ def test_png_of_fit_is_the_lanes(w):
     assert im.width() == 2400 and im.height() > 400, (im.width(), im.height())
 
 
+def test_stats_follow_open_file(w):
+    """2026-10-02 R8: Σ Stats showed the previous fit while a CSV was open; H2O-scale values
+    (~1e-13) printed as 0.000."""
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._reload()
+    w._fit_cache["gases"]["CHOCHO"] = w._fit_cache["gases"]["CHOCHO"] * 1e-13
+    line = next(s for s in w._stats_lines() if s.startswith("CHOCHO"))
+    assert "0.000" not in line and "e-1" in line, line
+    w._path = _write_conc_csv(d)
+    w._reload()
+    assert w._stats_lines() is None, "stats of the previous fit file while a CSV is open"
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -327,7 +341,8 @@ def main() -> int:
                      (test_residual_refuses_without_meta, (w,)),
                      (test_non_fit_restores_old_plots, (w,)),
                      (test_view_toggles_leave_non_fit_alone, (w,)),
-                     (test_png_of_fit_is_the_lanes, (w,))):
+                     (test_png_of_fit_is_the_lanes, (w,)),
+                     (test_stats_follow_open_file, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")

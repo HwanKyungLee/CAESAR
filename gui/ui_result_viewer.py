@@ -1556,9 +1556,10 @@ class ResultViewerWidget(QWidget):
         self._stats_lbl.setText(f"Merged: {os.path.basename(out)} ({len(rows)} rows{dmsg})")
 
     def _stats_arrays(self):
-        """현재 fit 캐시에서 (QC숨김·구간 반영) 선택마스크 반환."""
+        """현재 fit 캐시에서 (QC숨김·구간 반영) 선택마스크 반환. Only while a fit is open —
+        _fit_cache may hold an earlier file (2026-10-02 audit R8: CSV open, stats of old fit)."""
         t = self._fit_cache
-        if not t:
+        if not t or getattr(self, "_current_kind", None) != "fit":
             return None, None
         hide = self._qc_mask(t)
         sel = np.ones(len(t["row_idx"]), bool) & ~hide
@@ -1569,10 +1570,25 @@ class ResultViewerWidget(QWidget):
         return t, sel
 
     def _show_stats(self):
-        t, sel = self._stats_arrays()
-        if t is None:
+        lines = self._stats_lines()
+        if lines is None:
             QMessageBox.information(self, "Stats", "Open a fit result first.")
             return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Stats (ppb)")
+        dlg.resize(720, 380)
+        lay = QVBoxLayout(dlg)
+        ed = QPlainTextEdit("\n".join(lines))
+        ed.setReadOnly(True)
+        ed.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
+        lay.addWidget(ed)
+        dlg.show()
+
+    def _stats_lines(self):
+        """Stats table lines for the open fit result, or None when no fit is open."""
+        t, sel = self._stats_arrays()
+        if t is None:
+            return None
         t0, t1 = self._region_times()
         rng = (f"{t0:%Y-%m-%d %H:%M} ~ {t1:%Y-%m-%d %H:%M}" if t0 else "all")
         lines = [f"File: {os.path.basename(t['path'])}",
@@ -1590,8 +1606,9 @@ class ResultViewerWidget(QWidget):
                 continue
             tr = trend_per_hour(tt[sel], y[sel]) if tt is not None else None
             trs = f"  {tr[0]:>10.4g} {tr[1]:>8.2g}" if tr else ""
-            lines.append(f"{g:<10} {v.size:>6} {np.mean(v):>9.3f} {np.median(v):>9.3f} "
-                         f"{np.std(v):>8.3f} {np.min(v):>8.2f} {np.max(v):>8.2f}{trs}")
+            # %g, not %f: H2O sits near 1e-13 and printed as 0.000 everywhere (R8/R20)
+            lines.append(f"{g:<10} {v.size:>6} {np.mean(v):>9.3g} {np.median(v):>9.3g} "
+                         f"{np.std(v):>8.3g} {np.min(v):>8.3g} {np.max(v):>8.3g}{trs}")
         r = t["rms"][sel]
         r = r[np.isfinite(r)]
         if r.size:
@@ -1601,15 +1618,7 @@ class ResultViewerWidget(QWidget):
         lines.append("trend = straight-line slope over the range (ppb per hour). ± SE assumes "
                      "independent residuals —")
         lines.append("with autocorrelated data (most time series) the real uncertainty is larger.")
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Stats (ppb)")
-        dlg.resize(720, 380)
-        lay = QVBoxLayout(dlg)
-        ed = QPlainTextEdit("\n".join(lines))
-        ed.setReadOnly(True)
-        ed.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
-        lay.addWidget(ed)
-        dlg.show()
+        return lines
 
     def _export_png(self):
         """현재 화면의 그래프를 고해상도(폭 2400px) PNG 합본으로 저장."""
