@@ -127,6 +127,31 @@ def _robust_range(series, lines=()):
     return float(lo - pad), float(hi + pad)
 
 
+class _ElidedLabel(QLabel):
+    """Path label that elides in the middle instead of widening the window — a full raw path set the
+    minimum width to 1219 logical px, off-screen at 1366×768 @150 % (2026-10-02 audit g150a)."""
+
+    def __init__(self, text=""):
+        super().__init__()
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text) -> None:
+        self._full = text
+        self._elide()
+
+    def text(self) -> str:
+        return self._full
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._elide()
+
+    def _elide(self) -> None:
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(self.width() - 8, 40)))
+
+
 class _Card(QFrame):
     """현재 값 카드 — 제목 · 큰 값 · 보조 줄. 왼쪽 띠 색이 등급."""
 
@@ -214,9 +239,9 @@ class DashboardWindow(QMainWindow):
 
         # 2) 폴더 · Augur 데이터 폴더 · 시각 기준
         info = QHBoxLayout()
-        self.lbl_folder = QLabel("No folder selected")
+        self.lbl_folder = _ElidedLabel("No folder selected")
         self.lbl_folder.setStyleSheet(f"color:{VIGIL.dim}; padding:0 4px;")
-        self.lbl_data = QLabel("Augur data: not set")
+        self.lbl_data = _ElidedLabel("Augur data: not set")
         self.lbl_data.setStyleSheet(f"color:{VIGIL.dim}; padding:0 4px;")
         self.lbl_data.setToolTip("Where this PC keeps Augur outputs (FitSets, wavelength calibrations, references).\n"
                                  "Needed only when the profile's paths were made on another PC.")
@@ -228,8 +253,8 @@ class DashboardWindow(QMainWindow):
         self.cb_tz.setCurrentText(self._tz)
         self.cb_tz.setToolTip("Time zone for the time axis, tables, cards and log (display only)")
         self.cb_tz.currentTextChanged.connect(self._on_tz)
-        info.addWidget(self.lbl_folder, stretch=1)
-        info.addWidget(self.lbl_data)
+        info.addWidget(self.lbl_folder, stretch=2)
+        info.addWidget(self.lbl_data, stretch=1)
         info.addWidget(self.btn_data)
         info.addSpacing(12)
         info.addWidget(QLabel("Time:"))

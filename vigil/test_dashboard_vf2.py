@@ -277,6 +277,27 @@ def test_lifecycle():
               and recs[0]["last_ts"] == sl.tail(3)[0]["ts"], recs)
 
 
+def test_min_width():
+    print("[11] fits 1366x768 @150 % (911 logical px)")
+    from PyQt6.QtWidgets import QApplication
+    from vigil.alert_engine import P0
+    from vigil.dashboard.dashboard_window import DashboardWindow
+    win = DashboardWindow(title="t", tz="UTC")
+    long_path = "C:/GHL/2026 yeosu/RAW/hot/06/" + "a very long campaign folder name/" * 4 + "2026-06-03"
+    win.set_watch_dir(long_path)
+    win.set_data_root("C:/GHL/CAESAR/Output/" + "long augur data root/" * 4)
+    win.set_results([("liveness", P0, "measurement stopped? — last row 49s ago (limit 10s) " * 5, {})])
+    win.set_status(P0, "P0 ×1")
+    win.update_cards([{"key": k, "title": f"Card {k}", "value": "1346398.96 ppb", "sub": "concentration",
+                       "status": P0} for k in range(12)])
+    win.show()
+    QApplication.processEvents()
+    w = win.minimumSizeHint().width()
+    check("minimum width ≤ 911 with long path, badge and 12 cards", w <= 911, w)
+    check("path label keeps the full text", win.lbl_folder.text() == f"Watching: {long_path}")
+    win.close()
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -290,6 +311,7 @@ def main():
     test_badge_cause()
     test_close_confirm()
     test_lifecycle()
+    test_min_width()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 
