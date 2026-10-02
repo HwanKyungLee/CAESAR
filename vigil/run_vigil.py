@@ -83,6 +83,12 @@ class VigilApp:
         self.profiles = ProfileSet.load(profile_dir)
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
+        # 어느 채널 정의로 감시하나 — 측정 PC 는 USB 로 받아 git 으로 확인할 수 없으니 파일·판·내용
+        # 해시를 남긴다(Augur 알파 헤더 raw_layout 의 profile= 와 같은 문자열 — 둘을 대조하면 된다).
+        _profs = [p.provenance for p in self.profiles.profiles]
+        log.info("profiles: %s", ", ".join(_profs))
+        self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
+                              kind="profiles", profiles=_profs)
         self._watcher_kw = dict(max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
                                 cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec

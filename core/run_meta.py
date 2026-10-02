@@ -345,8 +345,11 @@ def layout_from_input(path: str) -> dict | None:
     lay, _ = layout_for(ncols, path)
     if lay is None:
         return {"ncols": ncols, "campaign": "unregistered"}
-    return {"ncols": ncols, "campaign": lay.campaign or lay.kind, "kind": lay.kind,
-            "source": lay.source}
+    out = {"ncols": ncols, "campaign": lay.campaign or lay.kind, "kind": lay.kind,
+           "source": lay.source}
+    if getattr(lay, "profile", ""):
+        out["profile"] = lay.profile
+    return out
 
 
 def meta_to_cfg(meta: dict, ref_dir: str | None = None) -> tuple:

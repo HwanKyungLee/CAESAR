@@ -472,6 +472,15 @@ class Profile:
     autodetect: Optional[Autodetect] = None
     saturation_adc_max: Optional[float] = None
     source_path: Optional[str] = None
+    # 프로파일 **파일 내용**의 sha1 앞 8자리 — 측정 PC 가 인터넷 없이 USB 로 받으면 git 으로 어느
+    # 판인지 확인할 수 없으니, 결과 헤더·Vigil 로그에 이걸 남겨 PC 끼리 같은 정의를 쓰는지 대조한다.
+    source_sha: Optional[str] = None
+
+    @property
+    def provenance(self) -> str:
+        """'caesar_hot.example.json@1.3.0#1a2b3c4d' — 어느 프로파일(파일·판·내용)을 썼나."""
+        name = os.path.basename(self.source_path) if self.source_path else self.profile_id
+        return f"{name}@{self.profile_version}#{self.source_sha or '?'}"
 
     # ── 편의 접근 ────────────────────────────────────────────────
     def signal_channels(self) -> list:
@@ -521,7 +530,8 @@ class Profile:
         return detected
 
     @classmethod
-    def from_dict(cls, d: dict, source_path: Optional[str] = None) -> "Profile":
+    def from_dict(cls, d: dict, source_path: Optional[str] = None,
+                  source_sha: Optional[str] = None) -> "Profile":
         try:
             return cls(
                 profile_id=d["profile_id"],
@@ -544,6 +554,7 @@ class Profile:
                                     if d.get("saturation", {}).get("adc_max") is not None
                                     else None),
                 source_path=source_path,
+                source_sha=source_sha,
             )
         except (KeyError, TypeError, ValueError) as e:
             raise ProfileError(f"Profile parse failed ({source_path or d.get('profile_id')}): {e}") from e
@@ -588,11 +599,15 @@ def validate_profile_dict(d: dict, schema: Optional[dict] = None) -> None:
 def load_profile(path: str, validate: bool = True,
                  schema: Optional[dict] = None) -> Profile:
     """단일 프로파일 JSON 로드(+검증) → Profile."""
-    with open(path, encoding="utf-8") as fh:
-        d = json.load(fh)
+    import hashlib
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    d = json.loads(raw.decode("utf-8"))
     if validate:
         validate_profile_dict(d, schema)
-    return Profile.from_dict(d, source_path=path)
+    # 줄바꿈은 해시 전에 맞춘다 — 같은 내용이 git 설정(autocrlf)에 따라 PC 마다 CRLF/LF 로 풀린다.
+    sha = hashlib.sha1(raw.replace(b"\r\n", b"\n")).hexdigest()[:8]
+    return Profile.from_dict(d, source_path=path, source_sha=sha)
 
 
 def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,

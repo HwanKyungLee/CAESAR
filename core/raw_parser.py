@@ -353,6 +353,9 @@ class CampaignLayout:
     # 채널 이름 → (압력 키 목록, 온도 키 목록) — 프로파일 채널 `cavity`(우선순위 순).
     # core/data_io 가 n_air 용 T/P 를 이걸로 고른다(채널 이름으로 분기하지 않는다).
     cavity: dict = field(default_factory=dict)
+    # 'caesar_hot.example.json@1.3.0#1a2b3c4d' — 어느 프로파일(파일·판·내용 해시)에서 왔나.
+    # 알파 헤더 raw_layout 줄·결과 meta 에 남는다(오프라인 PC 끼리 정의가 같은지 대조용).
+    profile: str = ""
 
     def spec_blocks(self) -> dict:
         out = {}
@@ -381,7 +384,7 @@ def _ranges_overlap(a, b) -> bool:
 
 def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
                              source="builtin", replace=False,
-                             date_range=None, cavity=None) -> CampaignLayout:
+                             date_range=None, cavity=None, profile="") -> CampaignLayout:
     """raw 구성 하나를 등록한다. 같은 ncols 에 **날짜 구간이 겹치는** 구성이 이미 있으면
     `replace=True` 라야 덮는다(겹치는 것들을 뺀다).
 
@@ -399,7 +402,7 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
             f"configuration a date_range that does not overlap")
     lay = CampaignLayout(ncols=int(ncols), kind=str(kind), channels=dict(channels),
                          hk_map=hk_map, campaign=str(campaign), source=str(source),
-                         date_range=dr, cavity=dict(cavity or {}))
+                         date_range=dr, cavity=dict(cavity or {}), profile=str(profile))
     for name, role in lay.channels.items():
         if isinstance(role, str) and role not in ROLE_BLOCKS:
             raise ValueError(f"Channel '{name}' has unknown role '{role}'. "
@@ -503,7 +506,8 @@ def load_campaign_layout(path: str, *, kind=None, replace=False,
     return register_campaign_layout(
         ncols, kind or prof.kind or str(prof.profile_id or "campaign"), channels, hk_map,
         campaign=str(prof.campaign or prof.profile_id or ""), source=os.path.basename(path),
-        replace=replace, date_range=prof.match.date_range, cavity=cavity)
+        replace=replace, date_range=prof.match.date_range, cavity=cavity,
+        profile=prof.provenance)
 
 
 def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:

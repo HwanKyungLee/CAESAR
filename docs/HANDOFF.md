@@ -12,6 +12,34 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-02 (4) — 리뷰 수정 + 채널 정의 단일화 (프로파일 JSON = 유일한 정본)
+
+**리뷰(b88cfe3..dcfb50b) 수정은 main 에 들어갔다**(fix/integration 병합, `b82cd6a`) — 측정 중 raw 캐시
+오염(`43365d6`, alpha_cache SCHEMA 3 → 기존 캐시 한 번 다시 파싱), 큰 그래프 NaN 솎아내기(`48b3cbc`),
+expr `**`·NaN 논리·오류 격리(`284ccc7`), etalon OFF DOF(`9e015fa` — etalon OFF 결과의 DOF·Chi2·Status 만
+바뀜), Vigil 커서 20 MB·짧은 행·1분 기록·핫 날짜 가드 등. 커밋 메시지에 수정 전 재현이 있다.
+
+**채널 정의 단일화** — 블록 이름·HK 열·채널별 압력/온도 센서·유효 날짜가 이제
+`vigil/profiles/*.json` **한 곳**에만 있다. 사용법·근거는 [`../vigil/profiles/README.md`](../vigil/profiles/README.md).
+- 1단계 `7370d83`: 프로파일 채널에 `cavity` 우선순위 목록, `kind`·`campaign`. Vigil 농도·R 이 그걸 읽음.
+- 2단계 `39c400f`: `core/raw_parser` 내장 표(HotHKMap 등) 삭제 → import 때 프로파일에서 레이아웃.
+  `CAMPAIGN_LAYOUTS` 는 열 수 → **목록**(같은 열 수에 날짜별 구성), 조회는 `layout_for(ncols, path)`.
+  `core/data_io` T/P 는 채널 cavity 목록(이름 분기 삭제). HK 키 이름이 프로파일 이름으로 바뀜
+  (`P_ANs`→`p_ans_cavity` 등 — 열·scale 동일, 옛 표는 `tools/test_raw_layout.py` 기준값).
+- 3단계: 출처 `파일@판#내용해시8` 을 알파 헤더 `raw_layout … profile=`, meta, Vigil `status.jsonl` 에 —
+  측정 PC 는 인터넷이 없어 git 대신 이 해시로 PC 끼리 같은 정의인지 대조한다.
+
+**출력 불변 증거**: G: 드라이브 raw(6/1 cold·hot, 6/2 cold) + 날짜 밖·6174·미등록 열 수 사본, 7파일 ×
+채널 1·2·3 × 행마다 flag·T·P·스펙트럼 해시가 단일화 전과 **전부 동일**(scratchpad 기준선 스크립트).
+
+**의도한 동작 차이 두 가지**: (1) 프로파일이 정의한 채널에서 cavity 목록의 센서가 **전부** 결측이면 예전엔
+kind 가 같은 아무 HK(예: 핫 templed1)를 썼고 이제는 기본값 25 °C·1013.25 mbar + 경고 — 목록 끝이
+cell_heater(늘 유효)라 실데이터에선 안 걸린다. (2) 결과 헤더 raw_layout `source` 가 `builtin` → 프로파일 파일명.
+
+**남은 것**: `tools/channel_map.json` 의 채널→wavecal 폴더가 프로파일 `wl_dir` 와 같은 사실의 두 번째
+사본이다(roi1/roi2 미결 2건, test_raw_layout [5]) — 미결이 풀리면 프로파일로 합칠 것. 6176열처럼 짧은 헤더행이
+다른 등록 열 수와 우연히 맞으면 그 구성으로 판정되는 함정(합성 사본에서 확인, 실데이터 미발견).
+
 ## 2026-10-02 (3) — R 생성도 같은 캐시 + 알파와 공유
 
 - R 생성의 모든 진입점(`_RTrendWorker`·`_ChannelRWorker`·`rt_precompute`)이 `scan_directory` →

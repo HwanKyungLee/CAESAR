@@ -10,8 +10,8 @@
 - **col 2053–4100 (청색 LED, 'ch1', 핏창 430–462 nm, roi2) = ΣANs 300 °C / col 4101–6148 (469 nm LED, 'ch2', 444–471 nm, roi1) = ΣPNs 180 °C.**
 - 2026-09-25~27에 쓴 'ch2 = 300 °C'는 **오판**이었다(철회). 근거·영향 목록: [`CHANNEL_IDENTITY_YEOSU2026.md`](CHANNEL_IDENTITY_YEOSU2026.md).
 - raw 블록 번호·라벨·기억만으로 채널을 정하지 말 것 — 8/11 이후 광섬유 배치가 바뀌었다. **LED 스펙트럼 모양**으로 판단.
-- `core/raw_parser.py`는 6181열 파일에 파일명 날짜 2026-05-01~08-31일 때만 ANs/PNs 이름을 붙인다(그 밖은 ch1/ch2).
-- 압력 센서 짝(2053 ↔ `P_ANs` 6164, 4101 ↔ `P_PNs` 6162)은 `core/data_io.py`가 채널 정체로 고른다(`87028c4`). R 경로의 `col_press` 인자는 받기만 하고 안 쓰인다(`data_io` 경유) — 그 상수를 근거로 삼지 말 것.
+- **채널 정의(블록 이름·HK 열·채널별 압력/온도 센서·유효 날짜)는 `vigil/profiles/*.json` 한 곳**이다(2026-10-02 단일화) — Augur(`core/raw_parser`가 import 때 읽음)와 Vigil이 같은 파일을 본다. 핫 프로파일은 파일명 날짜 2026-05-01~08-31에만 ANs/PNs 이름을 붙인다(`match.date_range`, 그 밖은 ch1/ch2). 채널 추가·배치 변경은 JSON만 고친다: `vigil/profiles/README.md`.
+- 압력 센서 짝(2053 ↔ `p_ans_cavity` 6164, 4101 ↔ `p_pns_cavity` 6162 — 옛 이름 `P_ANs`/`P_PNs`)은 프로파일 채널의 `cavity` 목록이 정하고 `core/data_io.py`가 그걸 따른다. R 경로의 `col_press` 인자는 받기만 하고 안 쓰인다(`data_io` 경유) — 그 상수를 근거로 삼지 말 것.
 
 ## 뭘 만드는 저장소인가
 
@@ -41,7 +41,7 @@
 2. **물리 > 통계**: 통계(F검정·perr·MDL)만으로 레퍼런스/세팅을 심판하면 과적합을 상 준다
    (O4 사건이 실증 — `fit_optimizer_handoff.md` §12, §14-C). **T1(자기일관성)은 절대 단독 심판이 될 수 없다.**
    외부 진실(T3) > 물리 건전성(T2) > 자기일관성(T1) 순.
-3. **단일 출처 원칙**: raw 컬럼 배치는 `core/raw_parser.py`, Rayleigh 물리는 `core/physics.py`,
+3. **단일 출처 원칙**: raw 컬럼 배치·채널 정의는 `vigil/profiles/*.json`(읽는 건 `core/raw_parser.py`), Rayleigh 물리는 `core/physics.py`,
    QC 문턱식은 `core/result_io.py` 한 곳에만 — 사본을 만들지 말 것.
 4. **재현성**: 결과 파일 헤더에 git 해시 + 세팅 전체가 자동 기록되어야 함. 자동 처리는 사람 승인 없이 적용 금지.
 

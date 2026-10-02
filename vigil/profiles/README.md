@@ -80,6 +80,23 @@
 고르며, Vigil 은 그 채널의 농도·R·램프 감시기를 따로 만든다. 날짜가 어느 프로파일에도 안 드는
 같은 열 수 파일은 Augur 에선 구조적 이름(ch1/ch2)+옛 슬롯 규칙, Vigil 에선 "NOT monitored" P2.
 
+## 측정 PC 배포 (인터넷 없음 — USB)
+
+측정 PC 는 git 을 쓸 수 없다고 보고 설계했다.
+
+- **옮기는 단위는 프로그램 폴더 전체**(이 폴더 `vigil/profiles/` 포함). Augur 와 Vigil 이 같은
+  폴더의 같은 JSON 을 읽으므로 따로 설정할 것이 없다. FitSet·wavecal·레퍼런스는 Augur `Output`
+  폴더 쪽이라 같이 옮기고, Vigil 대시보드에서 그 폴더를 **Augur 데이터 폴더**로 지정한다
+  (`tools/bundle_vigil_deps.py` 가 필요한 것만 모아 준다).
+- **프로파일만 바뀌었으면** 그 JSON 을 모든 PC 의 `vigil/profiles/` 에 덮어 쓰고 Augur·Vigil 을
+  다시 켠다(import·시작 때 한 번 읽는다).
+- **어느 PC 가 어느 정의를 쓰는지는 해시로 대조한다.** 프로파일마다
+  `파일@판#내용해시8` 문자열(예 `caesar_hot.example.json@1.3.0#af04dbf2`)이 남는다:
+  - Vigil — 시작할 때 `status.jsonl` 에 `profiles loaded: …`(kind=profiles)
+  - Augur — 알파 헤더 `# raw_layout: … profile=…`, raw 입력 결과의 meta `raw_layout.profile`
+  같은 문자열이면 같은 정의다(줄바꿈 CRLF/LF 차이는 해시에서 무시). 내용을 바꾸면
+  `profile_version` 도 올릴 것 — 해시는 바뀐 걸 알려 줄 뿐 무엇이 바뀌었는지는 판 번호와 기록이 말한다.
+
 ## HK 열 근거 (옛 core/raw_parser 내장 표에서 옮김, 2026-10-02)
 
 옛 이름 → 프로파일 키: `ANs_oven`→`oven_ans_setpoint`, `PNs_oven`→`oven_pns_setpoint`,

@@ -143,6 +143,20 @@ def test_profile_layouts_match_legacy(d):
           (RP.hk_col(6179, "p_cavity"), RP.hk_col(6181, "p_ans_cavity"), RP.hk_col(6181, "nope"))
           == (6160, 6164, None))
 
+    # 출처: 오프라인 PC 끼리 같은 정의를 쓰는지 대조할 문자열(파일@판#내용해시)
+    import re
+    from core import run_meta
+    prov = RP.layout_for(6181)[0].profile
+    check("레이아웃 출처 = 파일@판#해시8",
+          re.fullmatch(r"caesar_hot\.example\.json@\d+\.\d+\.\d+#[0-9a-f]{8}", prov or "") is not None, prov)
+    lay_in = run_meta.layout_from_input(os.path.join(d, "2026-06-01-001 hot.dat"))
+    check("raw 입력 meta 에 profile", (lay_in or {}).get("profile") == prov, lay_in)
+    ap = os.path.join(d, "x_alpha_trace.dat")
+    with open(ap, "w", encoding="utf-8") as fh:
+        fh.write(f"# raw_layout: ncols=6181 campaign=2026-yeosu parser=DataIO-dynamic profile={prov}\n1 2\n")
+    check("알파 헤더의 profile= 이 meta 로 왕복", (run_meta.layout_from_input(ap) or {}).get("profile") == prov,
+          run_meta.layout_from_input(ap))
+
 
 def test_unknown_ncols(d):
     print("[2] 미등록 ncols → 구조적 폴백")
