@@ -23,3 +23,5 @@ Vigil 고유 원칙(설계 §2): raw 는 읽기만, 감시기는 죽지 않는�
 - **남은 것** — VC 3–4(퍼지 직후 제외, 재생 검증), VF1 ①②③⑤⑥⑦(버린 행 로그)⑧, VF2 ①–⑤⑦–⑬, VF3 ②–⑥⑧, VF4.
   워크트리를 origin/main 기준으로 다시 만들었다(fix/vf1-ingest, fix/vf2-dashboard, fix/vc-purge).
   메인 체크아웃(C:\GHL\CAESAR)은 다른 세션이 origin/main 병합 중(MERGE_HEAD) — 건드리지 않는다.
+- 2026-10-03 — VF3 ② HK 히스테리시스, ③ R 인접 ZA·He 짝(실데이터 05-20 확인), ⑥ 프로파일 의미 검사·jsonschema 없음 경고,
+  ⑧ 같은 열수 모호 프로파일 경고 (커밋 7434f2c d9d7116 684c8f1). 남은 것: VF3 ④ 기준선 축적 중 SKIP, VF4 나머지(역행·도약·rollover·헤더만), 3단계 UX.
