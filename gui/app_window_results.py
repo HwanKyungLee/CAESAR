@@ -338,15 +338,23 @@ class ResultsQCMixin:
     def reapply_qc(self):
         """재핏 없이 라벨(Chi2) → Kalman Q/R → 자동 QC 순서로 후처리 재적용."""
         if not getattr(self, 'results', None):
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Reapply", "No analysis results. Run a fit first.")
             return
+
+        def _excluded():
+            return [str(r.get('Status', '')).startswith(('QC-', 'Settling')) for r in self.results]
+        was_excl = _excluded()
         self._reapply_quality_label()
         self._reapply_kalman()
         changed = self._apply_auto_qc()
         self._refresh_after_qc(changed)
-        from PyQt6.QtWidgets import QMessageBox
+        # `changed` mixes newly excluded rows with restored / relabelled ones — count
+        # each direction instead of calling all of them "Excluded".
+        now_excl = _excluded()
+        n_new = sum(1 for a, b in zip(was_excl, now_excl) if b and not a)
+        n_restored = sum(1 for a, b in zip(was_excl, now_excl) if a and not b)
         K = self.spin_qc_k.value() if hasattr(self, 'spin_qc_k') else 8.0
+        qc_on = hasattr(self, 'chk_qc') and self.chk_qc.isChecked() and K > 0
         kq = self.spin_kalman_q.value() if hasattr(self, 'spin_kalman_q') else 0.0005
         kr = self.spin_kalman_r.value() if hasattr(self, 'spin_kalman_r') else 0.050
         rms_pct = self.spin_rms_thresh.value() if hasattr(self, 'spin_rms_thresh') else 10.0
@@ -356,9 +364,11 @@ class ResultsQCMixin:
         _n_settle = sum(1 for r in self.results if str(r.get('Status', '')) == 'Settling')
         QMessageBox.information(self, "Reapply",
                                 f"Re-judged OK/Unstable (Chi2), Kalman (Q={kq}, R={kr}), "
-                                f"QC (K={K:g}){_settle_str}.\n"
-                                f"Excluded: {len(changed)} / {len(self.results):,} rows"
-                                + (f"  (settling {_n_settle})" if _settle_on else ""))
+                                + (f"QC (K={K:g})" if qc_on else "QC off")
+                                + f"{_settle_str}.\n"
+                                f"Excluded: {sum(now_excl):,} / {len(self.results):,} rows"
+                                + (f"  (settling {_n_settle})" if _settle_on else "")
+                                + f"\nThis reapply: {n_new:,} newly excluded, {n_restored:,} restored")
 
     def _reapply_quality_label(self):
         """각 행의 OK/Unstable 을 Chi2 로 재판정 — 워커와 **같은 함수**를 쓴다

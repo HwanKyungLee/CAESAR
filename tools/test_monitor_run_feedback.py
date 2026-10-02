@@ -202,6 +202,23 @@ def test_table_cap_note_survives_completion():
     assert "5 of 12 rows" in h.popups[-1][2]
 
 
+def test_reapply_reports_qc_off_and_restored_rows():
+    """R10: 'QC (K=8)' was shown with QC off, and restored rows were 'Excluded'."""
+    from PyQt6.QtWidgets import QCheckBox
+    rows = [_row(i) for i in range(6)]
+    for r in rows[:2]:                          # excluded by an earlier auto QC
+        r['_qc_orig'] = {'NO2': 1.0}
+        r['_qc_orig_status'] = 'OK'
+        r['Status'] = 'QC-Auto (rms=1e-3>1e-4)'
+        r['NO2'] = float('nan')
+    h = _host(rows, [1])
+    h.chk_qc = QCheckBox()                      # unchecked → QC off
+    h.reapply_qc()
+    msg = h.popups[-1][2]
+    assert "QC off" in msg and "K=" not in msg, msg
+    assert "Excluded: 0 /" in msg and "0 newly excluded, 2 restored" in msg, msg
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):
