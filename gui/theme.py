@@ -184,6 +184,72 @@ def apply_augur(app) -> None:
         button=t.button, button_text=t.ink, highlight=t.select, highlighted_text="#FFFFFF",
         mid=t.rule, dark="#A8A396", light="#FFFFFF", disabled_text=t.faint, link=t.select,
         tooltip_base=t.paper, tooltip_text=t.ink, placeholder=t.faint))
+    app.setStyleSheet(_augur_qss(t))
+    keep_windows_on_screen(app)
+
+
+def _augur_qss(t) -> str:
+    """App-wide widget styling (2026-10-03): sections as cards, one button language.
+    Roles are a dynamic property — `set_role(button, "primary" | "danger")` — so a window marks
+    *what a button does*, not its colours. Per-widget setStyleSheet still wins where it is set."""
+    return f"""
+QGroupBox {{ background: {t.surface}; border: 1px solid {t.rule}; border-radius: 6px;
+             margin-top: 1.1em; padding: 6px 6px 6px 6px; }}
+QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; color: {t.ink};
+                    font-weight: bold; }}
+QPushButton {{ background: {t.button}; border: 1px solid #CFC9BB; border-radius: 4px;
+               padding: 3px 6px; min-height: 1.5em; }}
+QPushButton:hover {{ background: #E1DCCF; }}
+QPushButton:pressed {{ background: #D6D0C1; }}
+QPushButton:disabled {{ color: {t.faint}; background: #EEEBE3; border-color: #E2DDD2; }}
+QPushButton:flat {{ background: transparent; border: none; }}
+QPushButton[role="primary"] {{ background: {t.select}; color: #FFFFFF; border-color: #2F519A;
+                              font-weight: bold; }}
+QPushButton[role="primary"]:hover {{ background: #33579F; }}
+QPushButton[role="primary"]:disabled {{ background: #B9C6E2; color: #F4F6FA; border-color: #B9C6E2; }}
+QPushButton[role="danger"] {{ color: {t.fail}; border-color: #E2B4B0; font-weight: bold; }}
+QPushButton[role="danger"]:disabled {{ color: {t.faint}; border-color: #E2DDD2; font-weight: normal; }}
+QTabBar::tab:selected {{ font-weight: bold; }}
+QToolTip {{ background: {t.paper}; color: {t.ink}; border: 1px solid {t.rule}; padding: 4px; }}
+"""
+
+
+_fit_hooked = False
+
+
+def keep_windows_on_screen(app) -> None:
+    """A window (dialogs included) larger than the screen's work area is shrunk to it and centred
+    when it gets focus — several dialogs open at 1100×760 or larger, taller than a 1366×768
+    laptop at 150 % (512 logical px), with their buttons off-screen (UX audit 2026-10-02 s6).
+    Hooked on focusWindowChanged (rare) rather than an app-wide event filter, which would run
+    Python on every paint and mouse event."""
+    global _fit_hooked
+    if _fit_hooked:
+        return
+    _fit_hooked = True
+
+    def _fit(win):
+        if win is None or win.screen() is None:
+            return
+        area = win.screen().availableGeometry()
+        m = win.frameMargins()
+        w = min(win.width(), area.width() - m.left() - m.right())
+        h = min(win.height(), area.height() - m.top() - m.bottom())
+        if (w, h) == (win.width(), win.height()):
+            return
+        win.resize(max(w, 200), max(h, 150))
+        win.setPosition(area.left() + (area.width() - w - m.left() - m.right()) // 2 + m.left(),
+                        area.top() + (area.height() - h - m.top() - m.bottom()) // 2 + m.top())
+
+    app.focusWindowChanged.connect(_fit)
+
+
+def set_role(widget, role) -> None:
+    """Mark a button's role for the app stylesheet ("primary", "danger", or None to clear)."""
+    widget.setProperty("role", role or "")
+    st = widget.style()
+    st.unpolish(widget)
+    st.polish(widget)
 
 
 def apply_vigil(app) -> None:
