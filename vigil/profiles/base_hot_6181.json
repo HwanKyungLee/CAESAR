@@ -1,0 +1,271 @@
+{
+  "profile_id": "caesar_hot_base",
+  "profile_version": "1.0.0",
+  "description": "CAESAR Hot raw 구조(6181열) — 기본 프로파일. 셀 정체 없음: 블록 ch0(5–2052)·ch1(2053–4100)·ch2(4101–6148), HK 열지도·flag·주기만. 빛이 들어오는 블록(role=auto)의 밝기·포화·HK·유입을 감시한다. 셀 이름·캐비티 센서·FitSet·R 은 미션 프로파일(base=caesar_hot_base)이 날짜 범위와 함께 얹는다 — 미션이 없는 날짜의 파일도 이걸로 감시된다(농도·R 만 빠짐).",
+  "instrument": "CAESAR",
+  "kind": "hot",
+  "match": {
+    "n_columns": 6181,
+    "filename_glob": "*Hot*.dat"
+  },
+  "header": {
+    "time_bytepack": {
+      "hi_col": 0,
+      "lo_col": 1,
+      "epoch": "year_start",
+      "unit": "centiseconds"
+    },
+    "exposure_col": 2,
+    "ccd_temp": {
+      "col": 3,
+      "scale": 0.01,
+      "unit": "degC"
+    },
+    "state_flag_col": 4
+  },
+  "flags": {
+    "sampling": [
+      1
+    ],
+    "shutdown": [
+      100
+    ],
+    "za_inject": [
+      500
+    ],
+    "za_setflow": [
+      501
+    ],
+    "za_wait_before": [
+      502
+    ],
+    "za_wait_after": [
+      503
+    ],
+    "he_inject": [
+      510
+    ],
+    "he_setflow": [
+      511
+    ],
+    "he_wait_before": [
+      512
+    ],
+    "he_wait_after": [
+      513
+    ],
+    "header": [
+      0
+    ]
+  },
+  "spectrum_block_width": 2048,
+  "channels": [
+    {
+      "id": "ch0",
+      "label": "ch0",
+      "role": "noise",
+      "columns": [
+        5,
+        2052
+      ]
+    },
+    {
+      "id": "ch1",
+      "label": "ch1",
+      "role": "auto",
+      "columns": [
+        2053,
+        4100
+      ]
+    },
+    {
+      "id": "ch2",
+      "label": "ch2",
+      "role": "auto",
+      "columns": [
+        4101,
+        6148
+      ]
+    }
+  ],
+  "autodetect": {
+    "first_spectrum_col": 5,
+    "signal_min_max": 2500,
+    "warmup_scans": 5
+  },
+  "hk": {
+    "start_col": 6149,
+    "fields": [
+      {
+        "key": "templed1",
+        "label": "LED1 temp",
+        "rel": 0,
+        "scale": 0.01,
+        "unit": "degC",
+        "alert": {
+          "warn": [
+            15,
+            45
+          ]
+        }
+      },
+      {
+        "key": "templed2",
+        "label": "LED2 temp",
+        "rel": 1,
+        "scale": 0.01,
+        "unit": "degC",
+        "alert": {
+          "warn": [
+            15,
+            45
+          ]
+        }
+      },
+      {
+        "key": "oven_ans_setpoint",
+        "label": "ANs oven SP",
+        "rel": 2,
+        "scale": 0.01,
+        "unit": "degC",
+        "nominal": 300,
+        "alert": {
+          "warn": [
+            295,
+            305
+          ],
+          "alarm": [
+            285,
+            315
+          ]
+        }
+      },
+      {
+        "key": "templed4",
+        "label": "LED4 temp",
+        "rel": 3,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "preheater",
+        "label": "Preheater T",
+        "rel": 4,
+        "scale": 0.01,
+        "unit": "degC",
+        "nominal": 38
+      },
+      {
+        "key": "oven_pns_setpoint",
+        "label": "PNs oven SP",
+        "rel": 5,
+        "scale": 0.01,
+        "unit": "degC",
+        "nominal": 180,
+        "alert": {
+          "warn": [
+            175,
+            185
+          ],
+          "alarm": [
+            165,
+            195
+          ]
+        }
+      },
+      {
+        "key": "cell_heater",
+        "label": "Cell heater SP",
+        "rel": 6,
+        "scale": 0.01,
+        "unit": "degC",
+        "nominal": 75
+      },
+      {
+        "key": "p_pns_cavity",
+        "label": "PNs cavity P",
+        "rel": 13,
+        "scale": 0.6895,
+        "unit": "mbar",
+        "nominal": 965,
+        "alert": {
+          "warn": [
+            930,
+            1000
+          ],
+          "alarm": [
+            880,
+            1050
+          ],
+          "phases": [
+            "sampling"
+          ]
+        }
+      },
+      {
+        "key": "p_ans_cavity",
+        "label": "ANs cavity P",
+        "rel": 15,
+        "scale": 0.6895,
+        "unit": "mbar",
+        "nominal": 915,
+        "alert": {
+          "warn": [
+            880,
+            950
+          ],
+          "alarm": [
+            830,
+            1000
+          ],
+          "phases": [
+            "sampling"
+          ]
+        }
+      },
+      {
+        "key": "tempcell1",
+        "label": "Cell temp 1",
+        "rel": 25,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "tempcell2",
+        "label": "Cell temp 2",
+        "rel": 26,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "tempcell3",
+        "label": "Cell temp 3 (not connected)",
+        "rel": 27,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "t_spectrometer",
+        "label": "Spectrometer T (reads 0)",
+        "rel": 28,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "unknown_rel31",
+        "label": "Unknown temp? (rel31)",
+        "rel": 31,
+        "scale": 0.01,
+        "unit": "degC"
+      }
+    ]
+  },
+  "saturation": {
+    "adc_max": 64000
+  },
+  "cadence": {
+    "scan_interval_sec": 1,
+    "file_rollover_sec": 3600,
+    "liveness_grace_sec": 10
+  }
+}

@@ -362,6 +362,8 @@ class CampaignLayout:
     # 'caesar_hot.example.json@1.3.0#1a2b3c4d' — 어느 프로파일(파일·판·내용 해시)에서 왔나.
     # 알파 헤더 raw_layout 줄·결과 meta 에 남는다(오프라인 PC 끼리 정의가 같은지 대조용).
     profile: str = ""
+    # 미션(셀 정체를 얹은 것)인가, 기본(구조)인가. 같은 열 수에서 날짜가 맞는 미션이 기본보다 먼저.
+    is_mission: bool = False
 
     def spec_blocks(self) -> dict:
         out = {}
@@ -390,7 +392,8 @@ def _ranges_overlap(a, b) -> bool:
 
 def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
                              source="builtin", replace=False,
-                             date_range=None, cavity=None, profile="") -> CampaignLayout:
+                             date_range=None, cavity=None, profile="",
+                             is_mission=False) -> CampaignLayout:
     """raw 구성 하나를 등록한다. 같은 ncols 에 **날짜 구간이 겹치는** 구성이 이미 있으면
     `replace=True` 라야 덮는다(겹치는 것들을 뺀다).
 
@@ -399,7 +402,9 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
     """
     dr = tuple(date_range) if date_range else None
     have = CAMPAIGN_LAYOUTS.get(int(ncols), [])
-    clash = [h for h in have if _ranges_overlap(h.date_range, dr)]
+    # 겹침은 **같은 층끼리만** 따진다 — 기본(구조)은 날짜와 무관한 바탕이고, 미션이 그 위에 얹힌다.
+    clash = [h for h in have if h.is_mission == bool(is_mission)
+             and _ranges_overlap(h.date_range, dr)]
     if clash and not replace:
         h = clash[0]
         raise ValueError(
@@ -408,7 +413,8 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
             f"configuration a date_range that does not overlap")
     lay = CampaignLayout(ncols=int(ncols), kind=str(kind), channels=dict(channels),
                          hk_map=hk_map, campaign=str(campaign), source=str(source),
-                         date_range=dr, cavity=dict(cavity or {}), profile=str(profile))
+                         date_range=dr, cavity=dict(cavity or {}), profile=str(profile),
+                         is_mission=bool(is_mission))
     for name, role in lay.channels.items():
         if isinstance(role, str) and role not in ROLE_BLOCKS:
             raise ValueError(f"Channel '{name}' has unknown role '{role}'. "
@@ -420,18 +426,29 @@ def register_campaign_layout(ncols, kind, channels, hk_map, *, campaign="",
 def layout_for(ncols, path=None):
     """(레이아웃, 날짜 구간 안인가) — 이 열 수·파일에 맞는 구성. 모르는 열 수면 (None, False).
 
-    path 의 파일명 날짜가 어느 구성의 date_range 안이면 그 구성(제한 없는 구성은 언제나 '안').
-    어느 구간에도 안 들면 그 열 수의 첫 구성을 **구간 밖**으로 돌려준다 — 블록 위치·HK 열은
-    쓰되 채널 이름은 주장하지 않는다(호출측 규약, `_detect_layout`). path 가 없으면 첫 구성."""
+    우선순위: ① 파일명 날짜가 맞는 **미션**(셀 정체) ② 그 열 수의 **기본(구조)** 프로파일 —
+    날짜와 무관하게 '안'(블록 이름은 ch0/ch1/ch2, 캐비티 센서 없음 → data_io 는 슬롯 규칙).
+    ③ 기본도 없으면 첫 미션을 **구간 밖**으로(블록·HK 는 쓰되 채널 이름은 주장하지 않는다 —
+    `_detect_layout`). path 가 없으면 날짜를 모르므로 첫 미션(없으면 기본)."""
     lays = CAMPAIGN_LAYOUTS.get(int(ncols)) if ncols else None
     if not lays:
         return None, False
+    missions = [l for l in lays if l.is_mission]
+    bases = [l for l in lays if not l.is_mission]
     if path is None:
-        return lays[0], True
-    for lay in lays:
+        return (missions or bases)[0], True
+    for lay in missions:
         if not lay.date_range or _in_date_range(str(path), None, lay.date_range):
             return lay, True
+    if bases:
+        return bases[0], True
     return lays[0], False
+
+
+def missions_not_covering(ncols, path) -> list:
+    """이 열 수의 미션 중 path 의 날짜를 안 덮는 것(경고용 — 그 파일은 기본 프로파일로 읽힌다)."""
+    return [l for l in CAMPAIGN_LAYOUTS.get(int(ncols), [])
+            if l.is_mission and l.date_range and not _in_date_range(str(path), None, l.date_range)]
 
 
 def hk_col(ncols, key, path=None):
@@ -442,7 +459,7 @@ def hk_col(ncols, key, path=None):
 
 
 def load_campaign_layout(path: str, *, kind=None, replace=False,
-                         validate=False, verbose=True) -> CampaignLayout:
+                         validate=False, verbose=True, source=None) -> CampaignLayout:
     """**캠페인 프로파일 JSON**(`vigil/profiles/*.json`)에서 raw 레이아웃을 등록.
 
     캠페인별 컬럼 지도는 그 파일이 갖고 있다(`match.n_columns`·`date_range`, `channels[].columns`·
@@ -477,7 +494,7 @@ def load_campaign_layout(path: str, *, kind=None, replace=False,
         warn.append(f"state_flag_col {hdr.state_flag_col} != core {COL_FLAG}")
 
     channels, cavity = {}, {}
-    for ch in prof.signal_channels():
+    for ch in prof.candidate_channels():          # signal + auto(기본 프로파일의 블록)
         if ch.columns is None:
             warn.append(f"channel '{ch.id}' has no columns (autodetect only) — skipped")
             continue
@@ -485,7 +502,9 @@ def load_campaign_layout(path: str, *, kind=None, replace=False,
         role = next((r for r, b in ROLE_BLOCKS.items() if b == block), block)
         name = str(ch.label or ch.id)
         channels[name] = role
-        cavity[name] = (tuple(ch.pressure_keys()), tuple(ch.temp_keys()))
+        pk, tk = tuple(ch.pressure_keys()), tuple(ch.temp_keys())
+        if pk or tk:                              # 센서를 정한 채널만(기본 프로파일 블록은 없음)
+            cavity[name] = (pk, tk)
 
     hk_map = {}
     for f in prof.hk.fields:
@@ -511,9 +530,10 @@ def load_campaign_layout(path: str, *, kind=None, replace=False,
 
     return register_campaign_layout(
         ncols, kind or prof.kind or str(prof.profile_id or "campaign"), channels, hk_map,
-        campaign=str(prof.campaign or prof.profile_id or ""), source=os.path.basename(path),
+        campaign=str(prof.campaign or (prof.profile_id if prof.is_mission else "")),
+        source=source or os.path.basename(path),
         replace=replace, date_range=prof.match.date_range, cavity=cavity,
-        profile=prof.provenance)
+        profile=prof.provenance, is_mission=prof.is_mission)
 
 
 def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
@@ -535,12 +555,18 @@ def autoload_campaign_layouts(profile_dir=None, *, verbose=True) -> list:
             return []
     known = {lay.source for lays in CAMPAIGN_LAYOUTS.values() for lay in lays}
     out = []
-    for path in sorted(_glob.glob(os.path.join(profile_dir, "*.json"))):
-        name = os.path.basename(path)
-        if name.startswith("_") or name in known:
+    try:                                         # 설치된 미션 패키지(<profile_dir>/missions/<이름>/)
+        from core.mission_package import installed_mission_files, missions_root
+        pkg = installed_mission_files(missions_root(profile_dir))
+    except Exception:                            # noqa: BLE001
+        pkg = []
+    for path in sorted(_glob.glob(os.path.join(profile_dir, "*.json"))) + pkg:
+        # 이름 = 프로파일 폴더 기준 상대경로(패키지마다 mission_*.json 이름이 같다)
+        name = os.path.relpath(path, profile_dir).replace("\\", "/")
+        if os.path.basename(path).startswith("_") or name in known:
             continue                             # _schema.json 등 메타 파일 · 이미 등록
         try:
-            out.append(load_campaign_layout(path, verbose=verbose))
+            out.append(load_campaign_layout(path, verbose=verbose, source=name))
             if verbose:
                 print(f"[raw_parser] Registered campaign layout: {name} "
                       f"(ncols={out[-1].ncols}, channels={list(out[-1].channels)})")
@@ -673,6 +699,17 @@ class RawParser:
         mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=KST)
 
         lay, in_range = layout_for(ncols, path)
+        if lay is not None and in_range and not lay.is_mission:
+            missed = missions_not_covering(ncols, path)
+            if missed:
+                # 이 열 수의 미션(셀 정체)이 이 날짜를 안 덮는다 — 기본(구조) 프로파일로 읽는다.
+                print(f"[raw_parser] {os.path.basename(path)}: no mission covers this date "
+                      f"({', '.join(f'{m.campaign or m.kind} {m.date_range}' for m in missed)}) "
+                      f"→ base profile, structural names {list(lay.spec_blocks())}",
+                      file=sys.stderr)
+                return FileLayout(
+                    path=path, ncols=ncols, kind=f"{lay.kind}(no mission)",
+                    hk_map=lay.hk_map, spec_blocks=lay.spec_blocks(), mtime=mtime)
         if lay is not None and not in_range:
             # 같은 열 수지만 캠페인 기간 밖 — 채널 이름은 주장하지 않는다(블록·HK는 유지).
             blocks = spec_blocks_for_ncols(ncols)
@@ -881,8 +918,8 @@ def block_channel_name(path: str, block_start: int):
     except OSError:
         return None
     lay, in_range = layout_for(fl.ncols, path)
-    if lay is None or not in_range:
-        return None
+    if lay is None or not in_range or not lay.is_mission:
+        return None              # 기본(구조) 프로파일의 ch1/ch2 는 셀 이름이 아니다 — 블록 번호만
     return lay.channel_at(block_start)
 
 

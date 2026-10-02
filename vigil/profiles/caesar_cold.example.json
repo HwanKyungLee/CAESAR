@@ -1,43 +1,29 @@
 {
   "profile_id": "caesar_cold_2026yeosu",
-  "profile_version": "1.1.0",
+  "profile_version": "1.2.0",
+  "base": "caesar_cold_base",
   "description": "CAESAR Cold-cavity raw layout (2026 Yeosu). PRIMARY=NO2 cell 1채널. core/raw_parser.py의 VALUE-INSPECTION 기록에서 파생한 기본 프로파일 — 값은 캠페인별로 복제·조정.",
-  "instrument": "CAESAR",
   "kind": "cold",
   "campaign": "2026-yeosu",
-
-  "match": {
-    "n_columns": 6179,
-    "filename_glob": "*Cold*.dat"
-  },
-
-  "header": {
-    "time_bytepack": { "hi_col": 0, "lo_col": 1, "epoch": "year_start", "unit": "centiseconds" },
-    "exposure_col": 2,
-    "ccd_temp": { "col": 3, "scale": 0.01, "unit": "degC" },
-    "state_flag_col": 4
-  },
-
-  "flags": {
-    "sampling": [1],
-    "shutdown": [100],
-    "za_inject": [500],
-    "za_setflow": [501],
-    "za_wait_before": [502],
-    "za_wait_after": [503],
-    "he_inject": [510],
-    "he_setflow": [511],
-    "he_wait_before": [512],
-    "he_wait_after": [513],
-    "header": [0]
-  },
-
-  "spectrum_block_width": 2048,
-
   "channels": [
-    { "id": "ch_legacy", "label": "legacy-ch3", "role": "noise",  "columns": [5, 2052] },
-    { "id": "ch_no2",    "label": "NO2",         "role": "signal", "columns": [2053, 4100],
-      "cavity": { "pressure_hk": ["p_cavity"], "temperature_hk": ["t_cavity", "t_spectrometer"] },
+    {
+      "id": "ch0",
+      "label": "legacy-ch3",
+      "role": "noise"
+    },
+    {
+      "id": "ch1",
+      "label": "NO2",
+      "role": "signal",
+      "cavity": {
+        "pressure_hk": [
+          "p_cavity"
+        ],
+        "temperature_hk": [
+          "t_cavity",
+          "t_spectrometer"
+        ]
+      },
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
@@ -45,42 +31,31 @@
         "target": "NO2",
         "throttle_sec": 10,
         "seed_narrow_px": 2.0,
-        "alert": { "conc_max_ppb": 100, "spike_ppb": 20, "rms_alarm": 5e-8, "flatline_n": 5 }
+        "alert": {
+          "conc_max_ppb": 100,
+          "spike_ppb": 20,
+          "rms_alarm": 5e-08,
+          "flatline_n": 5
+        }
       },
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/cold/Calib_20260523_Hg_4line_400-497nm_Poly2.txt",
-        "roi_nm": [438.0, 476.0],
+        "roi_nm": [
+          438.0,
+          476.0
+        ],
         "cavity_len_cm": 51.8,
         "rl_factor": 0.933,
-        "alert": { "warn_drop": 2e-5, "alarm_drop": 1e-4 }
-      } },
-    { "id": "ch_noise2", "label": "noise",       "role": "noise",  "columns": [4101, 6148] }
-  ],
-
-  "autodetect": {
-    "first_spectrum_col": 5,
-    "signal_min_max": 2500,
-    "warmup_scans": 5
-  },
-
-  "hk": {
-    "start_col": 6149,
-    "fields": [
-      { "key": "unknown_rel0",  "label": "Unknown temp? (rel0)", "rel": 0,  "scale": 0.01,   "unit": "degC" },
-      { "key": "sentinel",     "label": "sentinel?",       "rel": 6,  "scale": 1,      "unit": "raw" },
-      { "key": "p_cavity",     "label": "Cavity P",        "rel": 11, "scale": 0.6895, "unit": "mbar", "nominal": 1000, "alert": { "warn": [960, 1040], "alarm": [900, 1100], "phases": ["sampling"] } },
-      { "key": "t_cavity",     "label": "Cavity T",        "rel": 24, "scale": 0.01,   "unit": "degC", "nominal": 28.8, "alert": { "warn": [15, 40] } },
-      { "key": "t_spectrometer","label": "Spectrometer T", "rel": 25, "scale": 0.01,   "unit": "degC" },
-      { "key": "unknown_rel28", "label": "Unknown temp? (rel28)", "rel": 28, "scale": 0.01, "unit": "degC" },
-      { "key": "unknown_rel29", "label": "Unknown temp? (rel29)", "rel": 29, "scale": 0.01, "unit": "degC" }
-    ]
-  },
-
-  "saturation": { "adc_max": 64000 },
-
-  "cadence": {
-    "scan_interval_sec": 1,
-    "file_rollover_sec": 3600,
-    "liveness_grace_sec": 10
-  }
+        "alert": {
+          "warn_drop": 2e-05,
+          "alarm_drop": 0.0001
+        }
+      }
+    },
+    {
+      "id": "ch2",
+      "label": "noise",
+      "role": "noise"
+    }
+  ]
 }

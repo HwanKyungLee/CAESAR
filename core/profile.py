@@ -171,6 +171,9 @@ class ConcentrationConfig:
     wl_dir: str
     allow_negative_gas: bool
     target: str = "NO2"
+    # FitSet 채널 키("1"…) — 미션 패키지가 적는다. 있으면 wl_dir 대신 이 키로 채널을 고른다
+    # (사람이 내보낼 때 확정한 연결이라 wavecal 폴더 이름 추측보다 확실하다).
+    fitset_channel: Optional[str] = None
     cavity_temp_hk: Optional[str] = None
     cavity_pressure_hk: Optional[str] = None
     throttle_sec: float = 10.0
@@ -197,6 +200,7 @@ class ConcentrationConfig:
             wl_dir=d["wl_dir"],
             allow_negative_gas=d["allow_negative_gas"],
             target=d.get("target", "NO2"),
+            fitset_channel=(str(d["fitset_channel"]) if d.get("fitset_channel") is not None else None),
             cavity_temp_hk=d.get("cavity_temp_hk"),
             cavity_pressure_hk=d.get("cavity_pressure_hk"),
             throttle_sec=float(d.get("throttle_sec", 10.0)),
@@ -228,6 +232,12 @@ class Channel:
     @property
     def is_signal(self) -> bool:
         return self.role == "signal"
+
+    @property
+    def is_auto(self) -> bool:
+        """'auto' = 기본(구조) 프로파일의 블록 — 빛이 들어오면 신호로 본다(Vigil 이 파일마다 판정).
+        셀 정체가 없으니 농도·R 은 없고, 밝기·포화·HK 만 감시한다."""
+        return self.role == "auto"
 
     def pressure_keys(self, cfg=None) -> list:
         """압력 HK 키 우선순위 목록 — cfg(농도/R 설정)의 덮어쓰기가 있으면 맨 앞."""
@@ -371,9 +381,17 @@ class HK:
 
         `phase`(= 그 행의 flag 역할)를 넘기면 구간 한정 밴드가 올바르게 적용된다.
         교정 구간에서 대기용 밴드가 오경보를 내지 않도록 **항상 넘기는 것을 권장**한다."""
+        from core.raw_parser import _is_sentinel   # 결측 규약 단일 출처(0·65535·비유한)
         out = {}
         for f in self.fields:
-            v = f.value(row, self.start_col)
+            try:
+                raw = float(row[self.start_col + f.rel])
+            except (IndexError, ValueError, TypeError):
+                raw = float("nan")
+            if _is_sentinel(raw):
+                out[f.key] = (float("nan"), SEVERITY_NONE)   # 값 없음 — 0 °C 로 읽지 않는다
+                continue
+            v = raw * f.scale + f.offset
             out[f.key] = (v, f.evaluate(v, phase))
         return out
 
@@ -475,12 +493,26 @@ class Profile:
     # 프로파일 **파일 내용**의 sha1 앞 8자리 — 측정 PC 가 인터넷 없이 USB 로 받으면 git 으로 어느
     # 판인지 확인할 수 없으니, 결과 헤더·Vigil 로그에 이걸 남겨 PC 끼리 같은 정의를 쓰는지 대조한다.
     source_sha: Optional[str] = None
+    # 미션(정체) 프로파일이면 그 바탕이 된 기본(구조) 프로파일 id 와 출처. 기본 프로파일이면 None.
+    base_id: Optional[str] = None
+    base_provenance: Optional[str] = None
+
+    @property
+    def is_mission(self) -> bool:
+        """기본(구조) 프로파일 위에 셀 정체·센서·FitSet 을 얹은 '미션' 인가."""
+        return self.base_id is not None
 
     @property
     def provenance(self) -> str:
-        """'caesar_hot.example.json@1.3.0#1a2b3c4d' — 어느 프로파일(파일·판·내용)을 썼나."""
+        """'mission_x.json@1.0.0#1a2b3c4d+base_hot_6181.json@1.0.0#9f8e7d6c' — 어느 프로파일(파일·판·
+        내용 해시)을 썼나. 미션이면 바탕 기본 프로파일까지(둘 중 하나만 바뀌어도 문자열이 달라진다)."""
         name = os.path.basename(self.source_path) if self.source_path else self.profile_id
-        return f"{name}@{self.profile_version}#{self.source_sha or '?'}"
+        own = f"{name}@{self.profile_version}#{self.source_sha or '?'}"
+        return f"{own}+{self.base_provenance}" if self.base_provenance else own
+
+    def candidate_channels(self) -> list:
+        """신호(signal) + 자동(auto) 블록 — 구조적으로 이름을 붙일 블록(Augur 레이아웃용)."""
+        return [c for c in self.channels if c.is_signal or c.is_auto]
 
     # ── 편의 접근 ────────────────────────────────────────────────
     def signal_channels(self) -> list:
@@ -531,7 +563,7 @@ class Profile:
 
     @classmethod
     def from_dict(cls, d: dict, source_path: Optional[str] = None,
-                  source_sha: Optional[str] = None) -> "Profile":
+                  source_sha: Optional[str] = None, base_provenance: Optional[str] = None) -> "Profile":
         try:
             return cls(
                 profile_id=d["profile_id"],
@@ -555,6 +587,8 @@ class Profile:
                                     else None),
                 source_path=source_path,
                 source_sha=source_sha,
+                base_id=d.get("base"),
+                base_provenance=base_provenance,
             )
         except (KeyError, TypeError, ValueError) as e:
             raise ProfileError(f"Profile parse failed ({source_path or d.get('profile_id')}): {e}") from e
@@ -596,29 +630,113 @@ def validate_profile_dict(d: dict, schema: Optional[dict] = None) -> None:
         raise ProfileError("channels is empty")
 
 
-def load_profile(path: str, validate: bool = True,
-                 schema: Optional[dict] = None) -> Profile:
-    """단일 프로파일 JSON 로드(+검증) → Profile."""
+def _read_profile_json(path: str, validate: bool, schema: Optional[dict]):
+    """(dict, 내용 해시8). 줄바꿈은 해시 전에 맞춘다 — 같은 내용이 git 설정(autocrlf)에 따라 PC 마다
+    CRLF/LF 로 풀린다."""
     import hashlib
     with open(path, "rb") as fh:
         raw = fh.read()
     d = json.loads(raw.decode("utf-8"))
     if validate:
         validate_profile_dict(d, schema)
-    # 줄바꿈은 해시 전에 맞춘다 — 같은 내용이 git 설정(autocrlf)에 따라 PC 마다 CRLF/LF 로 풀린다.
-    sha = hashlib.sha1(raw.replace(b"\r\n", b"\n")).hexdigest()[:8]
-    return Profile.from_dict(d, source_path=path, source_sha=sha)
+    return d, hashlib.sha1(raw.replace(b"\r\n", b"\n")).hexdigest()[:8]
 
 
-def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,
-                  validate: bool = True) -> list:
-    """폴더의 모든 프로파일 로드. '_'로 시작하는 파일(_schema.json 등)은 건너뛴다."""
-    schema = _load_schema() if validate else None
-    profiles = []
+def merge_mission(base: dict, mission: dict) -> dict:
+    """기본(구조) 프로파일 dict 위에 미션 dict 를 얹은 유효 프로파일 dict.
+
+    미션이 바꿀 수 있는 것: 이름·판·설명·kind·campaign, match 의 date_range·filename_glob,
+    **이미 있는 블록**(channels[].id)의 label·role·cavity·concentration·reflectance.
+    열 수·HK 열지도·flag·주기 등 구조는 바꾸지 못한다(그건 기본 프로파일의 일 — 미션이 구조를
+    고치면 같은 raw 를 두 정의로 읽게 된다)."""
+    import copy
+    d = copy.deepcopy(base)
+    for k in ("profile_id", "profile_version", "description", "kind", "campaign", "base"):
+        if k in mission:
+            d[k] = mission[k]
+    m = dict(d.get("match") or {})
+    mm = mission.get("match") or {}
+    if "n_columns" in mm and mm["n_columns"] != m.get("n_columns"):
+        raise ProfileError(f"mission {mission.get('profile_id')}: match.n_columns {mm['n_columns']} "
+                           f"!= base {m.get('n_columns')} — a mission cannot change the raw structure")
+    for k in ("date_range", "filename_glob"):
+        if k in mm:
+            m[k] = mm[k]
+    d["match"] = m
+    by_id = {c["id"]: c for c in d.get("channels", [])}
+    for oc in mission.get("channels", []):
+        bc = by_id.get(oc.get("id"))
+        if bc is None:
+            raise ProfileError(f"mission {mission.get('profile_id')}: channel '{oc.get('id')}' is not a "
+                               f"block of base '{base.get('profile_id')}' ({sorted(by_id)})")
+        if "columns" in oc and list(oc["columns"]) != list(bc.get("columns") or []):
+            raise ProfileError(f"mission {mission.get('profile_id')}: channel '{oc['id']}' columns "
+                               f"differ from the base — a mission names blocks, it does not move them")
+        for k in ("label", "role", "cavity", "concentration", "reflectance"):
+            if k in oc:
+                bc[k] = copy.deepcopy(oc[k])
+    return d
+
+
+def _find_base(profile_dir: str, base_id: str, schema, validate: bool):
     for path in sorted(glob.glob(os.path.join(profile_dir, "*.json"))):
         if os.path.basename(path).startswith("_"):
             continue
-        profiles.append(load_profile(path, validate=validate, schema=schema))
+        d, sha = _read_profile_json(path, validate, schema)
+        if d.get("profile_id") == base_id and "base" not in d:
+            return path, d, sha
+    raise ProfileError(f"base profile '{base_id}' not found in {profile_dir}")
+
+
+def _build(path, d, sha, bases: dict) -> Profile:
+    """기본이면 그대로, 미션이면 바탕과 합쳐서 Profile. 파일 안의 상대경로(FitSet·wavecal)는 그 파일
+    폴더 기준으로 푼다 — 미션 패키지는 USB 어디에 두든 열려야 한다."""
+    from core.mission_package import absolutize_profile_dict
+    d = absolutize_profile_dict(d, os.path.dirname(os.path.abspath(path)))
+    bid = d.get("base")
+    if not bid:
+        return Profile.from_dict(d, source_path=path, source_sha=sha)
+    if bid not in bases:
+        raise ProfileError(f"mission {d.get('profile_id')} ({os.path.basename(path)}): base profile "
+                           f"'{bid}' not found")
+    bpath, bd, bsha = bases[bid]
+    bprov = f"{os.path.basename(bpath)}@{bd.get('profile_version')}#{bsha}"
+    return Profile.from_dict(merge_mission(bd, d), source_path=path, source_sha=sha,
+                             base_provenance=bprov)
+
+
+def load_profile(path: str, validate: bool = True,
+                 schema: Optional[dict] = None, base_dirs: Sequence[str] = ()) -> Profile:
+    """단일 프로파일 JSON 로드(+검증) → Profile. 미션이면 바탕 기본 프로파일을 같은 폴더(그리고
+    base_dirs, 기본 프로파일 폴더)에서 찾아 합친다."""
+    d, sha = _read_profile_json(path, validate, schema)
+    bases = {}
+    if d.get("base"):
+        for dd in (os.path.dirname(os.path.abspath(path)), *base_dirs, DEFAULT_PROFILE_DIR):
+            try:
+                bases[d["base"]] = _find_base(dd, d["base"], schema, validate)
+                break
+            except ProfileError:
+                continue
+    return _build(path, d, sha, bases)
+
+
+def load_profiles(profile_dir: str = DEFAULT_PROFILE_DIR,
+                  validate: bool = True, extra_paths: Sequence[str] = ()) -> list:
+    """폴더의 모든 프로파일(기본 + 미션) 로드. '_'로 시작하는 파일(_schema.json 등)은 건너뛴다.
+    extra_paths = 폴더 밖의 미션 파일(미션 패키지) — 바탕은 이 폴더의 기본 프로파일에서 찾는다."""
+    from core.mission_package import installed_mission_files, missions_root
+    schema = _load_schema() if validate else None
+    raw = []
+    for path in sorted(glob.glob(os.path.join(profile_dir, "*.json"))):
+        if not os.path.basename(path).startswith("_"):
+            d, sha = _read_profile_json(path, validate, schema)
+            raw.append((path, d, sha))
+    bases = {d["profile_id"]: (p, d, s) for p, d, s in raw if not d.get("base")}
+    profiles = [_build(p, d, s, bases) for p, d, s in raw]
+    # 설치된 미션 패키지(<profile_dir>/missions/<이름>/) + 호출측이 준 것 — 바탕은 패키지 안 사본이 먼저
+    for path in [*installed_mission_files(missions_root(profile_dir)), *extra_paths]:
+        profiles.append(load_profile(path, validate=validate, schema=schema, base_dirs=(profile_dir,)))
     # 중복 profile_id 방지 — by_id/route가 조용히 첫 번째만 쓰는 footgun 차단
     # (열수 중복은 정당할 수 있어 막지 않는다: filename_glob로 구분 가능)
     seen: dict = {}
@@ -671,6 +789,10 @@ class ProfileSet:
             exact = [p for p in pool if p.match.col_match(n_columns)]
             if exact:
                 pool = exact
+        # 미션(셀 정체를 얹은 것)이 맞으면 기본(구조) 프로파일보다 먼저 — 기본은 '정체를 모를 때'의 바탕
+        missions = [p for p in pool if p.is_mission]
+        if missions:
+            pool = missions
         if filename is not None:
             named = [p for p in pool if p.match.name_match(filename)]
             if named:
@@ -682,9 +804,10 @@ class ProfileSet:
         return None
 
     def date_excluded(self, filename: Optional[str], n_columns: Optional[int] = None) -> list:
-        """열 수는 정확히 맞는데 파일명 날짜가 date_range 밖이라 빠진 프로파일 id 들(표시·경고용)."""
+        """열 수는 정확히 맞는데 파일명 날짜가 date_range 밖이라 빠진 **미션** id 들(표시·경고용) —
+        그 파일은 기본(구조) 프로파일로 감시된다(농도·R 없음)."""
         return [p.profile_id for p in self.profiles
-                if p.match.col_match(n_columns) and not p.match.date_ok(filename)]
+                if p.is_mission and p.match.col_match(n_columns) and not p.match.date_ok(filename)]
 
 
 if __name__ == "__main__":

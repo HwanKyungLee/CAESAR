@@ -48,7 +48,7 @@ def test_threshold_matches_vigil_profiles():
     import glob
     import json
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    profs = glob.glob(os.path.join(root, "vigil", "profiles", "caesar_*.example.json"))
+    profs = glob.glob(os.path.join(root, "vigil", "profiles", "base_*.json"))   # 포화 문턱은 구조(기본 프로파일)의 일
     assert profs, "vigil 프로파일 예제를 못 찾았다 — 경로가 바뀌었나?"
     seen = []
     for p in profs:

@@ -1,85 +1,37 @@
 {
   "profile_id": "caesar_hot_2026yeosu",
-  "profile_version": "1.3.1",
+  "profile_version": "1.4.1",
+  "base": "caesar_hot_base",
   "description": "CAESAR Hot-cavity raw layout (2026 Yeosu, 2026-05-18 – 07-11). 채널 정체는 LED 스펙트럼으로 판정(CHANNEL_IDENTITY_YEOSU2026.md): block 2053 = ΣANs 300 °C 셀(LED 428–456 nm, P_ANs col 6164), block 4101 = ΣPNs 180 °C 셀(LED 451–471 nm, P_PNs col 6162). 캐비티 기체 온도는 오븐 설정값이 아니라 실측 tempcell(1→block 2053, 2→block 4101; Augur core/data_io.py와 같은 짝)을 쓴다. wl_dir은 FitSet의 wl_path로 채널을 고른다(roi1 → FitSet 채널 1, 429.4–466.0 nm; roi2 → 채널 2, 444.0–470.7 nm — reflectance.roi_nm must cover the fit window or ConcMonitor refuses to fit; vigil/test_profile_roi_coverage.py checks it). 8/11 이후 실험실 구성(block 2053 = cold, 4101 = 300 °C)에는 쓰지 말 것 — match.date_range(core/raw_parser 6181열 레이아웃과 같은 2026-05-01~08-31)가 그 밖의 파일을 막는다(1.2.3). 다른 구성은 이 파일을 복제해 바꿀 것.",
-  "instrument": "CAESAR",
   "kind": "hot",
   "campaign": "2026-yeosu",
   "match": {
-    "n_columns": 6181,
-    "filename_glob": "*Hot*.dat",
-    "date_range": ["2026-05-01", "2026-08-31"]
-  },
-  "header": {
-    "time_bytepack": {
-      "hi_col": 0,
-      "lo_col": 1,
-      "epoch": "year_start",
-      "unit": "centiseconds"
-    },
-    "exposure_col": 2,
-    "ccd_temp": {
-      "col": 3,
-      "scale": 0.01,
-      "unit": "degC"
-    },
-    "state_flag_col": 4
-  },
-  "flags": {
-    "sampling": [
-      1
-    ],
-    "shutdown": [
-      100
-    ],
-    "za_inject": [
-      500
-    ],
-    "za_setflow": [
-      501
-    ],
-    "za_wait_before": [
-      502
-    ],
-    "za_wait_after": [
-      503
-    ],
-    "he_inject": [
-      510
-    ],
-    "he_setflow": [
-      511
-    ],
-    "he_wait_before": [
-      512
-    ],
-    "he_wait_after": [
-      513
-    ],
-    "header": [
-      0
+    "date_range": [
+      "2026-05-01",
+      "2026-08-31"
     ]
   },
-  "spectrum_block_width": 2048,
   "channels": [
     {
-      "id": "ch_legacy",
+      "id": "ch0",
       "label": "legacy-ch3",
-      "role": "noise",
-      "columns": [
-        5,
-        2052
-      ]
+      "role": "noise"
     },
     {
-      "id": "ch_ans",
+      "id": "ch1",
       "label": "ANs",
       "role": "signal",
-      "columns": [
-        2053,
-        4100
-      ],
-      "cavity": { "pressure_hk": ["p_ans_cavity", "p_pns_cavity"], "temperature_hk": ["tempcell1", "tempcell2", "cell_heater"] },
+      "cavity": {
+        "pressure_hk": [
+          "p_ans_cavity",
+          "p_pns_cavity"
+        ],
+        "temperature_hk": [
+          "tempcell1",
+          "tempcell2",
+          "cell_heater"
+        ]
+      },
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
@@ -104,14 +56,20 @@
       }
     },
     {
-      "id": "ch_pns",
+      "id": "ch2",
       "label": "PNs",
       "role": "signal",
-      "columns": [
-        4101,
-        6148
-      ],
-      "cavity": { "pressure_hk": ["p_pns_cavity", "p_ans_cavity"], "temperature_hk": ["tempcell2", "tempcell1", "cell_heater"] },
+      "cavity": {
+        "pressure_hk": [
+          "p_pns_cavity",
+          "p_ans_cavity"
+        ],
+        "temperature_hk": [
+          "tempcell2",
+          "tempcell1",
+          "cell_heater"
+        ]
+      },
       "concentration": {
         "allow_negative_gas": false,
         "fitset_path": "C:/Doasis_Work/Output/fit setting/FitSet_ANs[430-466nm_P4]_PNs[444-471nm_P3]_cold[438-466nm_P4]_Std.json",
@@ -135,185 +93,5 @@
         }
       }
     }
-  ],
-  "autodetect": {
-    "first_spectrum_col": 5,
-    "signal_min_max": 2500,
-    "warmup_scans": 5
-  },
-  "hk": {
-    "start_col": 6149,
-    "fields": [
-      {
-        "key": "templed1",
-        "label": "LED1 temp",
-        "rel": 0,
-        "scale": 0.01,
-        "unit": "degC",
-        "alert": {
-          "warn": [
-            15,
-            45
-          ]
-        }
-      },
-      {
-        "key": "templed2",
-        "label": "LED2 temp",
-        "rel": 1,
-        "scale": 0.01,
-        "unit": "degC",
-        "alert": {
-          "warn": [
-            15,
-            45
-          ]
-        }
-      },
-      {
-        "key": "oven_ans_setpoint",
-        "label": "ANs oven SP",
-        "rel": 2,
-        "scale": 0.01,
-        "unit": "degC",
-        "nominal": 300,
-        "alert": {
-          "warn": [
-            295,
-            305
-          ],
-          "alarm": [
-            285,
-            315
-          ]
-        }
-      },
-      {
-        "key": "templed4",
-        "label": "LED4 temp",
-        "rel": 3,
-        "scale": 0.01,
-        "unit": "degC"
-      },
-      {
-        "key": "preheater",
-        "label": "Preheater T",
-        "rel": 4,
-        "scale": 0.01,
-        "unit": "degC",
-        "nominal": 38
-      },
-      {
-        "key": "oven_pns_setpoint",
-        "label": "PNs oven SP",
-        "rel": 5,
-        "scale": 0.01,
-        "unit": "degC",
-        "nominal": 180,
-        "alert": {
-          "warn": [
-            175,
-            185
-          ],
-          "alarm": [
-            165,
-            195
-          ]
-        }
-      },
-      {
-        "key": "cell_heater",
-        "label": "Cell heater SP",
-        "rel": 6,
-        "scale": 0.01,
-        "unit": "degC",
-        "nominal": 75
-      },
-      {
-        "key": "p_pns_cavity",
-        "label": "PNs cavity P",
-        "rel": 13,
-        "scale": 0.6895,
-        "unit": "mbar",
-        "nominal": 965,
-        "alert": {
-          "warn": [
-            930,
-            1000
-          ],
-          "alarm": [
-            880,
-            1050
-          ],
-          "phases": [
-            "sampling"
-          ]
-        }
-      },
-      {
-        "key": "p_ans_cavity",
-        "label": "ANs cavity P",
-        "rel": 15,
-        "scale": 0.6895,
-        "unit": "mbar",
-        "nominal": 915,
-        "alert": {
-          "warn": [
-            880,
-            950
-          ],
-          "alarm": [
-            830,
-            1000
-          ],
-          "phases": [
-            "sampling"
-          ]
-        }
-      },
-      {
-        "key": "tempcell1",
-        "label": "Cell temp 1",
-        "rel": 25,
-        "scale": 0.01,
-        "unit": "degC"
-      },
-      {
-        "key": "tempcell2",
-        "label": "Cell temp 2",
-        "rel": 26,
-        "scale": 0.01,
-        "unit": "degC"
-      },
-      {
-        "key": "tempcell3",
-        "label": "Cell temp 3 (not connected)",
-        "rel": 27,
-        "scale": 0.01,
-        "unit": "degC"
-      },
-      {
-        "key": "t_spectrometer",
-        "label": "Spectrometer T (reads 0)",
-        "rel": 28,
-        "scale": 0.01,
-        "unit": "degC"
-      },
-      {
-        "key": "unknown_rel31",
-        "label": "Unknown temp? (rel31)",
-        "rel": 31,
-        "scale": 0.01,
-        "unit": "degC"
-      }
-    ]
-  },
-  "saturation": {
-    "adc_max": 64000
-  },
-  "cadence": {
-    "scan_interval_sec": 1,
-    "file_rollover_sec": 3600,
-    "liveness_grace_sec": 10
-  }
+  ]
 }

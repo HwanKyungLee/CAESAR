@@ -144,16 +144,16 @@ def test_channels():
     cold = ProfileSet.load_default().by_id(COLD_ID)
     sig_hot = [c.id for c in hot.signal_channels()]
     # block 2053 = ANs, 4101 = PNs (docs/채널정체_판정_2026-09-27.md, 프로파일 1.2.0)
-    check("hot signal 2채널 (ANs,PNs)", sig_hot == ["ch_ans", "ch_pns"], f"got {sig_hot}")
+    check("hot signal 2채널 (ANs,PNs)", sig_hot == ["ch1", "ch2"], f"got {sig_hot}")
     check("cold signal 1채널 (NO2)",
-          [c.id for c in cold.signal_channels()] == ["ch_no2"])
+          [c.id for c in cold.signal_channels()] == ["ch1"])
     # slice: PNs 채널 columns (2053,4100) → 길이 2048
     row = _make_row(6181)
-    pns = hot.channel("ch_pns")
+    pns = hot.channel("ch2")
     seg = pns.slice(row)
     check("PNs slice 길이 2048", len(seg) == 2048, f"got {len(seg)}")
     # 로직이 label에 의존하지 않음을 확인: id로 접근 가능
-    check("id로 채널 접근", hot.channel("ch_ans") is not None)
+    check("id로 채널 접근", hot.channel("ch1") is not None)
 
 
 def test_hk_conversion_and_bands():

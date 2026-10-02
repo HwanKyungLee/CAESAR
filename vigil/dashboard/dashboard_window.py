@@ -182,6 +182,7 @@ class DashboardWindow(QMainWindow):
     run_toggled = pyqtSignal(bool)        # Start/Stop → True=감시 중, False=정지
     folder_requested = pyqtSignal()       # 'Choose folder…' — 고르는 창은 run_vigil 이 띄운다
     data_root_requested = pyqtSignal()    # 'Augur data…' — 다른 PC 의 Augur 출력 폴더
+    mission_requested = pyqtSignal()      # 'Load mission…' — Augur 가 내보낸 미션 패키지
     tz_changed = pyqtSignal(str)          # 'KST' | 'UTC'
 
     def __init__(self, title: str = "Vigil — Pipeline Health", tz: str = "KST"):
@@ -248,6 +249,12 @@ class DashboardWindow(QMainWindow):
         self.btn_data = QPushButton("Augur data…")
         self.btn_data.setStyleSheet(_SMALL_BTN)
         self.btn_data.clicked.connect(self.data_root_requested.emit)
+        self.btn_mission = QPushButton("Load mission…")
+        self.btn_mission.setStyleSheet(_SMALL_BTN)
+        self.btn_mission.setToolTip("Load a mission package exported from Augur (Setup → Export mission for Vigil).\n"
+                                    "Without a mission Vigil still watches HK, block brightness and data flow;\n"
+                                    "the mission adds the cell names, sensors, FitSet → concentration and R.")
+        self.btn_mission.clicked.connect(self.mission_requested.emit)
         self.cb_tz = QComboBox()
         self.cb_tz.addItems(list(TZ_CHOICES))
         self.cb_tz.setCurrentText(self._tz)
@@ -256,6 +263,7 @@ class DashboardWindow(QMainWindow):
         info.addWidget(self.lbl_folder, stretch=2)
         info.addWidget(self.lbl_data, stretch=1)
         info.addWidget(self.btn_data)
+        info.addWidget(self.btn_mission)
         info.addSpacing(12)
         info.addWidget(QLabel("Time:"))
         info.addWidget(self.cb_tz)

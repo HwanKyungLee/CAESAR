@@ -65,7 +65,7 @@ def _safe_value(field):
             if lo is not None and hi is not None:
                 return (lo + hi) / 2.0
             return lo if lo is not None else (hi if hi is not None else 0.0)
-    return 0.0
+    return 30.0     # 밴드 없는 필드 — 0 은 이 계기에서 '값 없음'(결측)이라 그럴듯한 실측값을 넣는다
 
 
 def _hot_row(hot, overrides=None, flag=1, n_columns=6181):
@@ -124,8 +124,8 @@ def test_hk_missing():
 def test_hk_saturation():
     print("[6] hk_monitor — 부분 포화 P1 / 전 채널 포화 P0")
     hot = _hot()
-    ch_pns = hot.channel("ch_pns")
-    ch_ans = hot.channel("ch_ans")
+    ch_pns = hot.channel("ch2")
+    ch_ans = hot.channel("ch1")
 
     row = _hot_row(hot)
     for c in range(*[ch_pns.columns[0], ch_pns.columns[1] + 1]):

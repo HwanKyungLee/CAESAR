@@ -319,11 +319,15 @@ class Watcher:
         if prof is not None:
             self._profile_cache[path] = prof
             self.unknown_layout.pop(path, None)
-        elif path not in self.date_excluded:
+        if (prof is None or not prof.is_mission) and path not in self.date_excluded:
+            # 이 열 수의 미션(셀 정체)이 이 날짜를 안 덮는다 — 기본(구조) 프로파일로 감시되거나(농도·R 없음)
+            # 기본도 없으면 미배정. 진입점이 파일마다 한 번 알린다.
             ids = self.profiles.date_excluded(os.path.basename(path), n_columns)
             if ids:
                 self.date_excluded[path] = ids
-            else:
+            elif prof is None:
+                # No profile of any layer accepts this column count: unknown layout (a base-profile
+                # route is monitored, so it is not counted here).
                 self.unknown_layout[path] = (self.unknown_layout.get(path, (0,))[0] + 1, n_columns)
         return prof
 

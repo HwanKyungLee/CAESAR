@@ -24,21 +24,29 @@ def _fmt(label: str, val: float, unit: Optional[str]) -> str:
     return f"{label}={val:.2f}{u}"
 
 
-def evaluate_hk(profile: Profile, row, phase: Optional[str] = None):
+def evaluate_hk(profile: Profile, row, phase: Optional[str] = None, channels=None):
     """한 행의 HK 블록 + 신호채널 포화를 평가 → (status, msg, metrics).
 
     status: OK | P2(주의) | P1(밴드이탈/부분포화) | P0(전채널포화).
-    `phase`(그 행의 flag role)를 넘겨야 교정구간 오경보를 피한다(HKField.applies_to)."""
+    `phase`(그 행의 flag role)를 넘겨야 교정구간 오경보를 피한다(HKField.applies_to).
+    channels = 포화를 볼 블록(기본: signal 채널). 기본 프로파일이면 호출측이 빛이 들어오는 auto 블록을 넘긴다.
+    결측(raw 0·65535 — HK.read 가 NaN 으로)은 **밴드가 있거나 채널의 1순위 캐비티 센서인 필드만** P2 —
+    표시용 필드에는 늘 죽어 있는 열(templed4·tempcell3 등)이 있어 경보하면 상시 P2 가 된다."""
     readings = profile.hk.read(row, phase)
     issues: list = []
     worst = OK
+    # 결측을 알릴 필드: 밴드가 있거나, 어느 신호 채널의 **1순위** 캐비티 압력·온도 센서(n_air·R 에 쓰임 —
+    # 빠지면 다음 순위로 넘어가 값이 달라진다). 늘 죽어 있는 표시용 열은 조용히.
+    primary = {keys[0] for ch in profile.signal_channels()
+               for keys in (ch.pressure_keys(), ch.temp_keys()) if keys}
 
     for key, (val, sev) in readings.items():
         field = profile.hk.field(key)
         label = field.label or key
         if not math.isfinite(val):
-            issues.append(f"{label} missing (NaN)")
-            worst = worse(worst, P2)
+            if field.warn is not None or field.alarm is not None or key in primary:
+                issues.append(f"{label} missing (no reading)")
+                worst = worse(worst, P2)
             continue
         if sev == SEVERITY_ALARM:
             issues.append(_fmt(label, val, field.unit) + " out of band")
@@ -47,7 +55,7 @@ def evaluate_hk(profile: Profile, row, phase: Optional[str] = None):
             issues.append(_fmt(label, val, field.unit) + " near limit")
             worst = worse(worst, P2)
 
-    sig_channels = profile.signal_channels()
+    sig_channels = profile.signal_channels() if channels is None else list(channels)
     saturated = []
     for ch in sig_channels:
         try:

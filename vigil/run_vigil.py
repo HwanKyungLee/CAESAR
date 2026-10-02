@@ -83,15 +83,13 @@ class VigilApp:
                  backlog_age_sec=DEFAULT_BACKLOG_AGE_SEC, retire_after_sec: float = RETIRE_AFTER_SEC,
                  cursor_save_interval_sec: float = CURSOR_SAVE_INTERVAL_SEC):
         """watch_dir 은 None 이어도 된다 — 대시보드의 폴더 버튼으로 나중에 정한다(set_watch_dir)."""
-        self.profiles = ProfileSet.load(profile_dir)
+        self.profile_dir = profile_dir
+        # 이 PC 에 불러온 미션 패키지 — 상태 폴더 아래(프로그램 폴더는 쓰기 금지일 수 있다)
+        self.missions_dir = os.path.join(state_dir, "missions")
         self.cursor = IngestCursor(os.path.join(state_dir, "cursors.json"))
         self.state_log = StateLog(os.path.join(state_dir, "status.jsonl"))
-        # 어느 채널 정의로 감시하나 — 측정 PC 는 USB 로 받아 git 으로 확인할 수 없으니 파일·판·내용
-        # 해시를 남긴다(Augur 알파 헤더 raw_layout 의 profile= 와 같은 문자열 — 둘을 대조하면 된다).
-        _profs = [p.provenance for p in self.profiles.profiles]
-        log.info("profiles: %s", ", ".join(_profs))
-        self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
-                              kind="profiles", profiles=_profs)
+        self.profiles = None
+        self._load_profiles()
         self._watcher_kw = dict(max_bytes_per_tick=max_bytes_per_tick, backlog_age_sec=backlog_age_sec,
                                 cursor_save_interval_sec=cursor_save_interval_sec)
         self.retire_after_sec = retire_after_sec
@@ -112,6 +110,43 @@ class VigilApp:
         if watch_dir:
             self.set_watch_dir(watch_dir)
 
+    def _load_profiles(self) -> None:
+        """기본 + 프로그램 폴더의 미션 + 이 PC 에 불러온 미션 패키지. 어느 채널 정의로 감시하나 — 측정 PC 는
+        USB 로 받아 git 으로 확인할 수 없으니 파일·판·내용 해시를 남긴다(Augur 알파 헤더 raw_layout 의
+        profile= 와 같은 문자열 — 둘을 대조하면 된다)."""
+        from core.mission_package import installed_mission_files
+        from core.profile import load_profiles
+        self.profiles = ProfileSet(load_profiles(self.profile_dir,
+                                                 extra_paths=installed_mission_files(self.missions_dir)))
+        _profs = [p.provenance for p in self.profiles.profiles]
+        log.info("profiles: %s", ", ".join(_profs))
+        self.state_log.append("CONTROL", f"profiles loaded: {', '.join(_profs)}",
+                              kind="profiles", profiles=_profs)
+
+    def load_mission(self, pkg_dir: str) -> list:
+        """미션 패키지(Augur 'Export mission for Vigil')를 검사·설치하고 프로파일을 다시 읽는다 → 새로 들어온
+        미션 출처 문자열들. 검사 실패(파일 누락·내용 변경)·날짜 겹침이면 ValueError — 아무것도 안 바꾼다."""
+        from core.mission_package import install_package, overlap_problems, read_manifest
+        man = read_manifest(pkg_dir)
+        probs = overlap_problems(pkg_dir, self.profile_dir, self.missions_dir)
+        if probs:
+            raise ValueError("; ".join(probs))
+        dst = install_package(pkg_dir, self.missions_dir)
+        self._load_profiles()
+        if self.watcher is not None:
+            self.watcher.profiles = self.profiles
+            self.watcher._profile_cache.clear()
+            self.watcher.date_excluded.clear()
+            self._reset_state()
+        got = [p.provenance for p in self.profiles.profiles
+               if p.source_path and os.path.dirname(os.path.abspath(p.source_path)) == os.path.abspath(dst)]
+        msg = f"Mission loaded: {man['name']} → {', '.join(got)}"
+        log.info(msg)
+        self.state_log.append("CONTROL", msg, kind="mission", mission=man["name"], profiles=got)
+        if self.dashboard is not None:
+            self.dashboard.log_line(msg)
+        return got
+
     def set_watch_dir(self, watch_dir: str) -> None:
         """감시 폴더를 정하거나 바꾼다(대시보드 폴더 버튼). 커서는 파일 절대경로 키라 그대로 이어지고,
         이전 폴더의 파일별 상태·감시기 기준선·추세는 비운다 — 다른 계기·캠페인의 데이터와 섞이지 않게."""
@@ -130,6 +165,7 @@ class VigilApp:
         self._backlog_logged = False
         self._date_excluded_logged: set = set()
         self._unknown_logged: set = set()
+        self._auto_lit: dict = {}          # {(file, profile_id, channel_id): 빛이 들어오는 auto 블록인가}
         self._was_catching_up = False
         self._last_arrival = None
         self._waiting_since = datetime.now()   # liveness: no row since this -> P0 after a limit
@@ -186,10 +222,13 @@ class VigilApp:
         if scen is None:
             if not os.path.exists(fp):
                 raise FileNotFoundError(f"FitSet not found: {cfg.fitset_path} — set the Augur data folder")
-            scen = json.load(open(fp, encoding="utf-8"))
+            from core.mission_package import absolutize_fitset
+            # 미션 패키지의 FitSet 은 패키지 상대경로 — 그 FitSet 폴더 기준으로 푼다
+            scen = absolutize_fitset(json.load(open(fp, encoding="utf-8")), os.path.dirname(os.path.abspath(fp)))
             self._fitset_cache[fp] = scen
         from vigil.monitors.conc_monitor import pick_fitset_channel
-        return rebase_fitset_channel(pick_fitset_channel(scen, cfg.wl_dir), self.data_root)
+        return rebase_fitset_channel(pick_fitset_channel(scen, cfg.wl_dir, getattr(cfg, "fitset_channel", None)),
+                                     self.data_root)
 
     def _observe_reflectance(self, prof, ev, now) -> None:
         """이 행의 프로파일에 reflectance 설정이 있는 signal 채널마다 RMonitor.observe.
@@ -225,7 +264,7 @@ class VigilApp:
     def _combine_channels(self, prof, ev, by_channel, status, last_status, kind, label) -> None:
         """채널별 최신 판정 → 그 파일의 worst 로 합치고, 상태가 바뀔 때만 로그."""
         entries = [by_channel[(prof.profile_id, ch.id)]
-                  for ch in prof.signal_channels()
+                  for ch in prof.channels
                   if (prof.profile_id, ch.id) in by_channel]
         combined_status = SKIP
         for s, _m, _mt in entries:
@@ -238,11 +277,33 @@ class VigilApp:
                 self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {label} {combined_status}: {combined_msg}")
         last_status[ev.file] = combined_status
 
+    def _active_channels(self, prof, ev) -> list:
+        """감시할 스펙트럼 블록 — signal + **빛이 들어오는** auto 블록(기본 프로파일). auto 는 파일마다
+        첫 행의 블록 최대값으로 한 번 판정한다(≥ autodetect.signal_min_max, 없으면 data_io 와 같은 5000) —
+        어두운 블록의 바닥 잡음으로 램프 경보를 내지 않게."""
+        out = []
+        thr = prof.autodetect.signal_min_max if prof.autodetect is not None else 5000.0
+        for ch in prof.channels:
+            if ch.is_signal:
+                out.append(ch)
+            elif ch.is_auto and ch.columns is not None:
+                key = (ev.file, prof.profile_id, ch.id)
+                lit = self._auto_lit.get(key)
+                if lit is None:
+                    try:
+                        lit = max(float(v) for v in ch.slice(ev.row)) >= thr
+                    except (ValueError, TypeError):
+                        lit = False
+                    self._auto_lit[key] = lit
+                if lit:
+                    out.append(ch)
+        return out
+
     def _observe_lamp(self, prof, ev) -> None:
         """모든 signal 채널의 ZA 블록 세기(램프 헬스). 설정 없이 기본 문턱으로 돈다."""
         # ponytail: 문턱은 모듈 상수(2026 여수 실측). 캠페인별로 달라지면 프로파일 키로 뺄 것.
         touched = False
-        for ch in prof.signal_channels():
+        for ch in self._active_channels(prof, ev):
             key = (prof.profile_id, ch.id)
             lm = self._lamp_monitors.setdefault(key, LampMonitor())
             result = lm.observe(ev.role, ch.slice(ev.row))
@@ -319,9 +380,16 @@ class VigilApp:
             if path in self._date_excluded_logged:
                 continue
             self._date_excluded_logged.add(path)
-            msg = (f"NOT monitored: {os.path.basename(path)} has the column count of {', '.join(ids)}, "
-                   f"but its file date is outside that profile's date_range (different fibre/channel "
-                   f"layout) — add a profile for this layout")
+            base = w._profile_cache.get(path)
+            if base is not None and not base.is_mission:
+                msg = (f"No mission for {os.path.basename(path)}: its date is outside {', '.join(ids)} "
+                       f"(different fibre/channel layout) — monitoring with base profile "
+                       f"{base.profile_id}: HK, block brightness and data flow only, NO concentration/R. "
+                       f"Load the mission for this layout")
+            else:
+                msg = (f"NOT monitored: {os.path.basename(path)} has the column count of {', '.join(ids)}, "
+                       f"but its file date is outside that profile's date_range (different fibre/channel "
+                       f"layout) — add a profile for this layout")
             log.warning(msg)
             self.state_log.append(P2, msg, kind="ingest", file=path, profiles=ids)
             if self.dashboard is not None:
@@ -517,7 +585,8 @@ class VigilApp:
             prof = self.profiles.by_id(ev.profile_id)
             if prof is None:
                 continue
-            hk_status, hk_msg, hk_metrics = evaluate_hk(prof, ev.row, phase=ev.role)
+            hk_status, hk_msg, hk_metrics = evaluate_hk(prof, ev.row, phase=ev.role,
+                                                        channels=self._active_channels(prof, ev))
             self._hk_status[ev.file] = (hk_status, hk_msg, hk_metrics)
             if self._hk_last_status.get(ev.file) != hk_status:
                 self.state_log.append(hk_status, hk_msg, file=ev.file, **hk_metrics)
@@ -797,6 +866,23 @@ def main(argv=None) -> int:
         core.set_data_root(path)
         win.set_data_root(path)
     win.data_root_requested.connect(lambda: (lambda p: p and _on_data_root(p))(pick_data_root(win, qs)))
+
+    def _on_mission():
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        d = QFileDialog.getExistingDirectory(win, "Load mission package (folder from Augur 'Export mission for Vigil')",
+                                             qs.value("mission_dir", "", type=str))
+        if not d:
+            return
+        qs.setValue("mission_dir", d)
+        try:
+            got = core.load_mission(d)
+        except Exception as e:                    # noqa: BLE001 — 사람에게 보여 주고 아무것도 안 바꾼다
+            QMessageBox.warning(win, "Mission not loaded", f"{type(e).__name__}: {e}")
+            return
+        win.reset_views()
+        QMessageBox.information(win, "Mission loaded",
+                                "Concentration and R are on for files in the mission's dates:\n\n" + "\n".join(got))
+    win.mission_requested.connect(_on_mission)
 
     if not args.autostart or not args.dir:
         # 기본은 정지 상태로 켠다 — 폴더를 고르고(또는 확인하고) 사람이 Start 를 누를 때 읽기 시작.

@@ -1,0 +1,172 @@
+{
+  "profile_id": "caesar_cold_6174_base",
+  "profile_version": "1.0.0",
+  "description": "CAESAR Cold raw 구조(6174열, 2026-06-11~06-15 — HK 선두 5열 결손 구성, rel 전부 −5) — 기본 프로파일. 셀 정체는 미션이 얹는다.",
+  "instrument": "CAESAR",
+  "kind": "cold",
+  "match": {
+    "n_columns": 6174,
+    "filename_glob": "*Cold*.dat"
+  },
+  "header": {
+    "time_bytepack": {
+      "hi_col": 0,
+      "lo_col": 1,
+      "epoch": "year_start",
+      "unit": "centiseconds"
+    },
+    "exposure_col": 2,
+    "ccd_temp": {
+      "col": 3,
+      "scale": 0.01,
+      "unit": "degC"
+    },
+    "state_flag_col": 4
+  },
+  "flags": {
+    "sampling": [
+      1
+    ],
+    "shutdown": [
+      100
+    ],
+    "za_inject": [
+      500
+    ],
+    "za_setflow": [
+      501
+    ],
+    "za_wait_before": [
+      502
+    ],
+    "za_wait_after": [
+      503
+    ],
+    "he_inject": [
+      510
+    ],
+    "he_setflow": [
+      511
+    ],
+    "he_wait_before": [
+      512
+    ],
+    "he_wait_after": [
+      513
+    ],
+    "header": [
+      0
+    ]
+  },
+  "spectrum_block_width": 2048,
+  "channels": [
+    {
+      "id": "ch0",
+      "label": "ch0",
+      "role": "noise",
+      "columns": [
+        5,
+        2052
+      ]
+    },
+    {
+      "id": "ch1",
+      "label": "ch1",
+      "role": "auto",
+      "columns": [
+        2053,
+        4100
+      ]
+    },
+    {
+      "id": "ch2",
+      "label": "ch2",
+      "role": "auto",
+      "columns": [
+        4101,
+        6148
+      ]
+    }
+  ],
+  "autodetect": {
+    "first_spectrum_col": 5,
+    "signal_min_max": 2500,
+    "warmup_scans": 5
+  },
+  "hk": {
+    "start_col": 6149,
+    "fields": [
+      {
+        "key": "sentinel",
+        "label": "sentinel?",
+        "rel": 1,
+        "scale": 1,
+        "unit": "raw"
+      },
+      {
+        "key": "p_cavity",
+        "label": "Cavity P",
+        "rel": 6,
+        "scale": 0.6895,
+        "unit": "mbar",
+        "nominal": 1000,
+        "alert": {
+          "warn": [
+            960,
+            1040
+          ],
+          "alarm": [
+            900,
+            1100
+          ],
+          "phases": [
+            "sampling"
+          ]
+        }
+      },
+      {
+        "key": "t_cavity",
+        "label": "Cavity T",
+        "rel": 19,
+        "scale": 0.01,
+        "unit": "degC",
+        "nominal": 28.8,
+        "alert": {
+          "warn": [
+            15,
+            40
+          ]
+        }
+      },
+      {
+        "key": "t_spectrometer",
+        "label": "Spectrometer T",
+        "rel": 20,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "unknown_rel28",
+        "label": "Unknown temp? (normal config rel28)",
+        "rel": 23,
+        "scale": 0.01,
+        "unit": "degC"
+      },
+      {
+        "key": "unknown_rel29",
+        "label": "Unknown temp? (normal config rel29)",
+        "rel": 24,
+        "scale": 0.01,
+        "unit": "degC"
+      }
+    ]
+  },
+  "saturation": {
+    "adc_max": 64000
+  },
+  "cadence": {
+    "scan_interval_sec": 1,
+    "file_rollover_sec": 3600,
+    "liveness_grace_sec": 10
+  }
+}

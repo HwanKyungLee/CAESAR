@@ -54,10 +54,15 @@ FAIL_STREAK_FOR_P0 = 3   # 연속 이 이상 핏 실패하면 P0로 격상(r_mon
 HISTORY_WINDOW = 20       # 스파이크/평탄선 판단용 최근 농도 이력 길이
 
 
-def pick_fitset_channel(scen: dict, wl_dir: str) -> dict:
-    """FitSet json에서 wl_path에 wl_dir(roi1/roi2/cold 등)를 쓰는 채널을 찾는다.
-    data_label은 안 본다 — FitSet json에서 라벨이 실제 채널과 뒤바뀐 사례가 있다
-    (fit_optimizer_handoff.md §14-D, tools/optimize_params.pick_channel과 같은 이유)."""
+def pick_fitset_channel(scen: dict, wl_dir: str, key=None) -> dict:
+    """FitSet json에서 채널을 고른다 — key(미션 패키지가 적은 채널 키)가 있으면 그것, 없으면 wl_path에
+    wl_dir(roi1/roi2/cold 등)를 쓰는 채널. data_label은 안 본다 — FitSet json에서 라벨이 실제 채널과
+    뒤바뀐 사례가 있다(fit_optimizer_handoff.md §14-D, tools/optimize_params.pick_channel과 같은 이유)."""
+    if key is not None:
+        ch = scen["channels"].get(str(key))
+        if ch is None:
+            raise ValueError(f"FitSet has no channel '{key}'")
+        return ch
     for ch in scen["channels"].values():
         if wl_dir in str(ch.get("wl_path", "")).replace("\\", "/").split("/"):
             return ch
