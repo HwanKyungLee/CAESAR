@@ -469,6 +469,8 @@ class ResultViewerWidget(QWidget):
             rms_s = f"RMS {rms:.4g}" if rms is not None else "RMS —"
             active = "  ← open" if os.path.abspath(v["path"]) == cur else ""
             legacy = "  (partial)" if str(m.get("runid", "")).startswith("L") else ""
+            if "_archive" in os.path.normpath(v["path"]).split(os.sep):
+                legacy += "  (archived)"
             change = summarize_diff(diff_meta(prev, m)) if prev else "first version"
             it = QListWidgetItem(
                 f"v{i}  {m.get('runid')}{legacy}{active}\n"

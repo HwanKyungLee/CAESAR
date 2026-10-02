@@ -272,17 +272,26 @@ def archive_existing(path: str, base: str) -> str | None:
 
     상대경로를 보존하고 파일 수정시각을 이름에 붙여 몇 번을 재핏해도 이전 버전이
     전부 남는다: {base}/_archive/{상대경로stem}__{mtime YYMMDD_HHMMSS}{ext}.
+    The `.meta.json` sidecar moves with it, renamed to match the archived file — otherwise
+    the pair split (`x.meta__T.json`) and Result Lab's Versions never saw archived runs.
     path가 없으면 None, 이동했으면 이동된 경로를 반환."""
     if not os.path.exists(path):
         return None
     rel = os.path.relpath(os.path.abspath(path), os.path.abspath(base))
     if rel.startswith('..'):        # base 밖 파일은 상대경로 대신 이름만
         rel = os.path.basename(path)
-    stem, ext = os.path.splitext(rel)
+    meta_ext = '.meta.json'
+    if rel.endswith(meta_ext):
+        stem, ext = rel[:-len(meta_ext)], meta_ext
+    else:
+        stem, ext = os.path.splitext(rel)
     mt = datetime.fromtimestamp(os.path.getmtime(path))
     dst = os.path.join(base, '_archive', f"{stem}__{mt:%y%m%d_%H%M%S}{ext}")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     os.replace(path, dst)
+    side = os.path.splitext(path)[0] + meta_ext
+    if ext != meta_ext and os.path.exists(side):
+        os.replace(side, os.path.splitext(dst)[0] + meta_ext)
     return dst
 
 

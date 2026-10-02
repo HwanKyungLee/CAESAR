@@ -366,11 +366,9 @@ class SaveExportMixin:
                                           channel=ch, label=lbl,
                                           runid=(meta or {}).get('runid'), ext=ext)
                         os.makedirs(os.path.dirname(fpath), exist_ok=True)
-                        # 밀려나는 `.dat`의 meta도 같이 보낸다 — 안 그러면 아카이브된
-                        # 결과가 설정 없는 고아가 되고, 새 meta가 그 자리를 덮는다.
+                        # archive_existing moves the `.meta.json` with it (same archived name).
                         if archive_existing(fpath, arch_base):
                             n_archived += 1
-                            archive_existing(run_meta.meta_path_for(fpath), arch_base)
                         _write_df(ssub, fpath, _ch_header(ch) if multi else "", ch)
                         if meta:
                             run_meta.write_meta(fpath, meta)   # `.dat` 포맷 불변 — 옆에 쓴다

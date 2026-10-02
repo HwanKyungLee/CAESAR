@@ -252,8 +252,18 @@ def find_versions(dat_path: str) -> list:
     want_ch = (me or {}).get("channel")
     want_days = set((me or {}).get("data_days") or [])
 
+    # Superseded runs live in {campaign}/_archive/{day}/… (result_io.archive_existing).
+    # Search the live day folder and its archive twin, whichever side dat_path is on.
+    up, day = os.path.split(root)
+    if os.path.basename(up) == "_archive":
+        roots = [os.path.join(os.path.dirname(up), day), root]
+    else:
+        roots = [root, os.path.join(up, "_archive", day)]
+    # lazy (generator) so the `_`-dir pruning below still reaches os.walk
+    walk = (w for r in dict.fromkeys(roots) if os.path.isdir(r) for w in os.walk(r))
+
     found = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in walk:
         dirnames[:] = [x for x in dirnames if not x.startswith("_")]
         for fn in filenames:
             if not fn.endswith(".meta.json"):
