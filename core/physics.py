@@ -182,6 +182,47 @@ class RayleighPhysics:
         return sigma * N  # α = σ × N(T,P)  [cm⁻¹] — α는 압력·온도에 정비례
 
 
+def omr_d_from_ratio(ratio, alpha_za, alpha_he, rl=1.0):
+    """Mirror-loss term (1-R)/d [cm^-1] -- single source of this formula (CLAUDE.md rule 3).
+
+        (1-R)/d = RL * (ratio*alpha_ZA - alpha_He) / (1 - ratio),   ratio = I_ZA / I_He
+
+    Washenfelder et al. 2008: separates the mirror loss from the intensity ratio of two
+    gases with known Rayleigh scattering (zero air, helium).
+
+    Only the formula lives here. Per-caller processing (ratio smoothing, quality gates,
+    invalid-pixel interpolation, polynomial fit) stays with each caller. ratio -> 1 makes
+    the denominator 0; callers wrap this in np.errstate and filter by their own criteria.
+    Operation order must not change -- Augur outputs are compared bit-for-bit
+    (tools/test_bbceas_alpha.py).
+    """
+    return rl * ((ratio * alpha_za) - alpha_he) / (1.0 - ratio)
+
+
+def bbceas_alpha(I, I0, omr_d, alpha_za, alpha_sample, rl=1.0):
+    """BBCEAS extinction coefficient alpha [cm^-1] -- single source (CLAUDE.md rule 3).
+
+        alpha = RL*[(1-R)/d + alpha_ZA] * (I0/I - 1) - (alpha_ray,sample - alpha_ZA)
+
+    Used by Augur (raw direct-fit path, alpha generation Pass 2, binned alpha export) and by
+    Vigil's real-time concentration monitor. NOT the optical density -ln(I/I0): that is
+    ~alpha*L_eff and would inflate concentrations by L_eff (~1e6 cm).
+
+    Rayleigh terms are passed in, not computed here: callers compute them differently
+    (alpha generation scales a precomputed reference; float results differ in the last bit),
+    so computing them here would change production numbers. Handling of I <= 0 pixels
+    (masking vs clamping) is also left to the caller. Operation order must not change
+    (tools/test_bbceas_alpha.py checks bit identity with the former inline expressions).
+
+    I, I0        : dark/offset/stray-corrected sample and reference intensities [counts]
+    omr_d        : (1-R)/d [cm^-1] from the R calibration (already multiplied by RL)
+    alpha_za     : Rayleigh alpha at the I0 (zero-air) scan T/P [cm^-1]
+    alpha_sample : Rayleigh alpha at the sample scan T/P [cm^-1]
+    rl           : purge length ratio; already in omr_d, so applied here to alpha_ZA only
+    """
+    return (omr_d + rl * alpha_za) * ((I0 - I) / I) - (alpha_sample - alpha_za)
+
+
 class KalmanTracker:
     """
     다변수 Kalman 필터 — 농도 시계열 스무딩용.
