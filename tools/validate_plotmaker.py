@@ -17,7 +17,7 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
 5. 설정 저장/불러오기 : .pmcfg.json 라운드트립에서 mode_cfg 보존되나
 6. 색 결정론      : TimeSeries/Diurnal의 _resolve_specs()가 같은 입력→같은 색
 7. 시리즈 리스트 id무결성 : id조회·드래그순서·삭제
-8. Undo          : 데이터셋·시리즈 제거 복원
+8. Undo          : 데이터셋·시리즈 제거 복원 · 데이터셋 undo가 그걸 쓰던 시리즈까지(R7)
 9. 창 상태 기억   : QSettings 스플리터·탭·테마 저장→복원 왕복(2026-06 UX개편 회귀가드)
 10. Batch Publish : 종별 일괄저장 후 원래 시리즈목록/콤보선택 상태 복원되나 ·
     같은 종·다른 데이터셋 파일명이 겹쳐 덮어쓰지 않나(R2, 2026-10-02)
@@ -332,16 +332,21 @@ def c_series_list_identity():
 @check("Undo: 데이터셋·시리즈 제거 복원")
 def c_undo():
     w = _widget_with_fixture()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series.append(["fixture:CHOCHO", "R", None, None])   # 데이터셋을 쓰던 시리즈(R7)
+    ts._refresh_list()
     w._tree.topLevelItem(0).setSelected(True)
     w._remove_data()
-    if w.shelf:
+    if w.shelf or ts._series:
         return "FAIL", "데이터셋 제거가 안 됨(테스트 전제 실패)"
     w.undo_last()
     if "fixture" not in w.shelf:
         return "FAIL", "데이터셋 undo 복원 실패"
+    if [s[0] for s in ts._series] != ["fixture:CHOCHO"]:
+        return "FAIL", f"데이터셋 undo가 그걸 쓰던 시리즈를 복원 안 함: {ts._series} (R7)"
+    ts._series.clear()
 
-    ts = next(m for m in w._modes if m.key == "timeseries")
-    ts.options_widget()
     ts._series.append(["fixture:NO2", "L", None, None])
     ts._refresh_list()
     ts._list.item(0).setSelected(True)

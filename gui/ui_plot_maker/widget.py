@@ -2181,7 +2181,12 @@ class PlotMakerWidget(QWidget):
             if isinstance(data, tuple):
                 names.add(data[1])
         if names:
-            self.push_undo("dataset", [(n, self.shelf[n]) for n in names if n in self.shelf])
+            # Mode settings too: removing a dataset prunes the series/selections that used it,
+            # and Undo must bring those back, not only the shelf entry.
+            import copy
+            modes_cfg = {m.key: copy.deepcopy(m.to_config()) for m in self._modes}
+            self.push_undo("dataset", ([(n, self.shelf[n]) for n in names if n in self.shelf],
+                                       modes_cfg))
         for n in names:
             self.shelf.pop(n, None)
         if names:
@@ -2352,14 +2357,19 @@ class PlotMakerWidget(QWidget):
         kind, payload = self._undo_slot
         self._undo_slot = None
         if kind == "dataset":
+            items, modes_cfg = payload
             restored = 0
-            for name, ds in payload:
+            for name, ds in items:
                 if name not in self.shelf:
                     self.shelf[name] = ds
                     restored += 1
             self._refresh_tree()
             self._notify_modes()
-            self.set_status(f"{restored} dataset(s) restored")
+            for m in self._modes:            # series/selections as they were before the removal
+                if m.key in modes_cfg:
+                    m.from_config(modes_cfg[m.key])
+            self._mode.render()
+            self.set_status(f"{restored} dataset(s) restored with the series that used them")
         elif kind == "timeseries_series":
             ts = next((m for m in self._modes if m.key == "timeseries"), None)
             if ts is not None:
