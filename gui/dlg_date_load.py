@@ -214,7 +214,7 @@ class DateLoadDialog(QDialog):
             cfg_disp = f"{cfg} · " if cfg else ""
             it = QListWidgetItem(
                 f"{cfg_disp}{stem}   [{neg}/{qc}]   {days[0]}~{days[-1]} · {len(days)}d"
-                f"{datetime.fromtimestamp(last):%m-%d %H:%M}")
+                f" · saved {datetime.fromtimestamp(last):%m-%d %H:%M}")
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Unchecked)
             it.setData(Qt.ItemDataRole.UserRole, key)
