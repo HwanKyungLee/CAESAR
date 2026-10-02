@@ -55,6 +55,10 @@ class RMonitor:
         self._last_he: Optional[tuple] = None
         self._history: deque = deque(maxlen=history_window)
         self._fail_streak = 0
+        # (1-R)/d [cm^-1] per pixel of the last successful calibration; ConcMonitor builds
+        # BBCEAS alpha from it. Not overwritten on failure (keep last good value, like
+        # gui/worker.update_mirror_reflectivity).
+        self.omr_d: Optional[np.ndarray] = None
 
     @staticmethod
     def _avg(buf) -> tuple:
@@ -105,14 +109,17 @@ class RMonitor:
         calc.add_he_spectrum(*self._last_he)
         roi_lo, roi_hi = self.roi_nm
         try:
-            wl, _r_raw, r_fit, _omr_d = calc.calculate(
+            wl, _r_raw, r_fit, omr_d = calc.calculate(
                 wave_nm=self.wave_nm, roi_min=roi_lo, roi_max=roi_hi)
         except Exception as e:   # ReflectanceCalculator.calculate의 RuntimeError(품질게이트) 포함
             self._fail_streak += 1
             return self._fail_status(str(e))
         self._fail_streak = 0
-
         m = (wl >= roi_lo) & (wl <= roi_hi)
+        # Outside the ROI the R curve is a polynomial extrapolation; clipped to R<=1 it gives
+        # omr_d == 0 exactly, i.e. alpha 0 = fake 'no absorption'. Mark it NaN instead.
+        self.omr_d = np.where(m, np.asarray(omr_d, dtype=float), np.nan)
+
         r_val = float(np.median(r_fit[m])) if m.any() else float(np.median(r_fit))
         metrics = {"R": r_val, "n_history": len(self._history)}
         self._history.append(r_val)

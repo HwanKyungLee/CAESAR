@@ -275,7 +275,12 @@ class VigilApp:
             spectrum = ch.slice(ev.row)
             temp_c = _hk_value(prof, ev.row, ch.concentration.cavity_temp_hk)
             press_mbar = _hk_value(prof, ev.row, ch.concentration.cavity_pressure_hk)
-            result = cm.observe(ev.role, spectrum, temp_c, press_mbar)
+            # (1-R)/d from the same channel's RMonitor (it ran first in this tick, so this
+            # row's calibration is already in). No reflectance config -> None -> SKIP.
+            rm = self._r_monitors.get(key)
+            omr_d = rm.omr_d if rm is not None else None
+            rl = ch.reflectance.rl_factor if ch.reflectance is not None else 1.0
+            result = cm.observe(ev.role, spectrum, temp_c, press_mbar, omr_d=omr_d, rl=rl)
             if result is not None:
                 status, msg, metrics = result
                 self._conc_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)

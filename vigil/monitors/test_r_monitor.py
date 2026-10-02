@@ -141,9 +141,32 @@ def test_quality_gate_blocks_bad_contrast():
     check("메시지에 실패 언급", "failed" in r[1], r[1])
 
 
+def test_omr_d_exposed_and_masked_outside_roi():
+    """[6] omr_d exposed for ConcMonitor, NaN outside the ROI (extrapolated R clips to 1 ->
+    omr_d 0 -> fake 'no absorption'), last good value kept on failure."""
+    print("[6] omr_d exposed + NaN outside ROI")
+    rm = RMonitor(wave_nm=WAVE, cavity_len_cm=CAVITY_LEN, rl_factor=RL_FACTOR, roi_nm=ROI)
+    check("no omr_d before a calibration", rm.omr_d is None)
+    _feed_cycle(rm, 0.9999)
+    check("omr_d after a calibration", rm.omr_d is not None)
+    if rm.omr_d is None:
+        return
+    inside = (WAVE >= ROI[0]) & (WAVE <= ROI[1])
+    check("finite and > 0 inside ROI", bool(np.all(rm.omr_d[inside] > 0)))
+    check("NaN outside ROI", bool(np.all(np.isnan(rm.omr_d[~inside]))))
+    # R=0.9999, d=51.8 cm -> (1-R)/d ~ 1.93e-6 (times RL)
+    check("omr_d has (1-R)/d scale", 1e-6 < np.nanmedian(rm.omr_d[inside]) < 3e-6,
+          f"{np.nanmedian(rm.omr_d[inside]):.3e}")
+    good = rm.omr_d.copy()
+    rm.wave_nm = None                         # force a failure
+    _feed_cycle(rm, 0.9999)
+    check("failure keeps the last good omr_d", np.array_equal(good, rm.omr_d, equal_nan=True))
+
+
 def main():
     for t in (test_window_completion, test_baseline_accumulation_and_ok, test_drop_alarms,
-              test_failure_streak_to_p0, test_quality_gate_blocks_bad_contrast):
+              test_failure_streak_to_p0, test_quality_gate_blocks_bad_contrast,
+              test_omr_d_exposed_and_masked_outside_roi):
         t()
     print(f"\nr_monitor tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0

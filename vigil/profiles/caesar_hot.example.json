@@ -1,7 +1,7 @@
 {
   "profile_id": "caesar_hot_2026yeosu",
-  "profile_version": "1.2.1",
-  "description": "CAESAR Hot-cavity raw layout (2026 Yeosu, 2026-05-18 – 07-11). 채널 정체는 LED 스펙트럼으로 판정(CHANNEL_IDENTITY_YEOSU2026.md): block 2053 = ΣANs 300 °C 셀(LED 428–456 nm, P_ANs col 6164), block 4101 = ΣPNs 180 °C 셀(LED 451–471 nm, P_PNs col 6162). 캐비티 기체 온도는 오븐 설정값이 아니라 실측 tempcell(1→block 2053, 2→block 4101; Augur core/data_io.py와 같은 짝)을 쓴다. wl_dir은 FitSet의 wl_path로 채널을 고른다(roi1 → FitSet 채널 1, 429.7–466.0 nm; roi2 → 채널 2, 444.1–470.6 nm). 8/11 이후 실험실 구성(block 2053 = cold, 4101 = 300 °C)에는 쓰지 말 것 — 다른 구성은 이 파일을 복제해 바꿀 것.",
+  "profile_version": "1.2.2",
+  "description": "CAESAR Hot-cavity raw layout (2026 Yeosu, 2026-05-18 – 07-11). 채널 정체는 LED 스펙트럼으로 판정(CHANNEL_IDENTITY_YEOSU2026.md): block 2053 = ΣANs 300 °C 셀(LED 428–456 nm, P_ANs col 6164), block 4101 = ΣPNs 180 °C 셀(LED 451–471 nm, P_PNs col 6162). 캐비티 기체 온도는 오븐 설정값이 아니라 실측 tempcell(1→block 2053, 2→block 4101; Augur core/data_io.py와 같은 짝)을 쓴다. wl_dir은 FitSet의 wl_path로 채널을 고른다(roi1 → FitSet 채널 1, 429.4–466.0 nm; roi2 → 채널 2, 444.0–470.7 nm — reflectance.roi_nm must cover the fit window or ConcMonitor refuses to fit; vigil/test_profile_roi_coverage.py checks it). 8/11 이후 실험실 구성(block 2053 = cold, 4101 = 300 °C)에는 쓰지 말 것 — 다른 구성은 이 파일을 복제해 바꿀 것.",
   "instrument": "CAESAR",
   "match": {
     "n_columns": 6181,
@@ -96,7 +96,7 @@
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi1/Calib_20260619_Hg_400-499nm_Poly2.txt",
         "roi_nm": [
-          429.7,
+          429.4,
           466.0
         ],
         "cavity_temp_hk": "tempcell1",
@@ -137,8 +137,8 @@
       "reflectance": {
         "wavecal_path": "C:/Doasis_Work/Output/wv_cal/roi2/Calib_20260619_Hg_400-499nm_Poly2.txt",
         "roi_nm": [
-          444.1,
-          470.6
+          444.0,
+          470.7
         ],
         "cavity_temp_hk": "tempcell2",
         "cavity_pressure_hk": "p_pns_cavity",

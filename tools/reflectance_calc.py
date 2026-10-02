@@ -33,7 +33,7 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-from core.physics import RayleighPhysics  # noqa: E402,F401  (re-export for callers)
+from core.physics import RayleighPhysics, omr_d_from_ratio  # noqa: E402,F401  (RayleighPhysics re-exported for callers)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reflectance Calculator (Engine)
@@ -112,7 +112,7 @@ class ReflectanceCalculator:
 
         # 3. 원본(Raw) OMR_d 및 R 값 계산
         with np.errstate(divide="ignore", invalid="ignore"):
-            omr_d_raw = self.rl_factor * (ratio_smooth * alpha_za - alpha_he) / (1.0 - ratio_smooth)
+            omr_d_raw = omr_d_from_ratio(ratio_smooth, alpha_za, alpha_he, self.rl_factor)
         
         # 비물리 판정용 *unclipped* R.
         # 박사님 MATLAB(Rs2.m:96)은 clip 없이 R1 을 그대로 둬서 ratio>=1 인

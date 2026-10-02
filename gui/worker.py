@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 # RayleighPhysics / KalmanTracker → core/physics.py 에서 공유
-from core.physics import RayleighPhysics, KalmanTracker, air_number_density
+from core.physics import (RayleighPhysics, KalmanTracker, air_number_density,
+                          bbceas_alpha, omr_d_from_ratio)
 
 # 품질 라벨·문턱은 QC 단일 출처에 있다(CLAUDE.md §3). 결과뷰어의 사후 재판정
 # (`app_window_results._reapply_quality_label`)도 같은 함수를 부른다.
@@ -836,8 +837,8 @@ class AnalysisWorker(QThread):
                             # `omr + RL·alpha_ref` 로 교정(= RL·[(1-R)/d + alpha_ref]).
                             alpha_ref = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.t_za_last, self.p_za_last, 'zero_air')
                             alpha_ray_sample = RayleighPhysics.get_alpha_rayleigh(wave_nm, self.temperature, self.pressure, 'zero_air')
-                            optical_depth = ((self.one_minus_r_over_d + self.rl_factor * alpha_ref) * ((I_0 - I_meas) / I_meas)
-                                            - (alpha_ray_sample - alpha_ref))
+                            optical_depth = bbceas_alpha(I_meas, I_0, self.one_minus_r_over_d,
+                                                         alpha_ref, alpha_ray_sample, self.rl_factor)
                             fit_sign = 1.0
 
                             # Save alpha spectrum as intermediate product (per박사님 request)
@@ -1446,7 +1447,7 @@ class AnalysisWorker(QThread):
 
         # rl_factor: ZA/He가 채우는 유효 공동 길이 비율 (퍼지 보정)
         with np.errstate(divide='ignore', invalid='ignore'):
-            omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
+            omr_d = omr_d_from_ratio(ratio, alpha_ray_za, alpha_ray_he, self.rl_factor)
 
         # Replace non-finite values by interpolating from valid neighbours.
         # If ALL pixels are invalid (e.g. ratio≈1 when He/ZA signals are indistinct),
@@ -1930,8 +1931,7 @@ def _pass2_process_file(fp, entries, ctx):
 
             omr = _pass2_omr_d_at(gmean, rep_sec, ctx['rt_omr_pchip'], ctx['rt_omr_const'],
                                   ctx['omr_pchip'], ctx['omr_axis_is_sec'], ctx['best_omr_d'])
-            alpha = ((omr + ctx['rl_factor'] * alpha_ref) * ((i0_s - i_am_s) / i_am_s)
-                     - (alpha_sample - alpha_ref))
+            alpha = bbceas_alpha(i_am_s, i0_s, omr, alpha_ref, alpha_sample, ctx['rl_factor'])
             rows.append((row_idx, rep_sec, t_am, p_am, alpha, n_avg))
 
         if not rows:
@@ -2607,7 +2607,7 @@ class AlphaExportWorker(QThread):
                     alpha_ray_za = RayleighPhysics.get_alpha_rayleigh(wave_nm, t_za_b, p_za_b, 'zero_air')
                     ratio = i_za_b / i_he_s
                     with np.errstate(divide='ignore', invalid='ignore'):
-                        omr_d = self.rl_factor * ((ratio * alpha_ray_za) - alpha_ray_he) / (1.0 - ratio)
+                        omr_d = omr_d_from_ratio(ratio, alpha_ray_za, alpha_ray_he, self.rl_factor)
                     valid = np.isfinite(omr_d) & (omr_d > 0)
                     if (valid.mean() >= self.r_cal_valid_min
                             and np.nanmean(omr_d[valid]) < self.r_cal_omr_max):
@@ -3030,8 +3030,8 @@ class AlphaExportWorker(QThread):
                     alpha_ref    = _alpha_za(t_i0, p_i0)
                     alpha_sample = _alpha_za(t_am, p_am)
                     # RL은 괄호 전체를 곱한다(omr=RL·(1-R)/d → omr + RL·alpha_ref = RL·[(1-R)/d+α_ZA]).
-                    alpha = ((_omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)) + self.rl_factor * alpha_ref)
-                             * ((i0_s - i_am_s) / i_am_s) - (alpha_sample - alpha_ref))
+                    alpha = bbceas_alpha(i_am_s, i0_s, _omr_d_at(gmean, float((st[b, 0] + st[b, 1]) / 2.0)),
+                                         alpha_ref, alpha_sample, self.rl_factor)
                     n_written += 1
                 else:
                     alpha = np.full(len(wave_nm), np.nan)   # 빈 bin
