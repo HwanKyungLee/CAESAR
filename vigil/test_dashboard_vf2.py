@@ -227,6 +227,37 @@ def test_badge_cause():
           win.badge.sizePolicy().horizontalPolicy().name == "Ignored")
 
 
+def test_close_confirm():
+    print("[9] closing asks while monitoring runs")
+    from PyQt6.QtGui import QCloseEvent
+    from vigil.dashboard import dashboard_window as dw
+
+    class UserClose(QCloseEvent):
+        def spontaneous(self):
+            return True
+    win = dw.DashboardWindow(title="t", tz="UTC")
+    win.set_watch_dir("C:/raw"); win.set_running(True)
+    answers = []
+    real = dw.QMessageBox.question
+    try:
+        dw.QMessageBox.question = staticmethod(lambda *a, **k: (answers.append(a[2]), dw.QMessageBox.StandardButton.No)[1])
+        e = UserClose(); win.closeEvent(e)
+        check("user close while running: asks, No keeps it open", not e.isAccepted() and answers
+              and "Monitoring will stop" in answers[0], answers)
+        dw.QMessageBox.question = staticmethod(lambda *a, **k: dw.QMessageBox.StandardButton.Yes)
+        e = UserClose(); win.closeEvent(e)
+        check("Yes closes, reason recorded", e.isAccepted() and win.close_reason == "window closed by the user")
+        answers.clear()
+        dw.QMessageBox.question = staticmethod(lambda *a, **k: (answers.append(1), dw.QMessageBox.StandardButton.No)[1])
+        win.set_running(False)
+        e = UserClose(); win.closeEvent(e)
+        check("paused: closes without asking", e.isAccepted() and not answers)
+        e = QCloseEvent(); win.set_running(True); win.closeEvent(e)
+        check("programmatic quit: no question", e.isAccepted() and not answers and win.close_reason == "application quit")
+    finally:
+        dw.QMessageBox.question = real
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -238,6 +269,7 @@ def main():
     test_hk_view()
     test_realert()
     test_badge_cause()
+    test_close_confirm()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 

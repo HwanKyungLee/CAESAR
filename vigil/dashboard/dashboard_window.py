@@ -24,7 +24,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+    QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
     QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -162,6 +162,7 @@ class DashboardWindow(QMainWindow):
     def __init__(self, title: str = "Vigil — Pipeline Health", tz: str = "KST"):
         super().__init__()
         self._paused = False
+        self.close_reason = None          # set by closeEvent — why the window went away
         self.setWindowTitle(title)
         self.resize(1360, 860)
         self._last_status = None
@@ -447,6 +448,22 @@ class DashboardWindow(QMainWindow):
         self._cards_empty.show()
         self._last_status = None
         self.fresh.setText("last row —"); self._fresh_style(None)
+
+    def closeEvent(self, e) -> None:
+        """Closing the window ends monitoring — ask first when it is running. Only a user close (title-bar X,
+        Alt+F4) asks; a programmatic quit does not. close_reason goes to the status log (run_vigil)."""
+        if e.spontaneous() and self._watch_dir and not self._paused and not self._confirm_close():
+            e.ignore()
+            return
+        self.close_reason = "window closed by the user" if e.spontaneous() else "application quit"
+        super().closeEvent(e)
+
+    def _confirm_close(self) -> bool:
+        ans = QMessageBox.question(
+            self, "Close Vigil?",
+            "Monitoring will stop — no alarms until Vigil is started again.\n\nClose anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        return ans == QMessageBox.StandardButton.Yes
 
     def _toggle_run(self) -> None:
         self.set_running(self._paused)
