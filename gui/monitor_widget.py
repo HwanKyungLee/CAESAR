@@ -376,16 +376,16 @@ class MonitorWidget(QWidget):
         self._view_channel = int(_ch) if _ch is not None else idx + 1
         data = self._latest_by_channel.get(self._view_channel)
         if data:
-            self.update_spectrum(*data)
+            self.update_spectrum(*data)     # 7-tuple: carries the scan's own engine
 
     def _on_tab_changed(self, idx):
         """탭 전환 시 마지막 스캔으로 한 번 그린다 — 안 보이는 탭은 갱신을 건너뛰므로."""
         if not self.latest_fit_data:
             return
         if idx == 0:
-            self.update_components(*self.latest_fit_data[:5])
+            self.update_components(*self.latest_fit_data[:5], engine=self.latest_fit_data[6])
         elif idx == 1:
-            self._draw_fit_view(*self.latest_fit_data)
+            self._draw_fit_view(*self.latest_fit_data[:6])
 
     def _draw_fit_view(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
         x_plot, x_label = self.get_x_axis(pixel_idx)
@@ -396,25 +396,37 @@ class MonitorWidget(QWidget):
         self.curve_fit.setData(x_plot, intensity_fit)
         self.curve_resid.setData(x_plot, intensity_raw - intensity_fit)
 
-    def update_spectrum(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title):
+    def update_spectrum(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title,
+                        engine=None):
+        # The engine that produced this scan draws its gas components. Live scans come
+        # from a channel worker's plot_update signal → that worker's own engine (the
+        # active-tab engine gave other channels' Components wrong curves, up to 18.8 %).
+        # A direct call (replay, which swaps self.engine) has no sender → self.engine.
+        if engine is None and isinstance(self.sender(), QThread):   # fit workers are QThreads
+            engine = getattr(self.sender(), 'engine', None)
+        if engine is None:
+            engine = self.engine
         # 채널 필터: 어느 채널 스캔이든 최신본은 보관하되, 선택 채널만 화면에 렌더
         ch = int(fit_params.get('channel', 1)) if isinstance(fit_params, dict) else 1
-        self._latest_by_channel[ch] = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
+        data = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title, engine)
+        self._latest_by_channel[ch] = data
         if ch != getattr(self, '_view_channel', 1):
             return
-        self.latest_fit_data = (pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params, title)
+        self.latest_fit_data = data
 
         # 안 보이는 탭은 그리지 않는다. Components는 원래 그랬고 Fit View는 Trend/Conc를
         # 보고 있어도 매 스캔 setData를 돌리고 있었다(순수 낭비). 탭을 다시 열면
         # _on_tab_changed가 마지막 스캔으로 채운다.
         _tab = self.tabs.currentIndex()
         if _tab == 0:
-            self.update_components(pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params)
+            self.update_components(pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params,
+                                   engine=engine)
         elif _tab == 1:
             self._draw_fit_view(pixel_idx, intensity_raw, intensity_fit,
                                 intensity_poly, fit_params, title)
 
-    def update_components(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params):
+    def update_components(self, pixel_idx, intensity_raw, intensity_fit, intensity_poly, fit_params,
+                          engine=None):
         """
         Refreshes the per-gas component view using an anti-flicker technique.
 
@@ -428,7 +440,8 @@ class MonitorWidget(QWidget):
 
         The layout is rebuilt from scratch only when the number of gases changes.
         """
-        gas_list = self.engine.gas_list
+        engine = engine if engine is not None else self.engine
+        gas_list = engine.gas_list
         if not gas_list: return
 
         # 1. Create plot frames only when the gas SET changes (개수뿐 아니라 이름까지).
@@ -467,7 +480,7 @@ class MonitorWidget(QWidget):
         for i, name in enumerate(gas_list):
             if f"{name}_data" not in self.curve_items:
                 continue   # 곡선 미생성(가스셋 전환 직후 등) — 다음 갱신에서 재구성
-            gas_fit = self.engine.get_individual_gas_contribution(pixel_idx, fit_params['shifts'], fit_params['squeezes'], fit_params['gas_coeffs'], i)
+            gas_fit = engine.get_individual_gas_contribution(pixel_idx, fit_params['shifts'], fit_params['squeezes'], fit_params['gas_coeffs'], i)
             self.curve_items[f"{name}_data"].setData(x_plot, residual + gas_fit)
             self.curve_items[f"{name}_fit"].setData(x_plot, gas_fit)
             

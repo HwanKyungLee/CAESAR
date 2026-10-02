@@ -61,6 +61,46 @@ def test_trend_throttle_is_per_channel():
         assert m._trend_curves[ch]['sh'].xData is not None, ch
 
 
+class _Eng:
+    def __init__(self, gas, level):
+        self.gas_list, self.level = [gas], level
+
+    def get_individual_gas_contribution(self, px, sh, sq, coeffs, i):
+        import numpy as np
+        return np.full(len(px), self.level)
+
+
+def _emit_scan(m, eng, ch):
+    """Emit one scan the way a channel worker does (signal from a QThread)."""
+    import numpy as np
+    from PyQt6.QtCore import QThread, pyqtSignal
+
+    class W(QThread):
+        plot_update = pyqtSignal(np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict, str)
+    w = W()
+    w.engine = eng
+    w.plot_update.connect(m.update_spectrum)
+    px = np.arange(10.0)
+    w.plot_update.emit(px, np.zeros(10), np.zeros(10), np.zeros(10),
+                       {'channel': ch, 'shifts': [0], 'squeezes': [1], 'gas_coeffs': [1]}, "s")
+    return w
+
+
+def test_components_use_the_scans_own_engine():
+    """R2/R4: another channel's scan was drawn with the active-tab engine, also after
+    a tab round trip."""
+    m = _monitor()
+    m.engine = _Eng("A", 1.0)                   # active-tab engine
+    m.set_available_channels([1, 2])
+    m.cb_fit_channel.setCurrentIndex(1)          # view CH2
+    m.tabs.setCurrentIndex(0)
+    _w = _emit_scan(m, _Eng("B", 7.0), 2)
+    assert "B_fit" in m.curve_items and m.curve_items["B_fit"].yData[0] == 7.0
+    m.tabs.setCurrentIndex(1)
+    m.tabs.setCurrentIndex(0)
+    assert "B_fit" in m.curve_items and m.curve_items["B_fit"].yData[0] == 7.0
+
+
 if __name__ == "__main__":
     for _n, _f in list(globals().items()):
         if _n.startswith("test_"):
