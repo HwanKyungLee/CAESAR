@@ -99,6 +99,8 @@ gui/ui_plot_maker/ 패키지(2026-06 분할: data·processing·core·modes·widg
     기록만 · **설정을 열 때 기록을 자동 실행하지 않나**(센티넬 파일) · rerun()으로만 재생성 (D3, 2026-10-01)
 45. 주석 시각 : 연도 생략 값이 서기 1년·UTC가 아니라 데이터 연도·로컬로 · 깨진 주석은
     Publish를 죽이지 않고 건너뛰며 이름이 남나 (R1, 2026-10-02)
+46. Export CSV : 시간축 다른 열을 core.align으로 — 끝값 외삽·결손 직선 메움 없이 빈 칸,
+    '#' 헤더에 시프트·리샘플 기록, Plot Maker가 다시 읽나 (R3, 2026-10-02)
 """
 from __future__ import annotations
 import os, sys
@@ -2065,6 +2067,46 @@ def c_annot_time_parse():
     if "good" not in texts:
         return "FAIL", f"정상 주석까지 사라짐: {texts}"
     return "PASS", "연도 생략·포함 모두 로컬 같은 시각 · 깨진 주석만 건너뛰고 이름 남김"
+
+
+# ── 46. Export CSV: 다른 시간축은 core.align — 외삽·결손 메움 금지 + 헤더 기록 (R3) ──
+@check("Export CSV: 다른 시간축 외삽·결손 메움 없음 · '#' 헤더에 시프트·리샘플 · 다시 읽힘")
+def c_csv_no_fabrication():
+    import tempfile
+    from PyQt6.QtWidgets import QFileDialog
+    from gui.ui_plot_maker.data import load_dataset
+    w = _widget_with_fixture()
+    a = w.shelf["fixture"]
+    # 뒤 절반만 겹치고, 가운데 2시간 결손이 있는 두 번째 데이터셋
+    t2 = np.concatenate([a.time[250:350], a.time[-30:] + 600.0])
+    b = Dataset("fx2", "<fixture:fx2>", t2, {"NO2": np.arange(len(t2), dtype=float)})
+    w.shelf["fx2"] = b; w._refresh_tree(); w._notify_modes()
+    ts = next(m for m in w._modes if m.key == "timeseries")
+    ts.options_widget()
+    ts._series += [["fixture:NO2", "L", None, None], ["fx2:NO2", "L", None, None]]
+    headers, rows = ts.csv_table()
+    col = [r[2] for r in rows]
+    if any(col[i] for i in range(0, 250)):
+        return "FAIL", "앞쪽 범위 밖 행에 값이 채워짐(끝값 외삽)"
+    if any(col[i] for i in range(360, 460)):
+        return "FAIL", "결손 구간을 직선으로 메움"
+    if not all(col[i] for i in range(250, 350)):
+        return "FAIL", "겹치는 구간 값이 비었음"
+    orig = QFileDialog.getSaveFileName
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "x.csv")
+            QFileDialog.getSaveFileName = staticmethod(lambda *a_, **k: (out, ""))
+            w._export_csv()
+            txt = open(out, encoding="utf-8").read()
+            if not txt.startswith("# Augur Plot Maker export") or "resample" not in txt or "time shift" not in txt:
+                return "FAIL", f"CSV 헤더 기록 없음: {txt[:120]!r}"
+            ds = load_dataset(out)
+            if ds.time is None or len(ds.time) != len(rows):
+                return "FAIL", "'#' 헤더가 붙은 CSV를 Plot Maker가 다시 못 읽음"
+    finally:
+        QFileDialog.getSaveFileName = orig
+    return "PASS", "범위 밖·결손은 빈 칸 · 겹친 구간만 값 · 헤더에 시프트/리샘플 · 재로드 정상"
 
 
 def main():

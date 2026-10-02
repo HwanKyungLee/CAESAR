@@ -2893,6 +2893,17 @@ class PlotMakerWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Copy", f"Failed: {e}")
 
+    def _csv_provenance(self):
+        """'#' header lines for Export CSV — what was done to the values (Plot Maker reads '#' as comments)."""
+        from core.provenance import code_version
+        ds_sh = ", ".join(f"{n} {ds.shift_h:+g}h" for n, ds in self.shelf.items() if ds.shift_h)
+        return [f"Augur Plot Maker export · code {code_version()} · mode {self._mode.key}",
+                f"time shift {self.time_shift_hours:+g}h (global)"
+                + (f" · dataset shift: {ds_sh}" if ds_sh else ""),
+                f"resample {self.resample_sec:g} s (0 = raw) · smooth {self.smooth_n} point(s)",
+                "time series: columns on another time axis are aligned to the first one with "
+                "core.align (linear, gap guard); no extrapolation, gaps left empty"]
+
     def _export_csv(self):
         """현재 모드가 제공하는 데이터(csv_table)를 CSV로 저장."""
         table = self._mode.csv_table()
@@ -2910,6 +2921,8 @@ class PlotMakerWidget(QWidget):
         try:
             import csv
             with open(out, "w", newline="", encoding="utf-8") as f:
+                for line in self._csv_provenance():
+                    f.write("# " + line + "\n")
                 w = csv.writer(f)
                 w.writerow(headers)
                 w.writerows(rows)

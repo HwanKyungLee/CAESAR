@@ -883,17 +883,21 @@ class TimeSeriesMode(PlotMode):
             return None
         if time_ref is not None:
             headers = ["datetime"] + list(cols.keys())
+            # Other time axes go through core.align (same as Join / Scatter): no edge
+            # extrapolation, no bridging of gaps — those cells stay empty. np.interp used to
+            # fill a whole column with the edge value (fabricated rows).
+            aligned = {}
+            for lab, (xs, ys) in cols.items():
+                if xs is not None and xs is not time_ref:
+                    aligned[lab] = align_to(time_ref, xs, ys)[0]
             rows = []
             for i, tv in enumerate(time_ref):
                 row = [datetime.fromtimestamp(tv).strftime("%Y-%m-%d %H:%M:%S")]
                 for lab in cols:
                     xs, ys = cols[lab]
-                    if xs is time_ref and i < len(ys):
-                        row.append(f"{ys[i]:.6g}")
-                    elif xs is not None:
-                        row.append(f"{np.interp(tv, xs, ys):.6g}")
-                    else:
-                        row.append("")
+                    v = (ys[i] if i < len(ys) else np.nan) if xs is time_ref \
+                        else aligned[lab][i] if lab in aligned else np.nan
+                    row.append(f"{v:.6g}" if np.isfinite(v) else "")
                 rows.append(row)
             return headers, rows
         headers = ["index"] + list(cols.keys())
