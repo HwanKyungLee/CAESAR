@@ -19,6 +19,18 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFileDialo
 
 from core.data_io import DataIO
 from gui.theme import AUGUR
+from PyQt6.QtCore import QEvent, QObject
+
+
+class _WheelOnlyWhenFocused(QObject):
+    """Physical constants must not change while the user scrolls the Setup page: an unfocused
+    spin box under the cursor took the wheel (d 51.8 -> 50.8 cm, UX audit 2026-10-02)."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Wheel and not obj.hasFocus():
+            ev.ignore()          # let the scroll area scroll instead
+            return True
+        return False
 
 
 class CavityTabMixin:
@@ -370,6 +382,12 @@ class CavityTabMixin:
             "Typical UV: 0.001–0.01  |  0.0 = disabled"
         )
         lay_det.addRow("Stray Light ε:", self.spin_stray_light)
+
+        self._wheel_guard = _WheelOnlyWhenFocused(self)
+        for _sp in (self.spin_d_len, self.spin_rl_factor, self.spin_temp, self.spin_pres,
+                    self.spin_dark_scale, self.spin_offset_scale, self.spin_stray_light):
+            _sp.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            _sp.installEventFilter(self._wheel_guard)
 
         grp_det.setLayout(lay_det)
         _det_outer.addWidget(grp_det)
