@@ -1429,6 +1429,21 @@ class ResultViewerWidget(QWidget):
             out.append((t, line))
         return out, int(mask.sum())
 
+    def _provenance_lines(self, paths, sliced=True):
+        """What the viewer did to produce an Export/Merge file (principle 4). The copied input
+        header (e.g. "Auto QC K=8", its Code Version) describes the input, not this file."""
+        K = self._spin_qc_k.value()
+        t0, t1 = self._region_times() if sliced else (None, None)
+        return ([f"viewer post-hoc QC K={K:g}"
+                 + (" (gas values of rows above the threshold set to nan, Status QC-Auto; "
+                    "supersedes any Auto QC K in the header above)" if K > 0 else " (off)"),
+                 f"viewer Hide QC {'ON' if self._chk_hide_qc.isChecked() else 'OFF'} "
+                 "(display only - rows and Status kept)",
+                 "range " + (f"{t0:%Y-%m-%d %H:%M:%S} ~ {t1:%Y-%m-%d %H:%M:%S}" if t0 else "all")
+                 + (" (file times)" if sliced else " (Merge ignores the range)"),
+                 f"display time shift {self._time_shift_hours:+g} h (NOT applied - times as in input)"]
+                + [f"input {os.path.abspath(p)}" for p in paths])
+
     def _build_export(self, paths):
         """Merge → post-hoc QC on the whole set (as on screen) → slice to the range.
         Returns (comments, colhdr, rows, n_in, nq-in-range). ValueError if nothing to write."""
@@ -1478,7 +1493,8 @@ class ResultViewerWidget(QWidget):
         if _d:
             os.makedirs(_d, exist_ok=True)
         write_result(out, comments, colhdr, rows,
-                     note=f"{len(paths)} file(s), {n_in}→{len(rows)} rows, QC-excluded {nq} (viewer export)")
+                     note=f"{len(paths)} file(s), {n_in}→{len(rows)} rows, QC-excluded {nq} (viewer export)",
+                     extra=self._provenance_lines(paths))
         qmsg = f" · QC excluded {nq}" if nq else ""
         self._stats_lbl.setText(
             f"Saved: {os.path.basename(out)}  ({len(rows)} rows{qmsg}, "
@@ -1515,7 +1531,10 @@ class ResultViewerWidget(QWidget):
         if _d:
             os.makedirs(_d, exist_ok=True)
         with open(out, "w", encoding="utf-8", newline="") as f:
-            f.write(f"# source: {os.path.basename(path)}\n")
+            from core.provenance import code_version
+            f.write(f"# source: {os.path.abspath(path)}\n")
+            f.write(f"# exporter code {code_version()} (Result Lab concentration export, "
+                    f"{datetime.now():%Y-%m-%d %H:%M})\n")
             if shift_h:
                 f.write(f"# time shifted by {shift_h:+g}h vs. source (Result Lab manual correction)\n")
             out_df.to_csv(f, index=False)
@@ -1552,7 +1571,8 @@ class ResultViewerWidget(QWidget):
         if _d:
             os.makedirs(_d, exist_ok=True)
         write_result(out, comments, colhdr, rows,
-                     note=f"merged {len(paths)} files, {ndup} dups removed, QC-excluded {nq} (viewer)")
+                     note=f"merged {len(paths)} files, {ndup} dups removed, QC-excluded {nq} (viewer)",
+                     extra=self._provenance_lines(paths, sliced=False))
         dmsg = (f" · {ndup} dups" if ndup else "") + (f" · QC {nq}" if nq else "")
         self._stats_lbl.setText(f"Merged: {os.path.basename(out)} ({len(rows)} rows{dmsg})")
 

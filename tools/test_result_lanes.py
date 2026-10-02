@@ -375,6 +375,40 @@ def test_export_qc_matches_screen(w):
     assert got == list(screen) and nq == int(screen.sum()), (got, list(screen), nq)
 
 
+def test_outputs_carry_provenance(w):
+    """2026-10-02 R9: Export/Merge/Calculator files had no exporter git hash, K, range or
+    input paths, and a K=3 re-QC kept the input's "Auto QC K=8" header as the only K."""
+    from core.provenance import code_version
+    from core.result_io import write_result
+    from gui.dlg_calculator import CalculatorDialog
+    d = tempfile.mkdtemp()
+    w._path = _write_fit(d)
+    w._list.clear()
+    w._reload()
+    w._spin_qc_k.setValue(3.0)
+    c, colhdr, rows, _n, _nq = w._build_export([w._path])
+    out = os.path.join(d, "exp.dat")
+    write_result(out, c, colhdr, rows, extra=w._provenance_lines([w._path]))
+    w._spin_qc_k.setValue(0.0)
+    head = open(out, encoding="utf-8").read().split(colhdr)[0]
+    for want in (f"exporter code {code_version()}", "post-hoc QC K=3", "Hide QC",
+                 "range all", "time shift +0 h", f"input {os.path.abspath(w._path)}"):
+        assert want in head, (want, head)
+
+    dlg = CalculatorDialog(w, datasets=[w._path])
+    _lbl, ds, col, _rm = dlg._var_rows[0]
+    ds.setCurrentIndex(ds.findData(w._path))
+    col.setCurrentText("NO2")
+    dlg._expr.setText("A*2")
+    dlg._compute()
+    assert dlg._result is not None, dlg._msg.text()
+    out = os.path.join(d, "calc.csv")
+    dlg._write_csv(out)
+    head = open(out, encoding="utf-8").read()
+    assert f"exporter code {code_version()}" in head, head
+    assert f"# A = {os.path.abspath(w._path)} :: NO2" in head, head
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)   # 참조 유지 필수
     assert app is not None
@@ -390,7 +424,8 @@ def main() -> int:
                      (test_png_of_fit_is_the_lanes, (w,)),
                      (test_stats_follow_open_file, (w,)),
                      (test_bom_csv_opens, (w,)),
-                     (test_export_qc_matches_screen, (w,))):
+                     (test_export_qc_matches_screen, (w,)),
+                     (test_outputs_carry_provenance, (w,))):
         fn(*args)
         print(f"  PASS  {fn.__name__}")
     print("result lanes self-check OK")
