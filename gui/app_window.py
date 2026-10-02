@@ -592,7 +592,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
 
         from gui.ref_properties_dialog import RefPropertiesTable
         self.tbl_shsq = RefPropertiesTable([], {})
-        self.tbl_shsq.setMinimumHeight(int(120 * self._s))
+        self.tbl_shsq.setMinimumHeight(int(150 * self._s))   # two-line header + three gases
         self.tbl_shsq.setMaximumHeight(int(220 * self._s))
         self.tbl_shsq.changed.connect(self._on_shsq_table_changed)
         # 명시적 플래그 — isVisible()은 부모 탭이 숨으면 False라 토글이 어긋난다

@@ -79,12 +79,21 @@ class RefPropertiesTable(QWidget):
 
     def _build(self, gas_list, current_props):
         self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels([
-            "Gas Name", "Shift Mode", "Shift Params",
-            "Squeeze Mode", "Squeeze Params",
-            "T_ref (°C)", "dσ/dT (%/°C)",
-            "Active Bands (nm)",
-        ])
+        # Two-line headers: one-line ones were cut to "Shift Pa…" at these column widths in the
+        # main-window panel (UX audit 2026-10-02 s1). The full meaning is in each header's tooltip.
+        from PyQt6.QtWidgets import QTableWidgetItem
+        for col, (label, tip) in enumerate((
+                ("Gas", "Reference name (as locked)"),
+                ("Shift\nmode", "Free / Limit / Fix / Link (follow another gas) / Center"),
+                ("Shift\nparams", "Limit: 'lo, hi' px · Fix: value · Link: gas name · Center: 'centre, half-width'"),
+                ("Squeeze\nmode", "Free / Limit / Fix / Link for the wavelength stretch"),
+                ("Squeeze\nparams", "Limit: 'lo, hi' · Fix: value · Link: gas name"),
+                ("T_ref\n(°C)", "Temperature the cross-section was measured at"),
+                ("dσ/dT\n(%/°C)", "Cross-section temperature coefficient"),
+                ("Active bands\n(nm)", "Wavelength bands where this gas is fitted; empty = whole window"))):
+            it = QTableWidgetItem(label)
+            it.setToolTip(tip)
+            self.table.setHorizontalHeaderItem(col, it)
         hdr = self.table.horizontalHeader()
         # Per-column widths + horizontal scroll. Stretch next to 360 px of fixed columns
         # squeezed the mode/param columns to ~20 px in the narrow main-window panel.

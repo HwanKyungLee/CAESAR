@@ -106,11 +106,14 @@ class ResultsQCMixin:
             f.setPointSizeF(max(7.5, f.pointSizeF() - 1.5))
             self.table.setFont(f)
             widths = {"Ch": 34, "File": 88, "Time": 118, "RMS": 58, "Chi2": 44,
-                      "SNR": 52, "Status": 72, "Shift": 44, "Squeeze": 52}
+                      "SNR": 52, "Status": 100, "Shift": 44, "Squeeze": 52}
             s = getattr(self, '_s', 1.0)
             for i, c in enumerate(cols):
                 self.table.setColumnWidth(i, int(widths.get(c, 56) * s))   # 가스 컬럼 기본 56
             self.table.horizontalHeader().setStretchLastSection(False)
+            # one line per row, cut with "…" — notes like "OK · AT_BOUND(NO2)" wrapped into a
+            # second, clipped line; the whole text is the cell tooltip (_status_item)
+            self.table.setWordWrap(False)
         except Exception:
             pass
 
@@ -155,6 +158,7 @@ class ResultsQCMixin:
         Settling, Error…) is a failure."""
         st = str(status)
         it = QTableWidgetItem(st)
+        it.setToolTip(st)
         head = st.split(' · ')[0]
         if head == "Recovered":
             it.setBackground(QColor(AUGUR.warn_bg)); it.setForeground(QColor(AUGUR.ink))
