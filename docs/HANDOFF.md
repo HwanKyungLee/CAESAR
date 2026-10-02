@@ -12,6 +12,22 @@
 > — 항목마다 "주장 / 근거 숫자 / **재현 명령** / 출력 변화 / 확신 수준"이 있고,
 > **내가 틀렸다가 정정한 7건**도 목록으로 있다. 아래 절들보다 그쪽을 먼저 볼 것.
 
+## 2026-10-03 — 오차 정직화 A단계: 원고 §6.1 의 세 숫자 중 둘을 제품 경로로
+
+**전제 정정**: "perr 이 3.4~4.4배 작다"(09-17)는 shift 가 안 움직이던 하니스·감사 이전 값이라 폐기.
+현재 근거는 원고 §3.4·§4.6·§7.2 — 핏 σ 자체는 제 정의대로 거의 맞고(제로에어 0.91–1.06), 빠진 것은
+잔차에 안 보이는 구조항(I0·R 보간, etalon f 고정 — 핏 σ 의 1.1–2.0배)이다.
+**규약**: `<gas>_Error` 는 그대로 둔다(원고 product column). 새 값은 새 열.
+
+- `c4c4749` `<gas>_ErrorCorr`·`Resid_ACF1` — 잔차상관 sandwich. 05-20: ANs 1.42배, PNs 1.045배(중앙).
+- `f155d2e` 맥락 열 `I0_/R_dt_s·_gap_h·_edge` — 알파 헤더 knot(새 알파) 또는 폴더 `_calknots.json`
+  (옛 알파: `tools/alpha_context_sidecar.py --write-knots`). 모르면 NaN.
+- `32bea96` 제로에어 LOO 알파(알파 생성이 `{campaign}/_zeroair/` 에 런마다 한 파일) +
+  `tools/zero_air_floor.py`(shift·f 고정 핏 → σ·MDL·ΣANs). 7일 캐시로 정본 대비 수 % 이내.
+
+**남은 것(B)**: 스캔별 구조항 `<gas>_Struct` — `diagnostics/i0_interp_2026-09/production_budget.py`
+(LOO i0·rt·ef 섭동)를 제품 도구로. 실시간(Vigil)엔 못 넣는다(섭동을 돌려야 한다, 원고 §6.1).
+
 ## 2026-10-02 (5) — 기본(구조) 프로파일 + 미션 패키지 (Augur → Vigil, USB)
 
 **왜**: 측정 PC 는 인터넷이 없고(USB), FitSet 은 만든 PC 의 절대경로를 쓰며 "어느 블록이 어느 셀인가"를
