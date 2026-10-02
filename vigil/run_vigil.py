@@ -572,6 +572,7 @@ class VigilApp:
         self.recorder.maybe_write(now.timestamp(), self._record_values(overall_status, now))
 
         if self.dashboard is not None:
+            self.dashboard.set_results(results)        # badge names the worst cause + an action
             self.dashboard.set_status(overall_status, overall_msg)
             self.dashboard.set_freshness(self._last_arrival, now, grace_sec)
             self.dashboard.update_cards(self._cards())
@@ -752,6 +753,10 @@ def main(argv=None) -> int:
     qs = QSettings("CAESAR", "vigil")
     win = DashboardWindow(title="Vigil", tz=qs.value("tz", "KST", type=str))
     win.tz_changed.connect(lambda tz: qs.setValue("tz", tz))
+    # before VigilApp: its 'Watch folder' line would otherwise hide whether the last run wrote an exit line
+    StateLog(os.path.join(args.state_dir, "status.jsonl")).lifecycle(
+        "start", f"Vigil started (v{__version__}, autostart={bool(args.autostart and args.dir)})",
+        pid=os.getpid(), watch_dir=args.dir, autostart=bool(args.autostart and args.dir))
     core = VigilApp(args.dir, args.profiles, args.state_dir, dashboard=win,
                     max_bytes_per_tick=int(args.max_mb_per_tick * 2**20),
                     backlog_age_sec=(args.backlog_age_min * 60 if args.backlog_age_min >= 0 else None))
@@ -804,6 +809,8 @@ def main(argv=None) -> int:
     splash.finish(win)
     rc = app.exec()
     log.info("Vigil exited (rc=%s)", rc)
+    reason = win.close_reason or "application quit"
+    core.state_log.lifecycle("exit", f"Vigil exited (rc={rc}, {reason})", rc=rc, reason=reason)
     lock.unlock()
     return rc
 

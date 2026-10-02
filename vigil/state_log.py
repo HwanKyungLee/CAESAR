@@ -33,7 +33,8 @@ class StateLog:
         # 코드에서 나왔나"가 줄 단위로 확정돼야 한다(현장 PC의 Vigil이 랩 Augur보다
         # 뒤처질 수 있다: tools/bundle_vigil_deps.py USB 배포). code_version()은
         # lru_cache라 프로세스당 git 호출 1회.
-        rec = {"ts": datetime.now().isoformat(timespec="seconds"),
+        # ts carries the UTC offset (2026-10-02) — a bare local time is ambiguous next to UTC raw/vrec times.
+        rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
                "status": status, "msg": msg, "code": code_version(), **fields}
         line = json.dumps(rec, ensure_ascii=False, default=str) + "\n"
         try:
@@ -41,6 +42,18 @@ class StateLog:
                 fh.write(line)
         except OSError as e:   # 디스크 풀·잠금 — 감시 루프를 죽이지 않고 파일 로그에라도 남긴다
             log.warning("state log write failed (%s): %s", e, line.strip())
+
+    def lifecycle(self, event: str, msg: str, **fields) -> None:
+        """Start/exit lines (kind=lifecycle). Without them a stretch with Vigil closed looked like a quiet
+        stretch in this log (2026-10-02 audit: a 16 s restart gap was invisible). On "start", if the last
+        line is not an exit line the previous run died (crash, console closed, power loss) — say so."""
+        if event == "start":
+            last = self.tail(1)
+            if last and not (last[0].get("kind") == "lifecycle" and last[0].get("event") == "exit"):
+                self.append("LIFECYCLE", "previous run ended without an exit line (crash, console closed or "
+                            "power loss) — not monitored since the line before this one",
+                            kind="lifecycle", event="unclean_exit", last_ts=last[0].get("ts"))
+        self.append("LIFECYCLE", msg, kind="lifecycle", event=event, **fields)
 
     def tail(self, n: int = 20) -> list:
         """마지막 n개 레코드(대시보드 초기 로그 패널 채우기용). 파일 없으면 빈 리스트."""

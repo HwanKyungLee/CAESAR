@@ -54,10 +54,10 @@ def test_record(d):
         fh.write(struct.pack("<d", t0 + 120))  # 정전으로 잘린 꼬리
     check("잘린 꼬리 무시", len(read_records(path)[1]) == 2)
     rec.maybe_write(t0 + 180, {"a": 1.0, "b": 2.0, "c": 3.0})
-    check("열 바뀌면 새 파일(_2)", rec._path != path and rec._path.endswith("_2.vrec"), rec._path)
+    check("열이 늘어도 같은 파일(합집합)", rec._path == path and read_records(path)[0] == ["a", "b", "c"], rec._path)
     rec2 = MinuteRecorder(d)
     rec2.maybe_write(t0 + 240, {"a": 1.0, "b": 2.0})
-    check("재시작 — 같은 열이면 이어 씀", rec2._path == path and len(read_records(path)[1]) >= 3)
+    check("재시작 — 같은 날 파일에 이어 씀", rec2._path == path and len(read_records(path)[1]) == 4)
 
 
 def test_datapaths(d):
@@ -152,7 +152,7 @@ def test_dashboard():
     check("스파이크 하나에 안 뭉개짐", hi < 10, (lo, hi))
     trend = {("p", "f"): [(now + timedelta(seconds=10 * k), 1.0 + 0.01 * k) for k in range(50)]
              + [(now + timedelta(seconds=500), 1e6)]}
-    win.update_hk_trend(trend, {("p", "f"): {"label": "f"}})
+    win.update_hk_trend(trend, {("p", "f"): {"label": "f", "warn": [0, 2]}})
     out = win._out_items["hk"]
     check("범위 밖 점은 가장자리 표시", len(out.data) == 1)
     rows = {"/x/a.dat": {"last_row": now, "lag": 1.0, "hk_status": OK}}

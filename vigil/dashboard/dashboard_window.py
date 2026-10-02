@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -23,8 +24,8 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-    QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
+    QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from gui.flow_layout import FlowLayout
@@ -52,6 +53,10 @@ _BTN_STYLE = (f"QPushButton {{ font-size:15px; font-weight:600; padding:10px; co
 _SMALL_BTN = (f"QPushButton {{ padding:3px 10px; color:{VIGIL.text}; background:{VIGIL.button};"
               f" border:1px solid {VIGIL.rule}; }}")
 
+# Non-ASCII glyphs allowed in UI strings. The bundled IBM Plex has none of the shapes; these few come
+# from the system fallback and were seen to render. ★ and ⏸ rendered as □ (2026-10-02 audit) — use text.
+UI_GLYPHS = set("●▲◆■○▶—…₀·×–≥≤")
+
 _COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R", "Lamp", "Conc"]
 _ALARM_COLUMNS = ["Start", "End", "Level", "Source", "Message"]
 
@@ -63,6 +68,31 @@ _ALARM_COLOR = VIGIL.p0
 # 시각 기준 — 표시만 바꾼다(저장·판정은 모두 실제 시각 epoch). pyqtgraph DateAxisItem 의 utcOffset 은
 # '표시 = 실제 − offset' 규칙이라 UTC+9 는 −32400.
 TZ_CHOICES = {"KST": 9.0, "UTC": 0.0}
+
+# Badge: what is wrong and what to do, keyed by the result source prefix ("hk:file.dat" → "hk").
+# A count ("P0 ×1 — check now") made the operator dig through the Alarms tab at 3 a.m.
+_CAUSES = {
+    "liveness": ("Measurement stopped", "Check LabVIEW acquisition and that raw files are still being written."),
+    "hk":       ("Housekeeping out of band", "Check the instrument: cavity pressure, oven and LED temperatures."),
+    "r":        ("Mirror reflectivity (R)", "Check purge flow and the mirrors; confirm in Augur."),
+    "lamp":     ("Lamp / light path", "Check the LED, fibres and the light path."),
+    "conc":     ("Concentration", "Check the FitSet and the Augur data folder; confirm in Augur."),
+}
+_BADGE_MSG_MAX = 110
+
+# While P0 persists, flash the taskbar again this often — one flash is lost if nobody was looking.
+REALERT_SEC = 300.0
+
+_HK_ALL_LABEL = "HK (% of warn band)"
+
+
+def _band_pct(v, band):
+    """Value as % of its band (lo → 0, hi → 100); None if the band is not two-sided."""
+    lo, hi = band if band else (None, None)
+    if lo is None or hi is None or hi == lo:
+        return None
+    return 100.0 * (v - lo) / (hi - lo)
+
 
 _PLACEHOLDER = {
     "conc": "Concentration — shown after the ZA (I₀) segment",
@@ -95,6 +125,31 @@ def _robust_range(series, lines=()):
     span = hi - lo
     pad = 0.1 * span if span > 0 else max(abs(hi) * 0.05, 1e-9)
     return float(lo - pad), float(hi + pad)
+
+
+class _ElidedLabel(QLabel):
+    """Path label that elides in the middle instead of widening the window — a full raw path set the
+    minimum width to 1219 logical px, off-screen at 1366×768 @150 % (2026-10-02 audit g150a)."""
+
+    def __init__(self, text=""):
+        super().__init__()
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text) -> None:
+        self._full = text
+        self._elide()
+
+    def text(self) -> str:
+        return self._full
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._elide()
+
+    def _elide(self) -> None:
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(self.width() - 8, 40)))
 
 
 class _Card(QFrame):
@@ -132,12 +187,16 @@ class DashboardWindow(QMainWindow):
     def __init__(self, title: str = "Vigil — Pipeline Health", tz: str = "KST"):
         super().__init__()
         self._paused = False
+        self.close_reason = None          # set by closeEvent — why the window went away
         self.setWindowTitle(title)
         self.resize(1360, 860)
         self._last_status = None
+        self._p0_alert_t = 0.0            # monotonic time of the last taskbar alert
+        self._pending_results = None      # set_results → consumed by the next set_status
         self._curve_items: dict = {}      # 커브 캐시(키→PlotDataItem)
         self._threshold_items: dict = {}  # 임계선 캐시(키→[InfiniteLine,...])
         self._out_items: dict = {}        # 범위 밖 표시 ▲▼ (plot 키 → ScatterPlotItem)
+        self._trend_sig: dict = {}        # plot 키 → (len, last time) per series — skip redraw if unchanged
         self._color_idx = 0
         self._color_of: dict = {}
         self._cards: dict = {}
@@ -154,6 +213,8 @@ class DashboardWindow(QMainWindow):
         self.badge = QLabel(f"{_LEVEL[SKIP][0]}  Initializing…")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
+        # the cause text can be long — never let it set the window's minimum width (clipped; full text in tooltip)
+        self.badge.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.fresh = QLabel("last row —")
         self.fresh.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fresh.setMinimumWidth(190)
@@ -178,9 +239,9 @@ class DashboardWindow(QMainWindow):
 
         # 2) 폴더 · Augur 데이터 폴더 · 시각 기준
         info = QHBoxLayout()
-        self.lbl_folder = QLabel("No folder selected")
+        self.lbl_folder = _ElidedLabel("No folder selected")
         self.lbl_folder.setStyleSheet(f"color:{VIGIL.dim}; padding:0 4px;")
-        self.lbl_data = QLabel("Augur data: not set")
+        self.lbl_data = _ElidedLabel("Augur data: not set")
         self.lbl_data.setStyleSheet(f"color:{VIGIL.dim}; padding:0 4px;")
         self.lbl_data.setToolTip("Where this PC keeps Augur outputs (FitSets, wavelength calibrations, references).\n"
                                  "Needed only when the profile's paths were made on another PC.")
@@ -192,8 +253,8 @@ class DashboardWindow(QMainWindow):
         self.cb_tz.setCurrentText(self._tz)
         self.cb_tz.setToolTip("Time zone for the time axis, tables, cards and log (display only)")
         self.cb_tz.currentTextChanged.connect(self._on_tz)
-        info.addWidget(self.lbl_folder, stretch=1)
-        info.addWidget(self.lbl_data)
+        info.addWidget(self.lbl_folder, stretch=2)
+        info.addWidget(self.lbl_data, stretch=1)
         info.addWidget(self.btn_data)
         info.addSpacing(12)
         info.addWidget(QLabel("Time:"))
@@ -213,10 +274,27 @@ class DashboardWindow(QMainWindow):
         lay.addLayout(grid, stretch=1)
         self.p_conc = self._make_plot("Concentration (ppb)", "conc")
         self.p_r = self._make_plot("R", "r")
-        self.p_hk = self._make_plot("HK", "hk")
+        self.p_hk = self._make_plot(_HK_ALL_LABEL, "hk")
+        # HK mixes mbar (~950) and °C (17–300): one real-unit axis squashed every curve and drew ~14
+        # threshold lines. Default view = each field as % of its warn band (0–100 = in band, two shared
+        # lines); picking one field shows it in real units with only its own warn/alarm lines.
+        self.cb_hk = QComboBox()
+        self.cb_hk.addItem("All fields — % of warn band", None)
+        self.cb_hk.setToolTip("HK graph: all banded fields normalised to their warn band, or one field in its own unit")
+        self.cb_hk.currentIndexChanged.connect(self._on_hk_field)
+        self._hk_sel = None
+        self._hk_last = None              # (trend, meta) — redraw on a view change
+        self._hk_lines: list = []
+        hk_box = QWidget()
+        hk_lay = QVBoxLayout(hk_box)
+        hk_lay.setContentsMargins(0, 0, 0, 0); hk_lay.setSpacing(2)
+        hk_bar = QHBoxLayout()
+        hk_bar.addWidget(QLabel("HK view:")); hk_bar.addWidget(self.cb_hk); hk_bar.addStretch(1)
+        hk_lay.addLayout(hk_bar)
+        hk_lay.addWidget(self.p_hk, stretch=1)
         grid.addWidget(self.p_conc, 0, 0)
         grid.addWidget(self.p_r, 0, 1)
-        grid.addWidget(self.p_hk, 1, 0)
+        grid.addWidget(hk_box, 1, 0)
 
         self.table = QTableWidget(0, len(_COLUMNS))
         self.table.setHorizontalHeaderLabels(_COLUMNS)
@@ -246,6 +324,7 @@ class DashboardWindow(QMainWindow):
         self.tabs.addTab(self.alarm_table, "Alarms")
         self.tabs.addTab(self.log, "Log")
         grid.addWidget(self.tabs, 1, 1)
+        self._tz_headers()
         grid.setColumnStretch(0, 2)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(0, 1)
@@ -288,7 +367,14 @@ class DashboardWindow(QMainWindow):
             ax.update()
         self._row_of.clear(); self.table.setRowCount(0)   # 시각 칸 다시 쓰기
         self._alarm_sig = None
+        self._tz_headers()
         self.tz_changed.emit(tz)
+
+    def _tz_headers(self) -> None:
+        """Time columns name their zone — the Log/alarm times were bare and mixed zones after a switch."""
+        tz = f" ({self._tz})"
+        self.table.setHorizontalHeaderLabels([c + tz if c == "Last row" else c for c in _COLUMNS])
+        self.alarm_table.setHorizontalHeaderLabels([c + tz if c in ("Start", "End") else c for c in _ALARM_COLUMNS])
 
     def _color_for(self, key) -> str:
         col = self._color_of.get(key)
@@ -334,12 +420,15 @@ class DashboardWindow(QMainWindow):
         """버튼·배지만 맞춘다(시그널 없음)."""
         self._paused = not running
         self.btn_run.setText("■ Stop" if running else "▶ Start")
+        if not running:
+            # tick stops while paused, so the age would freeze at e.g. "7 s ago" and look healthy.
+            self.fresh.setText("paused\nnot reading"); self._fresh_style(None)
         if not running and not self._watch_dir:
             self.badge.setText("○  Choose the raw folder to monitor — 'Choose folder…' at the right")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
             self.setWindowTitle(self._base_title)
         elif not running:
-            self.badge.setText("⏸  Monitoring paused — press Start to read (from the backlog)")
+            self.badge.setText("○  PAUSED — monitoring paused, press Start to read (from the backlog)")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
             self.setWindowTitle(f"[paused] {self._base_title}")
 
@@ -367,7 +456,14 @@ class DashboardWindow(QMainWindow):
                 pw.plotItem.legend.clear()
             pw.clear()
             pw.setTitle(_PLACEHOLDER[kind], color=VIGIL.dim, size="10pt")
-        self._curve_items.clear(); self._threshold_items.clear(); self._out_items.clear()
+        self._curve_items.clear(); self._threshold_items.clear(); self._out_items.clear(); self._trend_sig.clear()
+        self._hk_lines.clear(); self._hk_last = None
+        self.cb_hk.blockSignals(True)
+        while self.cb_hk.count() > 1:
+            self.cb_hk.removeItem(1)
+        self.cb_hk.setCurrentIndex(0); self._hk_sel = None
+        self.cb_hk.blockSignals(False)
+        self.p_hk.setLabel('left', _HK_ALL_LABEL)
         self._color_of.clear(); self._color_idx = 0
         self.table.setRowCount(0); self._row_of.clear()
         self.alarm_table.setRowCount(0); self._alarm_sig = None
@@ -378,19 +474,60 @@ class DashboardWindow(QMainWindow):
         self._last_status = None
         self.fresh.setText("last row —"); self._fresh_style(None)
 
+    def closeEvent(self, e) -> None:
+        """Closing the window ends monitoring — ask first when it is running. Only a user close (title-bar X,
+        Alt+F4) asks; a programmatic quit does not. close_reason goes to the status log (run_vigil)."""
+        if e.spontaneous() and self._watch_dir and not self._paused and not self._confirm_close():
+            e.ignore()
+            return
+        self.close_reason = "window closed by the user" if e.spontaneous() else "application quit"
+        super().closeEvent(e)
+
+    def _confirm_close(self) -> bool:
+        ans = QMessageBox.question(
+            self, "Close Vigil?",
+            "Monitoring will stop — no alarms until Vigil is started again.\n\nClose anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        return ans == QMessageBox.StandardButton.Yes
+
     def _toggle_run(self) -> None:
         self.set_running(self._paused)
         self.run_toggled.emit(not self._paused)
 
+    def set_results(self, results) -> None:
+        """This tick's [(source, status, msg, metrics)] — the next set_status names the worst one.
+        Used once, so an internal-error set_status without results doesn't show a stale cause."""
+        self._pending_results = results
+
+    def _badge_text(self, status, msg, results):
+        glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
+        worst = [r for r in (results or ()) if r[1] == status] if status in (P0, P1, P2) else []
+        if not worst:
+            return f"{glyph}  {level}   {msg}", msg
+        source, _s, full, _mt = worst[0]
+        cause, action = _CAUSES.get(source.split(":")[0], (source, "See the Alarms tab."))
+        detail = full
+        if detail.lower().startswith(cause.lower()):      # "Measurement stopped — measurement stopped? — …"
+            detail = detail[len(cause):].lstrip("?:— ")
+        if len(detail) > _BADGE_MSG_MAX:
+            detail = detail[:_BADGE_MSG_MAX - 1] + "…"
+        more = sum(1 for r in results if r[1] in (P0, P1, P2)) - 1
+        text = f"{glyph}  {level}  {cause} — {detail}\n{action}"
+        return text + (f"   (+{more} more in Alarms)" if more > 0 else ""), f"{full}\n\n{msg}"
+
     def set_status(self, status: str, msg: str) -> None:
+        results, self._pending_results = self._pending_results, None
         if self._paused:
             return
-        glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
-        self.badge.setText(f"{glyph}  {level}   {msg}")
+        text, tip = self._badge_text(status, msg, results)
+        self.badge.setText(text)
+        self.badge.setToolTip(tip)
+        _glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
         self.badge.setStyleSheet(_BADGE_STYLE.get(status, _BADGE_STYLE[SKIP]) + _BADGE_BASE)
         self.setWindowTitle(f"[{level}] {self._base_title}" if status in (P0, P1, P2) else self._base_title)
-        if status == P0 and self._last_status != P0:
+        if status == P0 and (self._last_status != P0 or time.monotonic() - self._p0_alert_t >= REALERT_SEC):
             QApplication.alert(self)      # 작업표시줄 깜빡임
+            self._p0_alert_t = time.monotonic()
         self._last_status = status
 
     def set_freshness(self, last_arrival, now, grace_sec) -> None:
@@ -480,7 +617,19 @@ class DashboardWindow(QMainWindow):
                 txt, col = self._status_text(info.get(f"{k}_status"))
                 self._set_cell(r, c, txt, col, info.get(f"{k}_msg") or "")
 
+    def _unchanged(self, plot_key, trend) -> bool:
+        """True if no series got a point since the last draw. The deques are mutated in place, so the
+        signature is (length, newest time) — a full deque keeps its length but its newest time moves.
+        Redrawing 720-point curves every tick cost ~231 ms when full (2026-10-02 bench)."""
+        sig = tuple((k, len(dq), dq[-1][0]) for k, dq in trend.items() if dq)
+        if self._trend_sig.get(plot_key) == sig:
+            return True
+        self._trend_sig[plot_key] = sig
+        return False
+
     def update_conc_trend(self, trend: dict, meta: dict) -> None:
+        if self._unchanged("conc", trend):
+            return
         arrays = []
         for key, dq in trend.items():
             if not dq:
@@ -495,8 +644,11 @@ class DashboardWindow(QMainWindow):
                 item = self._curve_items.get(ck)
                 if item is None:
                     is_target = gas == target
-                    pen = pg.mkPen(self._color_for(ck), width=2.5 if is_target else 1.0)
-                    item = self.p_conc.plot(pen=pen, name=f"{label}:{gas}" + (" ★" if is_target else ""))
+                    # live curves: width-1 pen, no antialias — painting was 99 % of the tick when full
+                    item = self.p_conc.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False,
+                                            name=f"{label}:{gas}" + (" (target)" if is_target else ""))
+                    if is_target:
+                        item.setZValue(1)
                     self.p_conc.setTitle(None)
                     self._curve_items[ck] = item
                 ys = [gd.get(gas, float('nan')) for _t, gd in dq]
@@ -517,6 +669,8 @@ class DashboardWindow(QMainWindow):
             self._fit_view(self.p_conc, arrays, key="conc")
 
     def update_r_trend(self, trend: dict, meta: dict) -> None:
+        if self._unchanged("r", trend):
+            return
         arrays = []
         for key, dq in trend.items():
             if not dq:
@@ -529,7 +683,7 @@ class DashboardWindow(QMainWindow):
             ck = ("r", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1.5), symbol='o',
+                item = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1), symbol='o', antialias=False,
                                      symbolSize=4, symbolBrush=self._color_for(ck), name=label)
                 self.p_r.setTitle(None)
                 self._curve_items[ck] = item
@@ -537,47 +691,84 @@ class DashboardWindow(QMainWindow):
             bk = ("r_baseline", key)
             bitem = self._curve_items.get(bk)
             if bitem is None:
-                bitem = self.p_r.plot(pen=pg.mkPen(self._color_for(ck), width=1.0, style=Qt.PenStyle.DotLine))
+                faint = QColor(self._color_for(ck)); faint.setAlpha(110)   # solid, not dotted (cheaper)
+                bitem = self.p_r.plot(pen=pg.mkPen(faint, width=1), antialias=False)
                 self._curve_items[bk] = bitem
             bitem.setData(xs, bs)
             arrays += [(xs, ys), (xs, bs)]
         if arrays:
             self._fit_view(self.p_r, arrays, key="r")
 
+    def _on_hk_field(self, _idx) -> None:
+        self._hk_sel = self.cb_hk.currentData()
+        self._trend_sig.pop("hk", None)
+        if self._hk_last is not None:
+            self.update_hk_trend(*self._hk_last)
+
     def update_hk_trend(self, trend: dict, meta: dict) -> None:
+        self._hk_last = (trend, meta)
+        if self._unchanged("hk", trend):
+            return
+        sel = self._hk_sel
+        known = {self.cb_hk.itemData(i) for i in range(1, self.cb_hk.count())}
         arrays = []
         for key, dq in trend.items():
+            m = meta.get(key, {})
+            label, unit = m.get("label", str(key)), m.get("unit")
+            band = m.get("warn") or m.get("alarm")
+            if key not in known:
+                self.cb_hk.addItem(f"{label} ({unit})" if unit else label, key)
             if not dq:
                 continue
-            m = meta.get(key, {})
-            label = m.get("label", str(key))
-            unit = m.get("unit")
-            xs = [t.timestamp() for t, _v in dq]
-            ys = [v for _t, v in dq]
             ck = ("hk", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1.5),
-                                      name=f"{label} ({unit})" if unit else label)
+                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False, name=label)
                 self.p_hk.setTitle(None)
                 self._curve_items[ck] = item
+            xs = [t.timestamp() for t, _v in dq]
+            ys = [v for _t, v in dq]
+            if sel is None:
+                # ponytail: a one-sided band can't be shown as %, that field is only in its own view
+                ys = [_band_pct(v, band) for v in ys]
+                ys = [float('nan') if y is None else y for y in ys]
+            two_sided = _band_pct(0.0, band) is not None
+            visible = (sel is None and two_sided) or sel == key
+            item.setVisible(visible)
+            if not visible:
+                continue
             item.setData(xs, ys)
             arrays.append((xs, ys))
-            tk = ("hk_thr", key)
-            if tk not in self._threshold_items:
-                lines = []
-                for band, color in ((m.get("warn"), _WARN_COLOR), (m.get("alarm"), _ALARM_COLOR)):
-                    for v in (band or ()):
-                        if v is not None:
-                            line = pg.InfiniteLine(pos=v, angle=0, movable=False,
-                                                   pen=pg.mkPen(color, style=Qt.PenStyle.DashLine))
-                            self.p_hk.addItem(line)
-                            lines.append(line)
-                self._threshold_items[tk] = lines
+        lines = self._hk_threshold_lines(meta)
         if arrays:
-            # HK 는 단위가 섞여 있어(mbar·°C) 임계선을 범위에 넣지 않는다 — 넣으면 다른 필드가 뭉개진다.
-            self._fit_view(self.p_hk, arrays, key="hk")
+            self._fit_view(self.p_hk, arrays, lines=lines, key="hk")    # band edges stay in view
+
+    def _hk_threshold_lines(self, meta) -> list:
+        """Threshold lines for the current HK view only: 0 and 100 % in the all-fields view, the selected
+        field's own warn/alarm values otherwise. Rebuilt only when the view changes."""
+        sel = self._hk_sel
+        if sel is None:
+            want = [(0.0, _WARN_COLOR), (100.0, _WARN_COLOR)]
+        else:
+            m = meta.get(sel, {})
+            want = [(v, color) for band, color in ((m.get("warn"), _WARN_COLOR), (m.get("alarm"), _ALARM_COLOR))
+                    for v in (band or ()) if v is not None]
+        if [(ln.value(), c) for ln, c in self._hk_lines] != want:
+            for ln, _c in self._hk_lines:
+                self.p_hk.removeItem(ln)
+            self._hk_lines = []
+            for v, color in want:
+                ln = pg.InfiniteLine(pos=v, angle=0, movable=False, pen=pg.mkPen(color, style=Qt.PenStyle.DashLine))
+                self.p_hk.addItem(ln)
+                self._hk_lines.append((ln, color))
+            if sel is None:
+                self.p_hk.setLabel('left', _HK_ALL_LABEL)
+            else:
+                m = meta.get(sel, {})
+                self.p_hk.setLabel('left', f"{m.get('label', sel)} ({m.get('unit')})" if m.get("unit")
+                                   else m.get("label", str(sel)))
+        return [v for v, _c in want]
 
     def log_line(self, text: str) -> None:
-        self.log.append(f"[{self._fmt_time(datetime.now())}] {text}")
+        self.log.append(f"[{self._fmt_time(datetime.now())} {self._tz}] {text}")
 
