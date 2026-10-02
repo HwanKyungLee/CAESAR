@@ -561,20 +561,38 @@ class InputsAlphaMixin:
             self.main_tabs.setCurrentWidget(self._tab_pages.get(self.setup_tab, self.setup_tab))   # switch to Setup tab
             
     def set_i0_path(self, filepath):
-        """Updates the I0 state, loads data, and updates UI."""
-        self.lbl_i0_path.setText(os.path.basename(filepath))
-        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
-        self.status.setText(f"I0 set to: {os.path.basename(filepath)}")
-        
-        # 🌟 Load I0 data and plot
+        """Updates the I0 state, loads data, and updates UI.
+
+        Only a 1D spectrum is accepted. A raw Mega-Matrix (or alpha trace) read by the 1D
+        loader yields column 0 of every row (timestamps) as "I0", so it is refused and the
+        previous I0 is kept."""
+        name = os.path.basename(filepath)
+        if DataIO.is_araon_mega_matrix(filepath) or DataIO._is_alpha_trace_format(filepath):
+            QMessageBox.warning(
+                self, "Not an I0 spectrum",
+                f"{name} is a multi-scan raw/alpha file, not a 1D I0 spectrum.\n"
+                "I0 not changed. Pick a single averaged zero-air spectrum file, or leave I0 "
+                "empty to use the ZA scans in the raw data during RUN.")
+            return
         try:
             # Load I0 file using the same method as the engine (most stable)
             _, intensity_raw = DataIO.load_measurement(filepath, pixel_min=0)
-            self.i0_data = intensity_raw
-            self.update_diagnostic_plot()
         except Exception as e:
             print(f"Error loading I0 file: {e}")
             QMessageBox.warning(self, "Load Error", "Failed to read I0 measurement file.")
+            return
+        wl = getattr(self, 'wavelengths', None)
+        if wl is not None and len(np.ravel(wl)) != len(intensity_raw):
+            QMessageBox.warning(
+                self, "I0 length mismatch",
+                f"{name} has {len(intensity_raw)} points but the wavelength calibration has "
+                f"{len(np.ravel(wl))} pixels.\nI0 not changed.")
+            return
+        self.i0_data = intensity_raw
+        self.lbl_i0_path.setText(name)
+        self.lbl_i0_path.setStyleSheet(f"color: {AUGUR.info}; font-weight: bold;")
+        self.status.setText(f"I0 set to: {name}")
+        self.update_diagnostic_plot()
         self._refresh_setup_status()
 
     def update_diagnostic_plot(self):
