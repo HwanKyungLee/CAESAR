@@ -199,6 +199,34 @@ def test_realert():
         dw.time.monotonic, dw.QApplication.alert = real_mono, real_alert
 
 
+def test_badge_cause():
+    print("[8] badge names the worst cause and an action")
+    from vigil.alert_engine import OK, P0, P1, aggregate
+    from vigil.dashboard.dashboard_window import DashboardWindow
+    win = DashboardWindow(title="t", tz="UTC")
+    results = [("liveness", P0, "measurement stopped? — last row 49s ago (limit 10s)", {}),
+               ("hk:2026-06-03-006.dat", P1, "ANs cavity P=689.50 mbar out of band", {}),
+               ("conc:ch_ans", P1, "x" * 300, {})]
+    win.set_results(results)
+    win.set_status(*aggregate(results))
+    txt = win.badge.text()
+    check("P0: cause + action", txt.startswith("■  P0  Measurement stopped — measurement stopped? — last row 49s ago")
+          and "Check LabVIEW acquisition" in txt and "+2 more" in txt, txt)
+    win.set_results([r for r in results if r[1] != P0] + [("liveness", OK, "ok", {})])
+    win.set_status(P1, "P1 ×2 — quality at risk (P2 0)")
+    txt = win.badge.text()
+    check("P1: first worst (HK) named", "Housekeeping out of band — ANs cavity P=689.50" in txt
+          and "cavity pressure" in txt, txt)
+    win.set_results([("conc:ch_ans", P1, "x" * 300, {})])
+    win.set_status(P1, "P1 ×1")
+    check("long message clipped, full text in tooltip", len(win.badge.text().splitlines()[0]) < 160
+          and "x" * 300 in win.badge.toolTip())
+    win.set_status(P1, "Vigil internal error, 1 in a row: X")      # no fresh results → no stale cause
+    check("no results: message as is", "Vigil internal error" in win.badge.text(), win.badge.text())
+    check("badge never sets the minimum width", win.badge.minimumSizeHint().width() < 400 or
+          win.badge.sizePolicy().horizontalPolicy().name == "Ignored")
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -209,6 +237,7 @@ def main():
     test_trend_skip()
     test_hk_view()
     test_realert()
+    test_badge_cause()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 

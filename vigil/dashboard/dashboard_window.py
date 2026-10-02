@@ -25,7 +25,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-    QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from gui.flow_layout import FlowLayout
@@ -68,6 +68,17 @@ _ALARM_COLOR = VIGIL.p0
 # 시각 기준 — 표시만 바꾼다(저장·판정은 모두 실제 시각 epoch). pyqtgraph DateAxisItem 의 utcOffset 은
 # '표시 = 실제 − offset' 규칙이라 UTC+9 는 −32400.
 TZ_CHOICES = {"KST": 9.0, "UTC": 0.0}
+
+# Badge: what is wrong and what to do, keyed by the result source prefix ("hk:file.dat" → "hk").
+# A count ("P0 ×1 — check now") made the operator dig through the Alarms tab at 3 a.m.
+_CAUSES = {
+    "liveness": ("Measurement stopped", "Check LabVIEW acquisition and that raw files are still being written."),
+    "hk":       ("Housekeeping out of band", "Check the instrument: cavity pressure, oven and LED temperatures."),
+    "r":        ("Mirror reflectivity (R)", "Check purge flow and the mirrors; confirm in Augur."),
+    "lamp":     ("Lamp / light path", "Check the LED, fibres and the light path."),
+    "conc":     ("Concentration", "Check the FitSet and the Augur data folder; confirm in Augur."),
+}
+_BADGE_MSG_MAX = 110
 
 # While P0 persists, flash the taskbar again this often — one flash is lost if nobody was looking.
 REALERT_SEC = 300.0
@@ -155,6 +166,7 @@ class DashboardWindow(QMainWindow):
         self.resize(1360, 860)
         self._last_status = None
         self._p0_alert_t = 0.0            # monotonic time of the last taskbar alert
+        self._pending_results = None      # set_results → consumed by the next set_status
         self._curve_items: dict = {}      # 커브 캐시(키→PlotDataItem)
         self._threshold_items: dict = {}  # 임계선 캐시(키→[InfiniteLine,...])
         self._out_items: dict = {}        # 범위 밖 표시 ▲▼ (plot 키 → ScatterPlotItem)
@@ -175,6 +187,8 @@ class DashboardWindow(QMainWindow):
         self.badge = QLabel(f"{_LEVEL[SKIP][0]}  Initializing…")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
+        # the cause text can be long — never let it set the window's minimum width (clipped; full text in tooltip)
+        self.badge.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.fresh = QLabel("last row —")
         self.fresh.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fresh.setMinimumWidth(190)
@@ -438,11 +452,31 @@ class DashboardWindow(QMainWindow):
         self.set_running(self._paused)
         self.run_toggled.emit(not self._paused)
 
+    def set_results(self, results) -> None:
+        """This tick's [(source, status, msg, metrics)] — the next set_status names the worst one.
+        Used once, so an internal-error set_status without results doesn't show a stale cause."""
+        self._pending_results = results
+
+    def _badge_text(self, status, msg, results):
+        glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
+        worst = [r for r in (results or ()) if r[1] == status] if status in (P0, P1, P2) else []
+        if not worst:
+            return f"{glyph}  {level}   {msg}", msg
+        source, _s, full, _mt = worst[0]
+        cause, action = _CAUSES.get(source.split(":")[0], (source, "See the Alarms tab."))
+        detail = full if len(full) <= _BADGE_MSG_MAX else full[:_BADGE_MSG_MAX - 1] + "…"
+        more = sum(1 for r in results if r[1] in (P0, P1, P2)) - 1
+        text = f"{glyph}  {level}  {cause} — {detail}\n{action}"
+        return text + (f"   (+{more} more in Alarms)" if more > 0 else ""), f"{full}\n\n{msg}"
+
     def set_status(self, status: str, msg: str) -> None:
+        results, self._pending_results = self._pending_results, None
         if self._paused:
             return
-        glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
-        self.badge.setText(f"{glyph}  {level}   {msg}")
+        text, tip = self._badge_text(status, msg, results)
+        self.badge.setText(text)
+        self.badge.setToolTip(tip)
+        _glyph, level, _col = _LEVEL.get(status, _LEVEL[SKIP])
         self.badge.setStyleSheet(_BADGE_STYLE.get(status, _BADGE_STYLE[SKIP]) + _BADGE_BASE)
         self.setWindowTitle(f"[{level}] {self._base_title}" if status in (P0, P1, P2) else self._base_title)
         if status == P0 and (self._last_status != P0 or time.monotonic() - self._p0_alert_t >= REALERT_SEC):
