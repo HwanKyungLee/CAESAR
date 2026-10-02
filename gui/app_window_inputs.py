@@ -178,7 +178,10 @@ class InputsAlphaMixin:
         if not configs:
             QMessageBox.warning(self, "Channel config failed",
                                 "Could not build per-channel wavecal/pixel range.\n"
-                                f"Hot (≥2ch) needs the {self._WV_CAL_BASE}\\roi1,roi2 Calib files.")
+                                "Hot (≥2ch) needs a wavecal on each channel tab, or the fallback "
+                                f"Calib files in {self._WV_CAL_BASE}\\"
+                                + ", ".join(f"{r} (CH{c})" for c, r in self._FALLBACK_CH_ROI.items()
+                                            if c <= n_ch) + ".")
             return False
         _sel = getattr(self, '_alpha_sel_channels', None)
         _want = _sel if _sel is not None else set(range(1, n_ch + 1))
@@ -187,7 +190,9 @@ class InputsAlphaMixin:
         if _missing:
             QMessageBox.warning(self, "Some channels lack wavecal",
                                 f"Only {sorted(got)} of the selected channels will be generated. Missing: {_missing}.\n"
-                                f"Missing channels lack wavecal (channel tab or {self._WV_CAL_BASE}\\roiN)), skipped.\n"
+                                "Missing channels lack wavecal (channel tab, or fallback "
+                                + ", ".join(f"{self._WV_CAL_BASE}\\{self._FALLBACK_CH_ROI.get(c, '?')} for CH{c}"
+                                            for c in _missing) + "), skipped.\n"
                                 "Continuing.")
 
         # 채널별 워커를 순차 실행(큐). Hot=2채널 → PNs, ANs 각각 생성.
@@ -213,6 +218,11 @@ class InputsAlphaMixin:
 
     # wv_cal 자동탐색 베이스 (채널별 파장보정 — 레포 번들 reference_data/wv_cal)
     _WV_CAL_BASE = WV_CAL_DIR
+    # Fallback channel -> wv_cal/roiN folder, used only when a channel tab has no wavecal.
+    # The numbers are crossed on purpose: 2026 Yeosu ch1 (ANs) <-> roi2, ch2 (PNs) <-> roi1
+    # (README glossary "roi1 / roi2", CHANNEL_IDENTITY_YEOSU2026.md, tools/channel_map.json).
+    # Re-check for any other campaign/configuration; a tab wavecal always wins over this.
+    _FALLBACK_CH_ROI = {1: 'roi2', 2: 'roi1', 3: 'roi3'}
 
     def _channel_wl_path(self, ch):
         """채널 ch의 wavecal 파일 경로 — 채널 탭 config. 활성 채널은 현재 로드된 경로."""
@@ -232,7 +242,7 @@ class InputsAlphaMixin:
         if n_ch == 1:
             wl = getattr(self, 'wavelengths', None)
             return np.asarray(wl, dtype=float).flatten() if wl is not None else None
-        roi = {1: 'roi1', 2: 'roi2', 3: 'roi3'}.get(ch)
+        roi = self._FALLBACK_CH_ROI.get(ch)
         if roi:
             import glob
             d = os.path.join(self._WV_CAL_BASE, roi)
