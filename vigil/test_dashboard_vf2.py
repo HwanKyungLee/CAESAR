@@ -1,0 +1,50 @@
+"""Vigil dashboard / operator fixes (VF2, 2026-10-02) — no data needed, Qt offscreen.
+
+  1) UI strings use only glyphs that render (★ and ⏸ showed as □)
+"""
+import ast
+import os
+import sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_self_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path = [p for p in sys.path if os.path.abspath(p) != _self_dir]
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+_n_pass = _n_fail = 0
+
+
+def check(name, cond, detail=""):
+    global _n_pass, _n_fail
+    if cond:
+        _n_pass += 1
+        print(f"  PASS  {name}")
+    else:
+        _n_fail += 1
+        print(f"  FAIL  {name}  {detail}")
+
+
+def test_glyphs():
+    print("[1] UI glyphs")
+    from vigil.dashboard import dashboard_window as dw
+    tree = ast.parse(open(dw.__file__, encoding="utf-8").read())
+    docs = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+    used = {c for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in docs for c in n.value if ord(c) > 127}
+    check("only known-good glyphs in UI strings", used <= dw.UI_GLYPHS, "".join(sorted(used - dw.UI_GLYPHS)))
+
+
+def main():
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
+    test_glyphs()
+    print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
+    return 1 if _n_fail else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -52,6 +52,10 @@ _BTN_STYLE = (f"QPushButton {{ font-size:15px; font-weight:600; padding:10px; co
 _SMALL_BTN = (f"QPushButton {{ padding:3px 10px; color:{VIGIL.text}; background:{VIGIL.button};"
               f" border:1px solid {VIGIL.rule}; }}")
 
+# Non-ASCII glyphs allowed in UI strings. The bundled IBM Plex has none of the shapes; these few come
+# from the system fallback and were seen to render. ★ and ⏸ rendered as □ (2026-10-02 audit) — use text.
+UI_GLYPHS = set("●▲◆■○▶—…₀·×–≥≤")
+
 _COLUMNS = ["File", "Last row", "Lag (s)", "HK", "R", "Lamp", "Conc"]
 _ALARM_COLUMNS = ["Start", "End", "Level", "Source", "Message"]
 
@@ -339,7 +343,7 @@ class DashboardWindow(QMainWindow):
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
             self.setWindowTitle(self._base_title)
         elif not running:
-            self.badge.setText("⏸  Monitoring paused — press Start to read (from the backlog)")
+            self.badge.setText("○  PAUSED — monitoring paused, press Start to read (from the backlog)")
             self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
             self.setWindowTitle(f"[paused] {self._base_title}")
 
@@ -496,7 +500,7 @@ class DashboardWindow(QMainWindow):
                 if item is None:
                     is_target = gas == target
                     pen = pg.mkPen(self._color_for(ck), width=2.5 if is_target else 1.0)
-                    item = self.p_conc.plot(pen=pen, name=f"{label}:{gas}" + (" ★" if is_target else ""))
+                    item = self.p_conc.plot(pen=pen, name=f"{label}:{gas}" + (" (target)" if is_target else ""))
                     self.p_conc.setTitle(None)
                     self._curve_items[ck] = item
                 ys = [gd.get(gas, float('nan')) for _t, gd in dq]
