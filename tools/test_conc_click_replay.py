@@ -163,4 +163,17 @@ if __name__ == "__main__":
     test_click_near_point_returns_its_result()
     test_conc_click_with_downsampling_hits_the_spike()
     test_trend_click_skip_and_per_channel_gas()
+    # 검사는 여기서 끝 — MonitorWidget 3개(pyqtgraph 장면)를 인터프리터 종료 GC 에 맡기면 Qt 소멸 순서 때문에
+    # 가끔 접근 위반(exit 0xC0000005)으로 죽었다(pytest 하위 프로세스에서 3~5번 중 1~4번, 'ok' 출력 뒤).
+    # 창을 명시적으로 닫아 정리하고, 결과를 내보낸 뒤 바로 끝낸다.
+    import os as _os
+    from PyQt6.QtWidgets import QApplication as _QA
+    _app = _QA.instance()
+    if _app is not None:
+        for _w in _app.topLevelWidgets():
+            _w.close()
+            _w.deleteLater()
+        _app.processEvents()
     print("ok")
+    sys.stdout.flush()
+    _os._exit(0)
