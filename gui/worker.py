@@ -1738,8 +1738,10 @@ def _pass2_omr_d_at(g, sec, rt_pchip, rt_const, omr_pchip, omr_axis_is_sec, best
     return best_omr_d
 
 
-def _pass2_write_file(fp, rows, ctx):
-    """AlphaExportWorker._run_inner의 파일쓰기 블록과 동일(self.* 대신 ctx[...])."""
+def _pass2_write_file(fp, rows, ctx, out_path=None, extra_header=()):
+    """AlphaExportWorker._run_inner의 파일쓰기 블록과 동일(self.* 대신 ctx[...]).
+    out_path: write here instead of the dated alpha folder (fp still supplies the year, raw layout
+    and clock convention). extra_header: more '# …' lines right after the first line."""
     import re as _re_date
     from datetime import datetime as _dt, timedelta as _td
     from core.provenance import code_version as _codever
@@ -1758,7 +1760,10 @@ def _pass2_write_file(fp, rows, ctx):
         _file_dir = os.path.join(_file_dir, ctx['channel_subdir'])
     os.makedirs(_file_dir, exist_ok=True)
     lbl_tag = f"_{ctx['channel_label']}" if ctx['channel_label'] else ""
-    out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
+    if out_path is None:
+        out_path = os.path.join(_file_dir, f"{stem}{lbl_tag}_alpha_trace.dat")
+    else:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
     _yr = DataIO._file_year(fp) or 2026
 
     # raw **데이터행**의 열 수 = 그 파일의 구성 식별자.
@@ -1793,6 +1798,8 @@ def _pass2_write_file(fp, rows, ctx):
 
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(f"# CAESAR Pro Alpha Export — {os.path.basename(fp)}\n")
+        for _xl in extra_header:
+            f.write(_xl.rstrip("\n") + "\n")
         f.write(f"# code={_codever()}\n")
         f.write(f"# channel={ctx['channel']}  label={ctx['channel_label'] or 'single'}\n")
         f.write(f"# RL_factor={ctx['rl_factor']}  d={ctx['cavity_len']} cm\n")
@@ -1977,6 +1984,47 @@ def _pass2_process_file(fp, entries, ctx):
     except Exception as e:
         import traceback
         return (fp, None, 0, f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+
+
+ZEROAIR_DIR = "_zeroair"   # '_' prefix: folder loading and version search skip it
+
+
+def zero_air_loo_rows(ctx, za_x, za_arr, za_t, za_p, za_gidx, za_sec, breaks):
+    """Zero-air blocks as measurements of a known truth (0): block k against I₀ interpolated from
+    the **other** blocks (leave-one-out), assembled exactly like an ambient row in Pass 2
+    (bbceas_alpha, same Rayleigh terms, same ω(t)). Manuscript §7.2 / diagnostics zero_air_floor.py.
+    The first and last block are skipped (LOO there is extrapolation). Returns Pass-2 style rows
+    (k, sec, T, P, alpha, 1); empty when fewer than 3 blocks or no real-time axis."""
+    from core.step_guard import SegmentedPchip
+    za_x = np.asarray(za_x, float)
+    za_arr = np.asarray(za_arr, float)
+    za_t = np.asarray(za_t, float)
+    za_p = np.asarray(za_p, float)
+    nk = len(za_x)
+    rows = []
+    if nk < 3 or not ctx.get('i0_axis_is_sec'):
+        return rows
+    for k in range(1, nk - 1):
+        keep = np.ones(nk, bool)
+        keep[k] = False
+        xq = float(za_x[k])
+        i0 = SegmentedPchip(za_x[keep], za_arr[keep], break_x=breaks)(xq)
+        if i0 is None:
+            continue
+        t_i0 = float(SegmentedPchip(za_x[keep], za_t[keep], break_x=breaks)(xq))
+        p_i0 = float(SegmentedPchip(za_x[keep], za_p[keep], break_x=breaks)(xq))
+        i0_s = np.where(np.asarray(i0, float) > 0, i0, 1e-9).astype(float)
+        i_s = np.where(za_arr[k] > 0, za_arr[k], 1e-9).astype(float)
+        alpha_ref = _alpha_za_plain(t_i0, p_i0, ctx['ZA_REF'])
+        alpha_sample = _alpha_za_plain(float(za_t[k]), float(za_p[k]), ctx['ZA_REF'])
+        omr = _pass2_omr_d_at(float(za_gidx[k]), float(za_sec[k]), ctx['rt_omr_pchip'],
+                              ctx['rt_omr_const'], ctx['omr_pchip'], ctx['omr_axis_is_sec'],
+                              ctx['best_omr_d'])
+        if omr is None:
+            continue
+        alpha = bbceas_alpha(i_s, i0_s, omr, alpha_ref, alpha_sample, ctx['rl_factor'])
+        rows.append((k, float(za_sec[k]), float(za_t[k]), float(za_p[k]), alpha, 1))
+    return rows
 
 
 def _pass2_init(ctx):
@@ -3135,6 +3183,29 @@ class AlphaExportWorker(QThread):
             'i0_knot_sec': (list(map(float, za_x)) if use_pchip and _i0_axis_is_sec else None),
             'r_knot_sec': (list(map(float, _ks)) if rt_omr_pchip_obj is not None else None),
         }
+
+        # Zero-air LOO alpha (manuscript §7.2): every inner ZA block as a measurement of a known
+        # zero, I0 interpolated from the other blocks. One file per run in {campaign}/_zeroair/ —
+        # fit it with tools/zero_air_floor.py for the measured noise floor and MDL. The '_' folder
+        # keeps it out of folder loading, so it never mixes into an ambient fit.
+        if getattr(self, 'write_zeroair_loo', True) and use_pchip:
+            try:
+                _za_rows = zero_air_loo_rows(ctx, za_x, za_arr, za_t, za_p, za_gidx, za_sec,
+                                             _i0_breaks)
+                if _za_rows:
+                    from core.paths import campaign_dir as _cdir_za
+                    _stems = [os.path.splitext(os.path.basename(f))[0] for f in (self.file_list[0],
+                                                                                  self.file_list[-1])]
+                    _lab = self.channel_label or f"ch{self.channel}"
+                    _za_out = os.path.join(_cdir_za(self.output_dir, self.campaign), ZEROAIR_DIR,
+                                           f"zeroair_loo_{_lab}_{_stems[0]}_to_{_stems[1]}_alpha_trace.dat")
+                    _pass2_write_file(self.file_list[0], _za_rows, ctx, out_path=_za_out, extra_header=[
+                        "# kind=zero_air_LOO  truth=0  (each row = one ZA block; I0 interpolated from the "
+                        "other blocks; first/last block skipped)",
+                        f"# zero_air_blocks={len(_za_rows)}  of {len(za_x)} ZA knots"])
+                    self.status_msg.emit(f"[zero-air] {len(_za_rows)} LOO rows → {_za_out}")
+            except Exception as e:   # noqa: BLE001 — a diagnostic product must never stop alpha generation
+                self.status_msg.emit(f"⚠ [zero-air] LOO file not written: {type(e).__name__}: {e}")
 
         def _finish_one(fp, out_path, n_rows, err):
             nonlocal n_bins_total, n_saved

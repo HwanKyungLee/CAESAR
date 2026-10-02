@@ -97,7 +97,8 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
              px_min, px_max, poly_deg, step_limit, target="NO2",
              seed_range=15.0, seed_step=0.25, *, allow_negative_gas,
              controlled_start=None, controlled_bounds=None, controlled_initial_values=None,
-             return_solver_diagnostics=False, return_model=False, use_etalon=True):
+             return_solver_diagnostics=False, return_model=False, use_etalon=True,
+             etalon_freq=None):
     """한 스캔 핏 → 지표 + **핏된 shift/squeeze 값**(ref별). bounds를 데이터에서 정하려면
     이 값들의 분포가 필요하다. fit_optimizer.fit_window의 확장(shift/squeeze 반환 추가)."""
     allow_negative_gas = _require_bool(allow_negative_gas)
@@ -122,7 +123,14 @@ def fit_scan(eng, fitter, ref_props, wave, alpha, T_C, P_mbar,
     center = vp[len(vp) // 2]
 
     # use_etalon=False면 etalon 열 없이 푼다(DoasFitter.execute_varpro_fit의 fixed_e_f=None).
-    ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40) if use_etalon else None
+    # etalon_freq given → use it (production fixes f per run; on a scan with no structure, e.g. zero
+    # air, a per-scan search would fit the noise and bias the error low).
+    if not use_etalon:
+        ef = None
+    elif etalon_freq is not None:
+        ef = float(etalon_freq)
+    else:
+        ef = fitter.detect_etalon_frequency(vp, a_scaled, poly_deg, 0.02, 0.40)
 
     # ★초기 shift 시딩(필수): DOAS의 shift 지형은 레퍼런스가 진동해 **비볼록**이라
     # x0=0에서 least_squares만 돌리면 멀리 있는 진짜 최소(예: 핫 -4.95px)를 못 찾고

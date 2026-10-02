@@ -274,8 +274,9 @@ class SaveExportMixin:
                         "# Excluded rows: gas columns NaN; pre-exclusion values in {gas}_preQC, Status_preQC",
                         "# Error columns (1 sigma, ppb): {gas}_Error = fit covariance, white residual (product column); "
                         "{gas}_ErrorCorr = same fit with the residual autocorrelation (sandwich); "
-                        "{gas}_ErrorJoint = incl. shift/squeeze; {gas}_MDL = 3 x {gas}_Error. "
-                        "None contains the I0/R/etalon structural terms.",
+                        "{gas}_ErrorJoint = incl. shift/squeeze; {gas}_MDL = 3 x {gas}_Error (fit-based). "
+                        "None contains the I0/R/etalon structural terms. Measured floor / MDL: "
+                        "tools/zero_air_floor.py on {campaign}/_zeroair/ (written by alpha generation).",
                         "# Calibration context (alpha input): I0_/R_dt_s = s to the nearest knot, I0_/R_gap_h = "
                         "bracketing knot interval, I0_/R_edge = 1 if extrapolated; NaN = knots unknown "
                         "(alpha made before 2026-10-03 without _calknots.json).",
