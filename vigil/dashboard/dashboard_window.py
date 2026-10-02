@@ -251,9 +251,9 @@ class DashboardWindow(QMainWindow):
         self.btn_data.clicked.connect(self.data_root_requested.emit)
         self.btn_mission = QPushButton("Load mission…")
         self.btn_mission.setStyleSheet(_SMALL_BTN)
-        self.btn_mission.setToolTip("Load a mission package exported from Augur (Setup → Export mission for Vigil).\n"
+        self.btn_mission.setToolTip("Load a mission package exported from Augur (Setup > Export mission for Vigil).\n"
                                     "Without a mission Vigil still watches HK, block brightness and data flow;\n"
-                                    "the mission adds the cell names, sensors, FitSet → concentration and R.")
+                                    "the mission adds the cell names, sensors, FitSet concentration and R.")
         self.btn_mission.clicked.connect(self.mission_requested.emit)
         self.cb_tz = QComboBox()
         self.cb_tz.addItems(list(TZ_CHOICES))
