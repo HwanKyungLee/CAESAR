@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime
+import inspect
 from typing import Optional
 import warnings
 
@@ -41,6 +42,17 @@ from core import param_optimizer as PO
 from vigil.alert_engine import OK, P0, P1, P2, SKIP, worse
 from vigil.monitors.running_mean import RunningMean
 from tools import optimize_params as OP
+
+# Purge settle: ambient rows within this many seconds after a calibration (ZA/He) block ends
+# still hold purge gas -- the first fit after every hourly ZA came out 0.0 ppb with
+# rms/sig 2545 % (diagnostics/ux_audit_2026-10-02/vigil_v2_monitors.md §1). Augur's alpha
+# generation drops the same window; its default lives in the AlphaExportWorker signature
+# (gui/worker.py), so it is read from there instead of copying the number.
+from gui.worker import AlphaExportWorker as _AlphaExportWorker   # noqa: E402
+PURGE_SETTLE_SEC = float(
+    inspect.signature(_AlphaExportWorker.__init__).parameters["purge_settle_sec"].default)
+# Roles that are not a calibration block (Augur: is_amb = header or ambient flag).
+_NOT_CAL_ROLES = (None, "sampling", "header")
 
 FAIL_STREAK_FOR_P0 = 3   # 연속 이 이상 핏 실패하면 P0로 격상(r_monitor.py와 같은 관례)
 HISTORY_WINDOW = 20       # 스파이크/평탄선 판단용 최근 농도 이력 길이
@@ -96,6 +108,7 @@ class ConcMonitor:
         self._i0: Optional[np.ndarray] = None
         self._i0_tp: Optional[tuple] = None
         self._last_fit_time: Optional[datetime] = None
+        self._last_cal_time: Optional[datetime] = None   # last calibration-block row (purge settle)
         self._last_shift: Optional[float] = None
         self._history: deque = deque(maxlen=HISTORY_WINDOW)
         self._fail_streak = 0
@@ -108,7 +121,7 @@ class ConcMonitor:
         return rp
 
     def observe(self, role: Optional[str], spectrum, temp_c: float, press_mbar: float,
-                omr_d=None, rl: float = 1.0):
+                omr_d=None, rl: float = 1.0, row_time: Optional[datetime] = None):
         """새 행 한 개 관측. za_inject 구간 동안 I0 버퍼링, sampling 구간이면
         (throttle 통과 + I0 있을 때) 경량 핏을 돌려 (status, msg, metrics)를 반환.
         핏이 안 돌면 None(호출부는 이전 상태를 유지하면 된다).
@@ -116,7 +129,14 @@ class ConcMonitor:
         omr_d : (1-R)/d [cm^-1] per pixel, normally the same channel's RMonitor.omr_d.
                 None (no ZA/He cycle completed yet) -> SKIP, no concentration.
         rl    : purge length ratio; already in omr_d, applied to alpha_ZA only
-                (same convention as gui/worker.py)."""
+                (same convention as gui/worker.py).
+        row_time : the row's own timestamp (bytepack) for the purge-settle window; wall clock
+                if None."""
+        t_row = row_time or datetime.now()
+        if role not in _NOT_CAL_ROLES:
+            # Like Augur, the reference is the END of the calibration block (any ZA/He
+            # inject/wait/setflow row) -- the valve switches back only then.
+            self._last_cal_time = t_row
         if role == "za_inject":
             self._za_buf.add(spectrum)
             self._za_t.add(temp_c)
@@ -129,6 +149,11 @@ class ConcMonitor:
 
         if role != "sampling" or self._i0 is None:
             return None
+        if self._last_cal_time is not None:
+            # Negative = a row older than the calibration (out-of-order catch-up): not purge gas.
+            since_cal = (t_row - self._last_cal_time).total_seconds()
+            if 0.0 <= since_cal < PURGE_SETTLE_SEC:
+                return None
         now = datetime.now()
         if (self._last_fit_time is not None
                 and (now - self._last_fit_time).total_seconds() < self.cfg.throttle_sec):

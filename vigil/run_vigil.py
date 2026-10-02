@@ -287,7 +287,8 @@ class VigilApp:
             rm = self._r_monitors.get(key)
             omr_d = rm.omr_d if rm is not None else None
             rl = ch.reflectance.rl_factor if ch.reflectance is not None else 1.0
-            result = cm.observe(ev.role, spectrum, temp_c, press_mbar, omr_d=omr_d, rl=rl)
+            result = cm.observe(ev.role, spectrum, temp_c, press_mbar, omr_d=omr_d, rl=rl,
+                                row_time=ev.row_time)
             if result is not None:
                 status, msg, metrics = result
                 self._conc_by_channel[key] = (status, f"[{ch.label or ch.id}] {msg}", metrics)

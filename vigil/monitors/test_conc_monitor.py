@@ -38,10 +38,11 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import dataclasses
+from datetime import datetime, timedelta
 
 from core.physics import RayleighPhysics
 from vigil.alert_engine import OK, P0, P1, P2, SKIP
-from vigil.monitors.conc_monitor import ConcMonitor, pick_fitset_channel
+from vigil.monitors.conc_monitor import PURGE_SETTLE_SEC, ConcMonitor, pick_fitset_channel
 from vigil.profile import ConcentrationConfig
 from tools import optimize_params as OP
 from tools.residual_compare import load_alpha
@@ -49,6 +50,9 @@ from tools.residual_compare import load_alpha
 # (1-R)/d [cm^-1] of a real cold R (R=0.999949, L_eff ~10 km).
 OMR_D_COLD = 9.79e-7
 RL_COLD = 0.933
+# Calibration rows in the unit tests are stamped long ago, so the purge-settle window
+# (PURGE_SETTLE_SEC after the last ZA/He row) is over when 'sampling' rows arrive at now().
+CAL_T = datetime(2000, 1, 1)
 
 
 def _spectrum_for_alpha(alpha, i0, omr_d, t_c, p_mbar, wave, rl=RL_COLD):
@@ -142,7 +146,7 @@ def test_i0_buffer_and_fit_and_throttle():
     kw = dict(omr_d=omr_d, rl=RL_COLD)
 
     cm = _make_monitor(throttle_sec=0.0)
-    r_za = cm.observe("za_inject", i0, T, P, **kw)
+    r_za = cm.observe("za_inject", i0, T, P, **kw, row_time=CAL_T)
     check("za_inject 중엔 결과 없음", r_za is None)
     check("I0 아직 없음(za 윈도우 안 끝남)", cm._i0 is None)
 
@@ -178,7 +182,7 @@ def test_throttle_blocks_immediate_refit():
     spectrum = _spectrum_for_alpha(alpha_real, i0, omr_d, T, P, wave)
     kw = dict(omr_d=omr_d, rl=RL_COLD)
     cm = _make_monitor(throttle_sec=9999.0)
-    cm.observe("za_inject", i0, T, P, **kw)
+    cm.observe("za_inject", i0, T, P, **kw, row_time=CAL_T)
     r0 = cm.observe("sampling", spectrum, T, P, **kw)
     check("첫 핏은 즉시 실행", r0 is not None)
     r1 = cm.observe("sampling", spectrum, T, P, **kw)
@@ -190,21 +194,46 @@ def test_no_r_yields_skip_not_garbage():
     cm = _make_monitor(throttle_sec=0.0)
     i0 = np.full(2048, 40000.0)
     spectrum = i0 * 0.98
-    cm.observe("za_inject", i0, 25.0, 1013.25)
+    cm.observe("za_inject", i0, 25.0, 1013.25, row_time=CAL_T)
     r = cm.observe("sampling", spectrum, 25.0, 1013.25)          # no omr_d
     check("no omr_d -> SKIP", r is not None and r[0] == SKIP, f"got {r}")
     check("no omr_d -> no concentration value", r is not None and "conc_ppb" not in r[2], f"got {r}")
 
     cm2 = _make_monitor(throttle_sec=0.0)
-    cm2.observe("za_inject", i0, 25.0, 1013.25)
+    cm2.observe("za_inject", i0, 25.0, 1013.25, row_time=CAL_T)
     r2 = cm2.observe("sampling", spectrum, 25.0, 1013.25, omr_d=np.full(512, OMR_D_COLD))
     check("omr_d axis mismatch -> failure", r2 is not None and r2[0] in (P1, P0), f"got {r2}")
 
     cm3 = _make_monitor(throttle_sec=0.0)
-    cm3.observe("za_inject", i0, 25.0, 1013.25)
+    cm3.observe("za_inject", i0, 25.0, 1013.25, row_time=CAL_T)
     r3 = cm3.observe("sampling", spectrum, 25.0, 1013.25, omr_d=np.full(2048, np.nan))
     check("omr_d NaN in fit window (outside R ROI) -> failure, not a value",
           r3 is not None and r3[0] in (P1, P0) and "conc_ppb" not in r3[2], f"got {r3}")
+
+
+def test_purge_settle():
+    print("[8] purge settle -- no fit within PURGE_SETTLE_SEC after a ZA/He block (Augur default)")
+    check("same value as Augur alpha generation (60 s)", PURGE_SETTLE_SEC == 60.0, PURGE_SETTLE_SEC)
+    cm = _make_monitor(throttle_sec=0.0)
+    i0 = np.zeros(2048)                       # bad I0: any fit that runs reports a failure
+    kw = dict(omr_d=np.full(2048, OMR_D_COLD), rl=RL_COLD)
+    t0 = datetime(2026, 5, 20, 3, 0, 0)
+    cm.observe("za_inject", i0, 25.0, 1013.25, row_time=t0, **kw)
+    cm.observe("za_wait_after", i0, 25.0, 1013.25, row_time=t0 + timedelta(seconds=20), **kw)
+    end = t0 + timedelta(seconds=20)          # settle counts from the END of the block
+    r = cm.observe("sampling", i0, 25.0, 1013.25, row_time=end + timedelta(seconds=6), **kw)
+    check("6 s after the block: no fit", r is None, f"got {r}")
+    r = cm.observe("sampling", i0, 25.0, 1013.25,
+                   row_time=end + timedelta(seconds=PURGE_SETTLE_SEC - 1), **kw)
+    check("settle-1 s: still no fit", r is None, f"got {r}")
+    r = cm.observe("sampling", i0, 25.0, 1013.25,
+                   row_time=end + timedelta(seconds=PURGE_SETTLE_SEC), **kw)
+    check("settle elapsed: fit runs", r is not None, f"got {r}")
+    r = cm.observe("sampling", i0, 25.0, 1013.25, row_time=t0 - timedelta(minutes=5), **kw)
+    check("row older than the block (out-of-order catch-up) is not held back", r is not None)
+    cm.observe("he_inject", i0, 25.0, 1013.25, row_time=t0 + timedelta(hours=1), **kw)
+    r = cm.observe("sampling", i0, 25.0, 1013.25, row_time=t0 + timedelta(hours=1, seconds=30), **kw)
+    check("He block also starts a settle window", r is None, f"got {r}")
 
 
 def test_classify():
@@ -263,7 +292,7 @@ def test_fail_streak_to_p0():
     bad_i0 = np.zeros(2048)          # I0 <= 0 -> NaN alpha in the window
     bad_spec = np.full(2048, 1.0)
     kw = dict(omr_d=np.full(2048, OMR_D_COLD), rl=RL_COLD)
-    r_za = cm.observe("za_inject", bad_i0, 25.0, 1013.25, **kw)
+    r_za = cm.observe("za_inject", bad_i0, 25.0, 1013.25, **kw, row_time=CAL_T)
     r1 = cm.observe("sampling", bad_spec, 25.0, 1013.25, **kw)
     check("1회 실패 → P1", r1[0] == P1, f"got {r1[0]}: {r1[1]}")
     r2 = cm.observe("sampling", bad_spec, 25.0, 1013.25, **kw)
@@ -326,21 +355,29 @@ def test_real_raw_end_to_end():
             return prof.hk.first_valid(row, keys)
 
         concs, conc_without_r = [], 0
+        year = int(os.path.basename(raw)[:4])
+        last_cal, min_since_cal = None, float("inf")
         for row in rows:
             role = prof.flag_role(int(row[prof.header.state_flag_col]))
+            row_time = prof.header.time_bytepack.to_datetime(row, year)
+            if role not in ("sampling", "header", None):
+                last_cal = row_time
             spec = ch.slice(row)
             rm.observe(role, spec, hk(row, ch.temp_keys(rc)), hk(row, ch.pressure_keys(rc)))
             had_r = rm.omr_d is not None
             out = cm.observe(role, spec, hk(row, ch.temp_keys(cc)), hk(row, ch.pressure_keys(cc)),
-                             omr_d=rm.omr_d, rl=rc.rl_factor)
+                             omr_d=rm.omr_d, rl=rc.rl_factor, row_time=row_time)
             if out is not None and "conc_ppb" in out[2]:
                 concs.append(out[2]["conc_ppb"])
                 conc_without_r += 0 if had_r else 1
+                min_since_cal = min(min_since_cal, (row_time - last_cal).total_seconds())
             if len(concs) >= 8:
                 break
         check(f"{ch.label}: R computed from the raw ZA/He blocks", rm.omr_d is not None)
         check(f"{ch.label}: never a concentration without R", conc_without_r == 0, f"{conc_without_r}")
         check(f"{ch.label}: concentrations produced", bool(concs))
+        check(f"{ch.label}: no fit inside the purge-settle window",
+              min_since_cal >= PURGE_SETTLE_SEC, f"first fit {min_since_cal:.0f} s after calibration")
         if concs:
             med = float(np.median(concs))
             print(f"  ({ch.label}: {len(concs)} scans, NO2 median {med:.2f} ppb)")
@@ -356,7 +393,7 @@ def main():
     for t in (test_pick_fitset_channel, test_gas_policy_source_and_legacy_migration,
               test_i0_buffer_and_fit_and_throttle,
               test_throttle_blocks_immediate_refit, test_classify, test_fail_streak_to_p0,
-              test_no_r_yields_skip_not_garbage, test_real_raw_end_to_end):
+              test_no_r_yields_skip_not_garbage, test_purge_settle, test_real_raw_end_to_end):
         t()
     print(f"\nconc_monitor tests: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
