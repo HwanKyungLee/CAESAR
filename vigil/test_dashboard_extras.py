@@ -152,7 +152,7 @@ def test_dashboard():
     check("스파이크 하나에 안 뭉개짐", hi < 10, (lo, hi))
     trend = {("p", "f"): [(now + timedelta(seconds=10 * k), 1.0 + 0.01 * k) for k in range(50)]
              + [(now + timedelta(seconds=500), 1e6)]}
-    win.update_hk_trend(trend, {("p", "f"): {"label": "f"}})
+    win.update_hk_trend(trend, {("p", "f"): {"label": "f", "warn": [0, 2]}})
     out = win._out_items["hk"]
     check("범위 밖 점은 가장자리 표시", len(out.data) == 1)
     rows = {"/x/a.dat": {"last_row": now, "lag": 1.0, "hk_status": OK}}

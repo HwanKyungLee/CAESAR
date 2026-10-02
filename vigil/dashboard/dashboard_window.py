@@ -68,6 +68,17 @@ _ALARM_COLOR = VIGIL.p0
 # '표시 = 실제 − offset' 규칙이라 UTC+9 는 −32400.
 TZ_CHOICES = {"KST": 9.0, "UTC": 0.0}
 
+_HK_ALL_LABEL = "HK — % of warn band"
+
+
+def _band_pct(v, band):
+    """Value as % of its band (lo → 0, hi → 100); None if the band is not two-sided."""
+    lo, hi = band if band else (None, None)
+    if lo is None or hi is None or hi == lo:
+        return None
+    return 100.0 * (v - lo) / (hi - lo)
+
+
 _PLACEHOLDER = {
     "conc": "Concentration — shown after the ZA (I₀) segment",
     "r": "R — shown after ZA/He calibration completes",
@@ -218,10 +229,27 @@ class DashboardWindow(QMainWindow):
         lay.addLayout(grid, stretch=1)
         self.p_conc = self._make_plot("Concentration (ppb)", "conc")
         self.p_r = self._make_plot("R", "r")
-        self.p_hk = self._make_plot("HK", "hk")
+        self.p_hk = self._make_plot(_HK_ALL_LABEL, "hk")
+        # HK mixes mbar (~950) and °C (17–300): one real-unit axis squashed every curve and drew ~14
+        # threshold lines. Default view = each field as % of its warn band (0–100 = in band, two shared
+        # lines); picking one field shows it in real units with only its own warn/alarm lines.
+        self.cb_hk = QComboBox()
+        self.cb_hk.addItem("All fields — % of warn band", None)
+        self.cb_hk.setToolTip("HK graph: all banded fields normalised to their warn band, or one field in its own unit")
+        self.cb_hk.currentIndexChanged.connect(self._on_hk_field)
+        self._hk_sel = None
+        self._hk_last = None              # (trend, meta) — redraw on a view change
+        self._hk_lines: list = []
+        hk_box = QWidget()
+        hk_lay = QVBoxLayout(hk_box)
+        hk_lay.setContentsMargins(0, 0, 0, 0); hk_lay.setSpacing(2)
+        hk_bar = QHBoxLayout()
+        hk_bar.addWidget(QLabel("HK view:")); hk_bar.addWidget(self.cb_hk); hk_bar.addStretch(1)
+        hk_lay.addLayout(hk_bar)
+        hk_lay.addWidget(self.p_hk, stretch=1)
         grid.addWidget(self.p_conc, 0, 0)
         grid.addWidget(self.p_r, 0, 1)
-        grid.addWidget(self.p_hk, 1, 0)
+        grid.addWidget(hk_box, 1, 0)
 
         self.table = QTableWidget(0, len(_COLUMNS))
         self.table.setHorizontalHeaderLabels(_COLUMNS)
@@ -384,6 +412,13 @@ class DashboardWindow(QMainWindow):
             pw.clear()
             pw.setTitle(_PLACEHOLDER[kind], color=VIGIL.dim, size="10pt")
         self._curve_items.clear(); self._threshold_items.clear(); self._out_items.clear(); self._trend_sig.clear()
+        self._hk_lines.clear(); self._hk_last = None
+        self.cb_hk.blockSignals(True)
+        while self.cb_hk.count() > 1:
+            self.cb_hk.removeItem(1)
+        self.cb_hk.setCurrentIndex(0); self._hk_sel = None
+        self.cb_hk.blockSignals(False)
+        self.p_hk.setLabel('left', _HK_ALL_LABEL)
         self._color_of.clear(); self._color_idx = 0
         self.table.setRowCount(0); self._row_of.clear()
         self.alarm_table.setRowCount(0); self._alarm_sig = None
@@ -578,41 +613,75 @@ class DashboardWindow(QMainWindow):
         if arrays:
             self._fit_view(self.p_r, arrays, key="r")
 
+    def _on_hk_field(self, _idx) -> None:
+        self._hk_sel = self.cb_hk.currentData()
+        self._trend_sig.pop("hk", None)
+        if self._hk_last is not None:
+            self.update_hk_trend(*self._hk_last)
+
     def update_hk_trend(self, trend: dict, meta: dict) -> None:
+        self._hk_last = (trend, meta)
         if self._unchanged("hk", trend):
             return
+        sel = self._hk_sel
+        known = {self.cb_hk.itemData(i) for i in range(1, self.cb_hk.count())}
         arrays = []
         for key, dq in trend.items():
+            m = meta.get(key, {})
+            label, unit = m.get("label", str(key)), m.get("unit")
+            band = m.get("warn") or m.get("alarm")
+            if key not in known:
+                self.cb_hk.addItem(f"{label} ({unit})" if unit else label, key)
             if not dq:
                 continue
-            m = meta.get(key, {})
-            label = m.get("label", str(key))
-            unit = m.get("unit")
-            xs = [t.timestamp() for t, _v in dq]
-            ys = [v for _t, v in dq]
             ck = ("hk", key)
             item = self._curve_items.get(ck)
             if item is None:
-                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False,
-                                      name=f"{label} ({unit})" if unit else label)
+                item = self.p_hk.plot(pen=pg.mkPen(self._color_for(ck), width=1), antialias=False, name=label)
                 self.p_hk.setTitle(None)
                 self._curve_items[ck] = item
+            xs = [t.timestamp() for t, _v in dq]
+            ys = [v for _t, v in dq]
+            if sel is None:
+                # ponytail: a one-sided band can't be shown as %, that field is only in its own view
+                ys = [_band_pct(v, band) for v in ys]
+                ys = [float('nan') if y is None else y for y in ys]
+            two_sided = _band_pct(0.0, band) is not None
+            visible = (sel is None and two_sided) or sel == key
+            item.setVisible(visible)
+            if not visible:
+                continue
             item.setData(xs, ys)
             arrays.append((xs, ys))
-            tk = ("hk_thr", key)
-            if tk not in self._threshold_items:
-                lines = []
-                for band, color in ((m.get("warn"), _WARN_COLOR), (m.get("alarm"), _ALARM_COLOR)):
-                    for v in (band or ()):
-                        if v is not None:
-                            line = pg.InfiniteLine(pos=v, angle=0, movable=False,
-                                                   pen=pg.mkPen(color, style=Qt.PenStyle.DashLine))
-                            self.p_hk.addItem(line)
-                            lines.append(line)
-                self._threshold_items[tk] = lines
+        lines = self._hk_threshold_lines(meta)
         if arrays:
-            # HK 는 단위가 섞여 있어(mbar·°C) 임계선을 범위에 넣지 않는다 — 넣으면 다른 필드가 뭉개진다.
-            self._fit_view(self.p_hk, arrays, key="hk")
+            self._fit_view(self.p_hk, arrays, lines=lines, key="hk")    # band edges stay in view
+
+    def _hk_threshold_lines(self, meta) -> list:
+        """Threshold lines for the current HK view only: 0 and 100 % in the all-fields view, the selected
+        field's own warn/alarm values otherwise. Rebuilt only when the view changes."""
+        sel = self._hk_sel
+        if sel is None:
+            want = [(0.0, _WARN_COLOR), (100.0, _WARN_COLOR)]
+        else:
+            m = meta.get(sel, {})
+            want = [(v, color) for band, color in ((m.get("warn"), _WARN_COLOR), (m.get("alarm"), _ALARM_COLOR))
+                    for v in (band or ()) if v is not None]
+        if [(ln.value(), c) for ln, c in self._hk_lines] != want:
+            for ln, _c in self._hk_lines:
+                self.p_hk.removeItem(ln)
+            self._hk_lines = []
+            for v, color in want:
+                ln = pg.InfiniteLine(pos=v, angle=0, movable=False, pen=pg.mkPen(color, style=Qt.PenStyle.DashLine))
+                self.p_hk.addItem(ln)
+                self._hk_lines.append((ln, color))
+            if sel is None:
+                self.p_hk.setLabel('left', _HK_ALL_LABEL)
+            else:
+                m = meta.get(sel, {})
+                self.p_hk.setLabel('left', f"{m.get('label', sel)} ({m.get('unit')})" if m.get("unit")
+                                   else m.get("label", str(sel)))
+        return [v for v, _c in want]
 
     def log_line(self, text: str) -> None:
         self.log.append(f"[{self._fmt_time(datetime.now())} {self._tz}] {text}")

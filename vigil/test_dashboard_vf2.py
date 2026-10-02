@@ -149,6 +149,34 @@ def test_trend_skip():
           (item.opts["pen"].widthF(), item.opts["antialias"]))
 
 
+def test_hk_view():
+    print("[6] HK graph: % of band by default, one field in real units with only its lines")
+    from datetime import datetime, timedelta
+    from vigil.dashboard.dashboard_window import DashboardWindow
+    win = DashboardWindow(title="t", tz="UTC")
+    now = datetime.now()
+    trend = {("p", "press"): [(now + timedelta(seconds=10 * k), 915.0) for k in range(5)],
+             ("p", "oven"): [(now + timedelta(seconds=10 * k), 300.0) for k in range(5)],
+             ("p", "led"): [(now + timedelta(seconds=10 * k), 30.0) for k in range(5)]}
+    meta = {("p", "press"): {"label": "ANs cavity P", "unit": "mbar", "warn": [880, 950], "alarm": [830, 1000]},
+            ("p", "oven"): {"label": "ANs oven SP", "unit": "degC", "warn": [295, 305], "alarm": [285, 315]},
+            ("p", "led"): {"label": "LED1 temp", "unit": "degC", "warn": [15, 45]}}
+    win.update_hk_trend(trend, meta)
+    ys = {k[1]: list(win._curve_items[("hk", k)].getData()[1]) for k in trend}
+    check("normalised to % of warn band", ys["press"][0] == 50.0 and ys["oven"][0] == 50.0 and ys["led"][0] == 50.0, ys)
+    check("all view: two shared lines (0, 100)", sorted(ln.value() for ln, _c in win._hk_lines) == [0.0, 100.0])
+    check("combo lists every field", win.cb_hk.count() == 4, win.cb_hk.count())
+    win.cb_hk.setCurrentIndex([win.cb_hk.itemData(i) for i in range(win.cb_hk.count())].index(("p", "press")))
+    item = win._curve_items[("hk", ("p", "press"))]
+    check("one field: real units", list(item.getData()[1])[0] == 915.0)
+    check("one field: others hidden", not win._curve_items[("hk", ("p", "oven"))].isVisible())
+    check("one field: only its warn+alarm lines", sorted(ln.value() for ln, _c in win._hk_lines) == [830, 880, 950, 1000],
+          [ln.value() for ln, _c in win._hk_lines])
+    check("axis names the field and unit", "ANs cavity P (mbar)" in win.p_hk.getAxis("left").labelText)
+    win.reset_views()
+    check("reset clears the field list", win.cb_hk.count() == 1 and win._hk_sel is None and not win._hk_lines)
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv[:1])  # noqa: F841
@@ -157,6 +185,7 @@ def main():
     test_tz_labels()
     test_record_one_file_per_day()
     test_trend_skip()
+    test_hk_view()
     print(f"\ndashboard VF2: {_n_pass} PASS · {_n_fail} FAIL")
     return 1 if _n_fail else 0
 
