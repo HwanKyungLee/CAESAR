@@ -930,7 +930,7 @@ class DataIO:
                     #  바꿔 9/27 이전 슬롯 규칙을 재현한다.)
                     _ident = DataIO._slot_identity(_lay, ch, filepath)
                     _cav = _lay.cavity.get(_ident) if _ident else None
-                    if _cav:
+                    if _cav and (_cav[0] or _cav[1]):
                         # 채널이 정의한 목록만 — kind 로 아무 센서나 고르지 않는다. 목록이 다 결측이면
                         # 기본값(아래 env_t/env_p 초기값)과 경고.
                         pv = _get(*_cav[0])

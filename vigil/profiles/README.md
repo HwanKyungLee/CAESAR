@@ -13,9 +13,20 @@
 | 파일 | 역할 |
 |---|---|
 | `_schema.json` | 프로파일 JSON Schema (draft 2020-12). 모든 프로파일은 이걸로 검증된다. |
-| `caesar_cold.example.json` | 2026 여수 Cold (6179열, NO₂ 1채널, 블록 2053) |
-| `caesar_cold_6174.example.json` | 2026 여수 Cold 6/11~6/15 (6174열 — HK 선두 5열 결손, 아래 §HK 열 근거) |
-| `caesar_hot.example.json` | 2026 여수 Hot (6181열, ANs 블록 2053 + PNs 블록 4101, **파일 날짜 2026-05-01~08-31**) |
+| `base_hot_6181.json` | **기본(구조)** Hot 6181열 — 블록 ch0/ch1/ch2, HK·flag·주기. 셀 정체 없음 |
+| `base_cold_6179.json` | **기본(구조)** Cold 6179열 |
+| `base_cold_6174.json` | **기본(구조)** Cold 6174열 (6/11~6/15 — HK 선두 5열 결손, 아래 §HK 열 근거) |
+| `caesar_hot.example.json` | **미션** 2026 여수 Hot — ch1=ANs, ch2=PNs, 센서·FitSet·R, **파일 날짜 2026-05-01~08-31** |
+| `caesar_cold.example.json` | **미션** 2026 여수 Cold — ch1=NO₂ (날짜 제한 없음) |
+| `caesar_cold_6174.example.json` | **미션** 2026 여수 Cold 6174 — ch1=NO₂ |
+
+**두 층이다.** 기본(구조) 프로파일은 열 수마다 하나 — raw 를 *읽는 법*(블록 위치, HK 열지도, flag, 주기)
+만 담고 어떤 배치든 맞는다. 미션(`"base": "<기본 id>"`)은 그 위에 *그 기간의 정체* — 블록 이름(ANs…),
+`cavity` 센서, FitSet(`concentration`), R(`reflectance`), `match.date_range` — 만 얹는다(구조는 못 바꾼다:
+열 이동·없는 블록·열 수 변경은 로드 오류). 파일 날짜를 덮는 미션이 있으면 미션, 없으면 기본으로 읽는다:
+Augur 는 블록 이름 ch1/ch2 + 옛 슬롯 규칙 T/P, Vigil 은 **HK·블록 밝기(빛이 들어오는 블록만)·포화·유입**
+을 감시하고 농도·R 만 빠진다(P2 "No mission … Load the mission"). 그래서 Vigil 은 미션 없이 어디서
+켜도 동작한다.
 
 `.example.` 프로파일은 **기본값(씨앗)**이다. 새 캠페인은 이걸 복제해
 `caesar_hot_<campaign>.json` 처럼 이름 붙이고 값만 조정한다.
@@ -66,12 +77,11 @@
 
 **코드는 고치지 않는다 — JSON 만.** 예: 콜드의 어두운 블록 4101 에 광섬유를 연결해 2채널이 됐다.
 
-1. 옛 프로파일(`caesar_cold.example.json`)의 `match` 에 끝 날짜를 붙인다:
-   `"date_range": ["2026-01-01", "2026-09-30"]`.
-2. 그걸 복제해 새 프로파일(새 `profile_id`)을 만들고 `date_range` 를 새 배치 시작일부터로 둔다.
-3. 새 채널 블록을 `"role": "signal"` 로 바꾸고 `label`, `cavity`(그 셀의 압력·온도 센서), 필요하면
-   `concentration`(FitSet·wl_dir)·`reflectance`(wavecal·roi)를 채운다. 그 셀의 센서가 HK 에
-   없으면 `hk.fields` 에 추가한다.
+1. 옛 미션(`caesar_cold.example.json`)에 끝 날짜를 붙인다: `"match": {"date_range": ["2026-01-01", "2026-09-30"]}`.
+2. 새 **미션** 파일(새 `profile_id`, `"base": "caesar_cold_base"`, 새 배치 시작일부터의 `date_range`)을 만든다.
+3. 새 블록(`"id": "ch2"`)을 `"role": "signal"` 로 두고 `label`, `cavity`(그 셀의 압력·온도 센서), 필요하면
+   `concentration`(FitSet·wl_dir)·`reflectance`(wavecal·roi)를 채운다. 그 셀의 센서가 HK 지도에
+   없으면 **기본** 프로파일의 `hk.fields` 에 추가한다(구조는 기본의 일).
 4. **채널 정체는 LED 스펙트럼으로 판정**한다(블록 번호·기억으로 정하지 말 것 — 2026-09 오판,
    `CHANNEL_IDENTITY_YEOSU2026.md`).
 5. `python tools/test_raw_layout.py`, `python vigil/test_profile.py` — 스키마·날짜 겹침·키 참조 검사.

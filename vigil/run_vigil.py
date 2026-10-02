@@ -124,6 +124,7 @@ class VigilApp:
         self._tick_errors = 0
         self._backlog_logged = False
         self._date_excluded_logged: set = set()
+        self._auto_lit: dict = {}          # {(file, profile_id, channel_id): 빛이 들어오는 auto 블록인가}
         self._was_catching_up = False
         self._last_arrival = None
         self._hk_latest: dict = {}         # {(profile_id, field_key): (value, severity, datetime)} — 현재 값 카드
@@ -218,7 +219,7 @@ class VigilApp:
     def _combine_channels(self, prof, ev, by_channel, status, last_status, kind, label) -> None:
         """채널별 최신 판정 → 그 파일의 worst 로 합치고, 상태가 바뀔 때만 로그."""
         entries = [by_channel[(prof.profile_id, ch.id)]
-                  for ch in prof.signal_channels()
+                  for ch in prof.channels
                   if (prof.profile_id, ch.id) in by_channel]
         combined_status = SKIP
         for s, _m, _mt in entries:
@@ -231,11 +232,33 @@ class VigilApp:
                 self.dashboard.log_line(f"[{os.path.basename(ev.file)}] {label} {combined_status}: {combined_msg}")
         last_status[ev.file] = combined_status
 
+    def _active_channels(self, prof, ev) -> list:
+        """감시할 스펙트럼 블록 — signal + **빛이 들어오는** auto 블록(기본 프로파일). auto 는 파일마다
+        첫 행의 블록 최대값으로 한 번 판정한다(≥ autodetect.signal_min_max, 없으면 data_io 와 같은 5000) —
+        어두운 블록의 바닥 잡음으로 램프 경보를 내지 않게."""
+        out = []
+        thr = prof.autodetect.signal_min_max if prof.autodetect is not None else 5000.0
+        for ch in prof.channels:
+            if ch.is_signal:
+                out.append(ch)
+            elif ch.is_auto and ch.columns is not None:
+                key = (ev.file, prof.profile_id, ch.id)
+                lit = self._auto_lit.get(key)
+                if lit is None:
+                    try:
+                        lit = max(float(v) for v in ch.slice(ev.row)) >= thr
+                    except (ValueError, TypeError):
+                        lit = False
+                    self._auto_lit[key] = lit
+                if lit:
+                    out.append(ch)
+        return out
+
     def _observe_lamp(self, prof, ev) -> None:
         """모든 signal 채널의 ZA 블록 세기(램프 헬스). 설정 없이 기본 문턱으로 돈다."""
         # ponytail: 문턱은 모듈 상수(2026 여수 실측). 캠페인별로 달라지면 프로파일 키로 뺄 것.
         touched = False
-        for ch in prof.signal_channels():
+        for ch in self._active_channels(prof, ev):
             key = (prof.profile_id, ch.id)
             lm = self._lamp_monitors.setdefault(key, LampMonitor())
             result = lm.observe(ev.role, ch.slice(ev.row))
@@ -311,9 +334,16 @@ class VigilApp:
             if path in self._date_excluded_logged:
                 continue
             self._date_excluded_logged.add(path)
-            msg = (f"NOT monitored: {os.path.basename(path)} has the column count of {', '.join(ids)}, "
-                   f"but its file date is outside that profile's date_range (different fibre/channel "
-                   f"layout) — add a profile for this layout")
+            base = w._profile_cache.get(path)
+            if base is not None and not base.is_mission:
+                msg = (f"No mission for {os.path.basename(path)}: its date is outside {', '.join(ids)} "
+                       f"(different fibre/channel layout) — monitoring with base profile "
+                       f"{base.profile_id}: HK, block brightness and data flow only, NO concentration/R. "
+                       f"Load the mission for this layout")
+            else:
+                msg = (f"NOT monitored: {os.path.basename(path)} has the column count of {', '.join(ids)}, "
+                       f"but its file date is outside that profile's date_range (different fibre/channel "
+                       f"layout) — add a profile for this layout")
             log.warning(msg)
             self.state_log.append(P2, msg, kind="ingest", file=path, profiles=ids)
             if self.dashboard is not None:
@@ -482,7 +512,8 @@ class VigilApp:
             prof = self.profiles.by_id(ev.profile_id)
             if prof is None:
                 continue
-            hk_status, hk_msg, hk_metrics = evaluate_hk(prof, ev.row, phase=ev.role)
+            hk_status, hk_msg, hk_metrics = evaluate_hk(prof, ev.row, phase=ev.role,
+                                                        channels=self._active_channels(prof, ev))
             self._hk_status[ev.file] = (hk_status, hk_msg, hk_metrics)
             if self._hk_last_status.get(ev.file) != hk_status:
                 self.state_log.append(hk_status, hk_msg, file=ev.file, **hk_metrics)

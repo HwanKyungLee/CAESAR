@@ -113,8 +113,9 @@ def test_yeosu_hot_date_range():
     p = RawParser(_write_named_row_file(6181, "2026-09-27-001.dat"))
     check("기간 밖 파일은 구조 이름 ch1/ch2",
           p.layout.spec_blocks == {"ch1": SPEC_PRIMARY, "ch2": SPEC_SECONDARY}, p.layout.spec_blocks)
-    check("기간 밖이어도 HK 지도는 유지", p.layout.hk_map is HotHKMap)
-    check("kind에 기간 밖 표시", "outside" in p.layout.kind, p.layout.kind)
+    check("기간 밖이어도 HK 지도는 유지(기본 프로파일 — 같은 열)",
+          {k: v[0] for k, v in p.layout.hk_map.items()} == {k: v[0] for k, v in HotHKMap.items()})
+    check("kind에 미션 없음 표시", "no mission" in p.layout.kind, p.layout.kind)
 
 
 def main():

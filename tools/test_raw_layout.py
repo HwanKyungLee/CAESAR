@@ -147,8 +147,9 @@ def test_profile_layouts_match_legacy(d):
     import re
     from core import run_meta
     prov = RP.layout_for(6181)[0].profile
-    check("레이아웃 출처 = 파일@판#해시8",
-          re.fullmatch(r"caesar_hot\.example\.json@\d+\.\d+\.\d+#[0-9a-f]{8}", prov or "") is not None, prov)
+    check("레이아웃 출처 = 미션 파일@판#해시8 + 바탕 기본 파일@판#해시8",
+          re.fullmatch(r"caesar_hot\.example\.json@\d+\.\d+\.\d+#[0-9a-f]{8}"
+                       r"\+base_hot_6181\.json@\d+\.\d+\.\d+#[0-9a-f]{8}", prov or "") is not None, prov)
     lay_in = run_meta.layout_from_input(os.path.join(d, "2026-06-01-001 hot.dat"))
     check("raw 입력 meta 에 profile", (lay_in or {}).get("profile") == prov, lay_in)
     ap = os.path.join(d, "x_alpha_trace.dat")
@@ -302,13 +303,18 @@ def test_register_guard():
             check("모르는 역할은 예외", True)
         # 핫(05-01~08-31)과 안 겹치는 새 핫 배치 — 같은 6181 에 둘 다 산다
         RP.register_campaign_layout(6181, "hot-lab", {"cold": "primary", "ANs": "secondary"}, {},
-                                    date_range=("2026-09-01", "2099-12-31"), source="lab.json")
+                                    date_range=("2026-09-01", "2099-12-31"), source="lab.json",
+                                    is_mission=True)
         a, ina = RP.layout_for(6181, "2026-06-01-001.dat")
         b, inb = RP.layout_for(6181, "2026-10-02-001.dat")
         c, inc = RP.layout_for(6181, "2025-01-01-001.dat")
         check("layout_for: 6월 = 여수, 10월 = 새 배치",
               (a.kind, ina, b.kind, inb) == ("hot", True, "hot-lab", True), (a.kind, b.kind))
-        check("layout_for: 어느 구간에도 안 들면 첫 구성을 '구간 밖'으로", (c.kind, inc) == ("hot", False))
+        check("layout_for: 어느 미션도 안 덮으면 기본(구조) 프로파일", (c.is_mission, c.kind, inc) == (False, "hot", True),
+              (c.is_mission, c.kind, inc))
+        RP.CAMPAIGN_LAYOUTS[6181] = [l for l in RP.CAMPAIGN_LAYOUTS[6181] if l.is_mission]
+        c2, inc2 = RP.layout_for(6181, "2025-01-01-001.dat")
+        check("layout_for: 기본도 없으면 첫 미션을 '구간 밖'으로", (c2.kind, inc2) == ("hot", False))
         check("block_channel_name 이 날짜로 다른 이름",
               RP.block_channel_name(_synth_row(6181, os.path.join(tempfile.mkdtemp(), "2026-10-02-001.dat")),
                                     2053) == "cold")
@@ -352,11 +358,11 @@ def test_channel_map_matches_profiles():
         check("뒤바꾼 매핑을 잡아낸다", False, "ans/pns 키가 없다")
 
 
-def _profile_dir_with(d, name, edit):
-    """기본 프로파일 폴더 사본 + edit(dict) 를 적용한 새 프로파일 하나."""
+def _profile_dir_with(d, name, edit, src_name="caesar_cold.example.json"):
+    """기본 프로파일 폴더 사본 + (src_name 을 고친) 새 프로파일 하나."""
     pdir = os.path.join(d, name)
     shutil.copytree(os.path.join(_ROOT, "vigil", "profiles"), pdir)
-    src = os.path.join(pdir, "caesar_cold.example.json")
+    src = os.path.join(pdir, src_name)
     prof = json.load(open(src, encoding="utf-8"))
     edit(prof)
     with open(os.path.join(pdir, f"{name}.json"), "w", encoding="utf-8") as fh:
@@ -373,47 +379,48 @@ def test_autoload_new_configuration(d):
 
     def more_cols(p):
         p["profile_id"] = "caesar_next_2027demo"
-        p["campaign"] = "2027-demo"
+        p["kind"] = "next"
         p["match"]["n_columns"] = new_ncols
         p["match"]["filename_glob"] = "*Demo*.dat"
-    pdir = _profile_dir_with(d, "next", more_cols)
+    pdir = _profile_dir_with(d, "next", more_cols, src_name="base_cold_6179.json")
     with _saved_registry():
         got = RP.autoload_campaign_layouts(pdir, verbose=False)
         check("(a) 새 열 수만 새로 등록", [l.ncols for l in got] == [new_ncols], [l.ncols for l in got])
-        check("(a) campaign 기록", RP.layout_for(new_ncols)[0].campaign == "2027-demo")
+        check("(a) 새 기본 프로파일(미션 아님)", not RP.layout_for(new_ncols)[0].is_mission)
         pr = RP.RawParser(_synth_row(new_ncols, os.path.join(d, "next.dat")))
-        check("(a) 새 구성 raw가 파싱되고 HK가 읽힘", pr.layout.kind == "cold" and bool(next(pr.iter_rows()).hk),
+        check("(a) 새 구성 raw가 파싱되고 HK가 읽힘", pr.layout.kind == "next" and bool(next(pr.iter_rows()).hk),
               pr.layout.kind)
         check("(a) 재실행은 무해", RP.autoload_campaign_layouts(pdir, verbose=False) == [])
 
     # (b) 콜드에 채널 추가 — 같은 6179열, 2026-10-01 부터 블록 4101 도 신호(다른 셀, 다른 센서)
     def add_channel(p):
+        # 기본(구조)은 그대로, 새 **미션**: 블록 ch2 를 신호 채널 Cell2 로(센서는 다른 열)
         p["profile_id"] = "caesar_cold_2ch_demo"
         p["profile_version"] = "1.0.0"
-        p["match"]["date_range"] = ["2026-10-01", "2099-12-31"]
+        p["match"] = {"date_range": ["2026-10-01", "2099-12-31"]}
         for ch in p["channels"]:
-            if ch["id"] == "ch_noise2":
-                ch.update({"id": "ch_cell2", "label": "Cell2", "role": "signal",
-                           "cavity": {"pressure_hk": ["unknown_rel28"],
-                                      "temperature_hk": ["t_spectrometer"]}})
-        p["hk"]["fields"] = [dict(f, unit="mbar", scale=0.6895) if f["key"] == "unknown_rel28" else f
-                             for f in p["hk"]["fields"]]
+            if ch["id"] == "ch2":
+                ch.clear()
+                ch.update({"id": "ch2", "label": "Cell2", "role": "signal",
+                           "cavity": {"pressure_hk": ["p_cavity"],
+                                      "temperature_hk": ["unknown_rel28"]}})
     pdir = _profile_dir_with(d, "twoch", add_channel)
     # 여수 콜드 프로파일은 날짜 제한이 없어 새 구성과 겹친다 — 실제로는 여수 프로파일에 끝 날짜를
     # 붙여야 한다(그게 이 기능의 사용법). 사본에서 그렇게 한다.
     yp = os.path.join(pdir, "caesar_cold.example.json")
     y = json.load(open(yp, encoding="utf-8"))
-    y["match"]["date_range"] = ["2026-01-01", "2026-09-30"]
+    y.setdefault("match", {})["date_range"] = ["2026-01-01", "2026-09-30"]
     json.dump(y, open(yp, "w", encoding="utf-8"), ensure_ascii=False)
     with _saved_registry():
         RP.CAMPAIGN_LAYOUTS.clear()
         with contextlib.redirect_stdout(io.StringIO()):
             RP.autoload_campaign_layouts(pdir, verbose=False)
         lays = RP.CAMPAIGN_LAYOUTS.get(6179, [])
-        check("(b) 6179 에 날짜별 구성 2개", len(lays) == 2, [(l.source, l.date_range) for l in lays])
+        check("(b) 6179 에 기본 1 + 날짜별 미션 2",
+              sum(not l.is_mission for l in lays) == 1 and sum(l.is_mission for l in lays) == 2,
+              [(l.source, l.is_mission, l.date_range) for l in lays])
         old = RP.RawParser(_synth_row(6179, os.path.join(d, "2026-06-02-001.dat"), flag=1))
-        new_fp = _synth_row(6179, os.path.join(d, "2026-10-05-001.dat"), flag=1,
-                            overrides={6177: 1450})        # Cell2 압력 raw(×P_SCALE ≈ 999.7 mbar)
+        new_fp = _synth_row(6179, os.path.join(d, "2026-10-05-001.dat"), flag=1)
         new = RP.RawParser(new_fp)
         check("(b) 6월 파일은 1채널(NO2)", old.layout.spec_blocks == {"NO2": RP.SPEC_PRIMARY},
               old.layout.spec_blocks)
@@ -423,8 +430,8 @@ def test_autoload_new_configuration(d):
         with contextlib.redirect_stdout(io.StringIO()):
             _, s2, _, t2, p2 = DataIO.load_measurement_with_hk(new_fp, 0, None, 0, 2)
             _, s1, _, t1, p1 = DataIO.load_measurement_with_hk(new_fp, 0, None, 0, 1)
-        check("(b) data_io: 새 채널(슬롯 2)은 그 채널의 cavity 센서로 T/P",
-              abs(p2 - 1450 * RP.P_SCALE) < 1e-9 and abs(t2 - (3000 + 6174) * 0.01) < 1e-9, (t2, p2))
+        check("(b) data_io: 새 채널(슬롯 2)은 그 채널의 cavity 센서로 T/P(온도 = unknown_rel28, 6177)",
+              abs(p2 - (3000 + 6160) * RP.P_SCALE) < 1e-9 and abs(t2 - (3000 + 6177) * 0.01) < 1e-9, (t2, p2))
         check("(b) data_io: 기존 채널(슬롯 1)은 여전히 p_cavity·t_cavity",
               abs(p1 - (3000 + 6160) * RP.P_SCALE) < 1e-9 and abs(t1 - (3000 + 6173) * 0.01) < 1e-9,
               (t1, p1))

@@ -3,9 +3,9 @@
 핫 프로파일(2026 여수 채널 정체: block 2053 = ANs 300 °C)이 열 수(6181)만 보고 **모든** 6181열 파일에
 붙어서, 8/11 이후 배치(block 2053 = cold)로 측정하면 실시간 ppb·R·경보가 경고 없이 엉뚱한 셀에 붙었다.
 core/raw_parser 는 같은 레이아웃에 2026-05-01~08-31 에만 ANs/PNs 이름을 붙인다.
-  1) 범위 안 파일 → 핫 프로파일, 범위 밖 → 미배정, 날짜 없는 파일명 → 제한 없음(raw_parser 와 같게)
+  1) 범위 안 파일 → 핫 미션, 범위 밖 → 기본(구조) 프로파일(셀 정체 없음), 날짜 없는 파일명 → 제한 없음
   2) 프로파일의 date_range == raw_parser 6181열 레이아웃의 date_range (두 곳이 갈라지지 않게)
-  3) VigilApp: 범위 밖 핫 파일은 P2 'NOT monitored' 를 한 번만 남긴다(조용히 감시를 안 하지 않는다)
+  3) VigilApp: 범위 밖 핫 파일은 기본 프로파일로 감시하되 P2 'No mission'(농도·R 없음)을 한 번만 남긴다
 """
 import json
 import os
@@ -58,13 +58,15 @@ def main():
     ps = ProfileSet.load_default()
     hot = ps.route(filename="2026-06-20-001 Hot.dat", n_columns=NC)
     check("6월 핫 파일 → 핫 프로파일", hot is not None and "hot" in hot.profile_id, hot and hot.profile_id)
-    check("10월 핫 파일 → 미배정", ps.route(filename="2026-10-02-001 Hot.dat", n_columns=NC) is None)
+    g10 = ps.route(filename="2026-10-02-001 Hot.dat", n_columns=NC)
+    check("10월 핫 파일 → 기본(구조) 프로파일", g10 is not None and not g10.is_mission
+          and [c.label for c in g10.channels] == ["ch0", "ch1", "ch2"], g10 and g10.profile_id)
     check("10월: date_excluded 가 이유를 알려준다",
           ps.date_excluded("2026-10-02-001 Hot.dat", NC) == [hot.profile_id])
     check("날짜 없는 파일명은 제한 없음", ps.route(filename="synthetic Hot.dat", n_columns=NC) is not None)
     check("경계 08-31 포함 · 09-01 제외",
           ps.route(filename="2026-08-31-024 Hot.dat", n_columns=NC) is not None
-          and ps.route(filename="2026-09-01-001 Hot.dat", n_columns=NC) is None)
+          and not ps.route(filename="2026-09-01-001 Hot.dat", n_columns=NC).is_mission)
 
     lay, _ = raw_parser.layout_for(NC, "2026-06-20-001 Hot.dat")
     check("프로파일 date_range == raw_parser 6181열 레이아웃 date_range",
@@ -84,8 +86,8 @@ def main():
             fh.write(_rows(3, 23_600_005))
         core.tick()
         recs = [json.loads(x) for x in open(os.path.join(st, "status.jsonl"), encoding="utf-8")]
-        warn = [r for r in recs if "NOT monitored" in r.get("msg", "")]
-        check("범위 밖 핫 파일: P2 'NOT monitored' 한 번", len(warn) == 1 and warn[0]["status"] == "P2",
+        warn = [r for r in recs if r.get("msg", "").startswith("No mission")]
+        check("범위 밖 핫 파일: P2 'No mission'(기본으로 감시) 한 번", len(warn) == 1 and warn[0]["status"] == "P2",
               [r.get("msg") for r in recs][-3:])
         check("internal 오류 없음", not [r for r in recs if r.get("kind") == "internal"])
     finally:

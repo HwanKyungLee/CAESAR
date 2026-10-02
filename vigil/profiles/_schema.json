@@ -4,7 +4,10 @@
   "title": "Vigil Instrument Profile",
   "description": "하나의 CAESAR raw 파일 레이아웃을 서술하는 프로파일. Cold/Hot/PNs 같은 명칭은 이 파일 안의 label(표시용)로만 존재하고, 파싱·경보 로직은 여기 선언된 열지도/밴드/flag 규약만 본다. 로직 코드에 채널 의미를 하드코딩하지 않는다.",
   "type": "object",
-  "required": ["profile_id", "profile_version", "match", "header", "flags", "channels", "hk", "cadence"],
+  "required": ["profile_id", "profile_version"],
+  "if": { "required": ["base"] },
+  "then": { "required": ["channels"] },
+  "else": { "required": ["match", "header", "flags", "channels", "hk", "cadence"] },
   "additionalProperties": false,
   "properties": {
     "profile_id": {
@@ -19,6 +22,7 @@
     },
     "description": { "type": "string" },
     "instrument": { "type": "string", "description": "장비명(예: CAESAR)." },
+    "base": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "있으면 이 파일은 **미션**(정체 프로파일): 이 id 의 기본(구조) 프로파일 위에 블록 이름·role·cavity·concentration·reflectance 와 match.date_range 를 얹는다. 열 수·HK 열지도·flag 같은 구조는 바꾸지 못한다. 없으면 기본 프로파일(전 구조 필수)."},
     "kind": { "type": "string", "description": "구성 종류(예: 'cold', 'hot'). Augur 결과 헤더의 raw_layout 줄에 기록된다 — 표시·출처용, 로직은 열 지도만 본다." },
     "campaign": { "type": "string", "description": "캠페인 이름(예: '2026-yeosu'). Augur 결과 헤더에 기록된다." },
 
@@ -34,6 +38,7 @@
       },
       "anyOf": [
         { "required": ["n_columns"] },
+        { "required": ["date_range"] },
         { "required": ["filename_glob"] }
       ]
     },
@@ -82,12 +87,12 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "role"],
+        "required": ["id"],
         "additionalProperties": false,
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "채널 안정 식별자(로직이 참조). 라벨과 별개." },
           "label": { "type": "string", "description": "표시용 이름(예: 'PNs','ANs','NO2'). 로직이 이 문자열에 의존하면 안 됨." },
-          "role": { "type": "string", "enum": ["signal", "noise"], "description": "signal만 피팅/감시 대상, noise는 무시." },
+          "role": { "type": "string", "enum": ["signal", "noise", "auto"], "description": "signal = 셀 정체가 정해진 신호 블록(농도·R 가능). auto = 기본 프로파일의 블록 — 빛이 들어오면(블록 최대 ≥ autodetect.signal_min_max) 밝기·포화를 감시. noise = 무시. 기본 프로파일은 필수, 미션은 바꿀 때만." },
           "columns": {
             "type": "array",
             "description": "절대 열 범위 [start, end] (양끝 포함). 생략 시 autodetect.",

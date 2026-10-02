@@ -288,7 +288,9 @@ class Watcher:
         prof = self.profiles.route(filename=os.path.basename(path), n_columns=n_columns)
         if prof is not None:
             self._profile_cache[path] = prof
-        elif path not in self.date_excluded:
+        if (prof is None or not prof.is_mission) and path not in self.date_excluded:
+            # 이 열 수의 미션(셀 정체)이 이 날짜를 안 덮는다 — 기본(구조) 프로파일로 감시되거나(농도·R 없음)
+            # 기본도 없으면 미배정. 진입점이 파일마다 한 번 알린다.
             ids = self.profiles.date_excluded(os.path.basename(path), n_columns)
             if ids:
                 self.date_excluded[path] = ids
