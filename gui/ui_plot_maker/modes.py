@@ -47,6 +47,9 @@ class TimeSeriesMode(PlotMode):
         row = QHBoxLayout()
         b_l = QPushButton("+ Left Y")
         b_r = QPushButton("+ Right Y")
+        b_l.setToolTip("Plot the columns selected in the Data shelf on the left Y axis "
+                       "(double-clicking a column does the same)")
+        b_r.setToolTip("Plot the columns selected in the Data shelf on a second, right Y axis")
         b_l.clicked.connect(lambda: self._add("L"))
         b_r.clicked.connect(lambda: self._add("R"))
         row.addWidget(b_l)
@@ -57,6 +60,9 @@ class TimeSeriesMode(PlotMode):
         b_s = QPushButton("Style")
         b_n = QPushButton("Name")
         b_del = QPushButton("− Remove")
+        b_c.setToolTip("Colour of the selected series")
+        b_n.setToolTip("Legend name of the selected series")
+        b_del.setToolTip("Remove the selected series from the plot (the data stays on the shelf)")
         b_c.clicked.connect(self._pick_color)
         b_s.clicked.connect(self._edit_style)
         b_s.setToolTip("Line width · dashed/solid · marker shape/size")
@@ -138,7 +144,11 @@ class TimeSeriesMode(PlotMode):
         menu.exec(self._list.mapToGlobal(pos))
 
     def _add(self, axis):
-        for lab in self.host.selected_columns():
+        cols = self.host.selected_columns()
+        if not cols and hasattr(self.host, "set_status"):
+            # used to do nothing at all (UX audit 2026-10-02 s5)
+            self.host.set_status("Select one or more columns in the Data shelf first, then + Left Y / + Right Y.")
+        for lab in cols:
             if not any(s[0] == lab and s[1] == axis for s in self._series):
                 self._series.append([lab, axis, None, None])
         self._refresh_list()
@@ -1314,6 +1324,7 @@ class HeatmapMode(PlotMode):
         self._lbl_pin.setStyleSheet(f"color:{AUGUR.muted};")
         lay.addWidget(self._lbl_pin)
         b = QPushButton("Compute")
+        b.setToolTip("Recalculate and redraw with the current settings")
         b.clicked.connect(self.render)
         lay.addWidget(b)
         lay.addStretch(1)

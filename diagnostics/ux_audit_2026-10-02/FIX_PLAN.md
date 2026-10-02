@@ -77,4 +77,4 @@ worker.py는 W1(AlphaExportWorker, ~2000행 이후)과 W5(AnalysisWorker, ~1–1
 - 2026-10-03 (2) — 3단계 UX + 디자인 다듬기(91ea998 테마, aab7803 Augur, 4eadb6f Vigil): 1366×768 @150 % 에서
   메인 창 최소폭 1027→665 px, Setup 좁으면 위아래 쌓기, 큰 대화상자 화면 안으로, 왼쪽 1~4 단계 + ✓, 상태 기호,
   빈 상태 안내, RUN 주 버튼, Monitor "(Fast)" 제거. 화면은 실제 창(빈 상태·05-20 데이터·Fast 런)으로 찍어 확인.
-  남은 것: 결과 표 Status 열 노트 잘림, Plot Maker 툴팁 없는 버튼(Compute·+ Left Y 등)·↺ 라벨, 정책표 열 잘림.
+  남은 것: 결과 표 Status 열 노트 잘림, 정책표 열 잘림.
