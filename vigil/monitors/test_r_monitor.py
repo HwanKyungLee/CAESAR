@@ -29,7 +29,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from core.physics import RayleighPhysics
-from vigil.alert_engine import OK, P0, P1, P2
+from vigil.alert_engine import OK, P0, P1, P2, SKIP
 from vigil.monitors.r_monitor import RMonitor
 
 _n_pass = 0
@@ -89,10 +89,10 @@ def test_baseline_accumulation_and_ok():
                   warn_drop=5e-4, alarm_drop=2e-3)
     r1 = _feed_cycle(rm, 0.9999)
     check("1번째: 계산됨", r1 is not None)
-    check("1번째: OK(축적중)", r1[0] == OK, f"got {r1[0]}: {r1[1]}")
+    check("1번째: SKIP(축적중, OK 아님)", r1[0] == SKIP, f"got {r1[0]}: {r1[1]}")
 
     r2 = _feed_cycle(rm, 0.9999)
-    check("2번째: OK(축적중)", r2[0] == OK, f"got {r2[0]}: {r2[1]}")
+    check("2번째: SKIP(축적중, OK 아님)", r2[0] == SKIP, f"got {r2[0]}: {r2[1]}")
 
     r3 = _feed_cycle(rm, 0.9999)
     check("3번째(기준선 확보, 변화없음): OK", r3[0] == OK, f"got {r3[0]}: {r3[1]}")

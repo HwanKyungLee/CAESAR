@@ -38,7 +38,7 @@ from typing import Optional
 
 import numpy as np
 
-from vigil.alert_engine import OK, P0, P1, P2
+from vigil.alert_engine import OK, P0, P1, P2, SKIP
 
 WARN_REL = 0.05
 ALARM_REL = 0.15          # = core.step_guard.REL_FLOOR (핫 정상 drift p99.5 의 ~2배)
@@ -80,8 +80,9 @@ class LampMonitor:
             return P1, "lamp intensity computation failed (NaN)", metrics
         if len(self._history) < MIN_HISTORY_FOR_BASELINE:
             self._history.append(level)
-            return OK, (f"I={level:.0f} (building baseline "
-                        f"{len(self._history)}/{MIN_HISTORY_FOR_BASELINE})"), metrics
+            # SKIP, not OK: a lamp step or lamp-off cannot be judged without a baseline yet
+            return SKIP, (f"I={level:.0f} — building baseline "
+                          f"{len(self._history)}/{MIN_HISTORY_FOR_BASELINE}, no step alarm until then"), metrics
 
         hist = np.asarray(self._history, dtype=float)
         baseline = float(np.median(hist))

@@ -18,7 +18,7 @@ from typing import Optional
 
 import numpy as np
 
-from vigil.alert_engine import OK, P0, P1, P2
+from vigil.alert_engine import OK, P0, P1, P2, SKIP
 from vigil.monitors.running_mean import RunningMean
 
 # 연속 이 횟수 이상 R 산출 실패하면 "정지 수준"으로 격상(§5 P0 예시: "R 산출 연속 실패").
@@ -142,7 +142,10 @@ class RMonitor:
         self._history.append(r_val)
 
         if len(self._history) < MIN_HISTORY_FOR_BASELINE:
-            return OK, f"R={r_val:.5f} (building baseline {len(self._history)}/{MIN_HISTORY_FOR_BASELINE})", metrics
+            # SKIP, not OK: without a baseline a mirror problem cannot raise anything yet — with He every
+            # 3 h that is ~9 h of silence after start (audit 2026-10-02 V2 §4).
+            return SKIP, (f"R={r_val:.5f} — building baseline {len(self._history)}/{MIN_HISTORY_FOR_BASELINE}, "
+                          f"no drop alarm until then"), metrics
 
         baseline = float(np.median(list(self._history)[:-1]))
         drop = baseline - r_val

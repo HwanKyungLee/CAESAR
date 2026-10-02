@@ -23,7 +23,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from vigil.alert_engine import OK, P0, P1, P2
+from vigil.alert_engine import OK, P0, P1, P2, SKIP
 from vigil.monitors.lamp_monitor import LampMonitor
 
 _n_pass = 0
@@ -59,14 +59,14 @@ def test_window_and_fragments():
     check("샘플링 행은 None", lm.observe("sampling", np.ones(8)) is None)
     check("ZA 2행 조각은 판정 안 함", _block(lm, 12000, n=2) is None)
     r = _block(lm, 12000)
-    check("완결 블록은 판정", r is not None and r[0] == OK, str(r))
+    check("완결 블록은 판정", r is not None, str(r))
 
 
 def test_baseline_accumulation():
     print("[2] 기준선 축적 중")
     lm = LampMonitor()
     r = _block(lm, 5000)
-    check("첫 블록 OK + 축적 문구", r[0] == OK and "building baseline" in r[1], r[1])
+    check("첫 블록 SKIP(OK 아님) + 축적 문구", r[0] == SKIP and "building baseline" in r[1], r[1])
 
 
 def test_levels():
