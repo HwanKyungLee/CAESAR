@@ -49,8 +49,9 @@ def _fake_fitset(d):
         k: {"wl_path": os.path.join(d, "wv_cal", roi, "Calib.txt").replace("\\", "/"),
             "refs": [{"name": "NO2", "path": os.path.join(d, "wv_cal", roi, "Ref_NO2.dat").replace("\\", "/")}],
             "fit_start_nm": 430.0, "fit_end_nm": 462.0, "cavity_d": 51.8, "rl_factor": 0.933,
+            "allow_negative_gas": neg,                            # ±Neg differs per channel
             "data_label": "WRONG-LABEL"}                         # 이름표는 안 쓴다
-        for k, roi in (("1", "roi1"), ("2", "roi2"))}}
+        for k, roi, neg in (("1", "roi1", False), ("2", "roi2", True))}}
     os.makedirs(os.path.join(d, "fit setting"))
     p = os.path.join(d, "fit setting", "FitSet_demo.json")
     json.dump(fs, open(p, "w", encoding="utf-8"))
@@ -90,6 +91,11 @@ def main():
               c1["concentration"]["fitset_path"] == "fitset.json" and c1["concentration"]["fitset_channel"] == "2"
               and c1["reflectance"]["wavecal_path"] == "wavecal/roi2/Calib.txt"
               and c1["reflectance"]["roi_nm"] == [430.0, 462.0], c1)
+        # 2026-10-02 first real export: the mission defaulted ±Neg to False while the FitSet had True,
+        # and ConcMonitor refused to start ("allow_negative_gas disagrees with FitSet").
+        check("1) 미션 ±Neg = 그 채널 FitSet 값(ch1←FitSet 2 True, ch2←FitSet 1 False)",
+              c1["concentration"]["allow_negative_gas"] is True
+              and md["channels"][1]["concentration"]["allow_negative_gas"] is False, md["channels"])
         check("1) manifest 출처 = 미션+바탕", man["provenance"][0].startswith("mission_caesar_hot_base.json@1.0.0#")
               and "+base_hot_6181.json@" in man["provenance"][0], man["provenance"])
         check("1) verify 깨끗", MP.verify_package(pkg) == [], MP.verify_package(pkg))

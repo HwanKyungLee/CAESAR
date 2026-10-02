@@ -223,6 +223,11 @@ def build_package(out_dir: str, fitset_path: str, missions: list, *, name: str,
                 conc.update(c["concentration"])
                 conc.update({"fitset_path": FITSET, "wl_dir": wl_dir_of(fch.get("wl_path")),
                              "fitset_channel": str(c["fitset_channel"])})
+                # The ±Neg policy is the FitSet's (single source): ConcMonitor refuses to start when
+                # the profile disagrees with it, so a False default here switched concentration off
+                # for every FitSet fitted with ±Neg on (2026-10-02, first real export: "init failed").
+                if isinstance(fch.get("allow_negative_gas"), bool):
+                    conc["allow_negative_gas"] = fch["allow_negative_gas"]
                 oc["concentration"] = conc
             if fch is not None and c.get("reflectance") is not None:
                 refl = {"cavity_len_cm": float(fch.get("cavity_d", 51.8)),
