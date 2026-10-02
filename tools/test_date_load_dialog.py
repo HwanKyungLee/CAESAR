@@ -30,6 +30,10 @@ def test_list_text_and_write_location():
         txt = dlg._list.item(0).text()
         # R14: day count and save time were glued together ("2d10-02 04:42")
         assert " · 2d · saved " in txt, txt
+        # R10: the merge is written into the chosen tree — the dialog must say where,
+        # and scanning/opening must not write anything.
+        assert os.path.join(base, "_derived") in dlg._lbl.text(), dlg._lbl.text()
+        assert not os.path.exists(os.path.join(base, "_derived"))
 
 
 if __name__ == "__main__":
