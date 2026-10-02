@@ -272,6 +272,11 @@ class SaveExportMixin:
                         f"# Allow Negative Gas (±Neg): {neg}",
                         f"# Auto QC: {qc_str}",
                         "# Excluded rows: gas columns NaN; pre-exclusion values in {gas}_preQC, Status_preQC",
+                        "# Reference Masks: " + ("; ".join(
+                            f"{r['name']} " + (f"keep px {r['mask']['range'][0]}-{r['mask']['range'][1]}"
+                                               if r['mask'].get('mode') == 'manual'
+                                               else f"zero <{r['mask'].get('threshold_pct')}% of peak")
+                            for r in cfg.get('refs', []) if r.get('mask')) or "none"),
                         f"# Step Limit: {cfg.get('step_limit', step_val)} px",
                         f"# OK RMS Threshold: {rms_thresh_pct:.1f}%  (low-signal retry trigger; "
                         f"OK/Unstable label = Chi2 <= {_MISFIT_CHI2})",
@@ -645,6 +650,8 @@ class SaveExportMixin:
             try:
                 eng.add_reference(name=ref['name'], filepath=ref_path,
                                   wave_nm=wave, multiplier=10.0 ** ref.get('mult', 0))
+                if ref.get('mask'):
+                    eng.apply_mask_spec(ref['name'], ref['mask'])
             except Exception as e:
                 print(f"[ch engine] ref failed {ref.get('name')}: {e}")
                 _diffs.append(f"{ref.get('name')}: load failed ({type(e).__name__})")

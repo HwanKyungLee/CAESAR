@@ -123,7 +123,12 @@ class MaskDialog(QDialog):
         self.spin_thresh.setSuffix("%")
         layout_auto.addWidget(self.spin_thresh)
         layout_opt.addLayout(layout_auto)
-        
+
+        # [Option C] back to the unmasked reference (masks are stored in the FitSet now)
+        self.rb_clear = QRadioButton("Remove mask (use the full reference)")
+        self.bg.addButton(self.rb_clear)
+        layout_opt.addWidget(self.rb_clear)
+
         grp_masking.setLayout(layout_opt)
         main_layout.addWidget(grp_masking)
         
@@ -143,7 +148,8 @@ class MaskDialog(QDialog):
 
     def get_data(self):
         """Returns the masking options set in the dialog as a dictionary."""
-        mode = "manual" if self.rb_manual.isChecked() else "auto"
+        mode = ("manual" if self.rb_manual.isChecked()
+                else "clear" if self.rb_clear.isChecked() else "auto")
         return {
             "name": self.cb_ref.currentText(),
             "mode": mode,

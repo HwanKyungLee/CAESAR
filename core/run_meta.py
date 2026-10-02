@@ -70,7 +70,7 @@ def _species(cfg: dict) -> list:
     for ref in cfg.get("refs") or []:
         name = ref.get("name")
         p = props.get(name, {}) if name else {}
-        out.append({
+        sp = {
             "name": name,
             "xs": _basename(ref.get("path")),
             "mult": _num(ref.get("mult")),
@@ -81,7 +81,10 @@ def _species(cfg: dict) -> list:
             "t_ref": _num(p.get("t_ref")),
             "t_coeff": _num(p.get("t_coeff")),
             "active_bands_nm": _text(p.get("active_bands_nm")),
-        })
+        }
+        if ref.get("mask"):
+            sp["mask"] = ref["mask"]
+        out.append(sp)
     return out
 
 

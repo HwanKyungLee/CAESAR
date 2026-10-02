@@ -237,6 +237,18 @@ class UniversalEngine:
         self._sync_reference_update(name, data)
         return True
 
+    def apply_mask_spec(self, name, spec):
+        """Re-apply a stored mask (FitSet ref entry `mask`): {'mode': 'manual', 'range': [lo, hi]}
+        or {'mode': 'auto', 'threshold_pct': t}. None/unknown -> no-op, False."""
+        if not spec:
+            return False
+        if spec.get('mode') == 'manual':
+            lo, hi = spec['range']
+            return self.apply_manual_mask(name, lo, hi)
+        if spec.get('mode') == 'auto':
+            return self.apply_auto_mask(name, spec['threshold_pct'])
+        return False
+
     def _set_interpolator(self, name, data):
         """레퍼런스 보간기 + 그 도함수를 함께 만든다(단일 출처).
 

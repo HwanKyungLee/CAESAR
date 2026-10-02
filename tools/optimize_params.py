@@ -155,6 +155,8 @@ def build_engine_from_config(cfg):
             try:
                 eng.add_reference(name=ref["name"], filepath=p, wave_nm=wave,
                                   multiplier=10.0 ** ref.get("mult", 0))
+                if ref.get("mask"):
+                    eng.apply_mask_spec(ref["name"], ref["mask"])
             except Exception as e:            # noqa: BLE001
                 print(f"[engine] ref 실패 {ref.get('name')}: {e}")
     try:

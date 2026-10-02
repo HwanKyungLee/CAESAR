@@ -108,7 +108,10 @@ class ChannelConfigMixin:
         refs_data = []
         for rw in getattr(self, 'ref_widgets', []):
             if rw['n'].text() and rw['fp']:
-                refs_data.append({"name": rw['n'].text(), "path": rw['fp'], "mult": rw['mult'].value()})
+                ref = {"name": rw['n'].text(), "path": rw['fp'], "mult": rw['mult'].value()}
+                if rw.get('mask'):
+                    ref["mask"] = dict(rw['mask'])
+                refs_data.append(ref)
         return {
             "wl_path": getattr(self, 'loaded_wl_path', ""),
             "refs": refs_data,
@@ -292,6 +295,7 @@ class ChannelConfigMixin:
                 if os.path.exists(ref_path):
                     self.add_ref_row(name=ref['name'], path=ref_path)
                     self.ref_widgets[-1]['mult'].setValue(ref.get('mult', 0))
+                    self.ref_widgets[-1]['mask'] = ref.get('mask')
             if refs:
                 self.lock_ref(silent=True)   # 채널 전환/시나리오 적용 자동 재락 — 팝업 없음
 

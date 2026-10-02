@@ -509,14 +509,17 @@ class FitSetupMixin:
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             name = data['name']
-            
-            _MEM = ("\n\nNote: the mask lives in memory only — it is not saved in the FitSet or the result "
-                    "header, and it is lost on Lock or a channel-tab switch.")
+            rw = next((w for w in self.ref_widgets if w['n'].text() == name), None)
+            if rw is None:
+                QMessageBox.warning(self, "Error", f"No reference row named {name}.")
+                return
             try:
                 fit_lo, fit_hi = sorted((int(self.txt_min.text()), int(self.txt_max.text())))
             except Exception:
                 fit_lo, fit_hi = 0, len(self.engine.raw_references.get(name, [])) - 1
-            if data['mode'] == 'manual':
+            if data['mode'] == 'clear':
+                spec = None
+            elif data['mode'] == 'manual':
                 try:
                     mn, mx = map(int, data['range'].split('-'))
                 except Exception:
@@ -535,21 +538,24 @@ class FitSetupMixin:
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                     if ok != QMessageBox.StandardButton.Yes:
                         return
-                if self.engine.apply_manual_mask(name, mn, mx):
-                    QMessageBox.information(self, "Mask applied",
-                                            f"{name}: kept px {mn}-{mx} ({keep} px inside the fit window).{_MEM}")
-                    self.refresh_viewer()
+                spec = {'mode': 'manual', 'range': [mn, mx]}
             else:
-                thresh = data['threshold']
-                if self.engine.apply_auto_mask(name, thresh):
-                    ref = np.asarray(self.engine.raw_references.get(name, []))
-                    keep = int(np.count_nonzero(ref[fit_lo:fit_hi + 1]))
-                    QMessageBox.information(self, "Mask applied",
-                                            f"Signals below {thresh}% of the peak were zeroed in {name} "
-                                            f"({keep} non-zero px left inside the fit window).{_MEM}")
-                    self.refresh_viewer()
-                else:
-                    QMessageBox.warning(self, "Error", "Auto-masking failed.")
+                spec = {'mode': 'auto', 'threshold_pct': float(data['threshold'])}
+
+            # The mask belongs to the reference entry: channel config, FitSet, result meta and
+            # every config-built engine carry it. Re-lock so it replaces (not stacks on) an
+            # earlier mask and the live engine matches what gets saved.
+            rw['mask'] = spec
+            self.lock_ref(silent=True)
+            ref = np.asarray(self.engine.raw_references.get(name, []))
+            left = int(np.count_nonzero(ref[fit_lo:fit_hi + 1]))
+            what = ("mask removed" if spec is None else
+                    f"kept px {spec['range'][0]}-{spec['range'][1]}" if spec['mode'] == 'manual' else
+                    f"zeroed below {spec['threshold_pct']:g}% of the peak")
+            QMessageBox.information(self, "Mask",
+                                    f"{name}: {what} ({left} non-zero px inside the fit window).\n\n"
+                                    "Saved with the reference (FitSet, result meta). Re-apply ILS if you use it.")
+            self.refresh_viewer()
 
     def lock_ref(self, silent=False):
         """
@@ -606,6 +612,9 @@ class FitSetupMixin:
         # Register wavelength axis in the engine (required for pixel_to_wavelength)
         if current_wave is not None:
             self.engine.set_wavelength_axis(current_wave)
+        for widget in self.ref_widgets:
+            if widget.get('mask') and widget['n'].text() in self.engine.raw_references:
+                self.engine.apply_mask_spec(widget['n'].text(), widget['mask'])
 
         # Apply zero convolution initially (refreshes internal interpolators)
         self.engine.apply_ils_convolution(0.0)

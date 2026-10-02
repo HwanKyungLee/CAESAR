@@ -90,6 +90,8 @@ def build_engine(wl_path, refs, load_wavecal):
             try:
                 eng.add_reference(name=r["name"], filepath=r["path"], wave_nm=wave,
                                   multiplier=10.0 ** r["mult"])
+                if r.get("mask"):
+                    eng.apply_mask_spec(r["name"], r["mask"])
             except Exception:             # noqa: BLE001
                 pass
     try:
