@@ -2,6 +2,7 @@
 
   1) liveness counts only rows routed to a profile — a growing analysis .dat must not mask a raw stop
   2) "no rows seen yet" is SKIP only for a while after start / folder change / Start, then P0
+  3) aggregate never says "normal — all OK" while sources were not evaluated
 """
 import os
 import shutil
@@ -101,6 +102,24 @@ def test_no_rows_escalates(d):
     check("after Start the wait restarts", "liveness" not in core._open_alarms)
 
 
+def test_aggregate_not_evaluated():
+    print("[3] aggregate counts SKIP as not evaluated")
+    from vigil.alert_engine import aggregate
+    live = ("liveness", "OK", "", {})
+    s, m = aggregate([live])
+    check("liveness alone is not 'normal — all 1 OK'", s == "P2" and "only raw inflow" in m, (s, m))
+    s, m = aggregate([live, ("conc:a", "SKIP", "", {}), ("conc:b", "SKIP", "", {})])
+    check("liveness OK + every monitor SKIP -> P2, says so", s == "P2" and "only raw inflow" in m, (s, m))
+    s, m = aggregate([live, ("hk:x", "OK", "", {}), ("conc:a", "SKIP", "", {}), ("conc:b", "SKIP", "", {})])
+    check("OK k/n · not evaluated m", s == "OK" and "OK 2/4" in m and "not evaluated 2" in m, (s, m))
+    s, m = aggregate([live, ("hk:x", "OK", "", {})])
+    check("all evaluated -> normal — all 2 OK", s == "OK" and m == "normal — all 2 OK", (s, m))
+    s, m = aggregate([("liveness", "SKIP", "", {}), ("conc:a", "SKIP", "", {})])
+    check("nothing evaluated -> SKIP", s == "SKIP", (s, m))
+    s, m = aggregate([live, ("hk:x", "P1", "", {}), ("conc:a", "SKIP", "", {})])
+    check("P1 message also counts not evaluated", s == "P1" and "not evaluated 1" in m, (s, m))
+
+
 def main():
     from PyQt6.QtCore import QCoreApplication
     _app_qt = QCoreApplication.instance() or QCoreApplication(sys.argv[:1])  # noqa: F841
@@ -108,6 +127,7 @@ def main():
     try:
         test_liveness_routed_only(d)
         test_no_rows_escalates(d)
+        test_aggregate_not_evaluated()
     finally:
         shutil.rmtree(d, ignore_errors=True)
     print(f"\nVF1 ingest tests: {_n_pass} PASS · {_n_fail} FAIL")

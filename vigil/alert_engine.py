@@ -21,19 +21,31 @@ def worse(a: str, b: str) -> str:
 
 def aggregate(results):
     """[(name, status, msg, metrics), ...] → (전체등급, 요약문). health_checks.overall()과 같은 역할,
-    Vigil 자체 등급 어휘(P0/P1/P2)로. 빈 리스트면 SKIP."""
+    Vigil 자체 등급 어휘(P0/P1/P2)로. 빈 리스트면 SKIP.
+
+    A SKIP (not evaluated) is not an OK: "normal — all OK" only when every source was evaluated,
+    otherwise "OK k/n · not evaluated m" (audit 2026-10-02 — liveness OK + every monitor SKIP read
+    "normal — all 1 OK"; same bug as Augur health_checks.overall, fixed in 0dc4be3). When raw inflow
+    is the only thing judged OK and every monitor is SKIP, nothing about the data is being watched —
+    P2, and the message says so."""
     if not results:
         return SKIP, "nothing to evaluate"
     worst = SKIP
     for _name, status, _msg, _metrics in results:
         worst = worse(worst, status)
     counts = {lvl: sum(1 for _n, s, *_ in results if s == lvl) for lvl in (P0, P1, P2, OK, SKIP)}
+    n, n_skip = len(results), counts[SKIP]
+    skipped = f" · not evaluated {n_skip}" if n_skip else ""
     if worst == P0:
-        return P0, f"P0 ×{counts[P0]} — check now (P1 {counts[P1]} · P2 {counts[P2]})"
+        return P0, f"P0 ×{counts[P0]} — check now (P1 {counts[P1]} · P2 {counts[P2]}){skipped}"
     if worst == P1:
-        return P1, f"P1 ×{counts[P1]} — quality at risk (P2 {counts[P2]})"
+        return P1, f"P1 ×{counts[P1]} — quality at risk (P2 {counts[P2]}){skipped}"
     if worst == P2:
-        return P2, f"P2 ×{counts[P2]} — watch"
+        return P2, f"P2 ×{counts[P2]} — watch{skipped}"
     if worst == OK:
-        return OK, f"normal — all {counts[OK]} OK"
-    return SKIP, "waiting for data"
+        if [name for name, s, *_ in results if s == OK] == ["liveness"]:
+            return P2, f"only raw inflow is checked — no monitor has evaluated yet ({n_skip} waiting)"
+        if n_skip:
+            return OK, f"normal — OK {counts[OK]}/{n}{skipped}"
+        return OK, f"normal — all {n} OK"
+    return SKIP, f"waiting for data — nothing evaluated yet ({n_skip} not evaluated)"
