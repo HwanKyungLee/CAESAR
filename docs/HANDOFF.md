@@ -40,6 +40,9 @@
 - Select Files 도 라벨 분배(`_distribute_channels`) — 핫+콜드를 같이 고르면 전부 CH1 에 들어가 CH1 세팅으로
   핏되던 것(Conc 대각선의 정체). `tools/test_load_files_distribute.py`.
 - 결과 표 File 칸은 `002 [0042]` 로 보이고 전체 이름은 UserRole — 행→파일 조회는 `_file_cell_text` 로 할 것.
+- 줄바꿈 QLabel 의 최소 높이는 한 줄이다 — 화면보다 긴 페이지(모든 칸이 최소 높이)에선 둘째 줄이 잘린다.
+  Setup Status 는 좁은 화면(위아래 배치)에서만 줄바꿈하고 `_WrapHeight` 필터가 실제 폭의 높이를 최소로 건다.
+  칩 안쪽 여백은 QSS padding 대신 contentsMargins.
 - Vigil 실시간 곡선 굵기는 1 로 유지 — 꽉 찬 그래프에서 그리기가 틱의 99 %(성능 가드 `vigil/test_dashboard_vf2.py` [5]).
 - `diagnostics/` 스크립트도 `ci_import_smoke` 가 임포트한다 — 최상위에서 Qt 창을 띄우면 segfault. `main()` 으로.
 

@@ -585,6 +585,7 @@ class MonitorWidget(QWidget):
                 d = self._conc_data[gas][ch]
                 if d['x']:
                     self._conc_curves[gas][ch].setData(d['x'], d['y'])
+        self._sync_conc_legend()
 
     def clear_trend(self):
         """Clears trend history for all channels."""
@@ -621,7 +622,7 @@ class MonitorWidget(QWidget):
         bar.addWidget(QLabel("Show gas:"))
         self.cb_conc_gas = QComboBox()
         self.cb_conc_gas.addItem("All")
-        self.cb_conc_gas.setFixedWidth(140)
+        self.cb_conc_gas.setFixedWidth(110)   # 140 made the monitor 6 px wider than a 1366@150 % pane
         self.cb_conc_gas.currentIndexChanged.connect(lambda *_: self._relayout_conc())
         bar.addWidget(self.cb_conc_gas)
         btn_png = QPushButton("Save PNG")
@@ -690,6 +691,7 @@ class MonitorWidget(QWidget):
                 self._conc_curves[gas][ch] = p.plot(pen=pen, symbol='o', symbolSize=4,
                                                     symbolBrush=col, name=f"CH{ch}")
                 self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
+        self._sync_conc_legend()
         # 가스 선택 콤보 갱신
         if hasattr(self, 'cb_conc_gas'):
             self.cb_conc_gas.blockSignals(True)
@@ -750,6 +752,21 @@ class MonitorWidget(QWidget):
             p = self._conc_plots[gas]
             if p.getViewBox().autoRangeEnabled()[0]:     # [x, y] list — x only
                 p.enableAutoRange(axis='x', enable=True)
+        self._sync_conc_legend()
+
+    def _sync_conc_legend(self):
+        """Each gas legend lists only the channels that have points — CH2 showed with no data
+        and sat on top of the curves."""
+        for gas, curves in self._conc_curves.items():
+            leg = self._conc_plots[gas].legend
+            if leg is None:
+                continue
+            want = [ch for ch in curves if self._conc_data[gas][ch]['x']]
+            have = [ch for ch in curves if any(s.item is curves[ch] for s, _l in leg.items)]
+            if want != have:
+                leg.clear()
+                for ch in want:
+                    leg.addItem(curves[ch], f"CH{ch}")
 
     def rebuild_trend(self, results):
         """Rebuild shift/squeeze/RMS trend curves from the full results list in one
@@ -785,6 +802,7 @@ class MonitorWidget(QWidget):
             for ch in self._CONC_CH_COLORS:
                 self._conc_data[gas][ch] = {'x': [], 'y': [], 'r': []}
                 self._conc_curves[gas][ch].setData([], [])
+        self._sync_conc_legend()
 
     def rebuild_conc(self, results):
         """결과 리스트 전체로 농도 시계열을 한 번에 재구성(벌크).
@@ -817,6 +835,7 @@ class MonitorWidget(QWidget):
             for ch in self._CONC_CH_COLORS:
                 d = self._conc_data[gas][ch]
                 self._conc_curves[gas][ch].setData(d['x'], d['y'])
+        self._sync_conc_legend()
 
     # Click → replay. A click picks the nearest point (in screen pixels) of the
     # plot under the cursor, so it need not land on the 4 px symbol itself — but

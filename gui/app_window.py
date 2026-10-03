@@ -34,6 +34,18 @@ from .app_window_save import SaveExportMixin           # §13
 from .app_window_channels import ChannelConfigMixin    # §14
 
 
+class _WrapHeight(QObject):
+    """A word-wrapped label claims the height of its wrapped text as its minimum. On a page taller
+    than the screen every row is squeezed to its minimum, which for a wrapped QLabel is one line —
+    the second line was cut off (Setup Status at 1366×768 @150 %)."""
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Resize and obj.wordWrap():
+            h = obj.heightForWidth(obj.width())
+            if h > 0 and h != obj.minimumHeight():
+                obj.setMinimumHeight(h)
+        return False
+
+
 class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMixin,
                      AnalysisRunMixin, ResultsQCMixin, SaveExportMixin,
                      ChannelConfigMixin, QMainWindow):
@@ -939,6 +951,16 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         if lay.direction() != want:
             lay.setDirection(want)
             self._setup_grp_viewer.setMinimumHeight(int(420 * self._s) if stack else 0)
+            # stacked = a narrow page: a long status line wraps instead of widening the page
+            # (1366@150 % scrolled 29 px sideways). Side by side the column widens for it instead
+            # (_refresh_setup_status). Safe now that tab pages ignore height-for-width.
+            for lbl in (self.lbl_st_wl, self.lbl_st_i0, self.lbl_st_r,
+                        self.lbl_st_refs, self.lbl_st_range, self.lbl_st_audit):
+                lbl.setWordWrap(stack)
+                if not hasattr(self, '_wrap_height_filter'):
+                    self._wrap_height_filter = _WrapHeight(self)
+                lbl.installEventFilter(self._wrap_height_filter)   # idempotent
+                lbl.setMinimumHeight(0)
         # side by side, the controls column may grow to 30 % of the page — its bare natural width
         # looked cramped next to a 1000 px graph on FHD; on small screens the natural width wins
         self._setup_left_container.setMaximumWidth(
@@ -1170,8 +1192,10 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         col = {"ok": AUGUR.ok, "warn": AUGUR.warn, "fail": AUGUR.fail}.get(level, AUGUR.muted)
         bg = {"ok": AUGUR.ok_bg, "warn": AUGUR.warn_bg, "fail": AUGUR.fail_bg}.get(level, AUGUR.neutral_bg)
         lbl.setText(f"{self._STATUS_GLYPH.get(level, '·')}  {text}")
-        lbl.setStyleSheet(f"color: {col}; background: {bg}; border-radius: 9px; padding: 3px 10px; "
-                          f"margin: 1px 0; font-size: 11px;")
+        # inner space as contents margins, not QSS padding — a wrapped line's height (narrow page)
+        # is computed without the QSS padding, so the second line was cut off
+        lbl.setStyleSheet(f"color: {col}; background: {bg}; border-radius: 9px; font-size: 11px;")
+        lbl.setContentsMargins(10, 4, 10, 4)
 
     _STEPS = ("References", "Wavelength", "Parameters", "Run")
 
