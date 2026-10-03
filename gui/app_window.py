@@ -177,17 +177,18 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         _btn_delc.clicked.connect(self._del_channel_tab)
         _chtab_bar.addWidget(_btn_addc); _chtab_bar.addWidget(_btn_delc)
         left_layout.addLayout(_chtab_bar)
-        # per-channel identity row: label · time shift · gas T
-        _chid_bar = QHBoxLayout()
-        _chid_bar.addWidget(QLabel("Label:"))
+        # per-channel label sits on the channel tab row; time shift and gas T are rarely set
+        # (0 = as recorded / measured) so they live in 3 · Parameters (_ch_override_row)
+        _chtab_bar.insertWidget(1, QLabel("Label:"))
         self._ed_ch_datalabel = QLineEdit()
         self._ed_ch_datalabel.setFixedWidth(int(80 * self._s))
         self._ed_ch_datalabel.setPlaceholderText("auto")
         self._ed_ch_datalabel.setToolTip(
             "Default: auto-distributed by alpha header channel number (# channel=N) → leave empty (campaign-independent).\n"
             "Override label for special cases only: maps alpha matching filename/header label/'ch{N}' to this channel.")
-        _chid_bar.addWidget(self._ed_ch_datalabel)
-        _chid_bar.addWidget(QLabel("Time shift:"))
+        _chtab_bar.insertWidget(2, self._ed_ch_datalabel)
+        _ch_override_row = QHBoxLayout()
+        _ch_override_row.addWidget(QLabel("Time shift:"))
         self.spin_time_shift = QDoubleSpinBox()
         self.spin_time_shift.setRange(-24.0, 24.0)
         self.spin_time_shift.setDecimals(1)
@@ -200,8 +201,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             "Pure time shift — no timezone labels. 0 = leave times exactly as recorded.\n"
             "e.g. instrument logged local time but you want UTC output → enter the negative of\n"
             "your UTC offset (Korea local = UTC+9 → enter −9). Half-hours (e.g. −9.5) allowed.")
-        _chid_bar.addWidget(self.spin_time_shift)
-        _chid_bar.addWidget(QLabel("Gas T:"))
+        _ch_override_row.addWidget(self.spin_time_shift)
+        _ch_override_row.addWidget(QLabel("Gas T:"))
         self.spin_gas_temp = QDoubleSpinBox()
         self.spin_gas_temp.setRange(0.0, 600.0)
         self.spin_gas_temp.setDecimals(1)   # tooltip example 31.5 °C was not enterable with 0
@@ -214,9 +215,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             "(confirmed 2026-06-10: tempcell = gas temperature through the cell. 75°C is the cell-heater setpoint, unused).\n"
             "Note: Hot alpha files generated before this fix may have 75°C baked into the T_C column\n"
             "→ when fitting those, enter the measured value here manually or regenerate the alpha.")
-        _chid_bar.addWidget(self.spin_gas_temp)
-        _chid_bar.addStretch(1)
-        left_layout.addLayout(_chid_bar)
+        _ch_override_row.addWidget(self.spin_gas_temp)
+        _ch_override_row.addStretch(1)
 
         # --- 1. Reference Management Section ---
         grp_ref = QGroupBox("1 · References")
@@ -584,6 +584,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.lbl_shsq.setToolTip("Per-gas Shift/Squeeze modes — expand the table below to edit")
         self.lbl_shsq.setSizePolicy(_SPsq.Policy.Ignored, _SPsq.Policy.Preferred)
         _pg.addWidget(self.lbl_shsq, 2, 0, 1, 8)
+        lay_calib_main.addLayout(_ch_override_row)
         lay_calib_main.addLayout(_pg)
 
         # ── 종 정책 테이블 상시 노출 (C1) ──────────────────────────────
@@ -651,11 +652,19 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         lay_params_outer.addWidget(grp_calib)
         left_layout.addWidget(self._params_container)
 
-        def _set_params_visible(v):
-            self._params_visible = v
-            self._params_container.setVisible(v)
-            self._btn_toggle_params.setText("▼  3 · Parameters" if v else "▶  3 · Parameters (hidden)")
+        def _set_params_visible(v=None):
+            if v is not None:
+                self._params_visible = v
+                self._params_container.setVisible(v)
+            v = self._params_visible
+            # folded, a non-zero time shift / gas T still shows — both change the output
+            notes = [f"shift {self.spin_time_shift.value():+g} h"] if self.spin_time_shift.value() else []
+            notes += [f"gas T {self.spin_gas_temp.value():g} °C"] if self.spin_gas_temp.value() else []
+            self._btn_toggle_params.setText(
+                "▼  3 · Parameters" if v else "▶  3 · Parameters (hidden)" + "".join(f"  · {n}" for n in notes))
         self._set_params_visible = _set_params_visible
+        self.spin_time_shift.valueChanged.connect(lambda _v: _set_params_visible())
+        self.spin_gas_temp.valueChanged.connect(lambda _v: _set_params_visible())
         self._btn_toggle_params.clicked.connect(lambda: _set_params_visible(not self._params_visible))
 
         # --- 3. Analysis Control Section ---
@@ -663,11 +672,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self._grp_ctl = grp_ctl
         lay_ctl = QVBoxLayout()
         
-        # 한 줄: Load + RUN/STOP/Save (세로 공간 절약)
-        layout_row1 = QHBoxLayout()
+        # 한 줄: Load + RUN/STOP/Save (세로 공간 절약) — grid_ctl 아래
         btn_load = QPushButton("Load Data")
         btn_load.clicked.connect(self.load_data)
-        layout_row1.addWidget(btn_load)
         self.b_run = QPushButton("RUN")
         self.b_run.clicked.connect(self.start_analysis)
         self.b_stop = QPushButton("STOP")
@@ -683,9 +690,6 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.b_save = QPushButton("Save")
         self.b_save.clicked.connect(self.save)
         self.b_save.setToolTip("Save results per channel and day, with a header and .meta.json (Ctrl+S)")
-        layout_row1.addWidget(self.b_run)
-        layout_row1.addWidget(self.b_stop)
-        layout_row1.addWidget(self.b_save)
 
         # One row: the step-only boxes and the CPU box are shown only in the mode that uses them
         # (they used to sit greyed out on two rows)
@@ -760,19 +764,24 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         _mode_widgets(self.cb_display_mode.currentText())
         self.cb_display_mode.currentTextChanged.connect(_mode_widgets)
 
-        layout_perf.addSpacing(8)
         self.chk_auto_save = QCheckBox("Auto-save")
         self.chk_auto_save.setToolTip(
             "Checked: when analysis finishes (after QC), auto-save with the existing filename rule without asking.\n"
             "Location = last Save folder (else Output\\fitting). Recommended for overnight runs.\n"
             "(autosave TSV is separate, for crash recovery — this is the formal result save)")
         self.chk_auto_save.setChecked(True)
-        layout_perf.addWidget(self.chk_auto_save)
         layout_perf.addStretch(1)
 
         # (RUN 중 α 저장 옵션 제거 — α 생성은 Alpha Generator 팝업이 전담)
-        lay_ctl.addLayout(layout_row1)
-        lay_ctl.addLayout(layout_perf)
+        # Buttons and the mode row share one 4-column grid so Auto-save stays under Save
+        # whatever the mode row shows
+        grid_ctl = QGridLayout()
+        for i, b in enumerate((btn_load, self.b_run, self.b_stop, self.b_save)):
+            grid_ctl.addWidget(b, 0, i)
+            grid_ctl.setColumnStretch(i, 1)
+        grid_ctl.addLayout(layout_perf, 1, 0, 1, 3)
+        grid_ctl.addWidget(self.chk_auto_save, 1, 3)
+        lay_ctl.addLayout(grid_ctl)
         grp_ctl.setLayout(lay_ctl)
         left_layout.addWidget(grp_ctl)
         
