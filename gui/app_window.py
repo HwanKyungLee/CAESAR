@@ -1235,7 +1235,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 name = ""
             if d:
                 st = f"color: {AUGUR.ink}; background: {AUGUR.neutral_bg}; border: 1px solid {AUGUR.neutral_bg};"
-                mark = AUGUR.brand
+                mark = AUGUR.ok          # done = the same green as Setup Status, not the brand red
                 chip.setText(f"<span style='color:{mark}; font-weight:bold; font-family:Segoe UI Symbol'>✔</span>&nbsp;&nbsp;{name}")
             elif i == cur:
                 chip.setText(f"<b>{i + 1}</b>&nbsp;&nbsp;{name}")
@@ -1259,6 +1259,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         n = len(getattr(self, 'file_list', None) or [])
         self._grp_ref.setTitle("1 · References" + ("  ✔" if refs else ""))
         self._grp_set.setTitle("2 · Wavelength && fit range" + ("  ✔" if wl else ""))
+        # a title cannot colour only its ✔ — a done step's whole title takes the 'done' green
+        for grp, done in ((self._grp_ref, refs), (self._grp_set, wl)):
+            grp.setStyleSheet(f"QGroupBox::title {{ color: {AUGUR.ok}; }}" if done else "")
         self._grp_ctl.setTitle("4 · Data && run" + (f"  — {n} file(s) loaded" if n else ""))
         if hasattr(self, '_step_chips'):
             ran = bool(getattr(self, 'results', None))

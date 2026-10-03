@@ -25,7 +25,7 @@ class AugurTokens:
     grey: str = "#6B6F78"
     faint: str = "#9A9A96"       # 흐린 글자·비활성
     rule: str = "#D8D3C7"        # 구분선·트랙
-    brand: str = "#B4473A"       # 주홍 — 머리글자·확정 ✓·fail
+    brand: str = "#B4473A"       # 주홍 — 정체성 전용(워드마크·탭 밑줄·스플래시). 상태(완료·실패)엔 쓰지 않는다
     msg: str = "#3B3F48"
     # 위젯 표면(토큰에서 파생 — 입력칸·표는 종이보다 한 단 밝게, 버튼은 한 단 어둡게)
     surface: str = "#FCFBF8"
@@ -36,16 +36,18 @@ class AugurTokens:
     # '오류 빨강'이 #C62828·#D32F2F·#B71C1C·#CC0000, '흐림 회색'이 6가지로 흩어져 있던 것을 하나로.
     # 글자색은 종이 바탕에서 읽히는 진한 톤, *_bg 는 칸·상자 배경용 옅은 톤. 그래프 데이터 색은 아래
     # SERIES/CHANNELS/SPECIES 가 따로 맡는다.
-    ok: str = "#2E7D32"          # 성공·로드됨·통과
-    warn: str = "#E65100"        # 주의·확인 필요
-    fail: str = "#C62828"        # 오류·실패·없음(필수인데)
-    info: str = "#1565C0"        # 안내·섹션 제목·링크·강조 버튼
+    # 2026-10-03: Material 기본값 → 종이 톤에 맞춘 낮은 채도. 전부 종이·자기 *_bg 위 대비 ≥ 4.5:1
+    # (옛 주황 #E65100 은 3.4 였다). 완료 ✔ 는 어디서나 ok 하나.
+    ok: str = "#376F43"          # 성공·로드됨·통과·완료 ✔
+    warn: str = "#9A5B12"        # 주의·확인 필요
+    fail: str = "#A8322A"        # 오류·실패·없음(필수인데)
+    info: str = "#2F5D8A"        # 안내·섹션 제목·링크·강조 버튼
     muted: str = "#6B6F78"       # 보조 설명·비활성 안내(= grey)
     special: str = "#6A1B9A"     # 수동 덮어쓰기·고급 설정처럼 '보통과 다른 경로' 표시
-    ok_bg: str = "#E8F5E9"
-    warn_bg: str = "#FFF3E0"
-    fail_bg: str = "#FFEBEE"
-    info_bg: str = "#E3F2FD"
+    ok_bg: str = "#E6EFE3"
+    warn_bg: str = "#F5EAD8"
+    fail_bg: str = "#F6E2DE"
+    info_bg: str = "#E2EAF2"
     neutral_bg: str = "#ECE8DE"  # 회색 칸·눌리지 않은 토글(종이 톤)
 
 
