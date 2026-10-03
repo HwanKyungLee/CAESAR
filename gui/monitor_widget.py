@@ -107,7 +107,9 @@ class MonitorWidget(QWidget):
         # Tab names used to say "(Fast)" although Fast mode draws nothing here while it runs.
         self.tabs.addTab(self.tab_comp, "Components")
         from gui.empty_hint import attach
-        attach(self.glw_comp, "Per-scan fit — live during a Step run.\nAfter any run, click a row in the results table or a point on Conc to replay that scan here.")
+        attach(self.glw_comp, "Each gas's fitted absorption and the polynomial baseline of one scan — "
+                              "live during a Step run.\nAfter any run, click a row in the results table "
+                              "or a point on Conc to see that scan's components here.")
 
     # =========================================================
     # [Tab 2] Fit View
@@ -196,6 +198,7 @@ class MonitorWidget(QWidget):
             self._trend_data[1]['x'], self._trend_data[1]['sh'], \
             self._trend_data[1]['sq'], self._trend_data[1]['rms']
         
+        self._sync_trend_legend()      # no channel has points yet
         self.glw_trend.scene().sigMouseClicked.connect(self._on_trend_scene_click)
         layout.addWidget(self.glw_trend)
         self.tabs.addTab(self.tab_trend, "Trend")
@@ -573,6 +576,7 @@ class MonitorWidget(QWidget):
         for p in (self.p_sh, self.p_sq, self.p_rms):
             if p.getViewBox().autoRangeEnabled()[0]:
                 p.enableAutoRange(axis='x', enable=True)
+        self._sync_trend_legend()
 
     def flush_plots(self):
         """Force a final redraw of trend + concentration curves (call when a run
@@ -597,6 +601,7 @@ class MonitorWidget(QWidget):
             tc['sh'].setData([], [])
             tc['sq'].setData([], [])
             tc['rms'].setData([], [])
+        self._sync_trend_legend()
         # Keep legacy aliases consistent
         self.x_data = self._trend_data[1]['x']
         self.y_sh   = self._trend_data[1]['sh']
@@ -754,19 +759,28 @@ class MonitorWidget(QWidget):
                 p.enableAutoRange(axis='x', enable=True)
         self._sync_conc_legend()
 
+    @staticmethod
+    def _sync_legend(plot, curves, want):
+        """`plot`'s legend lists exactly the channels in `want` (those with points), in order —
+        an empty CH2 entry sat on top of the curves."""
+        leg = plot.legend
+        if leg is None:
+            return
+        have = [ch for ch in curves if any(s.item is curves[ch] for s, _l in leg.items)]
+        if want != have:
+            leg.clear()
+            for ch in want:
+                leg.addItem(curves[ch], f"CH{ch}")
+
     def _sync_conc_legend(self):
-        """Each gas legend lists only the channels that have points — CH2 showed with no data
-        and sat on top of the curves."""
         for gas, curves in self._conc_curves.items():
-            leg = self._conc_plots[gas].legend
-            if leg is None:
-                continue
-            want = [ch for ch in curves if self._conc_data[gas][ch]['x']]
-            have = [ch for ch in curves if any(s.item is curves[ch] for s, _l in leg.items)]
-            if want != have:
-                leg.clear()
-                for ch in want:
-                    leg.addItem(curves[ch], f"CH{ch}")
+            self._sync_legend(self._conc_plots[gas], curves,
+                              [ch for ch in curves if self._conc_data[gas][ch]['x']])
+
+    def _sync_trend_legend(self):
+        want = [ch for ch in self._trend_curves if self._trend_data[ch]['x']]
+        for plot, key in ((self.p_sh, 'sh'), (self.p_sq, 'sq'), (self.p_rms, 'rms')):
+            self._sync_legend(plot, {ch: c[key] for ch, c in self._trend_curves.items()}, want)
 
     def rebuild_trend(self, results):
         """Rebuild shift/squeeze/RMS trend curves from the full results list in one

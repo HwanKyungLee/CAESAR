@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
@@ -91,7 +91,7 @@ _BADGE_MSG_MAX = 110
 # While P0 persists, flash the taskbar again this often — one flash is lost if nobody was looking.
 REALERT_SEC = 300.0
 
-_HK_ALL_LABEL = "HK (% of warn band)"
+_HK_ALL_LABEL = "% of band"   # short: a ~100 px plot clipped the long axis title
 
 
 def _band_pct(v, band):
@@ -103,10 +103,22 @@ def _band_pct(v, band):
 
 
 _PLACEHOLDER = {
-    "conc": "Concentration — shown after the ZA (I₀) segment",
-    "r": "R — shown after ZA/He calibration completes",
+    "conc": "Concentration — after the ZA (I₀) segment",
+    "r": "R — after ZA/He calibration",
     "hk": "HK — waiting for first row",
 }
+
+
+class _LegendWhenTall(QObject):
+    """Hide a plot's legend while the plot is shorter than LEGEND_MIN_H."""
+    LEGEND_MIN_H = 170
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.Resize:
+            leg = obj.getPlotItem().legend
+            if leg is not None:
+                leg.setVisible(obj.height() >= self.LEGEND_MIN_H)
+        return False
 
 
 def _robust_range(series, lines=()):
@@ -232,8 +244,11 @@ class DashboardWindow(QMainWindow):
         self.badge = QLabel(f"{_LEVEL[SKIP][0]}  Initializing…")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.badge.setStyleSheet(_BADGE_STYLE[SKIP] + _BADGE_BASE)
-        # the cause text can be long — never let it set the window's minimum width (clipped; full text in tooltip)
+        # the cause text can be long — never let it set the window's minimum width; it wraps instead
+        # (at 1366×768 @150 % a P1 cause and its action line were cut mid-word — the one line the
+        # operator must read). Full text stays in the tooltip.
         self.badge.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.badge.setWordWrap(True)
         self.fresh = QLabel("last row —")
         self.fresh.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.fresh.setMinimumWidth(190)
@@ -298,7 +313,8 @@ class DashboardWindow(QMainWindow):
         # 4) 그래프 + 탭
         grid = QGridLayout()
         lay.addLayout(grid, stretch=1)
-        self.p_conc = self._make_plot("Concentration (ppb)", "conc")
+        self._legend_filter = _LegendWhenTall(self)
+        self.p_conc = self._make_plot("ppb", "conc")   # the title names it
         self.p_r = self._make_plot("R", "r")
         self.p_hk = self._make_plot(_HK_ALL_LABEL, "hk")
         # HK mixes mbar (~950) and °C (17–300): one real-unit axis squashed every curve and drew ~14
@@ -381,6 +397,8 @@ class DashboardWindow(QMainWindow):
         pw.setLabel('left', ylabel)
         pw.setLabel('bottom', f"Time ({self._tz})")
         pw.addLegend(offset=(10, 10))
+        # a short plot (small screen, alarm banner wrapped) hides its legend — it lay on the curves
+        pw.installEventFilter(self._legend_filter)
         pw.showGrid(x=True, y=True, alpha=0.12)
         pw.setTitle(_PLACEHOLDER[kind], color=VIGIL.dim, size="10pt")
         pw.setMouseEnabled(x=True, y=False)

@@ -855,6 +855,8 @@ class ResultViewerWidget(QWidget):
             pw.addLegend(offset=(10, 6))
             # no "(x0.001)" suffix — a lane is ~120 px tall and the suffix clipped the gas name
             pw.getAxis("left").enableAutoSIPrefix(False)
+            # keeps a gas name on its axis; below this the page scrolls (1366@150 %: ~70 px lanes)
+            pw.setMinimumHeight(120)
             self._stack_lay.addWidget(pw)
             self._lanes.append(pw)
         pw = self._lanes[i]
