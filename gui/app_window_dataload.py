@@ -49,6 +49,10 @@ class DataLoadMixin:
         files, _ = QFileDialog.getOpenFileNames(self, "Select Measurement Files", self._dlg_dir('data'), "Data Files (*.dat *.txt *.csv)")
         if files:
             self._dlg_dir('data', files[0])
+            # same rule as a folder load: alphas of several labels (hot + cold picked together) go
+            # to their channel tabs — all into the current tab fitted cold alphas with CH1 settings
+            if self._distribute_channels(sorted(files)):
+                return
             self._update_file_table(sorted(files))
 
     def _load_folder(self):

@@ -32,7 +32,7 @@ def main():
         for _ in range(n): app.processEvents()
     pump()
     w.load_scenario(); pump()
-    w._load_files(); pump()
+    w._load_files(); pump()   # hot + cold picked together → auto-distributed to CH1 / CH3 (question → Yes)
     if RUN:
         w.chk_auto_save.setChecked(False)
         w.start_analysis(); t0 = time.time()
