@@ -23,8 +23,11 @@
 **밟은 함정 (Qt 레이아웃)**:
 - `QSizePolicy.Ignored` 는 sizeHint 를 0 으로 만든다 → 넉넉한 화면(FHD)에서 레이아웃이 그 위젯 자리를 0 으로
   주고 위젯은 제 최소폭으로 그려져 **서로 겹친다**. 좁은 화면에선 멀쩡해 보여서 늦게 찾았다. 쓰지 말 것.
-- Setup 왼쪽 열 최대폭은 첫 틱 자연폭으로 고정된다(`_cap_left_to_collapsed`) — 나중에 길어지는 글자는
-  잘린다. 상태 줄은 그 측정 **뒤에** wordWrap 을 켠다(먼저 켜면 열이 좁아진다).
+- Setup 가운데 열 최대폭은 첫 틱 자연폭으로 고정된다(`_cap_left_to_collapsed`) — 나중에 길어지는 상태 줄은
+  잘린다. **wordWrap 으로 풀지 말 것**: 줄바꿈 라벨은 Qt 가 높이(heightForWidth)를 과대평가해 Setup 페이지에
+  가짜 세로 스크롤이 생긴다. 대신 `_refresh_setup_status` 가 Setup Status 그룹이 모자란 만큼 상한을 늘린다.
+- 넓은 화면에서 "자연폭 딱 맞춤"은 답답해 보인다 — 왼쪽 패널·Setup 가운데 열 모두 `max(자연폭, 30 %)`.
+  작은 화면(1366@150)에선 자연폭이 이겨서 그대로.
 - Vigil 실시간 곡선 굵기는 1 로 유지 — 꽉 찬 그래프에서 그리기가 틱의 99 %(성능 가드 `vigil/test_dashboard_vf2.py` [5]).
 - `diagnostics/` 스크립트도 `ci_import_smoke` 가 임포트한다 — 최상위에서 Qt 창을 띄우면 segfault. `main()` 으로.
 

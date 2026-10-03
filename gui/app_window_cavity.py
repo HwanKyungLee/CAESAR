@@ -455,13 +455,9 @@ class CavityTabMixin:
             w = _left_container.sizeHint().width()
             if w > 0:
                 self._setup_left_max_w = w
-                if self._setup_main_layout.direction() == self._setup_main_layout.Direction.LeftToRight:
-                    _left_container.setMaximumWidth(w)
-            # the Setup Status texts are still short now; the longer ones that come later wrap inside
-            # this width instead of clipping (wrapping before the measure would narrow the column)
-            for lbl in (self.lbl_st_wl, self.lbl_st_i0, self.lbl_st_r,
-                        self.lbl_st_refs, self.lbl_st_range, self.lbl_st_audit):
-                lbl.setWordWrap(True)
+                page = self._tab_pages[self.setup_tab]
+                if page.isVisible():     # otherwise the first resize applies it
+                    self._setup_reflow(page.width())
         _QTimer.singleShot(0, _cap_left_to_collapsed)
 
         # --- Right Panel: Diagnostic Viewer ---

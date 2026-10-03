@@ -911,7 +911,10 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         if lay.direction() != want:
             lay.setDirection(want)
             self._setup_grp_viewer.setMinimumHeight(int(420 * self._s) if stack else 0)
-            self._setup_left_container.setMaximumWidth(16777215 if stack else self._setup_left_max_w)
+        # side by side, the controls column may grow to 30 % of the page — its bare natural width
+        # looked cramped next to a 1000 px graph on FHD; on small screens the natural width wins
+        self._setup_left_container.setMaximumWidth(
+            16777215 if stack else max(self._setup_left_max_w, int(width * 0.30)))
 
     def showEvent(self, ev):
         super().showEvent(ev)
@@ -924,7 +927,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                 sbw = self._left_scroll.verticalScrollBar().sizeHint().width() or 16
                 need = self._left_inner.sizeHint().width() + sbw + 6
                 _lw = min(need, int(self.width() * 0.55))
-                _lw = max(_lw, int(360 * self._s))
+                # at least 30 % of a wide window — the bare content width looked cramped on FHD
+                _lw = max(_lw, int(360 * self._s), int(self.width() * 0.30))
                 self._left_min_w = _lw          # 탭 복원 시 사용
                 self._left_scroll.setMinimumWidth(_lw)
                 self._splitter.setSizes([_lw, max(400, self.width() - _lw)])
@@ -1034,6 +1038,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         lay_status.addLayout(_st_btns)
         grp_status.setLayout(lay_status)
         left_v.addWidget(grp_status)
+        self._grp_status = grp_status
         left_v.addStretch(1)
         lay.addWidget(left_w)
 
@@ -1121,6 +1126,14 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
 
         self._render_day_audit()   # 캐시된 감사 결과는 Refresh로 지워지지 않는다
         self._refresh_step_marks()
+        # The Setup column's max width was measured while these texts were short; a longer status
+        # line widens it rather than clipping (word wrap instead made Qt over-estimate the height)
+        grp = getattr(self, '_grp_status', None)
+        if grp is not None and grp.isVisible():
+            extra = grp.sizeHint().width() - grp.width()
+            if extra > 0:
+                self._setup_left_max_w = self._setup_left_container.width() + extra
+                self._setup_reflow(self._tab_pages[self.setup_tab].width())
 
     _STATUS_GLYPH = {"ok": "✔", "warn": "!", "fail": "✘", "na": "–"}
 
