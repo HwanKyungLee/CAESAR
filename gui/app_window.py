@@ -687,8 +687,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         layout_row1.addWidget(self.b_stop)
         layout_row1.addWidget(self.b_save)
 
+        # One row: the step-only boxes and the CPU box are shown only in the mode that uses them
+        # (they used to sit greyed out on two rows)
         layout_perf = QHBoxLayout()
-        layout_perf2 = QHBoxLayout()
         _lbl_update = QLabel("Update/N:")
         self.spin_update = QSpinBox()
         self.spin_update.setRange(1, 1000)
@@ -698,7 +699,7 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
                                     "(Fast mode draws once, when the run finishes)")
 
         # Fitting mode: Fast (parallel) merges the old Normal+Turbo; Step replaces Observe.
-        layout_perf.addWidget(QLabel("Mode:"))
+        # no "Mode:" label — the items name themselves, and it kept the Step row from fitting
         self.cb_display_mode = QComboBox()
         self.cb_display_mode.addItems(["Fast (parallel)", "Step (slow)"])
         self.cb_display_mode.setToolTip(
@@ -721,21 +722,15 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.spin_step_delay.setToolTip(
             "Step mode only: delay per scan, so you can watch each fit.\n"
             "0 = no delay (runs at fit speed ~2.5ms/scan; plots are capped at 20fps anyway).")
-        def _mode_widgets(t):
-            step = t.startswith("Step")
-            self.spin_step_delay.setEnabled(step)
-            self.spin_update.setEnabled(step)   # Fast ignores Update/N (interval=-1)
-        _mode_widgets(self.cb_display_mode.currentText())
-        self.cb_display_mode.currentTextChanged.connect(_mode_widgets)
         layout_perf.addWidget(self.spin_step_delay)
         layout_perf.addWidget(_lbl_update)
         layout_perf.addWidget(self.spin_update)
-        layout_perf.addStretch(1)
 
         # 병렬 프로세스 수 — 알파 Pass1/2·Fast 핏·R(t) 파싱이 모두 이 값을 본다
         # (core.parallel 단일 출처, 환경변수로 전달). 예전엔 호출부마다 '코어 절반'이
         # 하드코딩돼 있었고, 이 스핀이 그 자리를 대신한다. 기본 = 전 논리코어.
-        layout_perf2.addWidget(QLabel("CPU:"))
+        _lbl_cpu = QLabel("CPU:")
+        layout_perf.addWidget(_lbl_cpu)
         _cpu_max = os.cpu_count() or 4
         self.spin_cores = QSpinBox()
         self.spin_cores.setRange(1, _cpu_max)
@@ -754,22 +749,30 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.spin_cores.valueChanged.connect(
             lambda n: (set_max_workers(n),
                        self._qsettings.setValue("cpu_workers", n)))
-        layout_perf2.addWidget(self.spin_cores)
+        layout_perf.addWidget(self.spin_cores)
 
-        layout_perf2.addSpacing(8)
+        def _mode_widgets(t):
+            step = t.startswith("Step")
+            for w in (self.spin_step_delay, _lbl_update, self.spin_update):
+                w.setVisible(step)              # Fast ignores the delay and Update/N (interval=-1)
+            for w in (_lbl_cpu, self.spin_cores):
+                w.setVisible(not step)          # Step fits one scan at a time; the value is kept
+        _mode_widgets(self.cb_display_mode.currentText())
+        self.cb_display_mode.currentTextChanged.connect(_mode_widgets)
+
+        layout_perf.addSpacing(8)
         self.chk_auto_save = QCheckBox("Auto-save")
         self.chk_auto_save.setToolTip(
             "Checked: when analysis finishes (after QC), auto-save with the existing filename rule without asking.\n"
             "Location = last Save folder (else Output\\fitting). Recommended for overnight runs.\n"
             "(autosave TSV is separate, for crash recovery — this is the formal result save)")
         self.chk_auto_save.setChecked(True)
-        layout_perf2.addWidget(self.chk_auto_save)
-        layout_perf2.addStretch(1)
+        layout_perf.addWidget(self.chk_auto_save)
+        layout_perf.addStretch(1)
 
         # (RUN 중 α 저장 옵션 제거 — α 생성은 Alpha Generator 팝업이 전담)
         lay_ctl.addLayout(layout_row1)
         lay_ctl.addLayout(layout_perf)
-        lay_ctl.addLayout(layout_perf2)
         grp_ctl.setLayout(lay_ctl)
         left_layout.addWidget(grp_ctl)
         
@@ -1199,6 +1202,8 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
             # Not Policy.Ignored: that zeroes the size hint and a roomy layout then gives the chips no
             # width at all, so they overlap (FHD showed only the ✔ marks)
             chip.setMinimumWidth(44)
+            # always rich text: a pending chip has no tag, so auto-detection showed "&nbsp;" literally
+            chip.setTextFormat(Qt.TextFormat.RichText)
             chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
             h.addWidget(chip)
             self._step_chips.append(chip)
