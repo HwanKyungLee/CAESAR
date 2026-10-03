@@ -1,0 +1,4 @@
+series,n,current_fullblock_noise_robust,current_fullblock_noise_SD,fullblock_from_hh_robust,half_noise_robust,LR1_err_robust,LR1_err_SD,LR2_err_robust,LR2_err_SD,LR3_err_robust,LR3_err_SD,LR5_err_robust,LR5_err_SD
+1,157,0.02474,0.02564,0.02465,0.03486,0.10768,0.10257,0.0307,0.03306,0.02795,0.02714,0.02799,0.0261
+2,157,0.03893,0.0399,0.03902,0.05518,0.0604,0.08188,0.04706,0.07444,0.03296,0.03709,0.0252,0.00885
+S,157,0.04395,0.04444,0.04416,0.06245,0.12462,0.13252,0.07742,0.08823,0.04235,0.04656,0.04515,0.03252
