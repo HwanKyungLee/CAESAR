@@ -651,12 +651,12 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         lay_params_outer.addWidget(grp_calib)
         left_layout.addWidget(self._params_container)
 
-        def _toggle_params():
-            self._params_visible = not self._params_visible
-            self._params_container.setVisible(self._params_visible)
-            self._btn_toggle_params.setText(
-                "▼  3 · Parameters" if self._params_visible else "▶  3 · Parameters (hidden)")
-        self._btn_toggle_params.clicked.connect(_toggle_params)
+        def _set_params_visible(v):
+            self._params_visible = v
+            self._params_container.setVisible(v)
+            self._btn_toggle_params.setText("▼  3 · Parameters" if v else "▶  3 · Parameters (hidden)")
+        self._set_params_visible = _set_params_visible
+        self._btn_toggle_params.clicked.connect(lambda: _set_params_visible(not self._params_visible))
 
         # --- 3. Analysis Control Section ---
         grp_ctl = QGroupBox("4 · Data && run")
@@ -777,6 +777,9 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         self.status = QLabel("Ready")
         self.pbar = QProgressBar()
         self.table = QTableWidget()
+        # compact rows — this table only gets the panel's leftover height, and the default ~30 px
+        # rows showed three scans on FHD
+        self.table.verticalHeader().setDefaultSectionSize(self.table.fontMetrics().height() + 8)
         self.table.cellDoubleClicked.connect(self.on_table_double_click)
         self.table.cellClicked.connect(self.on_table_single_click)
         

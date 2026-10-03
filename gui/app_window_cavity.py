@@ -13,7 +13,7 @@ import pyqtgraph as pg
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFileDialog,
-                             QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+                             QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                              QMessageBox, QPushButton, QRadioButton, QTabWidget,
                              QVBoxLayout, QWidget)
 
@@ -53,7 +53,6 @@ class CavityTabMixin:
 
         # Group: Daily-use tools
         grp_calib = QGroupBox("Tools")
-        lay_calib = QVBoxLayout()
 
         btn_calib_tool = QPushButton("Wavelength Calibration Tool")
         btn_calib_tool.clicked.connect(self.open_wavelength_calibration)
@@ -75,17 +74,6 @@ class CavityTabMixin:
         #   처리하고 R Calibrator가 같은 scan_directory를 재사용하므로 일상 흐름에서 중복.
         #   ui_peak_trend.py / open_peak_trend()는 raw peak 디버깅용으로 보존(배선만 해제).
 
-        lay_calib.addWidget(btn_calib_tool)
-        lay_calib.addWidget(btn_ref_gen)
-        lay_calib.addWidget(btn_r_trend)
-        grp_calib.setLayout(lay_calib)
-        control_layout.addWidget(grp_calib)
-
-        # Group: α Pipeline — raw→α 생성과 RUN 전 1-scan 검증. 캘리브 유틸(Tools)과
-        #   성격이 달라 별도 그룹으로 분리하고, 매일 쓰는 핵심 동작이라 강조(bold+테두리) 유지.
-        grp_pipe = QGroupBox("α Pipeline")
-        lay_pipe = QVBoxLayout()
-
         # Alpha Generator — raw → alpha 생성은 별도 팝업창에서(분석=알파 피팅과 분리).
         # 분석(좌측)은 알파를 넣고 RUN해 피팅. 알파 생성만 여기 Setup에서 창으로.
         btn_alpha_gen = QPushButton("Alpha Generator")
@@ -104,33 +92,6 @@ class CavityTabMixin:
             "overlay, residual, reference overlays, retrieved ppb and shift/squeeze.")
         btn_test_fit.clicked.connect(self._open_test_fit_dialog)
 
-        lay_pipe.addWidget(btn_alpha_gen)
-        lay_pipe.addWidget(btn_test_fit)
-        grp_pipe.setLayout(lay_pipe)
-        control_layout.addWidget(grp_pipe)
-
-        # Group: Vigil — hand the finished FitSet over to the live monitor (mission package).
-        # A group-box title cannot carry an icon, so the "title" is an icon + label row above an
-        # untitled box (same place and font as the other group titles).
-        from PyQt6.QtGui import QPixmap
-        _vig_hdr = QHBoxLayout()
-        _vig_hdr.setContentsMargins(0, 0, 0, 0)
-        _vig_hdr.setSpacing(int(4 * self._s))
-        _vig_icon = QLabel()
-        _png = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons", "vigil_256.png")
-        _h = self.fontMetrics().height()
-        _vig_icon.setPixmap(QPixmap(_png).scaled(_h, _h, Qt.AspectRatioMode.KeepAspectRatio,
-                                                 Qt.TransformationMode.SmoothTransformation))
-        _vig_hdr.addWidget(_vig_icon)
-        _vig_lbl = QLabel("Vigil")
-        from gui.theme import heading_font as _hf
-        _vig_lbl.setFont(_hf(11))
-        _vig_hdr.addWidget(_vig_lbl)
-        _vig_hdr.addStretch(1)
-        control_layout.addLayout(_vig_hdr)
-        grp_vigil = QGroupBox()
-        grp_vigil.setStyleSheet("QGroupBox { margin-top: 0px; }")   # title is the icon row above
-        lay_vigil = QVBoxLayout()
         btn_vigil = QPushButton("Export Mission…")
         btn_vigil.setToolTip(
             "Export a mission package for Vigil: this FitSet + references + wavelength calibrations,\n"
@@ -141,9 +102,17 @@ class CavityTabMixin:
             from gui.dlg_mission_export import open_mission_export
             open_mission_export(self)
         btn_vigil.clicked.connect(_open_vigil_export)
-        lay_vigil.addWidget(btn_vigil)
-        grp_vigil.setLayout(lay_vigil)
-        control_layout.addWidget(grp_vigil)
+        from PyQt6.QtGui import QIcon
+        btn_vigil.setIcon(QIcon(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                             "icons", "vigil_256.png")))
+        # One box, workflow order (calibrate → references → R → α → check → hand to Vigil). Three
+        # boxes of one to three buttons each cost two titles and a column of rows for no meaning.
+        lay_calib = QGridLayout()
+        for i, b in enumerate((btn_calib_tool, btn_ref_gen, btn_r_trend,
+                               btn_alpha_gen, btn_test_fit, btn_vigil)):
+            lay_calib.addWidget(b, i // 2, i % 2)
+        grp_calib.setLayout(lay_calib)
+        control_layout.addWidget(grp_calib)
 
         # S-A: 고급 설정 구분선 — Cavity/Override/Detector는 캠페인 시작 때 한 번 맞추고
         # 평소엔 안 건드리므로 접이식 '고급' 영역으로 묶는다.
@@ -435,6 +404,14 @@ class CavityTabMixin:
                 if self._det_corr_visible else
                 "▶ Detector Corrections")
         self._btn_toggle_det.clicked.connect(_toggle_det)
+
+        # One advanced section open at a time — all three open ran the Setup page past the screen
+        _adv = ((lambda: self._cavity_visible, _toggle_cavity, self._btn_toggle_cavity),
+                (lambda: self._manual_override_visible, _toggle_override, self._btn_toggle_override),
+                (lambda: self._det_corr_visible, _toggle_det, self._btn_toggle_det))
+        for _o, _keep, _btn in _adv:
+            _btn.clicked.connect(lambda _=False, keep=_keep: [tg() for op, tg, _b in _adv
+                                                              if tg is not keep and op()])
 
         control_layout.addStretch(1)
         # 좌측 컨트롤 컬럼을 컨테이너로 감싸 최대폭을 건다. Manual Override/Detector 등

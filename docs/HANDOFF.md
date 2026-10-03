@@ -28,6 +28,9 @@
   가짜 세로 스크롤이 생긴다. 대신 `_refresh_setup_status` 가 Setup Status 그룹이 모자란 만큼 상한을 늘린다.
 - 넓은 화면에서 "자연폭 딱 맞춤"은 답답해 보인다 — 왼쪽 패널·Setup 가운데 열 모두 `max(자연폭, 30 %)`.
   작은 화면(1366@150)에선 자연폭이 이겨서 그대로.
+- 세로 공간(사용자 지적 후): FitSet 로드 성공 시 3·Parameters 자동 접기(`_set_params_visible`) → FHD 결과 표
+  3줄 → 10줄, 표 행 높이 = 글자높이+8. Setup 의 Tools·α Pipeline·Vigil 세 상자를 Tools 한 상자 2열로(작업 순서),
+  고급 섹션(Cavity/Override/Detector)은 하나만 열리는 아코디언 — FHD 에서 어느 걸 열어도 스크롤 없음.
 - Vigil 실시간 곡선 굵기는 1 로 유지 — 꽉 찬 그래프에서 그리기가 틱의 99 %(성능 가드 `vigil/test_dashboard_vf2.py` [5]).
 - `diagnostics/` 스크립트도 `ci_import_smoke` 가 임포트한다 — 최상위에서 Qt 창을 띄우면 segfault. `main()` 으로.
 

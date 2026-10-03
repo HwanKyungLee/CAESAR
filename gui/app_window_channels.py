@@ -384,6 +384,8 @@ class ChannelConfigMixin:
                 self._channel_configs = {1: self._capture_config()}
                 self._remember_fitset(path)
                 QMessageBox.information(self, "Success", "Config restored (single channel).")
+            # the FitSet filled step 3 — fold it so the results table under step 4 gets the height
+            self._set_params_visible(False)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load scenario:\n{e}")
 
