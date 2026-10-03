@@ -204,6 +204,16 @@ class SegmentedPchip:
             itp = PchipInterpolator(xs, ys, extrapolate=False) if len(xs) >= 2 else None
             self._segs.append((xs[0], xs[-1], itp, ys[0], ys[-1]))
 
+    # Pickle by knots, rebuild on the other side: scipy ≥ 1.18's PchipInterpolator holds array-API
+    # modules (_xp) and cannot be pickled, so the alpha Pass 2 process pool could not start and fell
+    # back to sequential on every run ("cannot pickle 'module' object", UI audit 2026-10-04).
+    # Rebuilt from the same knots and applied breaks, the interpolator gives the same values.
+    def __getstate__(self):
+        return {"x": self.x, "y": self.y, "break_x": self.break_x}
+
+    def __setstate__(self, state):
+        self.__init__(state["x"], state["y"], state["break_x"])
+
     @property
     def n_segments(self):
         return len(self._segs)

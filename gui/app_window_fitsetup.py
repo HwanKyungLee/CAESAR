@@ -499,6 +499,7 @@ class FitSetupMixin:
     def _mark_refs_dirty(self):
         """L5: 레퍼런스 변경 후 Lock 안 된 상태 표시 — Lock 버튼 빨강 + RUN 시 경고."""
         self._refs_dirty = True
+        self._refs_failed = []    # the last lock's failures no longer describe the rows
         if hasattr(self, '_btn_lock_ref'):
             self._btn_lock_ref.setStyleSheet(
                 f"font-weight: bold; padding: 5px; background-color: {AUGUR.fail_bg}; color: {AUGUR.fail};")
@@ -592,6 +593,7 @@ class FitSetupMixin:
         n_attempted = sum(1 for w in self.ref_widgets if w['n'].text() and w['fp'])
         self.engine.clear_engine()
         success_count = 0
+        failed = []      # names that did not load — they are NOT in the fit
         
         raw_wave = getattr(self.engine, 'wavelengths', 
                            getattr(self, 'wavelengths', 
@@ -620,6 +622,7 @@ class FitSetupMixin:
                     success_count += 1
                 else:
                     print(f"⚠️ Lock Failed ({widget['n'].text()}): {msg}")
+                    failed.append(widget['n'].text())
                     
         # Register wavelength axis in the engine (required for pixel_to_wavelength)
         if current_wave is not None:
@@ -631,11 +634,23 @@ class FitSetupMixin:
         # Apply zero convolution initially (refreshes internal interpolators)
         self.engine.apply_ils_convolution(0.0)
         
+        self._refs_failed = list(failed)
         if success_count > 0:
-            self._refs_dirty = False     # L5: 잠금 완료 → dirty 해제
+            # A partial lock is not a lock: with one row failing, "3 references locked" read as done
+            # and the fit silently ran without that gas (UI audit 2026-10-04). Stay dirty and say which.
+            self._refs_dirty = bool(failed)     # L5: 잠금 완료 → dirty 해제 (전부 로드됐을 때만)
             if hasattr(self, '_btn_lock_ref'):
-                self._btn_lock_ref.setStyleSheet("font-weight: bold; padding: 5px;")
-            if silent:
+                self._btn_lock_ref.setStyleSheet(
+                    "font-weight: bold; padding: 5px;" if not failed else
+                    f"font-weight: bold; padding: 5px; background-color: {AUGUR.fail_bg}; color: {AUGUR.fail};")
+            if failed:
+                txt = (f"{len(failed)} reference(s) failed to load and are NOT in the fit: {', '.join(failed)}. "
+                       f"{success_count} loaded. Fix or remove the failed row(s) and Lock again.")
+                if silent:
+                    self.status.setText("References: " + txt)
+                else:
+                    QMessageBox.warning(self, "Lock incomplete", txt)
+            elif silent:
                 self.status.setText(f"{success_count} references locked (auto, channel switch)")
             else:
                 QMessageBox.information(self, "Locked", f"{success_count} references have been successfully locked into the Engine.")

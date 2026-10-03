@@ -1152,7 +1152,11 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
 
         # References locked
         refs_ok = hasattr(self, 'engine') and len(self.engine.gas_list) > 0
-        if refs_ok:
+        _failed = getattr(self, '_refs_failed', None)
+        if refs_ok and _failed:      # partial lock: some rows did not load
+            _st(self.lbl_st_refs, "fail", f"References: {', '.join(_failed)} failed to load — "
+                                          f"locked only {', '.join(self.engine.gas_list)}")
+        elif refs_ok:
             _st(self.lbl_st_refs, "ok", f"References locked: {', '.join(self.engine.gas_list)}")
         else:
             _st(self.lbl_st_refs, "fail", "References: not locked  (lock before RUN)")

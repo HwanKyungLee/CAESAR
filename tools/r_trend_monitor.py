@@ -294,7 +294,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
         # 워커 수 = core.parallel 단일 출처(기본 전 코어, GUI `CPU cores` 스핀이
         # 환경변수로 전달 — 이 도구는 GUI 안에서 인프로세스로도 불린다).
         from core.parallel import max_workers as _mw
-        _nproc = _mw()
+        # no more workers than files (idle processes cost start-up time and memory)
+        _nproc = min(_mw(), len(files))
         try:
             _parsed = {}
             _ndone = 0
@@ -385,7 +386,8 @@ def scan_directory(directory: str, wave_nm, file_list=None,
             if he and rc.quality_ok:
                 last_he = he
 
-            leff_arr = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
+            with np.errstate(divide="ignore", invalid="ignore"):   # masked below; was a RuntimeWarning per file
+                leff_arr = np.where(omr_d > 1e-10, 1.0 / omr_d * 1e-5, np.nan)
 
             # ── R-fit wavelength window (박사님 Rs2.m line 123-138) ──
             # Restrict the R statistics to the channel-specific band

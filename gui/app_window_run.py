@@ -75,6 +75,16 @@ class AnalysisRunMixin:
             return
         # L5: Lock 안 된 레퍼런스 변경이 있으면 경고
         if getattr(self, '_refs_dirty', False):
+            _failed = getattr(self, '_refs_failed', None)
+            if _failed:      # a partial lock (some rows failed to load) — name them
+                ret = QMessageBox.question(
+                    self, "References incomplete",
+                    f"These references failed to load and are NOT in the fit: {', '.join(_failed)}. "
+                    "Continue without them?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if ret != QMessageBox.StandardButton.Yes:
+                    return
+        if getattr(self, '_refs_dirty', False) and not getattr(self, '_refs_failed', None):
             ret = QMessageBox.question(
                 self, "References not locked",
                 "References were changed but  Lock was not pressed.\n"
@@ -513,6 +523,8 @@ class AnalysisRunMixin:
             bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                                   | QDialogButtonBox.StandardButton.Cancel)
             bb.button(QDialogButtonBox.StandardButton.Ok).setText("▶ Start")
+            from gui.theme import set_role as _set_role
+            _set_role(bb.button(QDialogButtonBox.StandardButton.Ok), "primary")   # the theme's ink action
             bb.accepted.connect(dlg.accept)
             bb.rejected.connect(dlg.reject)
             lay.addWidget(bb)

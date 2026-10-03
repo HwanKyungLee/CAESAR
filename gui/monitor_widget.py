@@ -131,8 +131,8 @@ class MonitorWidget(QWidget):
         self.p_resid.addLegend(offset=(10, 10))
         
         self.curve_meas = self.p_meas.plot(pen=None, symbol='o', symbolSize=3, symbolBrush='gray', name='Meas')
-        self.curve_fit = self.p_meas.plot(pen=pg.mkPen('r', width=2), name='Fit')
-        self.curve_resid = self.p_resid.plot(pen=pg.mkPen('b', width=1), name='Resid')
+        self.curve_fit = self.p_meas.plot(pen=pg.mkPen(AUGUR.select, width=2), name='Fit')   # theme, not pg 'r'/'b'
+        self.curve_resid = self.p_resid.plot(pen=pg.mkPen(AUGUR.sub, width=1), name='Resid')
         
         self.p_resid.addItem(pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('k', style=Qt.PenStyle.DashLine)))
         
@@ -234,7 +234,7 @@ class MonitorWidget(QWidget):
         l_view.addLayout(self._create_reset_toolbar(target_pw=self.pw_view))
         self.pw_view.addLegend()
         self.pw_view.showGrid(x=True, y=True)
-        self.curve_view = self.pw_view.plot(pen=pg.mkPen('b', width=1.5), name='Current')
+        self.curve_view = self.pw_view.plot(pen=pg.mkPen(AUGUR.select, width=1.5), name='Current')
         
         self.region = pg.LinearRegionItem()
         self.region.setZValue(10)
@@ -483,16 +483,16 @@ class MonitorWidget(QWidget):
             for i, name in enumerate(gas_list):
                 p = self.glw_comp.addPlot(title=name)
                 self.curve_items[f"{name}_data"] = p.plot(pen=None, symbol='o', symbolSize=2, symbolBrush='gray')
-                self.curve_items[f"{name}_fit"] = p.plot(pen='r', width=1.5)
+                self.curve_items[f"{name}_fit"] = p.plot(pen=pg.mkPen(AUGUR.select, width=1.5))
                 if (i+1) % cols == 0: self.glw_comp.nextRow()
                 
             self.p_poly_view = self.glw_comp.addPlot(title="Polynomial Baseline")
             self.curve_items["poly_raw"] = self.p_poly_view.plot(pen=None, symbol='o', symbolSize=1, symbolBrush='gray')
-            self.curve_items["poly_fit"] = self.p_poly_view.plot(pen='b', width=1.5)
+            self.curve_items["poly_fit"] = self.p_poly_view.plot(pen=pg.mkPen(AUGUR.components[4], width=1.5))
             if (current_gas_count+1) % cols == 0: self.glw_comp.nextRow()
             
             self.p_res_view = self.glw_comp.addPlot(title="Residual")
-            self.curve_items["residual"] = self.p_res_view.plot(pen='b')
+            self.curve_items["residual"] = self.p_res_view.plot(pen=pg.mkPen(AUGUR.sub))
             self.p_res_view.addItem(pg.InfiniteLine(angle=0, pen=pg.mkPen('k', style=Qt.PenStyle.DashLine)))
             
             self.plot_items["layout_ready"] = True

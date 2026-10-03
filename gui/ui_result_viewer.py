@@ -748,6 +748,20 @@ class ResultViewerWidget(QWidget):
                  if not (str(c) == "n_used" or str(c).endswith("_n")
                          or str(c) in ("T_used_C", "P_used_mbar")
                          or str(c).endswith("_RealConc"))]
+        # Flags, error columns, correction factors (g_prime) and states are not concentrations —
+        # drawn with them on one axis, a ΣANs file was an unreadable block of colour (UI audit
+        # 2026-10-04). Prefer the *ppb* columns when the file names its unit.
+        def _not_conc(c):
+            s = str(c).lower()
+            return "flag" in s or "err" in s or "state" in s or s.startswith("g_")
+        ycols = [c for c in ycols if not _not_conc(c)]
+        ppb = [c for c in ycols if "ppb" in str(c).lower()]
+        ycols = ppb or ycols
+        # the Gas box picks one column (as it picks a gas for fit files)
+        self._sync_gas_combo([str(c) for c in ycols])
+        sel = self._gas_combo.currentText()
+        if sel and sel != "All" and sel in [str(c) for c in ycols]:
+            ycols = [c for c in ycols if str(c) == sel]
         n = 0
         for i, c in enumerate(ycols):
             y = pd.to_numeric(df[c], errors="coerce").to_numpy()
@@ -761,6 +775,7 @@ class ResultViewerWidget(QWidget):
             raise ValueError("No numeric concentration columns found")
         self._pw_top.setLabel("left", "Concentration")
         self._pw_top.setTitle(f"Concentration — {os.path.basename(path)} ({n} columns)")
+        self._pw_top.enableAutoRange()      # not the previous file's range
         self._pw_bot.hide()
 
     # ── α/일반 숫자 배열 → vs 픽셀(또는 1열 vs 2열) ───────────────
@@ -807,6 +822,9 @@ class ResultViewerWidget(QWidget):
         if getattr(self, "_current_kind", None) == "fit" and self._fit_cache and self._path:
             self._pw_top.clear(); self._pw_bot.clear(); self._pw_bot.show()
             self._plot_fit(self._path)
+        elif getattr(self, "_current_kind", None) == "concentration" and self._path:
+            self._pw_top.clear()
+            self._plot_concentration(self._path)
 
     def _qc_mask(self, t):
         """숨길/제외할 행 마스크(True) — 두 기준의 OR:

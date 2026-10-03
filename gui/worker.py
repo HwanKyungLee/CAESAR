@@ -2468,7 +2468,8 @@ class AlphaExportWorker(QThread):
 
             _tasks = [(fp, self.pixel_min, self.pixel_max, self.channel) for fp in _miss]
             # 워커 수 = GUI `CPU cores` 스핀(core.parallel). R calc 병렬파싱과 동일 출처.
-            _nproc = max_workers()
+            # no more workers than files to parse (idle processes cost start-up time and memory)
+            _nproc = max(1, min(max_workers(), len(_miss)))
             # 제출 창을 프리페치 선행 깊이에 맞춘다 — 창이 더 넓으면 워커가 캐시를
             # 앞질러 디스크를 직접 읽게 되고(=헤드 긁힘 복귀) 프리페치가 무의미해진다.
             _win = max(2, min(_nproc, _pf_q.maxsize + 1))
@@ -3242,7 +3243,7 @@ class AlphaExportWorker(QThread):
         _use_par2 = getattr(self, 'use_parallel', True) and len(amb_index) > 1
         _pass2_ok = False
         if _use_par2:
-            _nproc2 = max_workers()
+            _nproc2 = max(1, min(max_workers(), len(amb_index)))   # no more workers than files
             _win2 = _nproc2 * 2
             self.status_msg.emit(f"Pass 2 (parallel {_nproc2} cores): processing {len(amb_index)} files…")
             try:

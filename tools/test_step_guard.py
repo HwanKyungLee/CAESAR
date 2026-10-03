@@ -231,11 +231,28 @@ def test_parse_datetimes():
         check("invalid input raises", True)
 
 
+def test_pickle_roundtrip():
+    """SegmentedPchip goes to the alpha Pass 2 worker processes — it must pickle (scipy 1.18's
+    PchipInterpolator does not) and give the same values after the trip (2026-10-04)."""
+    import pickle
+    x = np.arange(20, dtype=float)
+    y = np.where(x < 10, 1.0, 1.2) + 0.01 * np.sin(x)
+    seg = SegmentedPchip(x, y, break_x=[9.5])
+    try:
+        back = pickle.loads(pickle.dumps(seg))
+        q = np.linspace(-1, 21, 89)
+        same = all(np.allclose(seg(v), back(v)) for v in q)
+        check("pickle round trip: same values, same segments", same and back.n_segments == seg.n_segments,
+              f"segments {seg.n_segments}/{back.n_segments}")
+    except Exception as e:      # noqa: BLE001
+        check("pickle round trip: same values, same segments", False, f"{type(e).__name__}: {e}")
+
+
 if __name__ == "__main__":
     for t in (test_smooth_drift_no_regression, test_step_detected_and_segmented,
               test_spike_not_detected, test_noisy_channel_suppressed,
               test_manual_break, test_vector_knots, test_resolve_time_axis,
-              test_npz_manual_breaks_roundtrip, test_parse_datetimes):
+              test_npz_manual_breaks_roundtrip, test_parse_datetimes, test_pickle_roundtrip):
         t()
     print(f"\n{_n_pass} PASS · {_n_fail} FAIL")
     sys.exit(1 if _n_fail else 0)

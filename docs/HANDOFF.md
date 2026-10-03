@@ -50,6 +50,17 @@
   (R Cal·RefGen 본문 스크롤, Mission 안내문 줄바꿈), 팝업 주 버튼은 `set_role(primary)` 하나, matplotlib 팝업 그림은
   `theme.style_mpl_figure`(**rcParams 는 건드리지 말 것** — Plot Maker Publish 가 matplotlib 이다).
   Wavecal 피크 자동 찾기는 의도적으로 그대로(사람이 그래프에서 찍는다).
+- **전체 훑기(2026-10-04)**: `exercise_app.py <tmp>`(Plot Maker·Publish, Result Lab 전 종류·폴더·구간·Export·Merge,
+  Setup 소형 동작, 런+저장, 팝업 나머지 단계, Vigil) · `exercise_step.py`(Step 모드). `ONLY=rcal,alpha` 로 일부만.
+  **헤드리스 실행은 레지스트리(`HKCU\Software\CAESAR`)의 "마지막 연 폴더"를 덮어쓴다** — 스크립트가 `dlg_dir` 을
+  임시 폴더로 돌리지만 R Calibrator 는 따로 쓴다. 돌리기 전 `reg export`, 끝나면 `reg import`.
+  찾아 고친 것:
+  - **알파 Pass 2 병렬이 매번 실패하고 조용히 순차로 돌고 있었다** — `SegmentedPchip` 안의 scipy 1.18
+    `PchipInterpolator` 가 `_xp` 모듈을 들고 있어 pickle 불가("cannot pickle 'module' object", 콘솔엔 자식
+    프로세스 `EOFError` 만 보였다). knot 으로 pickle 하고 받는 쪽에서 재구성 → 병렬 복귀, 출력은 순차와 바이트 동일.
+  - **레퍼런스 일부만 로드돼도 "N references locked"** 로 끝나고 그 기체 없이 핏했다 → dirty 유지·실패 이름 경고·
+    Setup Status·RUN 확인창에 표시(`tools/test_partial_lock.py`).
+  - Result Lab 농도 파일: 플래그·오차·g_prime 까지 한 축에 그려 읽을 수 없던 것 → ppb 열만, Gas 칸으로 열 선택.
 - Vigil 실시간 곡선 굵기는 1 로 유지 — 꽉 찬 그래프에서 그리기가 틱의 99 %(성능 가드 `vigil/test_dashboard_vf2.py` [5]).
 - `diagnostics/` 스크립트도 `ci_import_smoke` 가 임포트한다 — 최상위에서 Qt 창을 띄우면 segfault. `main()` 으로.
 
