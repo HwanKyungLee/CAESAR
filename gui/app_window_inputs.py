@@ -445,7 +445,7 @@ class InputsAlphaMixin:
             self._alpha_failed.append((label, str(result)))
             self.status.setText(f"Alpha [{label}] failed")
         else:
-            self._alpha_done_msgs.append(f"[{label}] ")
+            self._alpha_done_msgs.append(f"[{label}] saved")   # was an empty "[ANs] " line
         self._alpha_ch_done = int(getattr(self, '_alpha_ch_done', 0)) + 1
         self._alpha_total = 0   # 다음 채널 total 재설정 대기
         # 끝난 워커를 wait()로 완전 종료시키고 참조 보관 — 다음 채널 워커로 덮어쓸 때

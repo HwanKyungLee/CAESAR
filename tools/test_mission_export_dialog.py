@@ -53,6 +53,19 @@ def main():
         dlg = MissionExportDialog(None, fitset_path=fp)
         t = dlg.table
         check("1) FitSet 채널마다 한 줄", t.rowCount() == 2, t.rowCount())
+        # 2026-10-03: 블록은 기본값 없음(예전엔 모든 행이 ch1) — 사람이 LED 스펙트럼을 보고 고른다
+        check("1) 블록 기본값은 비어 있음",
+              all(t.cellWidget(r, 3).currentData() is None for r in range(2)),
+              [t.cellWidget(r, 3).currentData() for r in range(2)])
+        for r in range(2):
+            t.cellWidget(r, 4).setText(f"cell{r}")
+        try:
+            dlg.collect()
+            check("1) 블록을 안 고르면 거부", False, "collect() accepted an unset block")
+        except ValueError as e:
+            check("1) 블록을 안 고르면 거부", "choose the raw block" in str(e), str(e))
+        for r in range(2):
+            t.cellWidget(r, 4).setText("")
         # 행 0 = FitSet 채널 '1' → 핫 블록 ch1, 행 1 = '2' → 핫 블록 ch2
         for r, blk in ((0, "ch1"), (1, "ch2")):
             cb = t.cellWidget(r, 2)

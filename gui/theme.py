@@ -201,7 +201,8 @@ def heading_font(point_size=12.0, bold=True):
 def apply_augur(app) -> None:
     """Augur: 종이·잉크. QApplication 직후, 창을 만들기 전에 부른다.
     2026-10-03 identity pass: the splash's typography and colours carried into the app — Spectral
-    headings, IBM Plex text and numbers, ink primary action, vermilion for "done", plots on paper."""
+    headings, IBM Plex text and numbers, ink primary action, green for "done" (vermilion is the
+    brand only), plots on paper."""
     t = AUGUR
     fams = register_fonts()
     if "IBM Plex Sans" in fams:
@@ -223,6 +224,14 @@ def apply_augur(app) -> None:
         pg.setConfigOption("foreground", t.sub)
     except ImportError:
         pass
+
+
+def style_mpl_figure(fig) -> None:
+    """A popup's matplotlib figure on the page colour, laid out tight (titles and axis labels of
+    stacked axes overlapped). Per figure, not rcParams: Plot Maker's Publish output uses matplotlib
+    too and must not change with the app theme. Figure-level, so it survives ax.clear()."""
+    fig.set_facecolor(AUGUR.surface)
+    fig.set_layout_engine("tight")
 
 
 def _augur_qss(t) -> str:

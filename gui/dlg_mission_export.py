@@ -39,6 +39,8 @@ def _defaults():
     return out
 
 
+_CHOOSE = "— choose —"
+
 class MissionExportDialog(QDialog):
     def __init__(self, parent=None, fitset_path: str = "", out_root: str = ""):
         super().__init__(parent)
@@ -50,10 +52,12 @@ class MissionExportDialog(QDialog):
         self.scen = {}
         self.checks = {}
         v = QVBoxLayout(self)
-        v.addWidget(QLabel(
+        _intro = QLabel(
             "Which raw block is which cell, and which sensors are its pressure / gas temperature, is decided "
             "<b>here, by you</b> — the FitSet does not know (its channel labels have been swapped before). "
-            "Use <i>Check with raw…</i> to see each block's spectrum: judge the cell by the LED shape."))
+            "Use <i>Check with raw…</i> to see each block's spectrum: judge the cell by the LED shape.")
+        _intro.setWordWrap(True)   # one 1435 px line made the dialog 1457 px wide at minimum
+        v.addWidget(_intro)
         form = QFormLayout()
         row = QHBoxLayout()
         self.ed_fitset = QLineEdit(fitset_path)
@@ -158,6 +162,13 @@ class MissionExportDialog(QDialog):
             cb_base.currentIndexChanged.connect(lambda _i, rr=r: self._fill_row(rr))
             cb_blk.currentIndexChanged.connect(lambda _i, rr=r: self._fill_defaults(rr))
             self._fill_row(r)
+        # every channel row stays visible — the block-spectra plot that Check adds took the space
+        # and left one row showing
+        t = self.table
+        t.resizeRowsToContents()         # rows grow to their combo boxes first, then count them
+        t.setMinimumHeight(t.horizontalHeader().sizeHint().height() + 4
+                           + t.horizontalScrollBar().sizeHint().height()   # it shows when narrow
+                           + sum(t.rowHeight(i) for i in range(t.rowCount())))
 
     def _base(self, r):
         bid = self.table.cellWidget(r, 2).currentData()
@@ -168,13 +179,17 @@ class MissionExportDialog(QDialog):
         cb_blk = self.table.cellWidget(r, 3)
         cb_blk.blockSignals(True)
         cb_blk.clear()
+        # no default block: every row used to start on ch1 (one hot FitSet = two rows on the same
+        # block, and a check of the wrong block). The person picks it from the LED spectra (Check).
+        cb_blk.addItem(_CHOOSE, None)
         for c in (b.channels if b else []):
             cb_blk.addItem(f"{c.id} (cols {c.columns[0]}–{c.columns[1]})", c.id)
-        cb_blk.setCurrentIndex(min(1, cb_blk.count() - 1))
+        cb_blk.setCurrentIndex(0)
         cb_blk.blockSignals(False)
         for col, unit in ((5, "mbar"), (6, "degC")):
             cb = self.table.cellWidget(r, col)
             cb.clear()
+            cb.addItem(_CHOOSE, None)    # chosen by the person, or by an installed mission (_fill_defaults)
             for f in (b.hk.fields if b else []):
                 if (f.unit or "") == unit:
                     cb.addItem(f"{f.key}  (col {b.hk.start_col + f.rel})", f.key)
@@ -207,15 +222,22 @@ class MissionExportDialog(QDialog):
                 if not line:
                     break
                 ncols = max(ncols, len(line.split("\t")))
-        curves = []
+        curves, pending, plotted = [], {}, set()
         for r in range(self.table.rowCount()):
             b = self._base(r)
             lab = self.table.cellWidget(r, 9)
             if b is None or b.match.n_columns != ncols:
                 lab.setText(f"(raw has {ncols} cols)")
                 continue
-            ch = next(c for c in b.channels if c.id == self.table.cellWidget(r, 3).currentData())
+            blk = self.table.cellWidget(r, 3).currentData()
             fch = self.scen["channels"][self.table.cellWidget(r, 1).property("key")]
+            if blk is None:
+                lab.setText("choose the block — compare the block spectra below")
+                for c in b.channels:
+                    pending.setdefault((b.profile_id, c.id), (c, fch))
+                continue
+            plotted.add((b.profile_id, blk))
+            ch = next(c for c in b.channels if c.id == blk)
             res = block_check(p, ch.columns[0], fch.get("wl_path"),
                               (fch.get("fit_start_nm"), fch.get("fit_end_nm"))
                               if fch.get("fit_start_nm") is not None else None)
@@ -233,6 +255,13 @@ class MissionExportDialog(QDialog):
             lab.setText(txt)
             lab.setStyleSheet("" if res["lit"] and res.get("window_inside", True) else "color:#b03030;")
             curves.append((f"{ch.id} ({self.table.cellWidget(r, 4).text() or '?'})", res["median"]))
+        # blocks no row has taken yet: draw each lit one once, so the cell is judged by its LED shape
+        for key, (c, fch) in pending.items():
+            if key in plotted:
+                continue
+            res = block_check(p, c.columns[0], fch.get("wl_path"), None)
+            if res.get("n_rows") and res["lit"]:
+                curves.append((f"{c.id} (unassigned)", res["median"]))
         if curves:
             self._show_plot(curves, os.path.basename(p))
 
@@ -286,6 +315,8 @@ class MissionExportDialog(QDialog):
             blk = self.table.cellWidget(r, 3).currentData()
             label = self.table.cellWidget(r, 4).text().strip()
             key = self.table.cellWidget(r, 1).property("key")
+            if blk is None:
+                raise ValueError(f"FitSet channel {key}: choose the raw block (Check with raw… shows each block's LED)")
             if not label:
                 raise ValueError(f"FitSet channel {key}: enter the cell name (judge it from the LED spectrum)")
             if (b.profile_id, blk) in seen:
@@ -293,6 +324,8 @@ class MissionExportDialog(QDialog):
             seen.add((b.profile_id, blk))
             pk = self.table.cellWidget(r, 5).currentData()
             tk = self.table.cellWidget(r, 6).currentData()
+            if pk is None or tk is None:
+                raise ValueError(f"FitSet channel {key}: choose its pressure and gas-temperature sensors")
             tchain = [k for k in (tk, "cell_heater") if k and b.hk.field(k) is not None]
             m = by_base.setdefault(b.profile_id, {
                 "base": b.profile_id, "profile_id": f"{name}_{b.kind}_{b.match.n_columns}".lower(),

@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
-from gui.theme import AUGUR
+from gui.theme import AUGUR, set_role, style_mpl_figure
 
 
 class ReferenceGeneratorDialog(QDialog):
@@ -98,6 +98,7 @@ class ReferenceGeneratorDialog(QDialog):
         # [Left] Graph Area
         left_layout = QVBoxLayout()
         self.fig, self.ax = plt.subplots(2, 1, figsize=(6, 8))
+        style_mpl_figure(self.fig)
         self.canvas = FigureCanvas(self.fig)
         left_layout.addWidget(self.canvas)
         layout.addLayout(left_layout, stretch=2)
@@ -164,7 +165,6 @@ class ReferenceGeneratorDialog(QDialog):
         lay_hitran_action.addWidget(self.combo_hitran_gas)
         
         self.btn_hitran = QPushButton("Generate from HITRAN")
-        self.btn_hitran.setStyleSheet(f"background-color: {AUGUR.info_bg}; color: {AUGUR.ink}; font-weight: bold;")
         self.btn_hitran.clicked.connect(self.generate_hitran_gas)
         lay_hitran_action.addWidget(self.btn_hitran)
         lay_raw.addLayout(lay_hitran_action)
@@ -182,7 +182,6 @@ class ReferenceGeneratorDialog(QDialog):
         # One-shot auto-pickup: grabs Calib + FWHM from the same campaign
         # wv_cal folder (remembers it across sessions via QSettings).
         self.btn_auto_pickup = QPushButton("Auto-pickup Calib + FWHM from campaign wv_cal folder")
-        self.btn_auto_pickup.setStyleSheet(f"background-color: {AUGUR.info}; color: white; font-weight: bold;")
         self.btn_auto_pickup.clicked.connect(self._auto_pickup_calib_fwhm)
         lay_wave.addWidget(self.btn_auto_pickup)
 
@@ -215,7 +214,9 @@ class ReferenceGeneratorDialog(QDialog):
         
         # --- 4. Generate & Save ---
         self.btn_generate = QPushButton("Generate Ultimate Reference")
-        self.btn_generate.setStyleSheet(f"background-color: {AUGUR.warn}; color: white; font-weight: bold; font-size: 14px;")
+        # one primary action per dialog in the theme's ink (2026-10-03) — the rainbow of
+        # green/blue/teal/purple fills fought the paper palette and said nothing about priority
+        set_role(self.btn_generate, "primary")
         self.btn_generate.clicked.connect(self.apply_convolution)
         self.btn_generate.setMinimumHeight(int(50 * self._s))
         right_layout.addWidget(self.btn_generate)
@@ -265,7 +266,6 @@ class ReferenceGeneratorDialog(QDialog):
         lay_sweep.addLayout(lay_sweep_out)
 
         self.btn_run_sweep = QPushButton("Run FWHM Sweep")
-        self.btn_run_sweep.setStyleSheet(f"background-color: {AUGUR.special}; color: white; font-weight: bold;")
         self.btn_run_sweep.clicked.connect(self.run_fwhm_sweep)
         self.btn_run_sweep.setMinimumHeight(int(40 * self._s))
         lay_sweep.addWidget(self.btn_run_sweep)
@@ -285,7 +285,16 @@ class ReferenceGeneratorDialog(QDialog):
         self._sweep_outdir = None
 
         right_layout.addStretch(1)
-        layout.addLayout(right_layout, stretch=1)
+        # the settings column scrolls: ~570 px tall, more than a 1366×768 @150 % screen (512)
+        from PyQt6.QtWidgets import QScrollArea, QWidget as _QW
+        _rw = _QW()
+        _rw.setLayout(right_layout)
+        _rsa = QScrollArea()
+        _rsa.setWidgetResizable(True)
+        _rsa.setFrameShape(QScrollArea.Shape.NoFrame)
+        _rsa.setWidget(_rw)
+        _rsa.setMinimumWidth(_rw.minimumSizeHint().width() + 20)
+        layout.addWidget(_rsa, stretch=1)
 
     # ---------------------------------------------------------
     # Data Loading Methods
@@ -438,7 +447,7 @@ class ReferenceGeneratorDialog(QDialog):
             )
             
             self.ax[0].clear()
-            self.ax[0].plot(self.raw_wave, self.raw_data, 'b-', label=f'HITRAN {gas_name}')
+            self.ax[0].plot(self.raw_wave, self.raw_data, color=AUGUR.select, label=f'HITRAN {gas_name}')
             self.ax[0].legend()
             self.canvas.draw()
         except Exception as e: 
@@ -700,7 +709,7 @@ class ReferenceGeneratorDialog(QDialog):
             
             # Redraw top graph
             ax_top.clear()
-            ax_top.plot(self.target_wavelengths, self.final_ready_data, 'r-', label="Ready Ref (Dynamic ILS)")
+            ax_top.plot(self.target_wavelengths, self.final_ready_data, color=AUGUR.select, label="Ready Ref (Dynamic ILS)")
             ax_top.set_xlabel("Wavelength (nm)")
             ax_top.set_ylabel("Cross Section")
             ax_top.legend()
@@ -708,7 +717,7 @@ class ReferenceGeneratorDialog(QDialog):
             
             # Redraw bottom graph
             ax_bottom.clear()
-            ax_bottom.plot(self.target_wavelengths, target_sigmas, 'g-', lw=2)
+            ax_bottom.plot(self.target_wavelengths, target_sigmas, color=AUGUR.components[4], lw=2)
             ax_bottom.set_title("Wavelength-Dependent Sigma Profile")
             ax_bottom.set_xlabel("Wavelength (nm)")
             ax_bottom.set_ylabel("Sigma (nm)")
@@ -717,7 +726,8 @@ class ReferenceGeneratorDialog(QDialog):
             
             self.suggested_filename = f"Ref_{self.gas_name}_{self.gen_info}.dat"
             self.btn_save.setEnabled(True)
-            self.btn_save.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold;")
+            set_role(self.btn_generate, None)      # the next step is Save — it becomes the primary
+            set_role(self.btn_save, "primary")
             
             QMessageBox.information(self, "Success", "Dynamic ILS Convolution applied successfully!")
             

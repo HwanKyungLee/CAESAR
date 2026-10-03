@@ -55,7 +55,7 @@ from gui.r_workers import (_LiveStream, _RTrendWorker, _RTExportWorker,
 
 
 # ── 채널 색상 팔레트 ─────────────────────────────────────────────────────────
-from gui.theme import AUGUR, CHANNELS as _THEME_CHANNELS
+from gui.theme import AUGUR, CHANNELS as _THEME_CHANNELS, set_role
 _CH_COLORS = list(_THEME_CHANNELS)   # 모든 Augur 그래프 공통 채널 색(gui/theme.py)
 
 
@@ -119,7 +119,17 @@ class RCalibratorDialog(QDialog):
         return sorted(out)
 
     def _init_ui(self):
-        main = QVBoxLayout(self)
+        # the body scrolls: stacked it needs ~590 px, more than a 1366×768 @150 % screen (512)
+        from PyQt6.QtWidgets import QScrollArea
+        _outer = QVBoxLayout(self)
+        _outer.setContentsMargins(0, 0, 0, 0)
+        _sa = QScrollArea()
+        _sa.setWidgetResizable(True)
+        _sa.setFrameShape(QScrollArea.Shape.NoFrame)
+        _body = QWidget()
+        _sa.setWidget(_body)
+        _outer.addWidget(_sa)
+        main = QVBoxLayout(_body)
         main.setSpacing(5)
 
         # ── 채널 목록 ────────────────────────────────────────────────────────
@@ -130,8 +140,6 @@ class RCalibratorDialog(QDialog):
 
         hdr = QHBoxLayout()
         btn_load_panel = QPushButton("Load channels from left panel")
-        btn_load_panel.setStyleSheet(
-            f"background-color:{AUGUR.info};color:white;font-weight:bold;")
         btn_load_panel.setToolTip(
             "Reads the left panel's channel settings (wavecal·R-window·TZ) to fill the rows.\n"
             "Click to sync if you changed or added channels.")
@@ -204,8 +212,10 @@ class RCalibratorDialog(QDialog):
         # ── 실행 버튼들 ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_run = QPushButton("▶  Start")
-        btn_run.setStyleSheet(
-            f"background-color:{AUGUR.ok};color:white;font-weight:bold;height:36px;")
+        # one primary action per dialog in the theme's ink (2026-10-03) — the rainbow of
+        # green/blue/teal/purple fills fought the paper palette and said nothing about priority
+        set_role(btn_run, "primary")
+        btn_run.setMinimumHeight(36)
         btn_run.clicked.connect(self._run)
         self._btn_run = btn_run
         btn_row.addWidget(btn_run)
@@ -234,8 +244,7 @@ class RCalibratorDialog(QDialog):
         # 평소엔 Start(auto-update 체크) 하나로 npz가 증분 관리된다. Rebuild는
         # 설정 변경/손상 시 npz를 처음부터 다시 만드는 비상용 탈출구(덮어쓰기).
         btn_rt = QPushButton("Rebuild npz (full)")
-        btn_rt.setStyleSheet(
-            f"background-color:{AUGUR.info};color:white;font-weight:bold;height:36px;")
+        btn_rt.setMinimumHeight(36)
         btn_rt.setToolTip(
             "Recompute every file from scratch and OVERWRITE R_<channel>.npz.\n"
             "Use only when settings changed (cavity/RL/R-window) or the npz is damaged.\n"
@@ -245,8 +254,7 @@ class RCalibratorDialog(QDialog):
         btn_row.addWidget(btn_rt)
 
         btn_verify = QPushButton("Verify npz")
-        btn_verify.setStyleSheet(
-            "background-color:#00796B;color:white;font-weight:bold;height:36px;")
+        btn_verify.setMinimumHeight(36)
         btn_verify.setToolTip(
             "Read-only check of each channel's R_<channel>.npz (no scanning):\n"
             "• missing days (calendar days with no knot → R interpolated)\n"
@@ -258,8 +266,7 @@ class RCalibratorDialog(QDialog):
         # 계단 가드 수동 분절 — 운영자가 아는 이벤트(거울 청소/재정렬 시각)를
         # npz에 기록하면 α 생성 시 그 시각에서 R(t) PCHIP 보간이 강제 분절된다.
         btn_breaks = QPushButton("R(t) Breaks…")
-        btn_breaks.setStyleSheet(
-            f"background-color:{AUGUR.special};color:white;font-weight:bold;height:36px;")
+        btn_breaks.setMinimumHeight(36)
         btn_breaks.setToolTip(
             "Manual step-change breaks for R(t) interpolation (step guard).\n"
             "Enter known events (mirror cleaning / realignment) as datetimes;\n"
@@ -299,17 +306,21 @@ class RCalibratorDialog(QDialog):
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         _date_axis = pg.DateAxisItem(orientation='bottom')
         self._pw = pg.PlotWidget(axisItems={'bottom': _date_axis}, title="R time-series")
-        self._pw.setBackground('w'); self._pw.showGrid(x=True, y=True, alpha=0.3)
+        self._pw.showGrid(x=True, y=True, alpha=0.3)        # background = theme surface (was 'w')
         self._pw.setLabel('left', 'R mean (%)'); self._pw.setLabel('bottom', 'Time')
         bottom_splitter.addWidget(self._pw)
 
         self._spectrum_pw = pg.PlotWidget(title="R(λ) per wavelength")
-        self._spectrum_pw.setBackground('w'); self._spectrum_pw.showGrid(x=True, y=True, alpha=0.3)
+        self._spectrum_pw.showGrid(x=True, y=True, alpha=0.3)
         self._spectrum_pw.setLabel('left', 'Reflectance R')
         self._spectrum_pw.setLabel('bottom', 'Wavelength (nm)')
         self._spectrum_pw.addLegend()
         bottom_splitter.addWidget(self._spectrum_pw)
         bottom_splitter.setSizes([600, 400])
+        # empty: a note instead of a bare 1970 date axis ("00.100 00.200" ticks)
+        from gui.empty_hint import attach
+        attach(self._pw, "R mean per calibration block shows here after Start.")
+        attach(self._spectrum_pw, "R(λ) of each channel shows here after Start.")
 
         main_splitter.addWidget(top_splitter)
         main_splitter.addWidget(bottom_splitter)

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.dlg_dir import dlg_dir
-from gui.theme import AUGUR
+from gui.theme import AUGUR, set_role
 from core.parallel import set_max_workers
 from core.raw_parser import PURGE_SETTLE_SEC
 
@@ -190,7 +190,8 @@ class AlphaGeneratorDialog(QDialog):
 
         run = QHBoxLayout()
         self._btn_gen = QPushButton("Generate Alpha")
-        self._btn_gen.setStyleSheet("font-weight:bold; padding:8px;")
+        set_role(self._btn_gen, "primary")     # the dialog's one action, in the theme's ink
+        self._btn_gen.setMinimumHeight(36)
         self._btn_gen.clicked.connect(self._generate)
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.reject)

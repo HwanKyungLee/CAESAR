@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSplashScreen, QDialogButtonBox, QStackedWidget, QFormLayout)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap
-from gui.theme import AUGUR
+from gui.theme import AUGUR, set_role, style_mpl_figure
 
 
 class NavigationHelper:
@@ -180,8 +180,9 @@ class WavelengthCalibrationDialog(QDialog):
         # [Left] Graph Area
         left_layout = QVBoxLayout()
         self.figure, self.ax = plt.subplots()
+        style_mpl_figure(self.figure)
         self.canvas = FigureCanvas(self.figure)
-        left_layout.addWidget(self.canvas)
+        left_layout.addWidget(self.canvas, 1)   # the plot takes the height; the tip line used to split it
         
         # Connect mouse click event (Click to add/analyze peak)
         self.canvas.mpl_connect('button_press_event', self.on_graph_click)
@@ -207,7 +208,7 @@ class WavelengthCalibrationDialog(QDialog):
         
         # Peak Table Setup
         self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["Pixel Index", "True Wavelength (nm)"])
+        self.table.setHorizontalHeaderLabels(["Pixel", "λ (nm)"])   # long headers were cut in the narrow panel
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         right_layout.addWidget(self.table)
         
@@ -223,13 +224,15 @@ class WavelengthCalibrationDialog(QDialog):
         right_layout.addWidget(btn_fit)
         
         btn_save_fwhm = QPushButton("Save FWHM && Sigma Records")
-        btn_save_fwhm.setStyleSheet(f"background-color: {AUGUR.info}; color: white; font-weight: bold;")
         btn_save_fwhm.clicked.connect(self.save_fwhm_data)
         right_layout.addWidget(btn_save_fwhm)
 
         # 4. Save & Apply Button
         btn_apply = QPushButton("4. Save && Apply to Main")
-        btn_apply.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold; height: 40px;")
+        # one primary action per dialog in the theme's ink (2026-10-03) — the rainbow of
+        # green/blue/teal/purple fills fought the paper palette and said nothing about priority
+        set_role(btn_apply, "primary")
+        btn_apply.setMinimumHeight(40)
         btn_apply.clicked.connect(self.save_and_apply)
         right_layout.addWidget(btn_apply)
         
@@ -367,7 +370,7 @@ class WavelengthCalibrationDialog(QDialog):
             try:
                 px = float(self.table.item(row, 0).text())
                 y_val = self.spectrum[int(round(px))] 
-                m = self.ax.scatter(px, y_val, color='red', marker='x', s=100, zorder=5)
+                m = self.ax.scatter(px, y_val, color=AUGUR.select, marker='x', s=100, zorder=5)
                 self.peak_markers.append(m)
             except: 
                 pass
@@ -737,6 +740,7 @@ class WavelengthCalibrationDialog(QDialog):
         
         v_lay = QVBoxLayout(fit_win)
         fig, ax = plt.subplots()
+        style_mpl_figure(fig)
         canvas = FigureCanvas(fig)
         v_lay.addWidget(canvas)
         
@@ -1028,6 +1032,7 @@ class RangeSelectorDialog(QDialog):
         
         # --- 2. Center Graph Area ---
         self.fig = Figure(figsize=(8, 5))
+        style_mpl_figure(self.fig)
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(111)
         self.ax2 = self.ax.twinx()  # Secondary Y-axis for reference overlay
@@ -1039,7 +1044,8 @@ class RangeSelectorDialog(QDialog):
         # --- 3. Bottom Button Area ---
         btns_layout = QHBoxLayout()
         self.b_apply = QPushButton("Apply Range")
-        self.b_apply.setStyleSheet(f"background-color: {AUGUR.ok}; color: white; font-weight: bold; height: 35px;")
+        set_role(self.b_apply, "primary")
+        self.b_apply.setMinimumHeight(35)
         # Apply는 범위만 반영하고 창은 열어둔다(여러 채널·범위를 이어서 조정 가능).
         # 실제 닫기는 Close 버튼으로만.
         self.b_apply.clicked.connect(self.emit_apply)

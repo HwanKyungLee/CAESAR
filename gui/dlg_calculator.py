@@ -20,7 +20,7 @@ from PyQt6.QtCore import Qt
 from core.align import align_to   # 단일 출처 — Plot Maker 정렬과 같은 결손 가드
 from core.expr import safe_eval   # 단일 출처 — Plot Maker 파생 열과 같은 엔진
 from gui.result_viewer_io import load_fit_table
-from gui.theme import AUGUR
+from gui.theme import AUGUR, set_role
 
 _VAR_LETTERS = "ABCDEFGH"
 
@@ -83,7 +83,7 @@ class CalculatorDialog(QDialog):
 
         actbar = QHBoxLayout()
         b_calc = QPushButton("▶ Compute")
-        b_calc.setStyleSheet(f"font-weight:bold; background:{AUGUR.info}; color:white; padding:4px;")
+        set_role(b_calc, "primary")       # the dialog's one action, in the theme's ink
         b_calc.clicked.connect(self._compute)
         b_save = QPushButton("Save CSV")
         b_save.clicked.connect(self._save_csv)
@@ -102,11 +102,12 @@ class CalculatorDialog(QDialog):
         right = QVBoxLayout()
         root.addLayout(right, 4)
         right.addWidget(QLabel("Preview"))
-        self._pw = pg.PlotWidget()
-        self._pw.setBackground("w")
+        self._pw = pg.PlotWidget()                     # background = theme surface (was "w")
         self._pw.showGrid(x=True, y=True, alpha=0.3)
         self._pw.setAxisItems({"bottom": pg.DateAxisItem(orientation="bottom")})
         right.addWidget(self._pw, 1)
+        from gui.empty_hint import attach            # not a bare 1970 date axis before Compute
+        attach(self._pw, "Map the variables, write an expression and press Compute — the result shows here.")
 
         # 초기 변수 2개(A,B)
         self._add_var_row()

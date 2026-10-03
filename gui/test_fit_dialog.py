@@ -13,6 +13,8 @@ step_limit·Link)를 추천하는 탭1을 추가한다. 추천은 표시만 — 
 """
 from __future__ import annotations
 
+from html import escape as _esc   # optimizer reasons hold '<' ("gain -1%(<5%)") — HTML ate them
+
 import json
 import os
 import subprocess
@@ -676,7 +678,7 @@ class TestFitDialog(QDialog):
             f"<b>{target} shift:</b> current {cur_sh.get('sh_mode','?')} "
             f"{cur_sh.get('sh_val','')} → recommended {sh.get('policy')} "
             f"{result['proposed_ref_props'][target]['sh_val']}<br>"
-            f"<i>{sh.get('reason','')}</i>",
+            f"<i>{_esc(sh.get('reason',''))}</i>",
             warn=bool(sh.get("undetermined")), err=bool(sh.get("degenerate")))
 
         sq = result["squeeze"]
@@ -684,23 +686,23 @@ class TestFitDialog(QDialog):
             f"<b>{target} squeeze:</b> current {cur_sh.get('sq_mode','?')} "
             f"{cur_sh.get('sq_val','')} → recommended {sq.get('policy')} "
             f"{result['proposed_ref_props'][target]['sq_val']}<br>"
-            f"<i>{sq.get('reason','')}</i>")
+            f"<i>{_esc(sq.get('reason',''))}</i>")
 
         st = result["step_limit"]
         if st.get("value") is not None:
             self._add_result_label(
                 f"<b>step_limit:</b> current {self._app.spin_step_limit.value():.2f} → "
-                f"recommended <b>{st['value']:.2f}</b><br><i>{st.get('reason','')}</i>",
+                f"recommended <b>{st['value']:.2f}</b><br><i>{_esc(st.get('reason',''))}</i>",
                 err=bool(st.get("degenerate")))
         else:
             self._add_result_label(
                 f"<b>step_limit:</b> keeping current ({self._app.spin_step_limit.value():.2f}) "
-                f"— <i>{st.get('reason','')}</i>", err=bool(st.get("degenerate")))
+                f"— <i>{_esc(st.get('reason',''))}</i>", err=bool(st.get("degenerate")))
 
         for d in result["secondary"]:
             g = d["secondary"]
             self._add_result_label(
-                f"<b>{g}:</b> {d.get('decision')} vs {target} — <i>{d.get('reason','')}</i>",
+                f"<b>{g}:</b> {d.get('decision')} vs {target} — <i>{_esc(d.get('reason',''))}</i>",
                 err=bool(d.get("blocked_by_collinearity")))
 
         health = result.get("health") or {}
@@ -798,6 +800,8 @@ class TestFitDialog(QDialog):
         self._explorer_run_status.setStyleSheet(f"color:{AUGUR.info};")
         lay.addWidget(self._explorer_run_status)
         self._explorer_run_edit = QTextEdit()
+        # three of these stacked set the dialog's minimum height (516 px > a 512 px screen at 1366@150 %)
+        self._explorer_run_edit.setMinimumHeight(44)
         self._explorer_run_edit.setReadOnly(True)
         self._explorer_run_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._explorer_run_edit.setPlaceholderText("Batch validation and execution output appears here.")
@@ -824,6 +828,7 @@ class TestFitDialog(QDialog):
         v2_bar.addWidget(export_btn); v2_bar.addStretch(1)
         lay.addLayout(v2_bar)
         self._v2_edit = QTextEdit(); self._v2_edit.setReadOnly(True)
+        self._v2_edit.setMinimumHeight(44)
         self._v2_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._v2_edit.setPlaceholderText("V2 plan/recommendation status appears here.")
         lay.addWidget(self._v2_edit, 1)
@@ -836,6 +841,7 @@ class TestFitDialog(QDialog):
         bar.addStretch(1)
         lay.addLayout(bar)
         self._explorer_review_edit = QTextEdit()
+        self._explorer_review_edit.setMinimumHeight(44)
         self._explorer_review_edit.setReadOnly(True)
         self._explorer_review_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._explorer_review_edit.setHtml(

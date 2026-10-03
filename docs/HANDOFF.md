@@ -43,6 +43,13 @@
 - 줄바꿈 QLabel 의 최소 높이는 한 줄이다 — 화면보다 긴 페이지(모든 칸이 최소 높이)에선 둘째 줄이 잘린다.
   Setup Status 는 좁은 화면(위아래 배치)에서만 줄바꿈하고 `_WrapHeight` 필터가 실제 폭의 높이를 최소로 건다.
   칩 안쪽 여백은 QSS padding 대신 contentsMargins.
+- **팝업 점검(실제 실행)**: `diagnostics/design_identity_2026-10-03/exercise_dialogs.py <out>` 가 7개 팝업의 핵심 기능을
+  실데이터로 돌린다(Calculator·Test Fit 최적화·Wavecal 로드·RefGen 컨볼루션·R Cal verify·Mission check·Alpha 생성).
+  `shoot_dialogs.py` 는 크기·최소 크기를 잰다. 고친 것: Export Mission 블록·센서 기본값 없음(예전엔 모든 행 ch1 —
+  사람이 LED 스펙트럼으로 고른다, Check 가 미배정 블록을 다 그린다), 팝업 최소 크기를 1366@150(910×512) 안으로
+  (R Cal·RefGen 본문 스크롤, Mission 안내문 줄바꿈), 팝업 주 버튼은 `set_role(primary)` 하나, matplotlib 팝업 그림은
+  `theme.style_mpl_figure`(**rcParams 는 건드리지 말 것** — Plot Maker Publish 가 matplotlib 이다).
+  Wavecal 피크 자동 찾기는 의도적으로 그대로(사람이 그래프에서 찍는다).
 - Vigil 실시간 곡선 굵기는 1 로 유지 — 꽉 찬 그래프에서 그리기가 틱의 99 %(성능 가드 `vigil/test_dashboard_vf2.py` [5]).
 - `diagnostics/` 스크립트도 `ci_import_smoke` 가 임포트한다 — 최상위에서 Qt 창을 띄우면 segfault. `main()` 으로.
 
