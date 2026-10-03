@@ -7,6 +7,7 @@ CAESARAnalyzer §12 — 결과 테이블 / QC 재적용 / fast 렌더 (gui/app_w
 """
 import pyqtgraph as pg
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem
 from gui.theme import AUGUR
@@ -130,6 +131,25 @@ class ResultsQCMixin:
             return
         self._apply_row_to_table(result_dict, row_index)
 
+    @staticmethod
+    def _file_item(full):
+        """File cell: '002 [0042]' (scan · row) — the 88 px column showed only the date, which the
+        Time column already has. The full name stays in UserRole and the tooltip; anything that
+        looks a row up by file reads it with _file_cell_text."""
+        import re as _re
+        m = _re.search(r"\d{4}-\d{2}-\d{2}-(\d+)", full)
+        r = _re.search(r"\[(\d+)\]", full)
+        it = QTableWidgetItem(f"{m.group(1)}" + (f" [{r.group(1)}]" if r else "") if m else full)
+        it.setData(Qt.ItemDataRole.UserRole, full)
+        it.setToolTip(full)
+        return it
+
+    @staticmethod
+    def _file_cell_text(item):
+        """The full file name of a File cell (results rows keep it in UserRole; loaded-file rows
+        before a run hold it as their text)."""
+        return item.data(Qt.ItemDataRole.UserRole) or item.text()
+
     def _write_row_cells(self, result_dict, row, multi):
         """Write the cells of one table row (no plots / scroll / progress bar)."""
         if row >= self.table.rowCount():
@@ -138,7 +158,7 @@ class ResultsQCMixin:
         if multi:
             self.table.setItem(row, 0, QTableWidgetItem(f"CH{result_dict.get('Channel', 1)}"))
             c = 1
-        self.table.setItem(row, c + 0, QTableWidgetItem(str(result_dict.get('File', ''))))
+        self.table.setItem(row, c + 0, self._file_item(str(result_dict.get('File', ''))))
         self.table.setItem(row, c + 1, QTableWidgetItem(str(result_dict.get('Time', ''))))
         self.table.setItem(row, c + 2, QTableWidgetItem(f"{result_dict.get('RMS', 0):.2e}"))
         self.table.setItem(row, c + 3, QTableWidgetItem(f"{result_dict.get('Chi2', 0):.2f}"))

@@ -553,7 +553,7 @@ class InputsAlphaMixin:
 
     def set_i0_from_table(self, row):
         """Extracts the filepath from the table row and sets it as I0."""
-        fname = self.table.item(row, 0).text()
+        fname = self._file_cell_text(self.table.item(row, 0))
         entry = self._entry_from_display_name(fname)
         filepath = self._entry_filepath(entry) if entry else None
 

@@ -10,7 +10,7 @@ at least one row. Pass `is_empty=` for anything else.
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
-from PyQt6.QtWidgets import QAbstractItemView, QLabel
+from PyQt6.QtWidgets import QAbstractItemView, QAbstractScrollArea, QGraphicsView, QLabel
 
 from gui.theme import AUGUR
 
@@ -44,12 +44,17 @@ class _Hint(QObject):
         super().__init__(widget)
         self.w = widget
         self.is_empty = is_empty
-        host = widget.viewport() if isinstance(widget, QAbstractItemView) else widget
+        # tables and pyqtgraph views (QGraphicsView) paint in their viewport — watch that, or new
+        # data never triggers the immediate re-check and the note sat on the data until the poll
+        host = widget.viewport() if isinstance(widget, QAbstractScrollArea) else widget
         self.label = QLabel(text, host)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setWordWrap(True)
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.label.setStyleSheet(f"color: {color or AUGUR.muted}; background: transparent; padding: 12px;")
+        self.color = color or AUGUR.muted
+        # an empty plot is covered whole, in its own background colour: the bare 0–1 axes and
+        # grid filled most of the first screen (UX re-evaluation 2026-10-03 s5)
+        self.cover = isinstance(widget, QGraphicsView)
         self.host = host
         host.installEventFilter(self)
         self.timer = QTimer(self)
@@ -60,6 +65,15 @@ class _Hint(QObject):
 
     def _place(self):
         r = self.host.rect()
+        if self.cover:
+            bg = self.w.backgroundBrush().color().name()
+            side = max(12, int(r.width() * 0.2))
+            self.label.setStyleSheet(f"color: {self.color}; background: {bg}; padding: 12px {side}px;")
+            self.label.setMinimumWidth(0)
+            self.label.setMaximumWidth(16777215)
+            self.label.setGeometry(r)
+            return
+        self.label.setStyleSheet(f"color: {self.color}; background: transparent; padding: 12px;")
         w = min(r.width() - 24, max(260, int(r.width() * 0.6)))
         self.label.setFixedWidth(max(w, 1))
         self.label.adjustSize()

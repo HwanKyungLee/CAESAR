@@ -427,7 +427,7 @@ class SaveExportMixin:
         if item is None:
             self._replay_fail(f"no cell at row {row}, col {fc}")
             return
-        fname = item.text()
+        fname = self._file_cell_text(item)
 
         # 클릭한 행의 채널부터 먼저 알아낸다 — 결과 테이블은 모든 채널 탭의 결과를 한
         # 테이블에 같이 보여주지만, 그 파일 경로는 self.file_list(= 지금 선택돼 있는 채널
@@ -574,7 +574,7 @@ class SaveExportMixin:
         # 결과가 있으면 클릭만으로 그 스캔 fit 그래프(리플레이) 표시; 없으면 기존 raw 뷰어.
         fc = 1 if getattr(self, '_multi_channel_mode', False) else 0
         if 0 <= row < self.table.rowCount() and self.table.item(row, fc) is not None:
-            fname = self.table.item(row, fc).text()
+            fname = self._file_cell_text(self.table.item(row, fc))
             if any(r.get('File') == fname for r in self.results):
                 self.on_table_double_click(row, col)
                 return
@@ -599,7 +599,7 @@ class SaveExportMixin:
             it = self.table.item(row, fc)
             if it is None:
                 return
-            fname = it.text()
+            fname = self._file_cell_text(it)
             entry = self._entry_from_display_name(fname)
             if entry:
                 fp  = self._entry_filepath(entry)

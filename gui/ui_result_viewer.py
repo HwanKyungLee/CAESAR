@@ -252,7 +252,8 @@ class ResultViewerWidget(QWidget):
         self._list.itemClicked.connect(self._on_list_item)
         self._list.itemDoubleClicked.connect(self._on_list_double)
         from gui.empty_hint import attach
-        attach(self._list, "Open a result file, a folder or a date range\n(File / Folder / Dates above).")
+        attach(self._list, "Open a result file, a folder or a date range\n(File / Folder / Dates above).",
+               is_empty=lambda lw: lw.count() == 0 and not self._path)   # File… opens without listing it
 
         # 좌측 아래: 같은 날·같은 채널의 **버전들**(B3). 파라미터를 바꿔 여러 번 돌리는 게
         # 실제 작업 방식인데 지금껏 파일명으로만 구분했다 — 그런데 파일명이 설정을 다
@@ -291,6 +292,7 @@ class ResultViewerWidget(QWidget):
         psplit.addWidget(self._pw_bot)
         attach(self._pw_top, "Time series of the opened results show here. Click a point to see "
                              "that scan's spectrum and residual below.")
+        attach(self._pw_bot, "A second view shows here for some files (e.g. Leff of an R file).")
 
         # ── B2: 핏 결과 전용 세로 스택 (종별 레인 + shift/squeeze + RMS) ──
         # 기존 6개 핸들러(r_trend·r_curve·alpha·reference·concentration·array)는
@@ -325,7 +327,12 @@ class ResultViewerWidget(QWidget):
         psplit.addWidget(self._pw_resid)
 
         self._psplit = psplit
-        psplit.setSizes([400, 250, 500, 220, 180])
+        # fit: five lanes share the third pane — at 500 they were ~90 px and clipped their axis titles
+        psplit.setSizes([400, 250, 640, 180, 150])
+        # start like a non-fit file (_show): the fit-only lanes, scan detail and residual appear
+        # when a fit opens — shown empty they took ~300 px and squashed the panes below
+        for w in (self._stack_host, self._pw_detail, self._pw_resid):
+            w.hide()
         hsplit.addWidget(psplit)
         hsplit.setSizes([240, 780])
         root.addWidget(hsplit, 1)
@@ -846,6 +853,8 @@ class ResultViewerWidget(QWidget):
             pw.setBackground(AUGUR.surface)
             pw.showGrid(x=True, y=True, alpha=0.3)
             pw.addLegend(offset=(10, 6))
+            # no "(x0.001)" suffix — a lane is ~120 px tall and the suffix clipped the gas name
+            pw.getAxis("left").enableAutoSIPrefix(False)
             self._stack_lay.addWidget(pw)
             self._lanes.append(pw)
         pw = self._lanes[i]

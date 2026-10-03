@@ -56,15 +56,27 @@ class FlowLayout(QLayout):
         right = rect.right() - m.right()
         line_h = 0
         sp = self.spacing()
+        line = []                                  # (item, x) of the current row
+
+        def _place(row, top, height):
+            # centre each item in its row — labels are shorter than buttons and sat on the row top
+            for it, ix in row:
+                s = it.sizeHint()
+                it.setGeometry(QRect(QPoint(ix, top + (height - s.height()) // 2), s))
+
         for item in self._items:
             w = item.sizeHint().width()
             h = item.sizeHint().height()
             if x + w > right and line_h > 0:      # 줄바꿈
+                if not test:
+                    _place(line, y, line_h)
+                line = []
                 x = rect.x() + m.left()
                 y = y + line_h + sp
                 line_h = 0
-            if not test:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+            line.append((item, x))
             x = x + w + sp
             line_h = max(line_h, h)
+        if not test:
+            _place(line, y, line_h)
         return y + line_h - rect.y() + m.bottom()

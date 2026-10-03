@@ -845,10 +845,23 @@ class CAESARAnalyzer(CavityTabMixin, InputsAlphaMixin, FitSetupMixin, DataLoadMi
         # 창/스플리터로 전파돼 '로드할 때마다 화면이 넘치거나 뭉개지던' 전역 원인 차단.
         # 내용이 뷰포트보다 크면 탭 안에 스크롤바만 생기고 창 크기는 불변.
         self._tab_pages = {}   # 내용위젯 → 스크롤페이지 (setCurrentWidget 호환용)
+        class _NoHfwLayout(QVBoxLayout):
+            # A FlowLayout toolbar (Result Lab, Plot Maker) gives the page height-for-width, and
+            # QScrollArea then sizes it to its layout's *preferred* height: Result Lab scrolled
+            # 2806 px with the scan detail pushed off screen. QScrollArea asks the layout, not the
+            # widget. Without it the page scrolls only below its minimum; the layouts inside still
+            # use height-for-width when laid out.
+            def hasHeightForWidth(self):
+                return False
+
         def _tab_scroll(widget):
             sa = QScrollArea()
             sa.setWidgetResizable(True)
-            sa.setWidget(widget)
+            holder = QWidget()
+            _hl = _NoHfwLayout(holder)
+            _hl.setContentsMargins(0, 0, 0, 0)
+            _hl.addWidget(widget)
+            sa.setWidget(holder)
             sa.setFrameShape(QScrollArea.Shape.NoFrame)
             self._tab_pages[widget] = sa
             return sa

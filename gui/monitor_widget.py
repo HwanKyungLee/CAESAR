@@ -632,7 +632,14 @@ class MonitorWidget(QWidget):
 
         self.glw_conc = pg.GraphicsLayoutWidget()
         self.glw_conc.scene().sigMouseClicked.connect(self._on_conc_scene_click)
-        layout.addWidget(self.glw_conc)
+        # own scroll area: the per-gas minimum height (_relayout_conc) must scroll this tab only —
+        # on the tab widget it raised every monitor tab's minimum and they all scrolled
+        from PyQt6.QtWidgets import QScrollArea
+        _sa = QScrollArea()
+        _sa.setWidgetResizable(True)
+        _sa.setFrameShape(QScrollArea.Shape.NoFrame)
+        _sa.setWidget(self.glw_conc)
+        layout.addWidget(_sa)
         # gas → PlotItem,  gas → {ch: curve},  gas → {ch: {'x':[], 'y':[]}}
         self._conc_plots  = {}
         self._conc_curves = {}
@@ -704,6 +711,9 @@ class MonitorWidget(QWidget):
         for r, gas in enumerate(gases):
             if gas in self._conc_plots:
                 self.glw_conc.addItem(self._conc_plots[gas], row=r, col=0)
+        # each gas plot keeps ~180 px; below that the tab scrolls (at 1366×768 @150 % three
+        # plots were ~100 px each with their axis titles on top of each other)
+        self.glw_conc.setMinimumHeight(180 * len([g for g in gases if g in self._conc_plots]))
 
     def update_conc(self, result_dict, row_index):
         """결과 1건(result_dict)에서 가스별 ppb를 뽑아 해당 채널 곡선에 추가(x=측정시각)."""
